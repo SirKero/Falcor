@@ -715,7 +715,7 @@ namespace Falcor
         }
         else
         {
-            static_assert(false, "Unsupported data type");
+            FALCOR_ASSERT("Unsupported data type");
         }
     }
 
@@ -758,7 +758,7 @@ namespace Falcor
         }
         else
         {
-            static_assert(false, "Unsupported data type");
+            FALCOR_ASSERT("Unsupported data type");
         }
     }
 
@@ -802,7 +802,7 @@ namespace Falcor
         }
         else
         {
-            static_assert(false, "Unsupported data type");
+            FALCOR_ASSERT("Unsupported data type");
         }
     }
 
@@ -841,7 +841,7 @@ namespace Falcor
         }
         else
         {
-            static_assert(false, "Unsupported data type");
+            FALCOR_ASSERT("Unsupported data type");
         }
     }
 
