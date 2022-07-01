@@ -208,11 +208,31 @@ void RenderGraphEditor::onGuiRender(Gui* pGui)
 
     passWindow.columns(5);
     auto renderPasses = RenderPassLibrary::instance().enumerateClasses();
+    // sort render passes alphabetically before display
+    std::sort(renderPasses.begin(), renderPasses.end(), [](const RenderPassLibrary::RenderPassDesc& l, const RenderPassLibrary::RenderPassDesc& r) {
+        return strcmp(l.info.type.c_str(), r.info.type.c_str()) < 0;
+              });
+
     for (size_t i = 0; i < renderPasses.size(); i++)
     {
         const auto& pass = renderPasses[i];
         passWindow.rect({ 148.0f, 64.0f }, pGui->pickUniqueColor(pass.info.type), false);
-        passWindow.image(("RenderPass##" + std::to_string(i)).c_str(), mpDefaultIconTex, { 148.0f, 44.0f });
+        const std::string customIconPath = std::string(pass.info.type) + ".png";
+        const std::string iconLabel = "RenderPass##" + std::to_string(i);
+        auto cachedEntry = mRenderPassImageCache.find(iconLabel);
+        if (cachedEntry != mRenderPassImageCache.end())
+        {
+            // display cached image
+            passWindow.image(iconLabel.c_str(), cachedEntry->second, { 148.0f, 44.0f });
+        }
+        else
+        {
+            // create cache entry
+            auto icon = Texture::createFromFile(customIconPath, false, true);
+            if (!icon) icon = mpDefaultIconTex;
+            mRenderPassImageCache[iconLabel] = icon;
+            passWindow.image(iconLabel.c_str(), icon, { 148.0f, 44.0f });
+        }
         passWindow.dragDropSource(pass.info.type.c_str(), "RenderPassType", pass.info.type);
         passWindow.text(pass.info.type);
         passWindow.tooltip(pass.info.desc, true);
