@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="PhotonMapper.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="PhotonMapper.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="PhotonMapperCollect.rt.slang" />
+    <ShaderSource Include="PhotonMapperGenerate.rt.slang" />
+    <ShaderSource Include="PhotonCulling.cs.slang" />
+    <ShaderSource Include="PhotonMapperStochasticCollect.rt.slang" />
+    <ShaderSource Include="showPhotonAccelerationStructure.rt.slang" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="PhotonCullingHash.slang" />
+  </ItemGroup>
+</Project>
