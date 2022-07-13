@@ -68,7 +68,7 @@ namespace
     {
         {"vbuffer",             "gVBuffer",                 "V Buffer to get the intersected triangle",         false},
         {"viewW",               "gViewWorld",               "World View Direction",                             false},
-        {"thpMatID",            "gThpMatID",                "Throughput and material id(w)",                    false},
+        {"thp",                 "gThp",                     "Throughput",                                       false},
         {"emissive",            "gEmissive",                "Emissive",                                         false},
     };
 

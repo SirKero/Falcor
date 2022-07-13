@@ -28,7 +28,7 @@ cbuffer CB
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gViewWorld;
-Texture2D<float4> gThpMatID;
+Texture2D<float4> gThp;
 Texture2D<float4> gEmissive;
 
 
@@ -38,22 +38,19 @@ RWTexture2D<float4> gPhotonImage;
 //Acceleration Structure
 RaytracingAccelerationStructure gPhotonAS;
 
-//Internal Buffer Structs
-
+//Helper Structs
 struct PhotonInfo
 {
     float4 dir;
     float4 flux;
 };
 
- //Internal Buffer Structs
+ //Photon Buffers
 Texture2D<float4> gPhotonFlux[2];
 Texture2D<float4> gPhotonDir[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
 
 // Static configuration based on defines set from the host.
-static const float3 kDefaultBackgroundColor = float3(0, 0, 0);
-
 static const uint kInfoTexHeight = INFO_TEXTURE_HEIGHT;
 static const bool kUsePhotonFaceNormal = PHOTON_FACE_NORMAL;
 
@@ -68,7 +65,7 @@ struct RayData
     uint pad;                       ///< free space.
     PackedHitInfo packedHitInfo;    ///< Hit info from vBuffer; Up to 16B
 
-    SampleGenerator sg;
+    SampleGenerator sg;             ///< Per-ray state for the sample generator (up to 16B).
   
     __init(){
         this.radiance = float3(0);
@@ -81,6 +78,7 @@ struct SphereAttribs
     float2 pad;
 };
 
+//Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -110,7 +108,7 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     photon.flux = gPhotonFlux[InstanceIndex()][primIndex2D];
     photon.dir = gPhotonDir[InstanceIndex()][primIndex2D];
         
-    //get hit
+    //Get hit data from payload
     const HitInfo hit = HitInfo(rayData.packedHitInfo);
     let lod = ExplicitLodTextureSampler(0.f);
     //World Direction is set to the viewDir we get from the vBuffer
@@ -122,21 +120,19 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
         float sinTheta = sin(photon.flux.w);
         float3 photonFaceN = float3(cos(photon.dir.w) * sinTheta, cos(photon.flux.w), sin(photon.dir.w) * sinTheta);
         photonFaceN = normalize(photonFaceN);
-        float3 faceN = dot(-WorldRayDirection(), sd.faceN) > 0 ? sd.faceN : -sd.faceN;
-        //Dot product has to be negative (View dir points to surface)
+        float3 faceN = dot(-WorldRayDirection(), sd.faceN) > 0 ? sd.faceN : -sd.faceN;  //Correct orientation of faceN so that it points to the camera
+        //Compaire normals with a small margin of error due to data loss for the photon face normal
         if(dot(faceN, photonFaceN) < 0.9f)
             return;
     }
 
-    
-    let bsdf = gScene.materials.getBSDF(sd, lod);
-            
+    //Photon contribution
+    let bsdf = gScene.materials.getBSDF(sd, lod);   
     float3 f_r = bsdf.eval(sd, -photon.dir.xyz, rayData.sg);
-       
     rayData.radiance += f_r * photon.flux.xyz;
 }
 
-//Checks if the ray start point is inside the sphere. 0 is returned if it is not in sphere and 1 if it is
+//Checks if the ray start point is inside the sphere.
 bool hitSphere(const float3 center, const float radius, const float3 p)
 {
     float3 radiusTest = p - center;
@@ -161,9 +157,11 @@ void intersection()
     //Check for Sphere intersection
     bool tHit = hitSphere(photonAABB.center(), radius, origin);
 
+    //Attribs are needed by the api. Because we have no need for additional attributes it is empty
     SphereAttribs attribs;
     attribs.pad = float2(0);
-    
+
+    //Report the hit if the point is in the sphere
     if (tHit)
     {
         ReportHit(RayTCurrent(), 0, attribs);
@@ -176,31 +174,32 @@ void rayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
-    
-    float4 thpMatID = gThpMatID[launchIndex];
+    float4 thp = gThp[launchIndex];
 
-    //prepare payload
+    //Prepare payload
     RayData rayData = RayData();
     rayData.packedHitInfo = gVBuffer[launchIndex];
     rayData.sg = SampleGenerator(launchIndex, gFrameCount);
     
     const HitInfo hit = HitInfo(rayData.packedHitInfo);
-    bool valid = hit.isValid(); //Check if the ray is valid (value over 0.1 in w coordinate of position)
+    bool valid = hit.isValid(); //Check if the ray is valid 
 
+    //Get vertex data for the world position
     const TriangleHit triangleHit = hit.getTriangleHit();
     VertexData v = gScene.getVertexData(triangleHit);
 
-    //Ray
+    //Ray description 
     RayDesc ray;
     ray.Origin = v.posW;
     ray.TMin = RAY_TMIN;
     ray.TMax = RAY_TMAX;
-    ray.Direction = gViewWorld[launchIndex].xyz;    //we take the view dir as direction
-    
+    ray.Direction = gViewWorld[launchIndex].xyz;    //we take the view dir as direction to save payload space
+
+    //Closest hit shader can be skipped
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     float3 radiance = float3(0);
     
-    //It is faster to trace two times in the different instance mask becaus of divergence
+    //It is faster to trace two times in the different instance mask because of divergence
     if (gCollectCausticPhotons && valid)
     {
         TraceRay(gPhotonAS, rayFlags, 1 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
@@ -215,11 +214,13 @@ void rayGen()
         float w = 1 / (M_PI * gGlobalRadius * gGlobalRadius);
         radiance += w * rayData.radiance;
     }
-        
-    radiance *= thpMatID.xyz;
 
+    //Accommodate for the path taken by the path traced V buffer
+    radiance *= thp.xyz;
+
+    //Add emission
     float3 pixEmission = gEmissive[launchIndex].xyz;
-    radiance += pixEmission * thpMatID.xyz;
+    radiance += pixEmission * thp.xyz;
     
     //Accumulate the image
     if (gFrameCount > 0 )
