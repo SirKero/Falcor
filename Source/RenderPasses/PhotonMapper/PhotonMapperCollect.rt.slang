@@ -47,13 +47,9 @@ struct PhotonInfo
 };
 
  //Internal Buffer Structs
-
-Texture2D<float4> gCausticFlux;
-Texture2D<float4> gCausticDir;
-Texture2D<float4> gGlobalFlux;
-Texture2D<float4> gGlobalDir;
-StructuredBuffer<AABB> gCausticAABB;
-StructuredBuffer<AABB> gGlobalAABB;
+Texture2D<float4> gPhotonFlux[2];
+Texture2D<float4> gPhotonDir[2];
+StructuredBuffer<AABB> gPhotonAABB[2];
 
 // Static configuration based on defines set from the host.
 static const float3 kDefaultBackgroundColor = float3(0, 0, 0);
@@ -99,13 +95,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
 {
-    // Nothing happens here. Just here for completions sake
-}
-
-[shader("closesthit")]
-void closestHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_IntersectionAttributes)
-{
-    // Nothing happens here. Just here for completions sake
+    //Empty. Is needed for compilation
 }
 
 
@@ -114,20 +104,12 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
 {    
     const uint primIndex = PrimitiveIndex();
     const uint2 primIndex2D = uint2(primIndex / kInfoTexHeight, primIndex % kInfoTexHeight);
-    //get caustic or global photon
-    PhotonInfo photon;
-     //Instance 0 is always the caustic buffer
-    if (InstanceIndex() == 0)
-    {
-        photon.flux = gCausticFlux[primIndex2D];
-        photon.dir = gCausticDir[primIndex2D];
-    }
-    else
-    {
-        photon.flux = gGlobalFlux[primIndex2D];
-        photon.dir = gGlobalDir[primIndex2D];
-    }
 
+    //Get caustic or global photon depending on Instance Index. (0 is caustic; 1 is global)
+    PhotonInfo photon;
+    photon.flux = gPhotonFlux[InstanceIndex()][primIndex2D];
+    photon.dir = gPhotonDir[InstanceIndex()][primIndex2D];
+        
     //get hit
     const HitInfo hit = HitInfo(rayData.packedHitInfo);
     let lod = ExplicitLodTextureSampler(0.f);
@@ -168,25 +150,15 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
 [shader("intersection")]
 void intersection()
 {
-    
-    //Check for Sphere intersection
+    //Get start point and prim index
     const float3 origin = ObjectRayOrigin();
     const uint primIndex = PrimitiveIndex();
+
+    //Get Photon AABB. Instance Index 0 is caustic; 1 is global
+    AABB photonAABB = gPhotonAABB[InstanceIndex()][primIndex];
+    float radius = InstanceIndex() == 0 ? gCausticRadius : gGlobalRadius;
     
-    AABB photonAABB;
-    float radius = 0;
-    //Instance 0 is always the caustic buffer
-    if (InstanceIndex() == 0)
-    {
-        photonAABB = gCausticAABB[primIndex];
-        radius = gCausticRadius;
-    }
-    else
-    {
-        photonAABB = gGlobalAABB[primIndex];
-        radius = gGlobalRadius;
-    }
-        
+    //Check for Sphere intersection
     bool tHit = hitSphere(photonAABB.center(), radius, origin);
 
     SphereAttribs attribs;
@@ -217,7 +189,8 @@ void rayGen()
 
     const TriangleHit triangleHit = hit.getTriangleHit();
     VertexData v = gScene.getVertexData(triangleHit);
-    
+
+    //Ray
     RayDesc ray;
     ray.Origin = v.posW;
     ray.TMin = RAY_TMIN;
@@ -231,7 +204,7 @@ void rayGen()
     if (gCollectCausticPhotons && valid)
     {
         TraceRay(gPhotonAS, rayFlags, 1 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-        float w = 1 / (M_PI * gCausticRadius * gCausticRadius); //make this a constant
+        float w = 1 / (M_PI * gCausticRadius * gCausticRadius);
         radiance += w * rayData.radiance;
         rayData.radiance = 0.0;
     }
@@ -239,7 +212,7 @@ void rayGen()
     if (gCollectGlobalPhotons && valid)
     {
         TraceRay(gPhotonAS, rayFlags, 2 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-        float w = 1 / (M_PI * gGlobalRadius * gGlobalRadius); //make this a constant
+        float w = 1 / (M_PI * gGlobalRadius * gGlobalRadius);
         radiance += w * rayData.radiance;
     }
         
@@ -248,7 +221,7 @@ void rayGen()
     float3 pixEmission = gEmissive[launchIndex].xyz;
     radiance += pixEmission * thpMatID.xyz;
     
-    //Accumulate the image (Put in accumulate pass ? )
+    //Accumulate the image
     if (gFrameCount > 0 )
     {
         float3 last = gPhotonImage[launchIndex].xyz;

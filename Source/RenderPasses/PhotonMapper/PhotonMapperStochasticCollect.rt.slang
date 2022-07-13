@@ -49,13 +49,9 @@ struct PhotonInfo
 };
 
  //Internal Buffer Structs
-
-Texture2D<float4> gCausticFlux;
-Texture2D<float4> gCausticDir;
-Texture2D<float4> gGlobalFlux;
-Texture2D<float4> gGlobalDir;
-StructuredBuffer<AABB> gCausticAABB;
-StructuredBuffer<AABB> gGlobalAABB;
+Texture2D<float4> gPhotonFlux[2];
+Texture2D<float4> gPhotonDir[2];
+StructuredBuffer<AABB> gPhotonAABB[2];
 
 // Static configuration based on defines set from the host.
 static const float3 kDefaultBackgroundColor = float3(0, 0, 0);
@@ -93,22 +89,14 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
 {
-    // Nothing happens here. Just here for completions sake
+    //Empty. Is needed for compilation
 }
-
-[shader("closesthit")]
-void closestHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_IntersectionAttributes)
-{
-    // Nothing happens here. Just here for completions sake
-}
-
 
 [shader("anyhit")]
 void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_IntersectionAttributes)
 {
     const uint primIndex = PrimitiveIndex();
-    //Face normal test
-    
+        
     rayData.counter++;
     uint idx = rayData.counter -1;
     //If idx is bigger get a random index between 0 and idx
@@ -135,7 +123,6 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
 [shader("intersection")]
 void intersection()
 {
-    
     //Check for Sphere intersection
     const float3 origin = ObjectRayOrigin();
     const uint primIndex = PrimitiveIndex();
@@ -144,28 +131,19 @@ void intersection()
     if (kUsePhotonFaceNormal)
     {
         const uint2 index2D = uint2(primIndex / kInfoTexHeight, primIndex % kInfoTexHeight);
-        const float theta = InstanceIndex() == 0 ? gCausticFlux[index2D].w : gGlobalFlux[index2D].w;
-        const float phi = InstanceIndex() == 0 ? gCausticDir[index2D].w : gGlobalDir[index2D].w;
+        const float theta = gPhotonFlux[InstanceIndex()][index2D].w;   
+        const float phi = gPhotonDir[InstanceIndex()][index2D].w;
         float sinTheta = sin(theta);
         float3 photonFaceN = float3(cos(phi) * sinTheta, cos(theta), sin(phi) * sinTheta);
         if(dot(WorldRayDirection(), photonFaceN) < 0.9f)    //Face N is stored in WorldRayDirection
             return;
     }
     
-    AABB photonAABB;
-    float radius = 0;
-    //Instance 0 is always the caustic buffer
-    if (InstanceIndex() == 0)
-    {
-        photonAABB = gCausticAABB[primIndex];
-        radius = gCausticRadius;
-    }
-    else
-    {
-        photonAABB = gGlobalAABB[primIndex];
-        radius = gGlobalRadius;
-    }
-        
+    //Get AABB buffer. Instance Index 0 is causic; 1 is global
+    AABB photonAABB = gPhotonAABB[InstanceIndex()][primIndex];
+    float radius = InstanceIndex() == 0 ? gCausticRadius : gGlobalRadius;
+    
+      
     bool tHit = hitSphere(photonAABB.center(), radius, origin);
     
     SphereAttribs attribs;
@@ -189,17 +167,11 @@ float3 photonContribution(in const ShadingData sd, in IBSDF bsdf, inout RayData 
     {
         uint photonIdx = rayData.photonIdx[i];
         uint2 photonIdx2D = uint2(photonIdx / kInfoTexHeight, photonIdx % kInfoTexHeight);
-        float3 photonFlux, photonDir;
-        if (isCaustic)
-        {
-            photonFlux = gCausticFlux[photonIdx2D].xyz;
-            photonDir = gCausticDir[photonIdx2D].xyz;
-        }
-        else
-        {
-            photonFlux = gGlobalFlux[photonIdx2D].xyz;
-            photonDir = gGlobalDir[photonIdx2D].xyz;
-        }
+        uint instanceIndex = isCaustic ? 0 : 1;
+        
+        float3 photonFlux = gPhotonFlux[instanceIndex][photonIdx2D].xyz;
+        float3 photonDir = gPhotonDir[instanceIndex][photonIdx2D].xyz;
+       
         const float3 wo = -photonDir;
         float3 f_r = bsdf.eval(sd, wo, rayData.sg);
        

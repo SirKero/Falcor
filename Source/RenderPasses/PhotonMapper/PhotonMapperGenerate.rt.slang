@@ -22,24 +22,21 @@ cbuffer PerFrame
 
 cbuffer CB
 {
-    //Max photon recursion depths
-    uint gMaxRecursion; 
+    uint gMaxRecursion; //Max photon recursion depths
     uint gPRNGDimension; // First available PRNG dimension.
     float gGlobalRejection; //Probability that a global photon is saved
     float gEmissiveScale;   //A scale for emissive lights
     
     float gSpecRoughCutoff; //Cutoff for specular materials (are interpreted as diffuse if rougness is above this value)
-    float gAnalyticInvPdf;  //Pdf for analytic lights
+    float gAnalyticInvPdf;  // 1/pdf for analytic lights
     bool gAdjustShadingNormals; //Adjusts shading normals
     bool gUseAlphaTest; //Enables alpha test
     
-    bool gEnablePhotonCulling;
-    uint gCullingHashSize;
-    uint gCullingYExtent;
-    float gCullingProjTest;
+    bool gEnablePhotonCulling;  //Enable Culling
+    uint gCullingHashSize;      //Hash Bit Size
+    uint gCullingYExtent;       //Y-Extend of the hash texture
+    float gCullingProjTest;     //Use camera projection for culling
 };
-
-
 
 // Inputs
 Texture2D<int> gLightSample;
@@ -54,7 +51,6 @@ struct PhotonInfo {
 };
 
  //Internal Buffer Structs
-
 RWTexture2D<float4> gPhotonFlux[2];
 RWTexture2D<float4> gPhotonDir[2];
 RWStructuredBuffer<AABB> gPhotonAABB[2];
@@ -82,9 +78,6 @@ static const bool kUsePhotonFaceNormal = PHOTON_FACE_NORMAL;
 
 static const float kRayTMinCulling = RAY_TMIN_CULLING;
 static const float kRayTMaxCulling = RAY_TMAX_CULLING;
-
-static const float k_2Pi = 6.28318530717958647692;
-static const float k_4Pi = 12.5663706143591729538;
 
 
 /** Payload for scatter ray (80B).
@@ -146,7 +139,7 @@ void calcLightDirection(in float3 lightDirW, float2 rnd, inout float3 newDir, in
         //Point
         case 0:
             newDir = sample_sphere(rnd);
-            lightPDF = k_4Pi;
+            lightPDF = M_1_4PI;
             break;
         //Area
         case 1:
@@ -155,7 +148,7 @@ void calcLightDirection(in float3 lightDirW, float2 rnd, inout float3 newDir, in
         //Spot
         case 2:
             newDir = sample_cone(rnd, cosThetaMax);
-            lightPDF = 1 / (k_2Pi * (1.0 - cosThetaMax));
+            lightPDF = 1 / (M_2PI * (1.0 - cosThetaMax));
     }
     
     fromLocalToWorld(lightDirW, newDir);
@@ -352,7 +345,7 @@ void rayGen()
     
     //light flux
     float3 lightFlux = lightIntensity * invPdf;
-    if (!analytic) lightFlux *= abs(dot(lightDir, ray.Direction)) * lightArea * M_PI_2;   //Convert L to flux
+    if (!analytic) lightFlux *= abs(dot(lightDir, ray.Direction)) * lightArea;   //Convert L to flux
     lightFlux /= analytic ? float(launchDim.x * launchDim.y) * lightDirPDF : lightDirPDF; //Total number of photons is in the invPDF for emissive
     //ray tracing vars
     ray.Origin = lightPos + 0.01 * ray.Direction;

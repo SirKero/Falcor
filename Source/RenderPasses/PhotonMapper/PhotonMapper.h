@@ -48,7 +48,7 @@ public:
 
     virtual Dictionary getScriptingDictionary() override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
-    virtual void compile(RenderContext* pContext, const CompileData& compileData) override;
+    virtual void compile(RenderContext* pContext, const CompileData& compileData) override {}
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene) override;
@@ -56,9 +56,8 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
     enum class TextureFormat {
-        _8Bit = 0u,
-        _16Bit = 1u,
-        _32Bit = 2u
+        _16Bit = 0u,
+        _32Bit = 1u
     };
 
     enum LightTexMode : uint32_t {
@@ -73,13 +72,13 @@ private:
     */
     void prepareVars();
 
-    /** Prepares all buffers neede for the generate photon pass
-    */
-    bool preparePhotonBuffers();
-
     /** Prepares the info textures. Is called inside of preparePhotonBuffers. Can be called seperate for format changes
     */
     void preparePhotonInfoTexture();
+
+    /** Prepares all buffers neede for the generate photon pass
+    */
+    bool preparePhotonBuffers();
 
     /** Creates the photon counter for caustic and global photon buffers
     */
@@ -118,15 +117,15 @@ private:
    */
     void createBottomLevelAS(RenderContext* pContext);
 
+    /**Builds the Top Level Acceleration structure
+    */
+    void buildTopLevelAS(RenderContext* pContext);
+
     /** Builds the Bottom Level Acceleration structure. aabbCount is the number of photon build for this acceleration structure
     * 0 index is always caustic, 1 index is global, everything above is ignored.
     * Photons counts above maxPhotons are ignored. 
     */
     void buildBottomLevelAS(RenderContext* pContext, std::array<uint, 2>& aabbCount);
-
-    /**Builds the Top Level Acceleration structure
-    */
-    void buildTopLevelAS(RenderContext* pContext);
 
     /** Prepares the buffer that holds the seeds for the SampleGenerator
     */
@@ -175,8 +174,8 @@ private:
     SampleGenerator::SharedPtr  mpSampleGenerator;          ///< GPU sample generator.
 
     //Constants
-    const float                 kMinPhotonRadius = 0.0001f;                 ///< At radius 0.0001 Photons are still visible
-    const float                 kCollectTMin = 0.000001f;                   ///<non configurable constant for collection for now
+    const float                 kMinPhotonRadius = 0.00001f;                 ///< Too small radiis should not be used as it could lead to floating point errors. 
+    const float                 kCollectTMin = 0.000001f;                   ///< Non configurable constant for collection for now
     const float                 kCollectTMax = 0.000002f;                   ///< non configurable constant for collection for now
     const uint                  kInfoTexHeight = 512;                       ///< Height of the info tex as it is too big for 1D tex
 
@@ -259,6 +258,8 @@ private:
     bool                        mPhotonBuffersReady = false;
 
     uint                        mCullingYExtent = 512;
+
+    ///////////////////////////////////////////////////////////
 
     //Clock/Timer
     bool                        mUseTimer = false;                          //<Activates the timer
