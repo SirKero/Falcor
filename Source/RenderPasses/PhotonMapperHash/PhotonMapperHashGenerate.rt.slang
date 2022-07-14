@@ -335,7 +335,7 @@ void rayGen()
     
     //light flux
     float3 lightFlux = lightIntensity * invPdf;
-    if (!analytic) lightFlux *= abs(dot(lightDir, ray.Direction)) * lightArea * M_PI_2;   //Convert L to flux
+    if (!analytic) lightFlux *= abs(dot(lightDir, ray.Direction)) * lightArea;   //Convert L to flux
     lightFlux /= analytic ? float(launchDim.x * launchDim.y) * lightDirPDF : lightDirPDF; //Total number of photons is in the invPDF for emissive
     //ray tracing vars
     ray.Origin = lightPos + 0.01 * ray.Direction;
