@@ -8,9 +8,6 @@ import Utils.Math.MathHelpers;
 import Utils.Sampling.SampleGenerator;
 import Utils.Geometry.GeometryHelpers;
 import Scene.Material.ShadingUtils;
-import Rendering.Materials.InteriorList;
-import Rendering.Materials.InteriorListHelpers;
-//import Rendering.Volumes.HomogeneousVolumeSampler; //Add maybe if dielectrics work
 import Rendering.Lights.LightHelpers;
 
 
@@ -44,9 +41,8 @@ RWTexture2D<float4> gMotionVector;
 #define is_valid(name) (is_valid_##name != 0)
 
 static const bool kComputeDepthOfField = COMPUTE_DEPTH_OF_FIELD;
-static const uint kMaxRejectedHits = 8;
 
-/** Payload for scatter ray (72B).
+/** Payload for scatter ray (64B).
 */
 struct RayData
 {
@@ -55,9 +51,8 @@ struct RayData
     float3 origin; ///< Next path segment origin.
     uint pathLength; ///<Path length
     float3 direction; ///< Next path segment direction.
-    uint rejectedHits;       ///number of rejected hits (for dielectrics)
-
-    InteriorList interiorList;  ///< interior list (8B)
+    uint pad;
+    
     SampleGenerator sg; ///< Per-ray state for the sample generator (up to 16B).
 
     /** Create ray payload with default parameters.
@@ -68,43 +63,10 @@ struct RayData
         this.origin = float3(0); 
         this.pathLength = 0; 
         this.direction = float3(0); 
-        this.rejectedHits = 0;
+        this.pad = 0;
         this.sg = sg;
     }
 };
-
-//For handling Nested Dielectrics. Taken from Path Tracer pass
-bool handleNestedDielectrics(inout ShadingData sd, inout RayData rayData)
-{
-    uint nestedPriority = sd.mtl.getNestedPriority();
-    
-    if (!rayData.interiorList.isTrueIntersection(nestedPriority))
-    {
-        // If it is a false intersection, we reject the hit and continue the path
-        // on the other side of the interface.
-        // If the offset position is not quite large enough, due to self-intersections
-        // it is possible we repeatedly hit the same surface and try to reject it.
-        // This has happened in a few occasions with large transmissive triangles.
-        // As a workaround, count number of rejected hits and terminate the path if too many.
-        if (rayData.rejectedHits < kMaxRejectedHits)
-        {
-            rayData.rejectedHits++;
-            rayData.interiorList.handleIntersection(sd.materialID, nestedPriority, sd.frontFacing);
-            rayData.origin = sd.computeNewRayOrigin(false);
-        }
-        else
-        {
-            rayData.terminated = true;
-        }
-        return false;
-    }
-    
-    // Compute index of refraction for medium on the outside.
-    //TODO: This does not work, gpu stops working 
-    //sd.IoR = computeOutsideIoR(rayData.interiorList, sd.materialID, sd.frontFacing);
-    
-    return true;
-}
 
 /** Computes a camera ray for a given pixel assuming a thin-lens camera model with a random instead of a fixed jitter. Based on computeRandomRayThinlens()
         The camera jitter is taken into account to compute the sample position on the image plane.
@@ -193,7 +155,6 @@ bool generateNewRay(const ShadingData sd, const IBSDF bsdf, float3 rayOrigin, in
         if (bsdfSample.isLobe(LobeType::Transmission))
         {
             rayData.origin = computeRayOrigin(sd.posW, dot(sd.faceN, bsdfSample.wo) <= 0.f ? -sd.faceN : sd.faceN);
-            //rayData.origin = sd.posW;
         }
         
         rayData.thp *= bsdfSample.weight;
@@ -224,9 +185,6 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         adjustShadingNormal(sd, v);
     }
     
-    
-    // Reject false hits in nested dielectrics.
-    //if (!handleNestedDielectrics(sd, rayData)) return;
     float3 thpStart = rayData.thp;
     
     BSDFSample bsdfSample;
@@ -289,15 +247,15 @@ void rayGen()
     {
         TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
-        //if ray is invalid return
+        //If ray is invalid return
         if (rayData.terminated)
             return;
       
-        //update ray for next iteration
+        //Update ray for next iteration
         ray.Origin = rayData.origin;
         ray.Direction = rayData.direction;
         if(i==0){
-            ray.TMin = 0.f;
+            ray.TMin = 0;    //Change tMin for transparent hits
         }
         
     }

@@ -1,12 +1,12 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="PTVBuffer.cpp" />
+    <ClCompile Include="VBufferPM.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="PTVBuffer.h" />
+    <ClInclude Include="VBufferPM.h" />
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="PTVBuffer.rt.slang" />
+    <ShaderSource Include="VBufferPM.rt.slang" />
   </ItemGroup>
 </Project>

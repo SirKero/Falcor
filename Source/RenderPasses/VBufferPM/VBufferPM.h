@@ -31,7 +31,7 @@
 
 using namespace Falcor;
 
-class PTVBuffer : public RenderPass
+class VBufferPM : public RenderPass
 {
 public:
     //Sample patterns for camera jitter
@@ -44,7 +44,7 @@ public:
         RandomUniform = 4
     };
 
-    using SharedPtr = std::shared_ptr<PTVBuffer>;
+    using SharedPtr = std::shared_ptr<VBufferPM>;
 
     static const Info kInfo;
 
@@ -65,7 +65,7 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
-    PTVBuffer(const Dictionary& dict);
+    VBufferPM(const Dictionary& dict);
 
     /** Parses the dictonary when creating the render pass
     */
@@ -84,7 +84,7 @@ private:
     */
     void updateSamplePattern();
 
-   
+
 
     // Internal state
     Scene::SharedPtr            mpScene;                            ///< Current scene.

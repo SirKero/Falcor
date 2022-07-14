@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -11,11 +11,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{3228F691-B542-449F-A05E-CCF9961A0AEF}</ProjectGuid>
+    <ProjectGuid>{F3B97957-0C9B-403F-86EE-4DA44D71786F}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>PTVBuffer</RootNamespace>
+    <RootNamespace>VBufferPM</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>PTVBuffer</ProjectName>
+    <ProjectName>VBufferPM</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -25,10 +25,10 @@
     <Import Project="..\..\Falcor\Falcor.props" />
   </ImportGroup>
   <ItemGroup>
-    <ClCompile Include="PTVBuffer.cpp" />
+    <ClCompile Include="VBufferPM.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="PTVBuffer.h" />
+    <ClInclude Include="VBufferPM.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Falcor\Falcor.vcxproj">
@@ -36,7 +36,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="PTVBuffer.rt.slang" />
+    <ShaderSource Include="VBufferPM.rt.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

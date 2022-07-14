@@ -25,10 +25,10 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "PTVBuffer.h"
+#include "VBufferPM.h"
 #include <RenderGraph/RenderPassHelpers.h>
 
-const RenderPass::Info PTVBuffer::kInfo{ "PTVBuffer", "A GBuffer that traces until it reaches a diffuse Surface." };
+const RenderPass::Info VBufferPM::kInfo{ "VBufferPM", "VBuffer for the Photon Mapper passes. Like a regular VBuffer but it traces the path until a diffuse surface was hit." };
 
 // Don't remove this. it's required for hot-reload to function properly
 extern "C" FALCOR_API_EXPORT const char* getProjDir()
@@ -38,17 +38,16 @@ extern "C" FALCOR_API_EXPORT const char* getProjDir()
 
 extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary & lib)
 {
-    lib.registerPass(PTVBuffer::kInfo, PTVBuffer::create);
+    lib.registerPass(VBufferPM::kInfo, VBufferPM::create);
 }
 
 namespace
 {
     //Metadata
-    const char kShader[] = "RenderPasses/PTVBuffer/PTVBuffer.rt.slang";
-    const char kDesc[] = "A VBuffer that traces until it reaches a diffuse Surface";
+    const char kShader[] = "RenderPasses/VBufferPM/VBufferPM.rt.slang";
 
     //Ray Tracing Program data
-    const uint32_t kMaxPayloadSizeBytes = 80u;
+    const uint32_t kMaxPayloadSizeBytes = 64u;
     const uint32_t kMaxRecursionDepth = 2u;
 
 
@@ -73,11 +72,11 @@ namespace
     // UI variables.
     const Gui::DropdownList kSamplePatternList =
     {
-        { PTVBuffer::SamplePattern::Center, "Center" },
-        { PTVBuffer::SamplePattern::DirectX, "DirectX" },
-        { PTVBuffer::SamplePattern::Halton, "Halton" },
-        { PTVBuffer::SamplePattern::Stratified, "Stratified" },
-        { PTVBuffer::SamplePattern::RandomUniform, "RandomUniform"}
+        { VBufferPM::SamplePattern::Center, "Center" },
+        { VBufferPM::SamplePattern::DirectX, "DirectX" },
+        { VBufferPM::SamplePattern::Halton, "Halton" },
+        { VBufferPM::SamplePattern::Stratified, "Stratified" },
+        { VBufferPM::SamplePattern::RandomUniform, "RandomUniform"}
     };
 
     // Scripting options.
@@ -89,13 +88,13 @@ namespace
     const char kAdjustShadingNormals[] = "adjustShadingNormals";
 }
 
-PTVBuffer::SharedPtr PTVBuffer::create(RenderContext* pRenderContext, const Dictionary& dict)
+VBufferPM::SharedPtr VBufferPM::create(RenderContext* pRenderContext, const Dictionary& dict)
 {
-    SharedPtr pPass = SharedPtr(new PTVBuffer(dict));
+    SharedPtr pPass = SharedPtr(new VBufferPM(dict));
     return pPass;
 }
 
-PTVBuffer::PTVBuffer(const Dictionary& dict)
+VBufferPM::VBufferPM(const Dictionary& dict)
     : RenderPass(kInfo)
 {
     parseDictionary(dict);
@@ -103,7 +102,7 @@ PTVBuffer::PTVBuffer(const Dictionary& dict)
     FALCOR_ASSERT(mpSampleGenerator);
 }
 
-void PTVBuffer::parseDictionary(const Dictionary& dict)
+void VBufferPM::parseDictionary(const Dictionary& dict)
 {
     for (const auto& [key, value] : dict)
     {
@@ -117,7 +116,7 @@ void PTVBuffer::parseDictionary(const Dictionary& dict)
     }
 }
 
-Dictionary PTVBuffer::getScriptingDictionary()
+Dictionary VBufferPM::getScriptingDictionary()
 {
     Dictionary dict;
     dict[kOutputSize] = mOutputSizeSelection;
@@ -130,7 +129,7 @@ Dictionary PTVBuffer::getScriptingDictionary()
     return dict;
 }
 
-RenderPassReflection PTVBuffer::reflect(const CompileData& compileData)
+RenderPassReflection VBufferPM::reflect(const CompileData& compileData)
 {
     // Define the required resources here
     RenderPassReflection reflector;
@@ -146,7 +145,7 @@ RenderPassReflection PTVBuffer::reflect(const CompileData& compileData)
     return reflector;
 }
 
-void PTVBuffer::execute(RenderContext* pRenderContext, const RenderData& renderData)
+void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     /// Update refresh flag if options that affect the output have changed.
     auto& dict = renderData.getDictionary();
@@ -176,13 +175,13 @@ void PTVBuffer::execute(RenderContext* pRenderContext, const RenderData& renderD
 
         return;
     }
-        
+
 
     if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::GeometryChanged))
         throw std::runtime_error("This render pass does not support scene geometry changes. Aborting.");
 
     //On start set the jitters sample generator
-    if(mFrameCount == 0)
+    if (mFrameCount == 0)
         updateSamplePattern();
 
     //Check if camera jitter sample gen needs to be set
@@ -216,7 +215,7 @@ void PTVBuffer::execute(RenderContext* pRenderContext, const RenderData& renderD
         var[bufName]["gUseAlphaTest"] = mUseAlphaTest;
         var[bufName]["gUseRandomPixelPosCamera"] = mCameraUseRandomSample;
     }
-   
+
 
     // Bind Output Textures. These needs to be done per-frame as the buffers may change anytime.
     auto bindAsTex = [&](const ChannelDesc& desc)
@@ -241,7 +240,7 @@ void PTVBuffer::execute(RenderContext* pRenderContext, const RenderData& renderD
     if (mResetConstantBuffers) mResetConstantBuffers = false;
 }
 
-void PTVBuffer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
+void VBufferPM::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     //Clear data from previous scenne
     //Rt program should be recreated
@@ -269,29 +268,19 @@ void PTVBuffer::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& 
         sbt->setRayGen(desc.addRayGen("rayGen"));
         sbt->setMiss(0, desc.addMiss("miss"));
 
-        /*
-        auto materialTypes = pScene->getMaterialSystem()->getMaterialTypes();
-        for (const auto materialType : materialTypes)
-        {
-            auto typeConformances = pScene->getMaterialSystem()->getTypeConformances(materialType);
-            if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh)) {
-                auto shaderID = desc.addHitGroup("closestHit", "anyHit", "", typeConformances, to_string(materialType));
-                sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh, materialType), shaderID);
-            }
-        }
-        */
-        
+        //TODO: Support more of Falcores geometry types
+
         if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh)) {
             sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
         }
-        
-        
+
+
 
         mTracer.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
     }
 }
 
-void PTVBuffer::renderUI(Gui::Widgets& widget)
+void VBufferPM::renderUI(Gui::Widgets& widget)
 {
     // Controls for output size.
     // When output size requirements change, we'll trigger a graph recompile to update the render pass I/O sizes.
@@ -332,7 +321,7 @@ void PTVBuffer::renderUI(Gui::Widgets& widget)
     widget.tooltip("Adjusts the shading normals to prevent invalid pixels at the edge of specular/transparent materials");
 }
 
-void PTVBuffer::prepareVars()
+void VBufferPM::prepareVars()
 {
     FALCOR_ASSERT(mTracer.pProgram);
 
@@ -353,14 +342,14 @@ static CPUSampleGenerator::SharedPtr createSamplePattern(uint32_t type, uint32_t
 {
     switch (type)
     {
-    case PTVBuffer::SamplePattern::Center:
-    case PTVBuffer::SamplePattern::RandomUniform:
+    case VBufferPM::SamplePattern::Center:
+    case VBufferPM::SamplePattern::RandomUniform:
         return nullptr;
-    case PTVBuffer::SamplePattern::DirectX:
+    case VBufferPM::SamplePattern::DirectX:
         return DxSamplePattern::create(sampleCount);
-    case PTVBuffer::SamplePattern::Halton:
+    case VBufferPM::SamplePattern::Halton:
         return HaltonSamplePattern::create(sampleCount);
-    case PTVBuffer::SamplePattern::Stratified:
+    case VBufferPM::SamplePattern::Stratified:
         return StratifiedSamplePattern::create(sampleCount);
     default:
         FALCOR_UNREACHABLE();
@@ -368,7 +357,7 @@ static CPUSampleGenerator::SharedPtr createSamplePattern(uint32_t type, uint32_t
     }
 }
 
-void PTVBuffer::setCameraJitter(const uint2 frameDim)
+void VBufferPM::setCameraJitter(const uint2 frameDim)
 {
     FALCOR_ASSERT(frameDim.x > 0 && frameDim.y > 0);
     mFrameDim = frameDim;
@@ -378,7 +367,7 @@ void PTVBuffer::setCameraJitter(const uint2 frameDim)
     if (mpScene) mpScene->getCamera()->setPatternGenerator(mpCameraJitterSampleGenerator, mInvFrameDim);
 }
 
-void PTVBuffer::updateSamplePattern()
+void VBufferPM::updateSamplePattern()
 {
     mpCameraJitterSampleGenerator = createSamplePattern(mSamplePattern, mSampleCount);
     if (mpCameraJitterSampleGenerator) mSampleCount = mpCameraJitterSampleGenerator->getSampleCount();
