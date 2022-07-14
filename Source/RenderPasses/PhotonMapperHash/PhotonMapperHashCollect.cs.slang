@@ -33,7 +33,7 @@ cbuffer CB
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gViewWorld;
-Texture2D<float4> gThpMatID;
+Texture2D<float4> gThp;
 Texture2D<float4> gEmissive;
 
 
@@ -230,7 +230,7 @@ float3 collectPhotons(in HitInfo hitInfo, in float3 dirVec, uint2 launchIndex,bo
 void main(uint2 DTid : SV_DispatchThreadID, uint2 Gid : SV_GroupID, uint2 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
 {
     float3 viewVec = gViewWorld[DTid].xyz;
-    float4 thpMatID = gThpMatID[DTid];
+    float4 thp = gThp[DTid];
     PackedHitInfo packedHitInfo = gVBuffer[DTid];
     const HitInfo hit = HitInfo(packedHitInfo);
     bool valid = hit.isValid(); //Check if the ray is valid
@@ -251,11 +251,11 @@ void main(uint2 DTid : SV_DispatchThreadID, uint2 Gid : SV_GroupID, uint2 GTid :
         radiance += w * causticRadiance;
     }
     
-    radiance *= thpMatID.xyz;   //Add throughput for path
+    radiance *= thp.xyz;   //Add throughput for path
 
     //Add emission
     float3 pixEmission = gEmissive[DTid].xyz;
-    radiance += pixEmission * thpMatID.xyz;
+    radiance += pixEmission * thp.xyz;
 
      //Accumulate the image (Put in accumulate pass ? )
     if (gFrameCount > 0)

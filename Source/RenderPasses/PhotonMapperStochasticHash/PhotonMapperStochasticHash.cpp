@@ -35,7 +35,7 @@
 
 constexpr float kUint32tMaxF = float((uint32_t)-1);
 
-const RenderPass::Info PhotonMapperStochasticHash::kInfo{"PhotonMapperStochasticHash", "A Photon Mapper with full RTX support" };
+const RenderPass::Info PhotonMapperStochasticHash::kInfo{"StochHashPPM", "Progressive Photon Mapper based on a Stochastic Hash Grid" };
 
 // Don't remove this. it's required for hot-reload to function properly
 extern "C" FALCOR_API_EXPORT const char* getProjDir()
@@ -65,7 +65,7 @@ namespace
     {
         {"vbuffer",             "gVBuffer",                 "V Buffer to get the intersected triangle",         false},
         {"viewW",               "gViewWorld",               "World View Direction",                             false},
-        {"thpMatID",            "gThpMatID",                "Throughput and material id(w)",                    false},
+        {"thp",                 "gThp",                     "Throughput",                                       false},
         {"emissive",            "gEmissive",                "Emissive",                                         false},
     };
 

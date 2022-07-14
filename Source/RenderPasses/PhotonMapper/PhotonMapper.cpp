@@ -35,7 +35,7 @@
 
 constexpr float kUint32tMaxF = float((uint32_t)-1);
 
-const RenderPass::Info PhotonMapper::kInfo{"PhotonMapper", "A Progressive Photon Mapper based on Acceleration Structure Photon Collection" };
+const RenderPass::Info PhotonMapper::kInfo{"RTPhotonMapper", "A Progressive Photon Mapper based on Acceleration Structure Photon Collection" };
 
 // Don't remove this. it's required for hot-reload to function properly
 extern "C" FALCOR_API_EXPORT const char* getProjDir()
