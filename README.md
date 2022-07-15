@@ -10,7 +10,8 @@ A Progressive Photon Mapper that uses the ray tracing hardware for distribution 
 - Set Mogwai as Startup Project and build with either `ReleaseD3D12` or `DebugD3D12` Configuration
 - Load a Photon Map setup in Mogwai under `File -> Load Script`. The setup scrips are in the `PhotonMapPasses` folder.
 - Load a scene in Mogwai under `File -> Load Scene`. 
-	- To get the scenes used in the paper see README in `Scenes` folder.
+	- All scenes from the paper can be found in the `Scenes` folder. Load in the `.pyscene` file to get the same results as in the paper.
+		- For information about settings used see `Scenes\SceneSettings.csv`.
 	- All Falcor-supported scenes with emissive lights and spot/point lights are supported. 
 
 ## Render Passes
