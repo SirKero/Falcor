@@ -53,7 +53,11 @@ namespace {
     };
 
     const ChannelList kOutputs = {
-        {"color",               "gColor",                   "Final shaded hdr image", false, ResourceFormat::RGBA16Float}
+        {"color",                   "gColor",                   "Final shaded hdr image",                   false,  ResourceFormat::RGBA32Float},
+        {"diffuseIllumination",     "gDiffuseIllumination",     "Diffuse Illumination and hit distance",    true,   ResourceFormat::RGBA32Float},
+        {"diffuseReflectance",      "gDiffuseReflectance",      "Diffuse Reflectance",                      true,   ResourceFormat::RGBA32Float},
+        {"specularIllumination",    "gSpecularIllumination",    "Specular illumination and hit distance",   true,   ResourceFormat::RGBA32Float},
+        {"specularReflectance",     "gSpecularReflectance",     "Specular reflectance",                     true,   ResourceFormat::RGBA32Float},
     };
 }
 
@@ -105,6 +109,7 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
     //UI here
     widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
 
+    mRecompile = widget.button("Recompile");
 }
 
 void ReStirExp::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
@@ -125,7 +130,7 @@ bool ReStirExp::prepareLighting(RenderContext* pRenderContext)
             const auto& pLights = mpScene->getLightCollection(pRenderContext);
             FALCOR_ASSERT(pLights && pLights->getActiveLightCount() > 0);
             //TODO: Support different types of sampler
-            mpEmissiveLightSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+            mpEmissiveLightSampler = EmissiveUniformSampler::create(pRenderContext, mpScene);
             lightingChanged = true;
             mRecompile = true;
         }
@@ -230,10 +235,14 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add(getValidResourceDefines(kOutputs, renderData));
 
         mpFinalShading = ComputePass::create(desc, defines, true);
     }
     FALCOR_ASSERT(mpFinalShading);
+
+    // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
+    mpFinalShading->getProgram()->addDefines(getValidResourceDefines(kOutputs, renderData));
 
     //Set variables
     auto var = mpFinalShading->getRootVar();

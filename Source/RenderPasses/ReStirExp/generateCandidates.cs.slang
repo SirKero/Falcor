@@ -95,16 +95,18 @@ bool sampleEmissiveTriangle(float3 rnd, in ShadingData sd, out LightSample ls){
     float pdf = distSqr / denom;
     //float LeF = (Le.x + Le.y + Le.z)/3;
     float LeF = luminance(Le);
+    pdf *= ls.selectPdf;
     ls.Li = LeF / pdf;
 
     return true;
 }
 
 //Generates a light sample. Returns false if sample is invalid
-bool generateSample(in SampleGenerator sg, in ShadingData sd,out LightSample ls){
+bool generateSample(inout SampleGenerator sg, in ShadingData sd,out LightSample ls){
     if(!sampleEmissiveTriangle(sampleNext3D(sg), sd, ls)) return false;
+        
     //If different lights are supported add MIS weight
-    return (any(ls.Li > 0.f));    //return true if valid sample
+    return (ls.Li > 0.f);    //return true if valid sample
 }
 
 //gets the target pdf averaged to one channel
@@ -168,7 +170,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
         float targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
         updateReservoir(r,ls, targetPdf, sampleNext1D(sg));
     }
-    r.W = 1.f/r.targetPdf * (r.weightSum / r.M);
-
+    if(r.targetPdf > 0){
+        r.W = 1.f/r.targetPdf * (r.weightSum / gNumEmissiveSamples);  
+    }
+    
     gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
 }
