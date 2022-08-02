@@ -77,7 +77,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     bool valid = true;
     //Get reservoir
     Reservoir r = gReservoir[index2Dto1D(dTid, gFrameDim.x)];
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount);    //TODO add seed offset
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 7 * 13);    //TODO add seed offset
 
     //Get shading data
     HitInfo hitInfo = HitInfo(gVBuffer[dTid]);

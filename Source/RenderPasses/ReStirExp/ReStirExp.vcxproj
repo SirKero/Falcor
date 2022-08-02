@@ -39,6 +39,7 @@
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="generateCandidates.cs.slang" />
     <ShaderSource Include="Reservoir.slang" />
+    <ShaderSource Include="temporalResampling.cs.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

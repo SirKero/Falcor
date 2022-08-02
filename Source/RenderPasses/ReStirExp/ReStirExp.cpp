@@ -44,6 +44,7 @@ extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
 namespace {
     //Shaders
     const char kShaderGenerateCandidates[] = "RenderPasses/ReStirExp/generateCandidates.cs.slang";
+    const char kShaderTemporalPass[] = "RenderPasses/ReStirExp/temporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/ReStirExp/finalShading.cs.slang";
 
     //Input
@@ -58,6 +59,13 @@ namespace {
         {"diffuseReflectance",      "gDiffuseReflectance",      "Diffuse Reflectance",                      true,   ResourceFormat::RGBA32Float},
         {"specularIllumination",    "gSpecularIllumination",    "Specular illumination and hit distance",   true,   ResourceFormat::RGBA32Float},
         {"specularReflectance",     "gSpecularReflectance",     "Specular reflectance",                     true,   ResourceFormat::RGBA32Float},
+    };
+
+    const Gui::DropdownList kResamplingModeList{
+        {ReStirExp::ResamplingMode::NoResampling , "No Resampling"},
+        {ReStirExp::ResamplingMode::Temporal , "Temporal only"},
+        {ReStirExp::ResamplingMode::Spartial , "Spartial only"},
+        {ReStirExp::ResamplingMode::SpartioTemporal , "SpartioTemporal"},
     };
 }
 
@@ -98,41 +106,54 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     generateCandidatesPass(pRenderContext, renderData);
 
+    if((mResamplingMode & ResamplingMode::Temporal) != 0)
+        temporalResampling(pRenderContext, renderData);
+
     finalShadingPass(pRenderContext, renderData);
 
-    mRecompile = false;
+    mReset = false;
     mFrameCount++;
 }
 
 void ReStirExp::renderUI(Gui::Widgets& widget)
 {
     //UI here
+    widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
+
     widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
 
-    mRecompile = widget.button("Recompile");
+    mReset = widget.button("Recompile");
 }
 
 void ReStirExp::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
     //TODO: Reset Pass
     mpScene = pScene;
-    mRecompile = true;
+    mReset = true;
 }
 
 bool ReStirExp::prepareLighting(RenderContext* pRenderContext)
 {
-    //TODO set up a lighting texture for 
+    //TODO set up a lighting texture for emissive and area light
     return false;
 }
 
 void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    //Has resolution changed ?
+    if ((mScreenRes.x != renderData.getDefaultTextureDims().x) || (mScreenRes.y != renderData.getDefaultTextureDims().y) || mReset)
+    {
+        mScreenRes = renderData.getDefaultTextureDims();
+        mpReservoirBuffer[0].reset(); mpReservoirBuffer[1].reset();
+    }
     //TODO check if resolution changed
-    if (!mpReservoirBuffer) {
+    if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1]) {
         uint2 texDim = renderData.getDefaultTextureDims();
         uint bufferSize = texDim.x * texDim.y;
-        mpReservoirBuffer = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
-        mpReservoirBuffer->setName("ReStirExp::ReservoirBuf");
+        mpReservoirBuffer[0] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
+        mpReservoirBuffer[0]->setName("ReStirExp::ReservoirBuf1");
+        mpReservoirBuffer[1] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
+        mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
     }
 
     if (!mpGenerateSampleGenerator) {
@@ -144,7 +165,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
 {
     FALCOR_PROFILE("GenerateCandidates");
 
-    if (mRecompile) mpGenerateCandidates.reset();
+    if (mReset) mpGenerateCandidates.reset();
 
     //Create pass
     if (!mpGenerateCandidates) {
@@ -174,7 +195,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
 
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
-    var["gReservoir"] = mpReservoirBuffer;
+    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     for (auto& inp : kInputs) bindAsTex(inp);
 
     //Uniform
@@ -182,6 +203,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     var["PerFrame"]["gFrameCount"] = mFrameCount;
     var["PerFrame"]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
     var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
+    var["PerFrame"]["gTestVisibility"] = mResamplingMode > 0;   //TODO: Also add a variable to manually disable
     
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -189,14 +211,69 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     mpGenerateCandidates->execute(pRenderContext, uint3(targetDim, 1));
 
     //Barrier for written buffer
-    pRenderContext->uavBarrier(mpReservoirBuffer.get());
+    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+}
+
+void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("TemporalResampling");
+
+    if (mReset) mpTemporalResampling.reset();
+
+    //Create Pass
+    if (!mpTemporalResampling) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderTemporalPass).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpGenerateSampleGenerator->getDefines());
+
+        mpTemporalResampling = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpTemporalResampling);
+
+    if (mReset) return; //Scip the rest on the first frame as the temporal buffer is invalid anyway
+
+    //Set variables
+    auto var = mpTemporalResampling->getRootVar();
+
+    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
+    auto bindAsTex = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+
+    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
+    mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
+
+    var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
+    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    for (auto& inp : kInputs) bindAsTex(inp);
+
+    //Uniform
+    var["PerFrame"]["gFrameCount"] = mFrameCount;
+    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
+    var["PerFrame"]["gMaxAge"] = mTemporalMaxAge;
+
+    //Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpTemporalResampling->execute(pRenderContext, uint3(targetDim, 1));
+
+    //Barrier for written buffer
+    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
 }
 
 void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("FinalShading");
 
-    if (mRecompile) mpFinalShading.reset();
+    if (mReset) mpFinalShading.reset();
 
     //Create pass
     if (!mpFinalShading) {
@@ -231,7 +308,7 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
-    var["gReservoir"] = mpReservoirBuffer;
+    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     for (auto& inp : kInputs) bindAsTex(inp);
     for (auto& out : kOutputs) bindAsTex(out);
 

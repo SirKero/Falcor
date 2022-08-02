@@ -1,7 +1,8 @@
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
-import Scene.Raytracing;
+
+import Scene.RaytracingInline;
 import Scene.Material.ShadingUtils;
 import Rendering.Materials.Microfacet;
 import Rendering.Materials.Fresnel;
@@ -24,7 +25,9 @@ cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
     uint gNumEmissiveSamples;       // Num emissive samples
-    uint2 gFrameDim;                //Frame Dimensions for camera dir 
+    uint2 gFrameDim;                //Frame Dimensions for camera dir
+    bool gTestVisibility;
+    uint3 pad;
 }
 
 
@@ -46,6 +49,8 @@ uint float2toUint(float2 xy){
     uint v = f32tof16(xy.y);
     return (u << 16u) | v;
 }
+
+static const float kRayEpsilon = 0.99f;
 
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
@@ -144,12 +149,14 @@ void updateReservoir(inout Reservoir r, in LightSample ls,float targetPdf, float
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount);
     Reservoir r = Reservoir.create();
     
     //Get shading data
-    HitInfo hitInfo = HitInfo(gVBuffer[dTid]);    
+    HitInfo hitInfo = HitInfo(gVBuffer[dTid]);
+    if(!hitInfo.isValid())
+        return;
+    
     let lod = ExplicitLodTextureSampler(0.f);
     //Recreate the V-Buffer ray for direction
     Ray cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
@@ -166,7 +173,28 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
     if(r.targetPdf > 0){
         r.M = gNumEmissiveSamples;
-        r.W = 1.f/r.targetPdf * (r.weightSum / gNumEmissiveSamples);  
+        r.W = 1.f/r.targetPdf * (r.weightSum / gNumEmissiveSamples);
+    }
+
+    //Test visibility and shoot a shadow ray from the surface to the selected light
+    if(r.targetPdf > 0 && gTestVisibility){
+        //get light sample
+        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(r.lightIdx);
+        const float3 barycentrics = sample_triangle(r.getUV());
+        float3 posW = tri.getPosition(barycentrics);
+        float3 toLight = posW - sd.posW;
+        float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs
+        float dist = sqrt(distSqr);
+        toLight /= dist;
+        
+        dist *= kRayEpsilon;
+        // Ray Query for shadow test; <1> means enabled alpha testing; TODO: Add static const for alpha test
+        SceneRayQuery<1> rayQuery;
+        const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.f, dist);
+        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+        {
+            r.W = 0.f;  //Set weight to zero if light is not visible
+        }
     }
     
     gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;

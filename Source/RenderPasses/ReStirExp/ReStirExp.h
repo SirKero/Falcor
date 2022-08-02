@@ -58,10 +58,18 @@ public:
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
-private:
-    ReStirExp() : RenderPass(kInfo) {}
+    //Structs and enum
+    enum ResamplingMode {
+        NoResampling = 0,
+        Temporal = 0b1,
+        Spartial = 0b10,
+        SpartioTemporal = 0b11
+    };
 
+private:
     //Functions
+
+    ReStirExp() : RenderPass(kInfo) {}
 
     /** Prepares the samplers etc needed for lighting. Returns true if lighting has changed
     */
@@ -75,16 +83,23 @@ private:
     */
     void generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Uses temporal resampling to combine the reservoir with the reservoir of the previous frame
+    */
+    void temporalResampling(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Uses the reservoir to shade the pixel
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //UI
+    uint mResamplingMode = ResamplingMode::SpartioTemporal;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
+    uint mTemporalMaxAge = 20;
    
 
     //Runtime
-    bool mRecompile = true;
+    bool mReset = true;
+    uint2 mScreenRes = { 0,0 };
     bool mUpdateRenderSettings = true;
     uint mFrameCount = 0;
 
@@ -94,8 +109,9 @@ private:
 
     //Passes
     ComputePass::SharedPtr mpGenerateCandidates;    //Generate Candidates Pass
-    ComputePass::SharedPtr mpFinalShading;          //Final Shading PAss
+    ComputePass::SharedPtr mpTemporalResampling;    //Temporal Resampling Pass
+    ComputePass::SharedPtr mpFinalShading;          //Final Shading Pass
 
     //Buffer
-    Buffer::SharedPtr mpReservoirBuffer;  //Buffer for the reservoir
+    Buffer::SharedPtr mpReservoirBuffer[2];  //Buffers for the reservoir
 };
