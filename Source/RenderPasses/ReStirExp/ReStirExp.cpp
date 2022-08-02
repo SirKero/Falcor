@@ -121,34 +121,8 @@ void ReStirExp::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& 
 
 bool ReStirExp::prepareLighting(RenderContext* pRenderContext)
 {
-    bool lightingChanged = false;
-
-    if (mpScene->useEmissiveLights()) {
-        //Init light sampler if not set
-        if (!mpEmissiveLightSampler) {
-            //Ensure that emissive light struct is build by falcor
-            const auto& pLights = mpScene->getLightCollection(pRenderContext);
-            FALCOR_ASSERT(pLights && pLights->getActiveLightCount() > 0);
-            //TODO: Support different types of sampler
-            mpEmissiveLightSampler = EmissiveUniformSampler::create(pRenderContext, mpScene);
-            lightingChanged = true;
-            mRecompile = true;
-        }
-    }
-    else {
-        if (mpEmissiveLightSampler) {
-            mpEmissiveLightSampler = nullptr;
-            lightingChanged = true;
-            mRecompile = true;
-        }
-    }
-
-    //Update Emissive light sampler
-    if (mpEmissiveLightSampler) {
-        lightingChanged |= mpEmissiveLightSampler->update(pRenderContext);
-    }
-
-    return lightingChanged;
+    //TODO set up a lighting texture for 
+    return false;
 }
 
 void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData)
@@ -181,7 +155,6 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
-        if (mpEmissiveLightSampler) defines.add(mpEmissiveLightSampler->getDefines());
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -201,7 +174,6 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
 
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
-    if (mpEmissiveLightSampler) mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);     //Emissive sampler
     var["gReservoir"] = mpReservoirBuffer;
     for (auto& inp : kInputs) bindAsTex(inp);
 

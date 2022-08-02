@@ -37,12 +37,6 @@ struct LightSample{
     //Enum type later ? 
 };
 
-cbuffer Light
-{
-    EmissiveLightSampler gEmissiveSampler;
-};
-
-
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
@@ -171,6 +165,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         updateReservoir(r,ls, targetPdf, sampleNext1D(sg));
     }
     if(r.targetPdf > 0){
+        r.M = gNumEmissiveSamples;
         r.W = 1.f/r.targetPdf * (r.weightSum / gNumEmissiveSamples);  
     }
     

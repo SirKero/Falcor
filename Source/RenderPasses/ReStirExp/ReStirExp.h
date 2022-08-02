@@ -90,7 +90,6 @@ private:
 
     //Falcor Vars
     Scene::SharedPtr mpScene;       //Pointer for scene
-    EmissiveLightSampler::SharedPtr mpEmissiveLightSampler;     //To sample the initial candidates
     SampleGenerator::SharedPtr mpGenerateSampleGenerator;       //Sample generator for Generate pass
 
     //Passes
