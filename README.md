@@ -14,6 +14,9 @@ A Progressive Photon Mapper that uses the ray tracing hardware for distribution 
 		- For information about settings used see `Scenes\SceneSettings.csv`.
 	- All Falcor-supported scenes with emissive lights and spot/point lights are supported. 
 
+## Examples
+- Example renders can be found under the `Images` folder.
+
 ## Render Passes
 | Graph | Description |
 |---|---|
