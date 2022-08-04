@@ -16,6 +16,7 @@ A Progressive Photon Mapper that uses the ray tracing hardware for distribution 
 
 ## Examples
 - Example renders can be found under the `Images` folder.
+- A demo video showing the photon mapper and some functions can be found under: [https://youtu.be/k_JvwOJJYRo](https://youtu.be/k_JvwOJJYRo)
 
 ## Render Passes
 | Graph | Description |
