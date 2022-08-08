@@ -73,39 +73,46 @@ void main(uint2 dTid : SV_DispatchThreadID)
 {
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 4 * 13);
     bool valid = true;
-    Reservoir prev = Reservoir.create();
-    Reservoir curr = Reservoir.create();
+    Reservoir r = Reservoir.create();
     //Check if surface is valid
     HitInfo hitInfo = HitInfo(gVBuffer[dTid]);
     if(!hitInfo.isValid())
         valid = false;
 
+    //Load reservoir from current iteration
+    Reservoir current =  gReservoir[index2Dto1D(dTid, gFrameDim.x)];
+    if(current.W > 0 && current.M == 1){
+        float currWeight = current.targetPdf * current.W * current.M;
+        combineReservoir(r, current, currWeight, 0.5 /* random */);
+        r.M = 1;
+    }
+    
     float2 motionOffset = gMVec[dTid] * float2(gFrameDim);
     //Check if motion vectors are inside of the frame
     float2 prevIdxF = motionOffset + float2(dTid);
     float2 rndOffset = sampleNext2D(sg) - 0.5f;
     prevIdxF += rndOffset;
     
-    valid &= prevIdxF.x >= 0 & prevIdxF.y >= 0 & prevIdxF.x < gFrameDim.x & prevIdxF.y < gFrameDim.y;
+    valid &= prevIdxF.x >= 0 && prevIdxF.y >= 0 && prevIdxF.x < gFrameDim.x && prevIdxF.y < gFrameDim.y;
 
     uint2 prevIdx = uint2(round(prevIdxF));
+    
+    Reservoir prev;
     //Load both reservoirs 
     if(valid){
-        curr = gReservoir[index2Dto1D(dTid, gFrameDim.x)];
         prev = gReservoirPrev[index2Dto1D(prevIdx, gFrameDim.x)];
     }
 
-    valid &= prev.W > 0 & prev.M != 0 & prev.age <= gMaxAge;
+    valid &= prev.W > 0 && prev.M != 0 && prev.age <= gMaxAge;
 
     //TODO check if reprojected surface is valid or similar to current and use weight of reprojected area
     
     if(valid){
-        curr.weightSum = curr.targetPdf * curr.W * curr.M;
         float prevWeight = prev.targetPdf * prev.W * prev.M;
-        combineReservoir(curr, prev, prevWeight, sampleNext1D(sg));
-        curr.M += prev.M;
-        curr.W = 1.f/curr.targetPdf * (curr.weightSum / curr.M);
+        combineReservoir(r, prev, prevWeight, sampleNext1D(sg));
+        r.M += prev.M;
+        r.W = 1.f/r.targetPdf * (r.weightSum / r.M);
         
-        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = curr;
+        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
     }   
 }

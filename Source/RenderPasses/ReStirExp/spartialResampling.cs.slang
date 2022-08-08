@@ -1,8 +1,7 @@
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
-
-import Scene.RaytracingInline;
+import Scene.Raytracing;
 import Scene.Material.ShadingUtils;
 import Rendering.Materials.Microfacet;
 import Rendering.Materials.Fresnel;
@@ -14,7 +13,6 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 
-
 RWStructuredBuffer<Reservoir> gReservoir;
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -24,10 +22,11 @@ Texture2D<float2> gMVec;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
-    uint gNumEmissiveSamples;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
-    bool gTestVisibility;
-    uint3 pad;
+    uint gSpartialSamples;
+    float gSamplingRadius;
+    float gDepthThreshold;          //Relative depth offset
+    float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
 }
 
 
@@ -37,7 +36,7 @@ struct LightSample{
     float Li;
     float selectPdf;
     float2 uv;
-    //Enum type later ? 
+    //Enum type later ?
 };
 
 uint index2Dto1D(uint2 idx, uint width){
@@ -50,8 +49,6 @@ uint float2toUint(float2 xy){
     return (u << 16u) | v;
 }
 
-static const float kRayEpsilon = 0.99f;
-
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -63,18 +60,21 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-bool sampleEmissiveTriangle(float3 rnd, in ShadingData sd, out LightSample ls){
+bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
+    float normalCheck = dot(currNormal, neighNormal);
+    float minLinZDiff = currLinZ * gDepthThreshold;
+    float linZDiff = abs(currLinZ - neighLinZ);
+    return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
+}
+
+bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out LightSample ls){
     const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
-    if(activeTriangleCount == 0) return false;
-    //get random active triangle
-    const uint rndTriangleIndex = min(uint(activeTriangleCount * rnd.x), activeTriangleCount-1);
-    ls.lightIdx = gScene.lightCollection.activeTriangles[rndTriangleIndex];
+    ls.lightIdx = triangleIdx;
     ls.selectPdf = 1.f/activeTriangleCount;
 
     //get triangle data and sample uniformly
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(ls.lightIdx);
-    const float3 barycentrics = sample_triangle(rnd.yz);
-    ls.uv = rnd.yz; //store uv for later
+    const float3 barycentrics = sample_triangle(uv);
     float3 posW = tri.getPosition(barycentrics);
     float3 toLight = posW - sd.posW;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
@@ -98,14 +98,6 @@ bool sampleEmissiveTriangle(float3 rnd, in ShadingData sd, out LightSample ls){
     ls.Li = LeF / pdf;
 
     return true;
-}
-
-//Generates a light sample. Returns false if sample is invalid
-bool generateSample(inout SampleGenerator sg, in ShadingData sd,out LightSample ls){
-    if(!sampleEmissiveTriangle(sampleNext3D(sg), sd, ls)) return false;
-        
-    //If different lights are supported add MIS weight
-    return (ls.Li > 0.f);    //return true if valid sample
 }
 
 //gets the target pdf averaged to one channel
@@ -135,70 +127,86 @@ float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, inout S
     return brdf * ls.Li; 
 }
 
-void updateReservoir(inout Reservoir r, in LightSample ls,float targetPdf, float rnd){
-    float weight = targetPdf / ls.selectPdf;
+void combineReservoir(inout Reservoir r, in Reservoir prev,float weight, float rnd){
     r.weightSum += weight;
-    r.M += 1;
     if(rnd < (weight / r.weightSum)){
-        r.lightIdx = ls.lightIdx;
-        r.setUV(ls.uv);
-        r.targetPdf = targetPdf;
+        r.lightIdx = prev.lightIdx;
+        r.uv = prev.uv;
+        r.targetPdf = prev.targetPdf;
     }
 }
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount);
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 5 * 13);
     Reservoir r = Reservoir.create();
+
     
-    //Get shading data
+    //Check if surface is valid
     HitInfo hitInfo = HitInfo(gVBuffer[dTid]);
-    if (!hitInfo.isValid())
-    {
-        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+    if(!hitInfo.isValid())
         return;
-    }
-    
+    //Get Hit shading information
     let lod = ExplicitLodTextureSampler(0.f);
-    //Recreate the V-Buffer ray for direction
     Ray cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
     ShadingData sd = loadShadingData(hitInfo, cameraRay.dir, lod);
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
-    
-    for(uint i = 0; i< gNumEmissiveSamples; i++){
-        LightSample ls;
-        bool valid = generateSample(sg,sd, ls);
-        if(!valid) continue;
-        float targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
-        updateReservoir(r,ls, targetPdf, sampleNext1D(sg));
-    }
-    if(r.targetPdf > 0){
-        r.M = 1;
-        r.W = 1.f/r.targetPdf * (r.weightSum / gNumEmissiveSamples);
-    }
+    float3 camPos = gScene.camera.getPosition();
+    float currLinZ = distance(camPos, sd.posW); //for now it is approximated as the distance from the point to the camera
 
-    //Test visibility and shoot a shadow ray from the surface to the selected light
-    if(r.targetPdf > 0 && gTestVisibility){
-        //get light sample
-        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(r.lightIdx);
-        const float3 barycentrics = sample_triangle(r.getUV());
-        float3 posW = tri.getPosition(barycentrics);
-        float3 toLight = posW - sd.posW;
-        float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs
-        float dist = sqrt(distSqr);
-        toLight /= dist;
-        
-        dist *= kRayEpsilon;
-        // Ray Query for shadow test; <1> means enabled alpha testing; TODO: Add static const for alpha test
-        SceneRayQuery<1> rayQuery;
-        const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.f, dist);
-        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
-        {
-            r.W = 0.f;  //Set weight to zero if light is not visible
+    //Load reservoir from current iteration
+    Reservoir current =  gReservoir[index2Dto1D(dTid, gFrameDim.x)];
+    if(current.W > 0 && current.M == 1){
+        float currWeight = current.targetPdf * current.W * current.M;
+        combineReservoir(r, current, currWeight, 0.5 /* random */);
+        r.M = 1;
+    }
+   
+    int2 currentIndex = dTid;
+    uint numSpartialSamples = min(gSpartialSamples,32); //Cap at 32 samples for the later bias correction
+
+    //Go through all neighbors
+    for(uint i=0 ; i<numSpartialSamples; i++){
+        float2 randSamp = (sampleNext2D(sg) - 0.5f) * 2.f;
+        int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
+        int2 idx = currentIndex + spartialOffset;
+
+        //Check if index is valid
+        if(idx.x < 0 && idx.y < 0 && idx.x >= gFrameDim.x && idx.y >= gFrameDim.y)
+            continue;
+
+        //Get surface and check if valid
+        HitInfo neightHit = HitInfo(gVBuffer[idx]);
+        if(!hitInfo.isValid())
+            continue;
+        VertexData neighVertexData = gScene.getVertexData(neightHit.getTriangleHit());
+        float neighLinZ = distance(camPos, neighVertexData.posW);
+        if(!isValidNeighbor(sd.N, currLinZ, neighVertexData.normalW, neighLinZ))
+            continue;
+
+        //If neighbor has passed the tests get reservoir and compair them
+        Reservoir neigh = gReservoir[index2Dto1D(idx, gFrameDim.x)];
+        if( !(neigh.W > 0 && neigh.M == 1) )
+            continue;
+
+        //Get neightbor light target PDF for current surface
+        LightSample ls = { };
+        getEmissiveTriangle(neigh.lightIdx, neigh.getUV(), sd, ls);
+        neigh.targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
+
+        //Combine Reservoirs
+        if(neigh.targetPdf > 0){
+            float neighWeight = neigh.targetPdf * neigh.W * neigh.M;
+            combineReservoir(r, neigh, neighWeight, sampleNext1D(sg));
+            r.M += neigh.M;
         }
     }
-    
-    gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+
+    if (r.targetPdf > 0 && r.M > 0)
+    {
+        r.W = 1.f / r.targetPdf * (r.weightSum / r.M);
+        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+    }
 }

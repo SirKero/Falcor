@@ -11,5 +11,6 @@
     <ShaderSource Include="generateCandidates.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="temporalResampling.cs.slang" />
+    <ShaderSource Include="spartialResampling.cs.slang" />
   </ItemGroup>
 </Project>

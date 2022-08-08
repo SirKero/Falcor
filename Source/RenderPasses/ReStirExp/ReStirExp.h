@@ -87,14 +87,26 @@ private:
     */
     void temporalResampling(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Uses spartial resampling to combine the reservoir with the reservoir of neighbors
+    */
+    void spartialResampling(RenderContext* pRenderContext, const RenderData& renderData);
+
+    /** Uses spartial and temporal resampling to combine the reservoir with the reservoir of neighbors
+   */
+    void spartioTemporalResampling(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Uses the reservoir to shade the pixel
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //UI
-    uint mResamplingMode = ResamplingMode::SpartioTemporal;
+    uint mResamplingMode = ResamplingMode::Spartial;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
-    uint mTemporalMaxAge = 20;
+    uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
+    uint mSpartialSamples = 4;              // Number of spartial samples
+    float mSamplingRadius = 20.f;           //Sampling radius in pixel
+    float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
+    float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
    
 
     //Runtime
@@ -108,9 +120,11 @@ private:
     SampleGenerator::SharedPtr mpGenerateSampleGenerator;       //Sample generator for Generate pass
 
     //Passes
-    ComputePass::SharedPtr mpGenerateCandidates;    //Generate Candidates Pass
-    ComputePass::SharedPtr mpTemporalResampling;    //Temporal Resampling Pass
-    ComputePass::SharedPtr mpFinalShading;          //Final Shading Pass
+    ComputePass::SharedPtr mpGenerateCandidates;            //Generate Candidates Pass
+    ComputePass::SharedPtr mpTemporalResampling;            //Temporal Resampling Pass
+    ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
+    ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
+    ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
 
     //Buffer
     Buffer::SharedPtr mpReservoirBuffer[2];  //Buffers for the reservoir

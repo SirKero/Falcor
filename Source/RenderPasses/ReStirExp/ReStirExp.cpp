@@ -45,6 +45,8 @@ namespace {
     //Shaders
     const char kShaderGenerateCandidates[] = "RenderPasses/ReStirExp/generateCandidates.cs.slang";
     const char kShaderTemporalPass[] = "RenderPasses/ReStirExp/temporalResampling.cs.slang";
+    const char kShaderSpartialPass[] = "RenderPasses/ReStirExp/spartialResampling.cs.slang";
+    const char kShaderSpartioTemporalPass[] = "RenderPasses/ReStirExp/spartioTemporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/ReStirExp/finalShading.cs.slang";
 
     //Input
@@ -106,8 +108,17 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     generateCandidatesPass(pRenderContext, renderData);
 
-    if((mResamplingMode & ResamplingMode::Temporal) != 0)
+    switch (mResamplingMode) {
+    case ResamplingMode::Temporal:
         temporalResampling(pRenderContext, renderData);
+        break;
+    case ResamplingMode::Spartial:
+        spartialResampling(pRenderContext, renderData);
+        break;
+    case ResamplingMode::SpartioTemporal:
+        spartioTemporalResampling(pRenderContext, renderData);
+        break;
+    }
 
     finalShadingPass(pRenderContext, renderData);
 
@@ -121,6 +132,16 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
     widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
 
     widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
+
+    widget.var("Temporal age", mTemporalMaxAge, 0u, 512u);
+
+    widget.var("Spartial Samples", mSpartialSamples, 0u, 32u);
+
+    widget.var("Sampling Radius", mSamplingRadius, 0.0f, 200.f);
+
+    widget.var("Depth Threshold", mRelativeDepthThreshold, 0.0f, 1.0f, 0.0001f);
+
+    widget.var("Normal Threshold", mNormalThreshold, 0.0f, 1.0f, 0.0001f);
 
     mReset = widget.button("Recompile");
 }
@@ -264,6 +285,118 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpTemporalResampling->execute(pRenderContext, uint3(targetDim, 1));
+
+    //Barrier for written buffer
+    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+}
+
+void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("SpartialResampling");
+
+    if (mReset) mpSpartialResampling.reset();
+
+    //Create Pass
+    if (!mpSpartialResampling) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderSpartialPass).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpGenerateSampleGenerator->getDefines());
+
+        mpSpartialResampling = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpSpartialResampling);
+
+    if (mReset) return; //Scip the rest on the first frame as the temporal buffer is invalid anyway
+
+    //Set variables
+    auto var = mpSpartialResampling->getRootVar();
+
+    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
+    auto bindAsTex = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+
+    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
+    mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
+
+    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    for (auto& inp : kInputs) bindAsTex(inp);
+
+    //Uniform
+    var["PerFrame"]["gFrameCount"] = mFrameCount;
+    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
+    var["PerFrame"]["gSpartialSamples"] = mSpartialSamples;
+    var["PerFrame"]["gSamplingRadius"] = mSamplingRadius;
+    var["PerFrame"]["gDepthThreshold"] = mRelativeDepthThreshold;
+    var["PerFrame"]["gNormalThreshold"] = mNormalThreshold;
+
+    //Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpSpartialResampling->execute(pRenderContext, uint3(targetDim, 1));
+
+    //Barrier for written buffer
+    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+}
+
+void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("SpartioTemporalResampling");
+
+    if (mReset) mpSpartioTemporalResampling.reset();
+
+    //Create Pass
+    if (!mpSpartioTemporalResampling) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderSpartioTemporalPass).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpGenerateSampleGenerator->getDefines());
+
+        mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpSpartioTemporalResampling);
+
+    if (mReset) return; //Scip the rest on the first frame as the temporal buffer is invalid anyway
+
+    //Set variables
+    auto var = mpSpartioTemporalResampling->getRootVar();
+
+    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
+    auto bindAsTex = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+
+    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
+    mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
+
+    var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
+    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    for (auto& inp : kInputs) bindAsTex(inp);
+
+    //Uniform
+    var["PerFrame"]["gFrameCount"] = mFrameCount;
+    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
+    var["PerFrame"]["gMaxAge"] = mTemporalMaxAge;
+
+    //Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpSpartioTemporalResampling->execute(pRenderContext, uint3(targetDim, 1));
 
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
