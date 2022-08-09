@@ -100,7 +100,7 @@ private:
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //UI
-    uint mResamplingMode = ResamplingMode::Spartial;
+    uint mResamplingMode = ResamplingMode::SpartioTemporal;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 4;              // Number of spartial samples
@@ -127,5 +127,7 @@ private:
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
 
     //Buffer
+    ResourceFormat    mVBufferFormat = HitInfo::kDefaultFormat;
     Buffer::SharedPtr mpReservoirBuffer[2];  //Buffers for the reservoir
+    Texture::SharedPtr mpPreviousVBuffer;    //Previous V-Buffer Data TODO: Use a surface buffer construct? 
 };

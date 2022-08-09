@@ -13,9 +13,11 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 
+StructuredBuffer<Reservoir> gReservoirPrev;
 RWStructuredBuffer<Reservoir> gReservoir;
 
 Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<PackedHitInfo> gPrevVBuffer;
 Texture2D<float2> gMVec;
 
 
@@ -23,6 +25,7 @@ cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
     uint2 gFrameDim;                //Frame Dimensions for camera dir
+    uint gMaxAge;
     uint gSpartialSamples;
     float gSamplingRadius;
     float gDepthThreshold;          //Relative depth offset
@@ -36,7 +39,7 @@ struct LightSample{
     float Li;
     float selectPdf;
     float2 uv;
-    //Enum type later ?
+    //Enum type later ? 
 };
 
 uint index2Dto1D(uint2 idx, uint width){
@@ -101,7 +104,7 @@ bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out Lig
 }
 
 //gets the target pdf averaged to one channel
-float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, inout SampleGenerator sg, in LightSample ls){
+float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, in LightSample ls){
 
     float3 H = normalize(sd.V + ls.dir);
     float NdotV = saturate(dot(sd.N, sd.V));
@@ -127,21 +130,29 @@ float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, inout S
     return brdf * ls.Li; 
 }
 
-void combineReservoir(inout Reservoir r, in Reservoir prev,float weight, float rnd){
-    r.weightSum += weight;
-    if(rnd < (weight / r.weightSum)){
-        r.lightIdx = prev.lightIdx;
-        r.uv = prev.uv;
-        r.targetPdf = prev.targetPdf;
+void combineReservoir(inout Reservoir r, in Reservoir newRes, float targetPdf , float sampleNormalization, uint sampleM, float rnd){
+    float risWeight = targetPdf * sampleNormalization;
+    
+    r.weightSum += risWeight;
+
+    r.M += sampleM;
+
+    bool selectSample = (rnd * r.weightSum < risWeight);
+
+    //If sample is selected update
+    if(true){
+        r.lightIdx = newRes.lightIdx;
+        r.uv = newRes.uv;
+        r.targetPdf = targetPdf;
+        r.age = newRes.age;
     }
 }
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 5 * 13);
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 6 * 13);
     Reservoir r = Reservoir.create();
-
     
     //Check if surface is valid
     HitInfo hitInfo = HitInfo(gVBuffer[dTid]);
@@ -155,57 +166,130 @@ void main(uint2 dTid : SV_DispatchThreadID)
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
     float3 camPos = gScene.camera.getPosition();
-    float currLinZ = distance(camPos, sd.posW); //for now it is approximated as the distance from the point to the camera
+    float currLinZ = distance(camPos, sd.posW); //for now it is approximated as the distance from the point to the camera 
 
     //Load reservoir from current iteration
     Reservoir current =  gReservoir[index2Dto1D(dTid, gFrameDim.x)];
-    if(current.W > 0 && current.M != 0){
-        float currWeight = current.targetPdf * current.W * current.M;
-        combineReservoir(r, current, currWeight, 0.5 /* random */);
-        r.M = 1;
-    }
+    if(isinf(current.W) || isnan(current.W))
+        current = Reservoir.create();
+    
+    uint historyLimit = min(1024 /*M max*/, uint(gMaxAge * current.M));
+    
+    combineReservoir(r, current, current.targetPdf, current.W * current.M, current.M, 0.5 /* random */);
+    
+    //
+    //Temporal Sample
+    //
+    
+    bool validTempSample = true;
+    float2 motionOffset = gMVec[dTid] * float2(gFrameDim);
+    //Check if motion vectors are inside of the frame
+    float2 prevIdxF = motionOffset + float2(dTid);
+    float2 rndOffset = sampleNext2D(sg) - 0.5f;
+    prevIdxF += rndOffset;
+    
+    validTempSample &= prevIdxF.x >= 0 && prevIdxF.y >= 0 && prevIdxF.x < gFrameDim.x && prevIdxF.y < gFrameDim.y;
+
+    int2 prevIdx = int2(round(prevIdxF));
+
+    //Get surface from last frame
+    HitInfo temporalHitInfo;
+    bool foundTemporalSurface = false;
+    int2 temporalOffset = int2(0,0);
+    const float temporalSearchRadius = 4.f;   //actual radius is 2 due to random value in [-0.5,0.5]
    
-    int2 currentIndex = dTid;
-    uint numSpartialSamples = min(gSpartialSamples,32); //Cap at 32 samples for the later bias correction
+    //Try to find a matching surface in the neighborhood of the reprojected pixel
+    for(uint i=0 ; i<9; i++){
+        int2 offset = int2(0,0);
+        if(i > 0){
+            offset = int2( (sampleNext2D(sg) - 0.5f) * temporalSearchRadius);
+        }
 
+        int2 idx = prevIdx + offset;
+
+        //index is outside of the frame
+        if(idx.x < 0 && idx.y < 0 && idx.x > gFrameDim.x && idx.y > gFrameDim.y)
+            continue;
+        
+        //Get Hit sample from last frame
+        temporalHitInfo = HitInfo(gPrevVBuffer[idx]);
+        if(!temporalHitInfo.isValid())
+            continue;
+
+        //Test surface similarity and discard if too different
+        VertexData tempVertexData = gScene.getVertexData(temporalHitInfo.getTriangleHit());
+        float tempLinZ = distance(camPos, tempVertexData.posW);
+        if(!isValidNeighbor(sd.N, currLinZ, tempVertexData.normalW, tempLinZ))
+            continue;
+
+        //Valid hit was found
+        temporalOffset = offset;
+        foundTemporalSurface = true;
+        break;
+    }
+    
+    //
+    //Spartio Temporal Resampling
+    //
+    uint numSamples = clamp(gSpartialSamples + 1,1,32); //Cap at 32 samples for the later bias correction
     //Go through all neighbors
-    for(uint i=0 ; i<numSpartialSamples; i++){
-        //TODO do this with a sampling mask
-        float2 randSamp = (sampleNext2D(sg) - 0.5f) * 2.f;
-        int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
-        int2 idx = currentIndex + spartialOffset;
+    for(uint i=0 ; i<numSamples; i++){
+        int2 spartialOffset, idx;
 
-        //Check if index is valid
-        if(idx.x < 0 && idx.y < 0 && idx.x >= gFrameDim.x && idx.y >= gFrameDim.y)
-            continue;
+        //Take temporal sample or generate a new neighbor sample
+        if(i==0 && foundTemporalSurface){
+           spartialOffset = temporalOffset;
+           idx = prevIdx + temporalOffset;
+        }
+        else{
+            //TODO do this with a sampling mask
+            float2 randSamp = (sampleNext2D(sg) - 0.5f) * 2.f;
+            spartialOffset = int2(round(randSamp * gSamplingRadius));
+            idx = prevIdx + spartialOffset;
 
-        //Get surface and check if valid
-        HitInfo neightHit = HitInfo(gVBuffer[idx]);
-        if(!neightHit.isValid())
-            continue;
-        VertexData neighVertexData = gScene.getVertexData(neightHit.getTriangleHit());
-        float neighLinZ = distance(camPos, neighVertexData.posW);
-        if(!isValidNeighbor(sd.N, currLinZ, neighVertexData.normalW, neighLinZ))
-            continue;
-
-        //If neighbor has passed the tests get reservoir and compair them
-        Reservoir neigh = gReservoir[index2Dto1D(idx, gFrameDim.x)];
-        if( !(neigh.W > 0 && neigh.M == 1) )
-            continue;
+            //Check if index is valid
+            if(idx.x < 0 && idx.y < 0 && idx.x > gFrameDim.x && idx.y > gFrameDim.y)
+                continue;
+            
+             //Get surface and check if valid
+            HitInfo neightHit = HitInfo(gPrevVBuffer[idx]);
+            if(!neightHit.isValid())
+                continue;
+        
+            VertexData neighVertexData = gScene.getVertexData(neightHit.getTriangleHit());
+            float neighLinZ = distance(camPos, neighVertexData.posW);
+            if(!isValidNeighbor(sd.N, currLinZ, neighVertexData.normalW, neighLinZ))
+                continue;
+        }
+            
+        //If neighbor surface has passed the tests get reservoir and compair them
+        bool validReservoir = true;
+        Reservoir sampledReservoir = gReservoirPrev[index2Dto1D(idx, gFrameDim.x)];
+        if(isnan(sampledReservoir.W) || isinf(sampledReservoir.W))
+            sampledReservoir = Reservoir.create();
+        
+        sampledReservoir.M = min(sampledReservoir.M, historyLimit);
+        sampledReservoir.age += 1;
+        
+        if( !(sampledReservoir.M > 0 && sampledReservoir.age < gMaxAge) )    //Check if valid
+            validReservoir = false;
 
         //Get neightbor light target PDF for current surface
-        LightSample ls = { };
-        getEmissiveTriangle(neigh.lightIdx, neigh.getUV(), sd, ls);
-        neigh.targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
+        float sampleTargetPdf = 0.f;
+        if (validReservoir)
+        {
+            LightSample ls = { };
+            getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.getUV(), sd, ls);
+            sampleTargetPdf = getSurfacePdf(bsdfProperties, sd, ls);
 
-        //Combine Reservoirs
-        if(neigh.targetPdf > 0){
-            float neighWeight = neigh.targetPdf * neigh.W * neigh.M;
-            combineReservoir(r, neigh, neighWeight, sampleNext1D(sg));
-            r.M += neigh.M;
+            //Combine Reservoirs
+            combineReservoir(r, sampledReservoir, sampleTargetPdf, sampledReservoir.W * sampledReservoir.M, sampledReservoir.M, sampleNext1D(sg));
         }
+       
+       
     }
 
+    //If the final reservoir is valid store it
     if (r.targetPdf > 0 && r.M > 0)
     {
         r.W = 1.f / r.targetPdf * (r.weightSum / r.M);

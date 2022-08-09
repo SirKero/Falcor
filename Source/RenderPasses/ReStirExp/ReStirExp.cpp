@@ -122,6 +122,7 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     finalShadingPass(pRenderContext, renderData);
 
+
     mReset = false;
     mFrameCount++;
 }
@@ -166,6 +167,8 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
     {
         mScreenRes = renderData.getDefaultTextureDims();
         mpReservoirBuffer[0].reset(); mpReservoirBuffer[1].reset();
+        mpPreviousVBuffer.reset();
+        mReset = true;  //TODO: Dont rebuild everything on screen size change
     }
     //TODO check if resolution changed
     if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1]) {
@@ -177,6 +180,11 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
         mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
     }
 
+    if (!mpPreviousVBuffer) {
+        mpPreviousVBuffer = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, mVBufferFormat,1 ,1 ,nullptr, Resource::BindFlags::UnorderedAccess | Resource::BindFlags::ShaderResource);
+        mpPreviousVBuffer->setName("ReStirExp:PreviousVBuffer");
+    }
+
     if (!mpGenerateSampleGenerator) {
         mpGenerateSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
     }
@@ -185,6 +193,9 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
 void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("GenerateCandidates");
+
+    //Clear current reservoir
+    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2].get()->getUAV().get(), float4(0.f));
 
     if (mReset) mpGenerateCandidates.reset();
 
@@ -384,6 +395,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
+    var["gPrevVBuffer"] = mpPreviousVBuffer;
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     for (auto& inp : kInputs) bindAsTex(inp);
@@ -392,6 +404,10 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     var["PerFrame"]["gFrameCount"] = mFrameCount;
     var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
     var["PerFrame"]["gMaxAge"] = mTemporalMaxAge;
+    var["PerFrame"]["gSpartialSamples"] = mSpartialSamples;
+    var["PerFrame"]["gSamplingRadius"] = mSamplingRadius;
+    var["PerFrame"]["gDepthThreshold"] = mRelativeDepthThreshold;
+    var["PerFrame"]["gNormalThreshold"] = mNormalThreshold;
 
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -443,6 +459,7 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
 
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     for (auto& inp : kInputs) bindAsTex(inp);
+    var["gPrevVBuffer"] = mpPreviousVBuffer;        //For copying 
     for (auto& out : kOutputs) bindAsTex(out);
 
     //Uniform

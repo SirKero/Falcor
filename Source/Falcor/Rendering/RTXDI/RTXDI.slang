@@ -35,7 +35,7 @@ import PackedTypes;
 // Set default value for RTXDI_INSTALLED.
 // We want this shader module to compile even if no external defines are set.
 #ifndef RTXDI_INSTALLED
-#define RTXDI_INSTALLED 0
+#define RTXDI_INSTALLED 1
 #endif
 
 #if RTXDI_INSTALLED
