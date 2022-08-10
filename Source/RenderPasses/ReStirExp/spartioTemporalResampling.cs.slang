@@ -130,21 +130,21 @@ float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, in Ligh
     return brdf * ls.Li; 
 }
 
-void combineReservoir(inout Reservoir r, in Reservoir newRes, float targetPdf , float sampleNormalization, uint sampleM, float rnd){
-    float risWeight = targetPdf * sampleNormalization;
+void combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
+    float normalizationFactor = prev.W * prev.M;
+
+    float risWeight = targetPDF * normalizationFactor;
+    
+    r.M += prev.M;
     
     r.weightSum += risWeight;
 
-    r.M += sampleM;
-
     bool selectSample = (rnd * r.weightSum < risWeight);
-
-    //If sample is selected update
-    if(true){
-        r.lightIdx = newRes.lightIdx;
-        r.uv = newRes.uv;
-        r.targetPdf = targetPdf;
-        r.age = newRes.age;
+    
+    if(selectSample){
+        r.lightIdx = prev.lightIdx;
+        r.uv = prev.uv;
+        r.targetPdf = targetPDF;
     }
 }
 
@@ -173,23 +173,19 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if(isinf(current.W) || isnan(current.W))
         current = Reservoir.create();
     
-    uint historyLimit = min(1024 /*M max*/, uint(gMaxAge * current.M));
+    uint historyLimit = uint(gMaxAge * current.M);
     
-    combineReservoir(r, current, current.targetPdf, current.W * current.M, current.M, 0.5 /* random */);
+    combineReservoir(r, current, current.targetPdf , 0.5 /* random */);
     
     //
     //Temporal Sample
     //
-    
-    bool validTempSample = true;
     float2 motionOffset = gMVec[dTid] * float2(gFrameDim);
     //Check if motion vectors are inside of the frame
     float2 prevIdxF = motionOffset + float2(dTid);
     float2 rndOffset = sampleNext2D(sg) - 0.5f;
     prevIdxF += rndOffset;
     
-    validTempSample &= prevIdxF.x >= 0 && prevIdxF.y >= 0 && prevIdxF.x < gFrameDim.x && prevIdxF.y < gFrameDim.y;
-
     int2 prevIdx = int2(round(prevIdxF));
 
     //Get surface from last frame
@@ -233,11 +229,12 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //
     uint numSamples = clamp(gSpartialSamples + 1,1,32); //Cap at 32 samples for the later bias correction
     //Go through all neighbors
-    for(uint i=0 ; i<numSamples; i++){
-        int2 spartialOffset, idx;
+    for(uint j=0 ; j<numSamples; j++){
+        int2 spartialOffset = int2(0);
+        int2 idx = int2(0);
 
         //Take temporal sample or generate a new neighbor sample
-        if(i==0 && foundTemporalSurface){
+        if(j==0 && foundTemporalSurface){
            spartialOffset = temporalOffset;
            idx = prevIdx + temporalOffset;
         }
@@ -263,36 +260,34 @@ void main(uint2 dTid : SV_DispatchThreadID)
         }
             
         //If neighbor surface has passed the tests get reservoir and compair them
-        bool validReservoir = true;
         Reservoir sampledReservoir = gReservoirPrev[index2Dto1D(idx, gFrameDim.x)];
         if(isnan(sampledReservoir.W) || isinf(sampledReservoir.W))
             sampledReservoir = Reservoir.create();
         
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
         sampledReservoir.age += 1;
-        
-        if( !(sampledReservoir.M > 0 && sampledReservoir.age < gMaxAge) )    //Check if valid
-            validReservoir = false;
 
+        
         //Get neightbor light target PDF for current surface
         float sampleTargetPdf = 0.f;
-        if (validReservoir)
+        if (sampledReservoir.M > 0)
         {
             LightSample ls = { };
             getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.getUV(), sd, ls);
             sampleTargetPdf = getSurfacePdf(bsdfProperties, sd, ls);
-
-            //Combine Reservoirs
-            combineReservoir(r, sampledReservoir, sampleTargetPdf, sampledReservoir.W * sampledReservoir.M, sampledReservoir.M, sampleNext1D(sg));
         }
-       
-       
+        //Combine Reservoirs
+        combineReservoir(r, sampledReservoir, sampleTargetPdf, sampleNext1D(sg));
     }
 
-    //If the final reservoir is valid store it
+    //Store final reservoir
     if (r.targetPdf > 0 && r.M > 0)
     {
-        r.W = 1.f / r.targetPdf * (r.weightSum / r.M);
-        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+        float demodulator = r.targetPdf * r.M;
+        r.W = r.weightSum / demodulator;
+    }else{
+        r = Reservoir.create();
     }
+    
+    gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
 }
