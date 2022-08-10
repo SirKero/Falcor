@@ -286,11 +286,14 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     for (auto& inp : kInputs) bindAsTex(inp);
+    var["gPrevVBuffer"] = mpPreviousVBuffer;
 
     //Uniform
     var["PerFrame"]["gFrameCount"] = mFrameCount;
     var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
     var["PerFrame"]["gMaxAge"] = mTemporalMaxAge;
+    var["PerFrame"]["gDepthThreshold"] = mRelativeDepthThreshold;
+    var["PerFrame"]["gNormalThreshold"] = mNormalThreshold;
 
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

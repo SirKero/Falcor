@@ -17,6 +17,7 @@ StructuredBuffer<Reservoir> gReservoirPrev;
 RWStructuredBuffer<Reservoir> gReservoir;
 
 Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<PackedHitInfo> gPrevVBuffer;
 Texture2D<float2> gMVec;
 
 
@@ -25,6 +26,8 @@ cbuffer PerFrame
     uint gFrameCount;                   //Current it for sample gen
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     uint gMaxAge;
+    float gDepthThreshold;          //Relative depth offset
+    float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
 }
 
 
@@ -58,13 +61,88 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-void combineReservoir(inout Reservoir r, in Reservoir prev,float weight, float rnd){
-    r.weightSum += weight;
-    if(rnd < (weight / r.weightSum)){
+bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
+    float normalCheck = dot(currNormal, neighNormal);
+    float minLinZDiff = currLinZ * gDepthThreshold;
+    float linZDiff = abs(currLinZ - neighLinZ);
+    return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
+}
+
+bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out LightSample ls){
+    const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
+    ls.lightIdx = triangleIdx;
+    ls.selectPdf = 1.f/activeTriangleCount;
+
+    //get triangle data and sample uniformly
+    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(ls.lightIdx);
+    const float3 barycentrics = sample_triangle(uv);
+    float3 posW = tri.getPosition(barycentrics);
+    float3 toLight = posW - sd.posW;
+    float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
+    ls.dir = toLight/ sqrt(distSqr);    //normalize
+
+    //Reject sample if light is backfacing
+    //TODO Set this an an define?
+    float cosTheta = dot(tri.normal, -ls.dir);
+    if(cosTheta < 0) return false;
+
+    //TODO: Add define if pre integrated emission or texture should be used
+    //Get emission
+    float3 Le = gScene.lightCollection.getAverageRadiance(ls.lightIdx);
+
+    //Calculate Li for later
+    float denom = max(FLT_MIN, cosTheta * tri.area); //Clamp to avoid nans
+    float pdf = distSqr / denom;
+    //float LeF = (Le.x + Le.y + Le.z)/3;
+    float LeF = luminance(Le);
+    pdf *= ls.selectPdf;
+    ls.Li = LeF / pdf;
+
+    return true;
+}
+
+//gets the target pdf averaged to one channel
+float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, inout SampleGenerator sg, in LightSample ls){
+
+    float3 H = normalize(sd.V + ls.dir);
+    float NdotV = saturate(dot(sd.N, sd.V));
+    float NdotL = saturate(dot(sd.N, ls.dir));
+    float NdotH = saturate(dot(sd.N, H));
+    float LdotH = saturate(dot(ls.dir, H));
+
+    //BRDF terms for target function (DGF Microfaset BRDF)
+    float D = evalNdfGGX(bsdfProperties.roughness * bsdfProperties.roughness, NdotH);
+    float G = evalMaskingSmithGGXSeparable(bsdfProperties.roughness, NdotL, NdotV);
+
+    float specular = luminance(bsdfProperties.specularReflectance);
+    //float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH)/specular; //Not "right" but less noisier
+
+    //eval brdf terms
+    float diffuseBRDF = NdotL * M_1_PI;
+    float specularBRDF = D*G*F/(4.f * NdotV);
+
+    //Mix diffuse and specular BRDF
+    float diffuseProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
+    float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, diffuseProb));
+    return brdf * ls.Li; 
+}
+
+void combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
+    float normalizationFactor = prev.W * prev.M;
+
+    float risWeight = targetPDF * normalizationFactor;
+    
+    r.M += prev.M;
+    
+    r.weightSum += risWeight;
+
+    bool selectSample = (rnd * r.weightSum < risWeight);
+    
+    if(selectSample){
         r.lightIdx = prev.lightIdx;
         r.uv = prev.uv;
-        r.targetPdf = prev.targetPdf;
-        r.age = prev.age + 1;
+        r.targetPdf = targetPDF;
     }
 }
 
@@ -79,13 +157,22 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if(!hitInfo.isValid())
         valid = false;
 
+    //Get Hit shading information
+    let lod = ExplicitLodTextureSampler(0.f);
+    Ray cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
+    ShadingData sd = loadShadingData(hitInfo, cameraRay.dir, lod);
+    let bsdf = gScene.materials.getBSDF(sd, lod);
+    let bsdfProperties = bsdf.getProperties(sd);
+    float3 camPos = gScene.camera.getPosition();
+    float currLinZ = distance(camPos, sd.posW); //for now it is approximated as the distance from the point to the camera
+    
     //Load reservoir from current iteration
     Reservoir current =  gReservoir[index2Dto1D(dTid, gFrameDim.x)];
-    if(current.W > 0 && current.M == 1){
-        float currWeight = current.targetPdf * current.W * current.M;
-        combineReservoir(r, current, currWeight, 0.5 /* random */);
-        r.M = 1;
-    }
+    if(isinf(current.W) || isnan(current.W))
+        current = Reservoir.create();
+
+    uint historyLimit = gMaxAge * current.M;
+    combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
     
     float2 motionOffset = gMVec[dTid] * float2(gFrameDim);
     //Check if motion vectors are inside of the frame
@@ -93,26 +180,68 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float2 rndOffset = sampleNext2D(sg) - 0.5f;
     prevIdxF += rndOffset;
     
-    valid &= prevIdxF.x >= 0 && prevIdxF.y >= 0 && prevIdxF.x < gFrameDim.x && prevIdxF.y < gFrameDim.y;
-
     uint2 prevIdx = uint2(round(prevIdxF));
-    
-    Reservoir prev;
-    //Load both reservoirs 
-    if(valid){
-        prev = gReservoirPrev[index2Dto1D(prevIdx, gFrameDim.x)];
+
+    //Check if a neighbor surface matches up
+    //Try to find a matching surface in the neighborhood of the reprojected pixel
+    HitInfo temporalHitInfo;
+    bool foundTemporalSurface = false;
+    int2 idx = (0,0);
+    float temporalSearchRadius = 4.f;
+    for(uint i=0 ; i<9; i++){
+        int2 offset = int2(0,0);
+        if(i > 0){
+            offset = int2( (sampleNext2D(sg) - 0.5f) * temporalSearchRadius);
+        }
+
+        idx = prevIdx + offset;
+
+        //index is outside of the frame
+        if(idx.x < 0 && idx.y < 0 && idx.x > gFrameDim.x && idx.y > gFrameDim.y)
+            continue;
+        
+        //Get Hit sample from last frame
+        temporalHitInfo = HitInfo(gPrevVBuffer[idx]);
+        if(!temporalHitInfo.isValid())
+            continue;
+
+        //Test surface similarity and discard if too different
+        VertexData tempVertexData = gScene.getVertexData(temporalHitInfo.getTriangleHit());
+        float tempLinZ = distance(camPos, tempVertexData.posW);
+        if(!isValidNeighbor(sd.N, currLinZ, tempVertexData.normalW, tempLinZ))
+            continue;
+
+        //Valid hit was found
+        foundTemporalSurface = true;
+        break;
     }
 
-    valid &= prev.W > 0 && prev.M != 0 && prev.age <= gMaxAge;
+    if(foundTemporalSurface){
+        Reservoir prev = gReservoirPrev[index2Dto1D(idx, gFrameDim.x)];
+        if(isinf(prev.W) || isnan(prev.W))
+            prev = Reservoir.create();
 
-    //TODO check if reprojected surface is valid or similar to current and use weight of reprojected area
+        prev.M = min(prev.M, historyLimit);
+        prev.age += 1;
+
+        //Get new target pdf if valid
+        float targetPdf = 0;
+        if(prev.M > 0){
+            LightSample ls = { };
+            getEmissiveTriangle(prev.lightIdx, prev.getUV(), sd, ls);
+            targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
+        }
+
+        combineReservoir(r, prev, targetPdf, sampleNext1D(sg));
+    }
+
+     if (r.targetPdf > 0 && r.M > 0)
+    {
+        float demodulator = r.targetPdf * r.M;
+        r.W = r.weightSum / demodulator;
+    }else{
+        r = Reservoir.create();
+    }
     
-    if(valid){
-        float prevWeight = prev.targetPdf * prev.W * prev.M;
-        combineReservoir(r, prev, prevWeight, sampleNext1D(sg));
-        r.M += prev.M;
-        r.W = 1.f/r.targetPdf * (r.weightSum / r.M);
-        
-        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
-    }   
+    gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
 }
