@@ -305,6 +305,9 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
 {
     FALCOR_PROFILE("SpartialResampling");
 
+    //Clear the other reservoir
+    pRenderContext->clearUAV(mpReservoirBuffer[(mFrameCount+1) % 2].get()->getUAV().get(), float4(0.f));
+
     if (mReset) mpSpartialResampling.reset();
 
     //Create Pass
@@ -339,6 +342,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    var["gOutReservoir"] = mpReservoirBuffer[(mFrameCount+1) % 2];
     for (auto& inp : kInputs) bindAsTex(inp);
 
     //Uniform
@@ -457,7 +461,9 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
-    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    uint reservoirIndex = mResamplingMode == ResamplingMode::Spartial ? (mFrameCount + 1) % 2 : mFrameCount % 2;
+
+    var["gReservoir"] = mpReservoirBuffer[reservoirIndex];
     for (auto& inp : kInputs) bindAsTex(inp);
     var["gPrevVBuffer"] = mpPreviousVBuffer;        //For copying 
     for (auto& out : kOutputs) bindAsTex(out);

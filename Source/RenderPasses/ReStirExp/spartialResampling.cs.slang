@@ -13,7 +13,8 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 
-RWStructuredBuffer<Reservoir> gReservoir;
+StructuredBuffer<Reservoir> gReservoir;
+RWStructuredBuffer<Reservoir> gOutReservoir;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
@@ -127,12 +128,21 @@ float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, inout S
     return brdf * ls.Li; 
 }
 
-void combineReservoir(inout Reservoir r, in Reservoir prev,float weight, float rnd){
-    r.weightSum += weight;
-    if(rnd < (weight / r.weightSum)){
+void combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
+    float normalizationFactor = prev.W * prev.M;
+
+    float risWeight = targetPDF * normalizationFactor;
+    
+    r.M += prev.M;
+    
+    r.weightSum += risWeight;
+
+    bool selectSample = (rnd * r.weightSum < risWeight);
+    
+    if(selectSample){
         r.lightIdx = prev.lightIdx;
         r.uv = prev.uv;
-        r.targetPdf = prev.targetPdf;
+        r.targetPdf = targetPDF;
     }
 }
 
@@ -142,7 +152,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 5 * 13);
     Reservoir r = Reservoir.create();
 
-    
     //Check if surface is valid
     HitInfo hitInfo = HitInfo(gVBuffer[dTid]);
     if(!hitInfo.isValid())
@@ -159,11 +168,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
     //Load reservoir from current iteration
     Reservoir current =  gReservoir[index2Dto1D(dTid, gFrameDim.x)];
-    if(current.W > 0 && current.M != 0){
-        float currWeight = current.targetPdf * current.W * current.M;
-        combineReservoir(r, current, currWeight, 0.5 /* random */);
-        r.M = 1;
-    }
+    if(isinf(current.W) || isnan(current.W))
+        current = Reservoir.create();
+    
+    combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
+    
    
     int2 currentIndex = dTid;
     uint numSpartialSamples = min(gSpartialSamples,32); //Cap at 32 samples for the later bias correction
@@ -190,25 +199,27 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //If neighbor has passed the tests get reservoir and compair them
         Reservoir neigh = gReservoir[index2Dto1D(idx, gFrameDim.x)];
-        if( !(neigh.W > 0 && neigh.M == 1) )
-            continue;
+        if(isinf(neigh.W) || isnan(neigh.W))
+            neigh = Reservoir.create();
 
         //Get neightbor light target PDF for current surface
-        LightSample ls = { };
-        getEmissiveTriangle(neigh.lightIdx, neigh.getUV(), sd, ls);
-        neigh.targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
-
-        //Combine Reservoirs
-        if(neigh.targetPdf > 0){
-            float neighWeight = neigh.targetPdf * neigh.W * neigh.M;
-            combineReservoir(r, neigh, neighWeight, sampleNext1D(sg));
-            r.M += neigh.M;
+        float targetPdf = 0;
+        if(neigh.M > 0){
+            LightSample ls = { };
+            getEmissiveTriangle(neigh.lightIdx, neigh.getUV(), sd, ls);
+            targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
         }
+        
+        combineReservoir(r, neigh, targetPdf, sampleNext1D(sg));
     }
 
     if (r.targetPdf > 0 && r.M > 0)
     {
-        r.W = 1.f / r.targetPdf * (r.weightSum / r.M);
-        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+        float demodulator = r.targetPdf * r.M;
+        r.W = r.weightSum / demodulator;
+    }else{
+        r = Reservoir.create();
     }
+    
+    gOutReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
 }
