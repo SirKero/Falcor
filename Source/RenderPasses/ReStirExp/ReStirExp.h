@@ -103,14 +103,18 @@ private:
     uint mResamplingMode = ResamplingMode::SpartioTemporal;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
-    uint mSpartialSamples = 4;              // Number of spartial samples
+    uint mSpartialSamples = 1;              // Number of spartial samples
+    uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
     float mSamplingRadius = 20.f;           //Sampling radius in pixel
     float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
+    bool mUseEmissiveTexture = true;        //Use Emissive texture in final shading
+    
    
 
     //Runtime
     bool mReset = true;
+    bool mReuploadBuffers = true;
     uint2 mScreenRes = { 0,0 };
     bool mUpdateRenderSettings = true;
     uint mFrameCount = 0;

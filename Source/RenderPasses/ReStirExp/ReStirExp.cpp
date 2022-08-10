@@ -124,27 +124,54 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 
 
     mReset = false;
+    mReuploadBuffers = false;
     mFrameCount++;
 }
 
 void ReStirExp::renderUI(Gui::Widgets& widget)
 {
-    //UI here
+    bool changed = false;
     widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
+    //UI here
+    changed |= widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
+    widget.tooltip("Number of emissive candidates generated per iteration");
 
-    widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
+    if (mResamplingMode > 0) {
+        if (auto group = widget.group("Resamling")) {
 
-    widget.var("Temporal age", mTemporalMaxAge, 0u, 512u);
+            changed |= widget.var("Depth Threshold", mRelativeDepthThreshold, 0.0f, 1.0f, 0.0001f);
+            widget.tooltip("Relative depth threshold. 0.1 = within 10% of current depth (linZ)");
 
-    widget.var("Spartial Samples", mSpartialSamples, 0u, 32u);
+            changed |= widget.var("Normal Threshold", mNormalThreshold, 0.0f, 1.0f, 0.0001f);
+            widget.tooltip("Maximum cosine of angle between normals. 1 = Exactly the same ; 0 = disabled");
+        }
+    }
+    if ((mResamplingMode & ResamplingMode::Temporal) > 0) {
+        if (auto group = widget.group("Temporal Options")) {
+            changed |= widget.var("Temporal age", mTemporalMaxAge, 0u, 512u);
+            widget.tooltip("Temporal age a sample should have");
+        }
+    }
+    if ((mResamplingMode & ResamplingMode::Spartial) > 0) {
+        if (auto group = widget.group("Spartial Options")) {
+            changed |= widget.var("Spartial Samples", mSpartialSamples, 0u, 32u);
+            widget.tooltip("Number of spartial samples");
 
-    widget.var("Sampling Radius", mSamplingRadius, 0.0f, 200.f);
+            changed |= widget.var("Disocclusion Sample Boost", mDisocclusionBoostSamples, 0u, 32u);
+            widget.tooltip("Number of spartial samples if no temporal surface was found. Needs to be bigger than \"Spartial Samples\" + 1 to have an effect");
 
-    widget.var("Depth Threshold", mRelativeDepthThreshold, 0.0f, 1.0f, 0.0001f);
+            changed |= widget.var("Sampling Radius", mSamplingRadius, 0.0f, 200.f);
+            widget.tooltip("Radius for the Spartial Samples");
+        }
+    }
 
-    widget.var("Normal Threshold", mNormalThreshold, 0.0f, 1.0f, 0.0001f);
+    if (auto group = widget.group("Misc")) {
+        changed |= widget.checkbox("Use Emissive Texture", mUseEmissiveTexture);
+        widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
+    }
 
     mReset = widget.button("Recompile");
+    mReuploadBuffers |= changed;
 }
 
 void ReStirExp::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
@@ -231,11 +258,17 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     for (auto& inp : kInputs) bindAsTex(inp);
 
     //Uniform
+    std::string uniformName = "PerFrame";
+
+    var[uniformName]["gFrameCount"] = mFrameCount;
+    if (mReset || mReuploadBuffers) {
+        uniformName = "Constant";
+        var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
+        var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
+        var[uniformName]["gTestVisibility"] = mResamplingMode > 0;   //TODO: Also add a variable to manually disable
+    }
+
     
-    var["PerFrame"]["gFrameCount"] = mFrameCount;
-    var["PerFrame"]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
-    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
-    var["PerFrame"]["gTestVisibility"] = mResamplingMode > 0;   //TODO: Also add a variable to manually disable
     
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -289,11 +322,15 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
     var["gPrevVBuffer"] = mpPreviousVBuffer;
 
     //Uniform
-    var["PerFrame"]["gFrameCount"] = mFrameCount;
-    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
-    var["PerFrame"]["gMaxAge"] = mTemporalMaxAge;
-    var["PerFrame"]["gDepthThreshold"] = mRelativeDepthThreshold;
-    var["PerFrame"]["gNormalThreshold"] = mNormalThreshold;
+    std::string uniformName = "PerFrame";
+    var[uniformName]["gFrameCount"] = mFrameCount;
+    if (mReset || mReuploadBuffers) {
+        uniformName = "Constant";
+        var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
+        var[uniformName]["gMaxAge"] = mTemporalMaxAge;
+        var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
+        var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+    }
 
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -349,12 +386,16 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     for (auto& inp : kInputs) bindAsTex(inp);
 
     //Uniform
-    var["PerFrame"]["gFrameCount"] = mFrameCount;
-    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
-    var["PerFrame"]["gSpartialSamples"] = mSpartialSamples;
-    var["PerFrame"]["gSamplingRadius"] = mSamplingRadius;
-    var["PerFrame"]["gDepthThreshold"] = mRelativeDepthThreshold;
-    var["PerFrame"]["gNormalThreshold"] = mNormalThreshold;
+    std::string uniformName = "PerFrame";
+    var[uniformName]["gFrameCount"] = mFrameCount;
+    if (mReset || mReuploadBuffers) {
+        uniformName = "Constant";
+        var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
+        var[uniformName]["gSpartialSamples"] = mSpartialSamples;
+        var[uniformName]["gSamplingRadius"] = mSamplingRadius;
+        var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
+        var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+    }
 
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -408,13 +449,18 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     for (auto& inp : kInputs) bindAsTex(inp);
 
     //Uniform
-    var["PerFrame"]["gFrameCount"] = mFrameCount;
-    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
-    var["PerFrame"]["gMaxAge"] = mTemporalMaxAge;
-    var["PerFrame"]["gSpartialSamples"] = mSpartialSamples;
-    var["PerFrame"]["gSamplingRadius"] = mSamplingRadius;
-    var["PerFrame"]["gDepthThreshold"] = mRelativeDepthThreshold;
-    var["PerFrame"]["gNormalThreshold"] = mNormalThreshold;
+    std::string uniformName = "PerFrame";
+    var[uniformName]["gFrameCount"] = mFrameCount;
+    if (mReset || mReuploadBuffers) {
+        uniformName = "Constant";
+        var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
+        var[uniformName]["gMaxAge"] = mTemporalMaxAge;
+        var[uniformName]["gSpartialSamples"] = mSpartialSamples;
+        var[uniformName]["gSamplingRadius"] = mSamplingRadius;
+        var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
+        var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gDisocclusionBoostSamples"] = mDisocclusionBoostSamples;
+    }
 
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -472,8 +518,13 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
     for (auto& out : kOutputs) bindAsTex(out);
 
     //Uniform
-    var["PerFrame"]["gFrameCount"] = mFrameCount;
-    var["PerFrame"]["gFrameDim"] = renderData.getDefaultTextureDims();
+    std::string uniformName = "PerFrame";
+    var[uniformName]["gFrameCount"] = mFrameCount;
+    if (mReset || mReuploadBuffers) {
+        uniformName = "Constant";
+        var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
+        var[uniformName]["gUseEmissiveTexture"] = mUseEmissiveTexture;
+    }
 
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

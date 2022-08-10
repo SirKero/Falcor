@@ -24,10 +24,13 @@ Texture2D<float2> gMVec;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
+}
+
+cbuffer Constant
+{
     uint gNumEmissiveSamples;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
-    uint3 pad;
 }
 
 

@@ -28,7 +28,12 @@ RWTexture2D<float4> gSpecularReflectance;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
-    uint2 gFrameDim;                //Frame Dimensions for camera dir 
+}
+
+cbuffer Constant
+{
+    uint2 gFrameDim;                //Frame Dimensions for camera dir
+    bool  gUseEmissiveTexture;      //Enables emissive texture for shading
 }
 
 static const float kRayEpsilon = 0.99f;
@@ -61,10 +66,15 @@ void getEmissiveLight(in Reservoir r, in float3 worldPos, out float distance ,ou
 
     float cosTheta = dot(tri.normal, -toLight);
     
-    //TODO: add a define if the precomputed radiance should be used instead
-    //Eval emissive texture
-    float2 texCoord = tri.getTexCoord(barycentrics);
-    float3 Le = gScene.materials.evalEmissive(tri.materialID, texCoord);
+    //Eval emissive power
+    float3 Le;
+    if(gUseEmissiveTexture){
+        float2 texCoord = tri.getTexCoord(barycentrics);
+        Le = gScene.materials.evalEmissive(tri.materialID, texCoord);
+    }else{
+        Le = gScene.lightCollection.getAverageRadiance(r.lightIdx);
+    }
+    
 
     //Calculate Li
     float denom = max(FLT_MIN, cosTheta * tri.area); //Clamp to avoid nans

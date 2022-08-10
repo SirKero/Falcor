@@ -24,12 +24,15 @@ Texture2D<float2> gMVec;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
+}
+
+cbuffer Constant
+{
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     uint gMaxAge;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
 }
-
 
 struct LightSample{
     uint lightIdx;

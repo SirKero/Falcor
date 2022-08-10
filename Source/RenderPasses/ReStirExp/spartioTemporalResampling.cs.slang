@@ -24,12 +24,17 @@ Texture2D<float2> gMVec;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
+}
+
+cbuffer Constant
+{
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     uint gMaxAge;
     uint gSpartialSamples;
     float gSamplingRadius;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
+    uint gDisocclusionBoostSamples; //Number of spartial samples if no temporal surface was found
 }
 
 
@@ -228,6 +233,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //Spartio Temporal Resampling
     //
     uint numSamples = clamp(gSpartialSamples + 1,1,32); //Cap at 32 samples for the later bias correction
+    if(!foundTemporalSurface)
+        numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,32);
+    
     //Go through all neighbors
     for(uint j=0 ; j<numSamples; j++){
         int2 spartialOffset = int2(0);
