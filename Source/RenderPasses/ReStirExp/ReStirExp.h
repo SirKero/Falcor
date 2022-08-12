@@ -99,6 +99,13 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /* Fills the neighbor offset buffer with psyeudo random numbers
+    */
+    void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
+
+    //Constants
+    const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
+
     //UI
     uint mResamplingMode = ResamplingMode::SpartioTemporal;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
@@ -110,8 +117,6 @@ private:
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
     bool mUseEmissiveTexture = true;        //Use Emissive texture in final shading
     
-   
-
     //Runtime
     bool mReset = true;
     bool mReuploadBuffers = true;
@@ -133,5 +138,6 @@ private:
     //Buffer
     ResourceFormat    mVBufferFormat = HitInfo::kDefaultFormat;
     Buffer::SharedPtr mpReservoirBuffer[2];  //Buffers for the reservoir
-    Texture::SharedPtr mpPreviousVBuffer;    //Previous V-Buffer Data TODO: Use a surface buffer construct? 
+    Texture::SharedPtr mpPreviousVBuffer;    //Previous V-Buffer Data TODO: Use a surface buffer construct?
+    Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
 };

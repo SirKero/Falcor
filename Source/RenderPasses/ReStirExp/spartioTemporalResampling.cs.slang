@@ -16,18 +16,20 @@ import Reservoir;
 StructuredBuffer<Reservoir> gReservoirPrev;
 RWStructuredBuffer<Reservoir> gReservoir;
 
+Texture1D<snorm float2> gNeighOffsetBuffer;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<PackedHitInfo> gPrevVBuffer;
 Texture2D<float2> gMVec;
 
+static const uint kNeighOffsetMask = OFFSET_BUFFER_SIZE;
+
 
 cbuffer PerFrame
 {
-    uint gFrameCount;                   //Current it for sample gen
+    uint gFrameCount; //Current it for sample gen
 }
 
-cbuffer Constant
-{
+cbuffer Constant{
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     uint gMaxAge;
     uint gSpartialSamples;
@@ -232,9 +234,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //
     //Spartio Temporal Resampling
     //
+    uint neighOffsetStartIdx = uint(sampleNext1D(sg) * float(kNeighOffsetMask-1));
     uint numSamples = clamp(gSpartialSamples + 1,1,32); //Cap at 32 samples for the later bias correction
     if(!foundTemporalSurface)
         numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,32);
+
     
     //Go through all neighbors
     for(uint j=0 ; j<numSamples; j++){
@@ -247,9 +251,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
            idx = prevIdx + temporalOffset;
         }
         else{
-            //TODO do this with a sampling mask
-            float2 randSamp = (sampleNext2D(sg) - 0.5f) * 2.f;
-            spartialOffset = int2(round(randSamp * gSamplingRadius));
+            //Get sample from sampling mask
+            uint neighBufferIdx = (neighOffsetStartIdx + j) % (kNeighOffsetMask-1);
+            float2 randSamp = gNeighOffsetBuffer[neighBufferIdx];
+            spartialOffset = int2(randSamp * gSamplingRadius);
             idx = prevIdx + spartialOffset;
 
             //Check if index is valid
@@ -296,6 +301,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }else{
         r = Reservoir.create();
     }
-    
-    gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+
+    if(!isnan(r.W) || !isinf(r.W))
+        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
 }

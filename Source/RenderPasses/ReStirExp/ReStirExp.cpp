@@ -131,7 +131,7 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 void ReStirExp::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
-    widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
+    changed |= widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
     //UI here
     changed |= widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
     widget.tooltip("Number of emissive candidates generated per iteration");
@@ -207,9 +207,26 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
         mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
     }
 
+    //Create a VBuffer for temporal Surface resampling
     if (!mpPreviousVBuffer) {
         mpPreviousVBuffer = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, mVBufferFormat,1 ,1 ,nullptr, Resource::BindFlags::UnorderedAccess | Resource::BindFlags::ShaderResource);
         mpPreviousVBuffer->setName("ReStirExp:PreviousVBuffer");
+    }
+
+    //Create an fill the neighbor offset buffer
+    if (!mpNeighborOffsetBuffer) {
+        std::vector<int8_t> offsets(2 * kNumNeighborOffsets);
+        fillNeighborOffsetBuffer(offsets);
+        /*
+        mpNeighborOffsetBuffer = Buffer::createTyped(ResourceFormat::RG8Snorm, kNumNeighborOffsets,
+                                                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                                                     Buffer::CpuAccess::None,
+                                                     offsets.data());
+        */
+        mpNeighborOffsetBuffer = Texture::create1D(kNumNeighborOffsets, ResourceFormat::RG8Snorm, 1, 1, offsets.data());
+
+        
+        mpNeighborOffsetBuffer->setName("ReStirExp::NeighborOffsetBuffer");
     }
 
     if (!mpGenerateSampleGenerator) {
@@ -268,8 +285,6 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         var[uniformName]["gTestVisibility"] = mResamplingMode > 0;   //TODO: Also add a variable to manually disable
     }
 
-    
-    
     //Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
@@ -359,6 +374,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
 
         mpSpartialResampling = ComputePass::create(desc, defines, true);
     }
@@ -383,6 +399,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
 
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gOutReservoir"] = mpReservoirBuffer[(mFrameCount+1) % 2];
+    var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     for (auto& inp : kInputs) bindAsTex(inp);
 
     //Uniform
@@ -421,6 +438,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
 
         mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -446,6 +464,8 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     var["gPrevVBuffer"] = mpPreviousVBuffer;
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
+
     for (auto& inp : kInputs) bindAsTex(inp);
 
     //Uniform
@@ -530,4 +550,34 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpFinalShading->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void ReStirExp::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
+{
+    // Taken from the RTXDI implementation
+    // 
+    // Create a sequence of low-discrepancy samples within a unit radius around the origin
+    // for "randomly" sampling neighbors during spatial resampling
+
+    int R = 250;
+    const float phi2 = 1.0f / 1.3247179572447f;
+    uint32_t num = 0;
+    float u = 0.5f;
+    float v = 0.5f;
+    while (num < kNumNeighborOffsets * 2) {
+        u += phi2;
+        v += phi2 * phi2;
+        if (u >= 1.0f) u -= 1.0f;
+        if (v >= 1.0f) v -= 1.0f;
+
+        float rSq = (u - 0.5f) * (u - 0.5f) + (v - 0.5f) * (v - 0.5f);
+        if (rSq > 0.25f)
+            continue;
+
+
+        //buffer[num++] = (u - 0.5f) * R;
+        //buffer[num++] = (v - 0.5f) * R;
+        buffer[num++] = int8_t((u - 0.5f) * R);
+        buffer[num++] = int8_t((v - 0.5f) * R);
+    }
 }

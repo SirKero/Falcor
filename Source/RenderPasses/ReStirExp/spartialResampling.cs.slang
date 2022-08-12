@@ -16,9 +16,11 @@ import Reservoir;
 StructuredBuffer<Reservoir> gReservoir;
 RWStructuredBuffer<Reservoir> gOutReservoir;
 
+Texture1D<snorm float2> gNeighOffsetBuffer;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
 
+static const uint kNeighOffsetMask = OFFSET_BUFFER_SIZE;
 
 cbuffer PerFrame
 {
@@ -176,14 +178,15 @@ void main(uint2 dTid : SV_DispatchThreadID)
     
     combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
     
-   
+   uint neighOffsetStartIdx = uint(sampleNext1D(sg) * float(kNeighOffsetMask-1));
     int2 currentIndex = dTid;
     uint numSpartialSamples = min(gSpartialSamples,32); //Cap at 32 samples for the later bias correction
 
     //Go through all neighbors
     for(uint i=0 ; i<numSpartialSamples; i++){
-        //TODO do this with a sampling mask
-        float2 randSamp = (sampleNext2D(sg) - 0.5f) * 2.f;
+        //Get sample from sampling mask
+        uint neighBufferIdx = (neighOffsetStartIdx + i) % (kNeighOffsetMask-1);
+        float2 randSamp = gNeighOffsetBuffer[neighBufferIdx];
         int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
         int2 idx = currentIndex + spartialOffset;
 
