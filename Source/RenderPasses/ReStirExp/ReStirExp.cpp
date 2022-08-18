@@ -69,6 +69,12 @@ namespace {
         {ReStirExp::ResamplingMode::Spartial , "Spartial only"},
         {ReStirExp::ResamplingMode::SpartioTemporal , "SpartioTemporal"},
     };
+
+    const Gui::DropdownList kBiasCorrectionModeList{
+        {ReStirExp::BiasCorrectionMode::Off , "Off"},
+        {ReStirExp::BiasCorrectionMode::Basic , "Basic"},
+        {ReStirExp::BiasCorrectionMode::RayTraced , "RayTraced"},
+    };
 }
 
 ReStirExp::SharedPtr ReStirExp::create(RenderContext* pRenderContext, const Dictionary& dict)
@@ -138,6 +144,7 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
 
     if (mResamplingMode > 0) {
         if (auto group = widget.group("Resamling")) {
+            changed |= widget.dropdown("BiasCorrection", kBiasCorrectionModeList, mBiasCorrectionMode);
 
             changed |= widget.var("Depth Threshold", mRelativeDepthThreshold, 0.0f, 1.0f, 0.0001f);
             widget.tooltip("Relative depth threshold. 0.1 = within 10% of current depth (linZ)");

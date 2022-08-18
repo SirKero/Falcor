@@ -66,6 +66,12 @@ public:
         SpartioTemporal = 0b11
     };
 
+    enum BiasCorrectionMode {
+        Off = 0,
+        Basic = 1u,
+        RayTraced = 2u
+    };
+
 private:
     //Functions
 
@@ -116,6 +122,7 @@ private:
     float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
     bool mUseEmissiveTexture = true;        //Use Emissive texture in final shading
+    uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     
     //Runtime
     bool mReset = true;
