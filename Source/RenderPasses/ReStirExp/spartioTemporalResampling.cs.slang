@@ -163,7 +163,7 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
 void finalizeSample(inout Reservoir r, float normalizationNumerator, float normalizationDenominator){
     float denominator = r.targetPdf * normalizationDenominator;
 
-    r.W = denominator > 0 ? r.weightSum / denominator : 0.f; 
+    r.W = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
 }
 
 Reservoir getReservoir(int2 idx, bool prev){
@@ -324,7 +324,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if(biasModeTmp >= kBiasModeBasic){
         // Calculate the unbiase term instead of using 1/M
         float pi = r.targetPdf;
-        float piSum = pi * r.M;
+        float piSum = pi * current.M;
 
         //Go through all neighbors
         for(uint i=0 ; i < numSamples; i++){

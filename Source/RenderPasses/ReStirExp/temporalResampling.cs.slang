@@ -1,7 +1,7 @@
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
-import Scene.Raytracing;
+import Scene.RaytracingInline;
 import Scene.Material.ShadingUtils;
 import Rendering.Materials.Microfacet;
 import Rendering.Materials.Fresnel;
@@ -43,6 +43,9 @@ struct LightSample{
     //Enum type later ? 
 };
 
+#define BIAS_MODE_BASIC 1
+#define BIAS_MODE_RAYTRACE 2
+
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
@@ -71,7 +74,7 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out LightSample ls){
+bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out LightSample ls, out float distance){
     const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
     ls.lightIdx = triangleIdx;
     ls.selectPdf = 1.f/activeTriangleCount;
@@ -82,7 +85,8 @@ bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out Lig
     float3 posW = tri.getPosition(barycentrics);
     float3 toLight = posW - sd.posW;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
-    ls.dir = toLight/ sqrt(distSqr);    //normalize
+    distance = sqrt(distSqr);
+    ls.dir = toLight/ distance;    //normalize
 
     //Reject sample if light is backfacing
     //TODO Set this an an define?
@@ -105,7 +109,7 @@ bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out Lig
 }
 
 //gets the target pdf averaged to one channel
-float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, inout SampleGenerator sg, in LightSample ls){
+float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, in LightSample ls){
 
     float3 H = normalize(sd.V + ls.dir);
     float NdotV = saturate(dot(sd.N, sd.V));
@@ -131,7 +135,7 @@ float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, inout S
     return brdf * ls.Li; 
 }
 
-void combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
+bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
     float normalizationFactor = prev.W * prev.M;
 
     float risWeight = targetPDF * normalizationFactor;
@@ -147,7 +151,34 @@ void combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
         r.uv = prev.uv;
         r.targetPdf = targetPDF;
     }
+
+    return selectSample;
 }
+
+void finalizeSample(inout Reservoir r, float normalizationNumerator, float normalizationDenominator)
+{
+    float denominator = r.targetPdf * normalizationDenominator;
+
+    r.W = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
+}
+
+Reservoir getReservoir(int2 idx, bool prev)
+{
+    Reservoir r = Reservoir.create();
+    if (prev)
+    {
+        r = gReservoirPrev[index2Dto1D(idx, gFrameDim.x)];
+    }
+    else
+    {
+        r = gReservoir[index2Dto1D(idx, gFrameDim.x)];
+    }
+    if (r.W <= 0 || isinf(r.W) || isnan(r.W))
+        r = Reservoir.create();
+    return r;
+}
+
+
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
@@ -170,9 +201,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float currLinZ = distance(camPos, sd.posW); //for now it is approximated as the distance from the point to the camera
     
     //Load reservoir from current iteration
-    Reservoir current =  gReservoir[index2Dto1D(dTid, gFrameDim.x)];
-    if(isinf(current.W) || isnan(current.W))
-        current = Reservoir.create();
+    Reservoir current = getReservoir(dTid, false);
 
     uint historyLimit = gMaxAge * current.M;
     combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
@@ -188,7 +217,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //Check if a neighbor surface matches up
     //Try to find a matching surface in the neighborhood of the reprojected pixel
     HitInfo temporalHitInfo;
+    bool selectPrevSample = false;
+    uint previousM = 0;
     bool foundTemporalSurface = false;
+    int2 temporalOffset;
     int2 idx = (0,0);
     float temporalSearchRadius = 4.f;
     for(uint i=0 ; i<9; i++){
@@ -216,34 +248,71 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //Valid hit was found
         foundTemporalSurface = true;
+        temporalOffset = offset;
         break;
     }
 
     if(foundTemporalSurface){
-        Reservoir prev = gReservoirPrev[index2Dto1D(idx, gFrameDim.x)];
-        if(isinf(prev.W) || isnan(prev.W))
-            prev = Reservoir.create();
+        Reservoir prev = getReservoir(idx, true);
 
         prev.M = min(prev.M, historyLimit);
+        previousM = prev.M;
         prev.age += 1;
 
         //Get new target pdf if valid
         float targetPdf = 0;
         if(prev.M > 0){
             LightSample ls = { };
-            getEmissiveTriangle(prev.lightIdx, prev.getUV(), sd, ls);
-            targetPdf = getSurfacePdf(bsdfProperties, sd, sg, ls);
+            float dis = 0;
+            getEmissiveTriangle(prev.lightIdx, prev.getUV(), sd, ls, dis);
+            targetPdf = getSurfacePdf(bsdfProperties, sd, ls);
         }
 
-        combineReservoir(r, prev, targetPdf, sampleNext1D(sg));
+        selectPrevSample = combineReservoir(r, prev, targetPdf, sampleNext1D(sg));
     }
 
-     if (r.targetPdf > 0 && r.M > 0)
+//Bias correction
+//#define BIAS_CORRECTION_MODE 2
+
+#if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
+    float pi = r.targetPdf;
+    float piSum = r.targetPdf * current.M;
+
+    if (foundTemporalSurface)
     {
-        float demodulator = r.targetPdf * r.M;
-        r.W = r.weightSum / demodulator;
-    }else{
-        r = Reservoir.create();
+        Ray biasCameraRay = gScene.camera.computeRayPinhole(idx, gFrameDim);
+        ShadingData biasSD = loadShadingData(temporalHitInfo, biasCameraRay.dir, lod);
+        let biasBsdf = gScene.materials.getBSDF(biasSD, lod);
+        let biasBsdfProperties = biasBsdf.getProperties(biasSD);
+        LightSample ls = { };
+        float distance = 0;
+        bool valid = getEmissiveTriangle(r.lightIdx, r.getUV(), biasSD, ls, distance);
+        float ps = valid ? getSurfacePdf(biasBsdfProperties, biasSD, ls) : 0.0;
+
+        #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
+        if (ps > 0)
+        {
+            SceneRayQuery < 1 > rayQuery;
+            distance *= 0.99;
+            const Ray ray = Ray(biasSD.computeNewRayOrigin(), ls.dir, 0.f, distance);
+            if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+            {
+                ps = 0;
+            }
+        }
+        #endif // BIAS MODE RAYTRACE
+        
+        pi = selectPrevSample ? ps : pi;
+        piSum += ps * previousM;
+    }
+    finalizeSample(r, pi, piSum);
+    
+#else    
+    finalizeSample(r, 1.0f, r.M);
+#endif //BIAS_MODE_BASIC
+    if (r.W <= 0 || isnan(r.W) || isinf(r.W))
+    {
+        r = current; //If resampled is invalid use the current reservoir instead
     }
     
     gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;

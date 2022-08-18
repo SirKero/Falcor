@@ -117,18 +117,31 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
     switch (mResamplingMode) {
     case ResamplingMode::Temporal:
         temporalResampling(pRenderContext, renderData);
+        if (mpSpartialResampling || mpSpartioTemporalResampling) {
+            mpSpartialResampling.reset();
+            mpSpartioTemporalResampling.reset();
+        }
         break;
     case ResamplingMode::Spartial:
         spartialResampling(pRenderContext, renderData);
+        if (mpTemporalResampling || mpSpartioTemporalResampling) {
+            mpTemporalResampling.reset();
+            mpSpartioTemporalResampling.reset();
+        }
         break;
     case ResamplingMode::SpartioTemporal:
         spartioTemporalResampling(pRenderContext, renderData);
+        if (mpSpartialResampling || mpTemporalResampling) {
+            mpSpartialResampling.reset();
+            mpTemporalResampling.reset();
+        }
         break;
     }
 
     finalShadingPass(pRenderContext, renderData);
 
     mReuploadBuffers = mReset ? true: false;
+    mBiasCorrectionChanged = false;
     mReset = false;
     mFrameCount++;
 }
@@ -143,7 +156,7 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
 
     if (mResamplingMode > 0) {
         if (auto group = widget.group("Resamling")) {
-            changed |= widget.dropdown("BiasCorrection", kBiasCorrectionModeList, mBiasCorrectionMode);
+            mBiasCorrectionChanged |= widget.dropdown("BiasCorrection", kBiasCorrectionModeList, mBiasCorrectionMode);
 
             changed |= widget.var("Depth Threshold", mRelativeDepthThreshold, 0.0f, 1.0f, 0.0001f);
             widget.tooltip("Relative depth threshold. 0.1 = within 10% of current depth (linZ)");
@@ -304,7 +317,7 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
 {
     FALCOR_PROFILE("TemporalResampling");
 
-    if (mReset) mpTemporalResampling.reset();
+    if (mReset || mBiasCorrectionChanged) mpTemporalResampling.reset();
 
     //Create Pass
     if (!mpTemporalResampling) {
@@ -315,6 +328,7 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
 
         mpTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -345,7 +359,7 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
-    if (mReset || mReuploadBuffers) {
+    if (mReset || mReuploadBuffers || mBiasCorrectionChanged) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;

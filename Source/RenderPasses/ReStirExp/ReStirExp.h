@@ -127,6 +127,7 @@ private:
     //Runtime
     bool mReset = true;
     bool mReuploadBuffers = true;
+    bool mBiasCorrectionChanged = false;
     uint2 mScreenRes = { 0,0 };
     bool mUpdateRenderSettings = true;
     uint mFrameCount = 0;
