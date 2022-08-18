@@ -448,7 +448,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
 {
     FALCOR_PROFILE("SpartioTemporalResampling");
 
-    if (mReset) mpSpartioTemporalResampling.reset();
+    if (mReset || mBiasCorrectionChanged) mpSpartioTemporalResampling.reset();
 
     //Create Pass
     if (!mpSpartioTemporalResampling) {
@@ -459,6 +459,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
 
         mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
@@ -492,7 +493,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
-    if (mReset || mReuploadBuffers) {
+    if (mReset || mReuploadBuffers || mBiasCorrectionChanged) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
