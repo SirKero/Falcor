@@ -383,7 +383,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     //Clear the other reservoir
     pRenderContext->clearUAV(mpReservoirBuffer[(mFrameCount+1) % 2].get()->getUAV().get(), float4(0.f));
 
-    if (mReset) mpSpartialResampling.reset();
+    if (mReset ||mBiasCorrectionChanged) mpSpartialResampling.reset();
 
     //Create Pass
     if (!mpSpartialResampling) {
@@ -394,6 +394,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
 
         mpSpartialResampling = ComputePass::create(desc, defines, true);
@@ -425,7 +426,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
-    if (mReset || mReuploadBuffers) {
+    if (mReset || mReuploadBuffers || mBiasCorrectionChanged) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gSpartialSamples"] = mSpartialSamples;

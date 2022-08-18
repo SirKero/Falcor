@@ -20,6 +20,12 @@ Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<PackedHitInfo> gPrevVBuffer;
 Texture2D<float2> gMVec;
 
+#define BIAS_MODE_BASIC 1
+#define BIAS_MODE_RAYTRACE 2
+//This is for syntax highlightig
+#ifndef BIAS_CORRECTION_MODE
+    #define BIAS_CORRECTION_MODE 2
+#endif
 
 cbuffer PerFrame
 {
@@ -42,9 +48,6 @@ struct LightSample{
     float2 uv;
     //Enum type later ? 
 };
-
-#define BIAS_MODE_BASIC 1
-#define BIAS_MODE_RAYTRACE 2
 
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
@@ -272,8 +275,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
 
 //Bias correction
-//#define BIAS_CORRECTION_MODE 2
-
 #if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
     float pi = r.targetPdf;
     float piSum = r.targetPdf * current.M;
