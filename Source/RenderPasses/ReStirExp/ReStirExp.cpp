@@ -128,9 +128,8 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     finalShadingPass(pRenderContext, renderData);
 
-
+    mReuploadBuffers = mReset ? true: false;
     mReset = false;
-    mReuploadBuffers = false;
     mFrameCount++;
 }
 

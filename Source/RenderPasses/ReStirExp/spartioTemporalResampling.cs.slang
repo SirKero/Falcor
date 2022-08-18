@@ -351,7 +351,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             Ray biasCameraRay = gScene.camera.computeRayPinhole(biasIdx, gFrameDim);
             ShadingData biasSD = loadShadingData(neightHit, biasCameraRay.dir, lod);
             let biasBsdf = gScene.materials.getBSDF(biasSD, lod);
-            let biasBsdfProperties = bsdf.getProperties(biasSD);
+            let biasBsdfProperties = biasBsdf.getProperties(biasSD);
             //Get PDF for this surface and selected light
             LightSample ls = { };
             float distance;
@@ -388,7 +388,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
     
     if(r.W <= 0 || isnan(r.W) || isinf(r.W)){
-        r = Reservoir.create();
+        r = current;    //If resampled is invalid use the current reservoir instead
     }
     
     gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
