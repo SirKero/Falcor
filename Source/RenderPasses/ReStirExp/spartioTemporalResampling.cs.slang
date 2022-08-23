@@ -266,6 +266,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,32);
 
     int selectedSample = -1;
+    bool validSample = true;
     
     //Go through all neighbors
     for(uint i=0 ; i<numSamples; i++){
@@ -309,94 +310,94 @@ void main(uint2 dTid : SV_DispatchThreadID)
         
         //Get neightbor light target PDF for current surface
         float sampleTargetPdf = 0.f;
+        bool valid = false;
         if (sampledReservoir.M > 0)
         {
             LightSample ls = { };
             float dis;
-            bool valid = getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.getUV(), sd, ls, dis);
+            valid = getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.getUV(), sd, ls, dis);
             sampleTargetPdf = valid ? getSurfacePdf(bsdfProperties, sd, ls): 0.0;
         }
         //Combine Reservoirs
         if(combineReservoir(r, sampledReservoir, sampleTargetPdf, sampleNext1D(sg))){
             selectedSample = i;
+            validSample = valid;
         }
     }
 
-    //Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
-#if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
-    float pi = r.targetPdf;
-    float piSum = r.targetPdf * current.M;
+    
+    if(validSample && ( r.W > 0 || !isnan(r.W) || !isinf(r.W))){
 
-     //go through all neighbors again
-    for (int i = 0; i < numSamples; i++)
-    {
-        //Skip if we skipped in last loop
-        if ((cachedResults & (1u << i)) == 0)
-            continue;
-        //Get Index
-        int2 offset = int2(0);
-        if (i == 0 && foundTemporalSurface)
-            offset = temporalOffset;
-        else
-        {
-            uint neighBufferIdx = (neighOffsetStartIdx + i) % (kNeighOffsetMask - 1);
-            float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
-            offset = int2(randSamp * gSamplingRadius);
-        }
-        int2 idx = prevIdx + offset;
-
-        //Get Surface
-        HitInfo biasHit = HitInfo(gVBuffer[idx]);
-        Ray biasCameraRay = gScene.camera.computeRayPinhole(idx, gFrameDim);
-        ShadingData biasSD = loadShadingData(biasHit, biasCameraRay.dir, lod);
-        let biasBsdf = gScene.materials.getBSDF(biasSD, lod);
-        let biasBsdfProperties = biasBsdf.getProperties(biasSD);
-
-        //getReservoir
-        Reservoir biasRes = getReservoir(idx, true);
-        biasRes.M = min(biasRes.M, historyLimit); //cap M
+        //Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
+        #if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
+    
+        float pi = r.targetPdf;
+        float piSum = r.targetPdf * current.M;
         
-        //Get light pdf
-        bool valid = true;
-        float ps = 0;
-        LightSample ls = { };
-        float distance = 0;
-        if (biasRes.M > 0)
+        //go through all neighbors again
+        for (int i = 0; i < numSamples; i++)
         {
-            valid |= getEmissiveTriangle(r.lightIdx, r.getUV(), biasSD, ls, distance);
-            float ps = valid ? getSurfacePdf(biasBsdfProperties, biasSD, ls) : 0.0;
-        }
-        
-
-        //Trace ray
-        #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
-        if (ps > 0 && valid)
-        {
-            SceneRayQuery < 1 > rayQuery;
-            distance *= 0.99;
-            const Ray ray = Ray(biasSD.computeNewRayOrigin(), ls.dir, 0.f, distance);
-            if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+            //Skip if we skipped in last loop
+            if ((cachedResults & (1u << i)) == 0)
+                continue;
+            //Get Index
+            int2 offset = int2(0);
+            if (i == 0 && foundTemporalSurface)
+                offset = temporalOffset;
+            else
             {
-                ps = 0;
+                uint neighBufferIdx = (neighOffsetStartIdx + i) % (kNeighOffsetMask - 1);
+                float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
+                offset = int2(randSamp * gSamplingRadius);
             }
+            int2 idx = prevIdx + offset;
+
+            //Get Surface
+            HitInfo biasHit = HitInfo(gVBuffer[idx]);
+            Ray biasCameraRay = gScene.camera.computeRayPinhole(idx, gFrameDim);
+            ShadingData biasSD = loadShadingData(biasHit, biasCameraRay.dir, lod);
+            let biasBsdf = gScene.materials.getBSDF(biasSD, lod);
+            let biasBsdfProperties = biasBsdf.getProperties(biasSD);
+
+            //getReservoir
+            Reservoir biasRes = getReservoir(idx, true);
+            biasRes.M = min(biasRes.M, historyLimit); //cap M
+        
+            //Get light pdf
+            bool valid = true;
+            float ps = 0;
+            LightSample ls = { };
+            float dist = 0;
+            if (biasRes.M > 0)
+            {
+                valid |= getEmissiveTriangle(r.lightIdx, r.getUV(), biasSD, ls, dist);
+                float ps = valid ? getSurfacePdf(biasBsdfProperties, biasSD, ls) : 0.0;
+            }
+        
+
+            //Trace ray
+            #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
+            if (ps > 0 && valid)
+            {
+                SceneRayQuery < 1 > rayQuery;
+                dist *= 0.99;
+                const Ray ray = Ray(biasSD.computeNewRayOrigin(), ls.dir, 0.f, dist);
+                if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+                {
+                    ps = 0;
+                }
+            }
+            #endif // BIAS MODE RAYTRACE
+        
+            pi = selectedSample == i ? ps : pi;
+            piSum += ps * biasRes.M;
         }
-        #endif // BIAS MODE RAYTRACE
+        finalizeSample(r, pi, piSum);
         
+        #else //BIAS MODE BASIC
+        finalizeSample(r, 1.0f, r.M);
+        #endif //BIAS MODE BASIC
+    }    
         
-        
-        pi = selectedSample == i ? ps : pi;
-        piSum += ps * biasRes.M;
-    }
-    
-    finalizeSample(r, pi, piSum);
-    
-#else //BIAS MODE BASIC
-    finalizeSample(r, 1.0f, r.M);
-#endif //BIAS MODE BASIC
-    
-    if(r.W <= 0 || isnan(r.W) || isinf(r.W)){
-        r = current;    //If resampled is invalid use the current reservoir instead
-    }
-    
     gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
 }
