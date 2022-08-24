@@ -117,7 +117,7 @@ private:
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
 
     //UI
-    uint mResamplingMode = ResamplingMode::NoResampling;
+    uint mResamplingMode = ResamplingMode::SpartioTemporal;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
