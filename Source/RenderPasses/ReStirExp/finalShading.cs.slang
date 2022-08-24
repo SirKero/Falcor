@@ -11,8 +11,8 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 
-
-StructuredBuffer<Reservoir> gReservoir;
+Texture2D<uint4> gReservoir;
+Texture2D<uint> gReservoirUV;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
@@ -41,6 +41,15 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
+Reservoir getReservoir(uint2 idx){
+    Reservoir r =  Reservoir(gReservoir[idx], gReservoirUV[idx]);
+    
+    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+        r = Reservoir();
+    
+    return r;
+}
+
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -55,7 +64,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 void getEmissiveLight(in Reservoir r, in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
     //Get triangle position
     EmissiveTriangle tri = gScene.lightCollection.getTriangle(r.lightIdx);
-    const float3 barycentrics = sample_triangle(r.getUV());
+    const float3 barycentrics = sample_triangle(r.uv);
     float3 lightPos = tri.getPosition(barycentrics);
     //Get light dir
     toLight = lightPos - worldPos;
@@ -86,7 +95,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 {
     bool valid = true;
     //Get reservoir
-    Reservoir r = gReservoir[index2Dto1D(dTid, gFrameDim.x)];
+    Reservoir r = getReservoir(dTid);
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 7 * 13);    //TODO add seed offset
 
     //Get shading data
@@ -101,7 +110,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
 
-    if(r.W < 0 || !hitInfo.isValid() || r.M == 0){
+    if(r.weightSum < 0 || !hitInfo.isValid() || r.M == 0){
         valid = false;
     }
     
@@ -110,7 +119,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float3 toLight = { };
     float3 Li = { };
     getEmissiveLight(r,sd.posW ,distance , toLight, Li);
-    Li = max(0.f, Li * r.W);
+    Li = max(0.f, Li * r.weightSum);
 
     //Check light visibility with a shadow ray
     if(valid){
@@ -153,9 +162,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if (is_valid(gDiffuseIllumination)) gDiffuseIllumination[dTid] = float4(diffuseIllumination, distance);
     if (is_valid(gSpecularReflectance)) gSpecularReflectance[dTid] = float4(specularReflectance, 1.f);
     if (is_valid(gSpecularIllumination)) gSpecularIllumination[dTid] = float4(specularIllumination, distance);
-    
-    //outColor = valid ? float3(r.W) : float3(0);
-    //outColor = valid ? float3(r.M)/32.f : float3(0);
-    
+        
     gColor[dTid] = float4(outColor, 1.0f);
 }

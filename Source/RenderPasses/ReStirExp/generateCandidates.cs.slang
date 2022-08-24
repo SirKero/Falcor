@@ -16,7 +16,8 @@ import Reservoir;
 import SurfaceData;
 
 
-RWStructuredBuffer<Reservoir> gReservoir;
+RWTexture2D<uint4> gReservoir;
+RWTexture2D<uint> gReservoirUV;
 
 
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -53,7 +54,7 @@ uint index2Dto1D(uint2 idx, uint width){
 }
 
 Surface getSurface(uint2 idx){
-    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;//TODO: Use prev view dir for last frame
+    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;
     PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
     return Surface(surfaceData, -viewDir);
@@ -141,23 +142,28 @@ bool updateReservoir(inout Reservoir r, in LightSample ls,float targetPdf, float
     
     if(selectSample){
         r.lightIdx = ls.lightIdx;
-        r.setUV(ls.uv);
+        r.uv = ls.uv;
         r.targetPdf = targetPdf;
     }
     return selectSample;
+}
+
+void finalizeSample(inout Reservoir r, float normalizationNumerator, float normalizationDenominator){
+    float denominator = r.targetPdf * normalizationDenominator;
+
+    r.weightSum = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
 }
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount);
-    Reservoir r = Reservoir.create();
+    Reservoir r = Reservoir();
 
     //Get shading data
     Surface surface = getSurface(dTid);
     if (!surface.valid)
     {
-        gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
         return;
     }
 
@@ -175,12 +181,12 @@ void main(uint2 dTid : SV_DispatchThreadID)
             selectedDirection = ls.dir;
         }
     }
-    if(r.targetPdf > 0){
-        r.M = 1;
-        r.W = 1.f/r.targetPdf * (r.weightSum / gNumEmissiveSamples);
-    }
 
-    bool validSample = r.W > 0 && !isnan(r.W) && !isinf(r.W);
+    //Finalize sample
+    r.M = 1;    //Every reservoir has the same amount of initial samples
+    finalizeSample(r, 1.f, gNumEmissiveSamples);
+
+    bool validSample = r.weightSum > 0 && !isnan(r.weightSum) && !isinf(r.weightSum);
     
     //Test visibility and shoot a shadow ray from the surface to the selected light
     if(validSample && gTestVisibility){
@@ -192,12 +198,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
         const Ray ray = Ray(rayPos, selectedDirection, 0.f, selectedDistance);
         if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
         {
-            r.W = 0.f;  //Set weight to zero if light is not visible
+            r.weightSum = 0.f;  //Set weight to zero if light is not visible
         }
     }
 
     if(!validSample)
-        r = Reservoir.create();
+        r = Reservoir();
     
-    gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+    gReservoir[dTid] = r.pack();
+    gReservoirUV[dTid] = r.packedUV;
 }

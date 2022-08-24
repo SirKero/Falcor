@@ -1,35 +1,52 @@
 struct Reservoir{
-    uint lightIdx;
-    uint M;
-    float weightSum;
-    float W;
-    float targetPdf;
-    uint lightType;
-    uint age;
-    uint uv ;
+    //In packed
+    uint lightIdx;      // Light index of the sample
+    uint M;             // Number of samples. Real number equals generatedSamples * M
+    float weightSum;    // Weight of the reservoir after finalizing (W in paper). Used as weightSum internaly
+    float targetPdf;    // Target Pdf of current sample
+    //Not in packed
+    uint packedUV ;           //UV encoded as two f16
 
-    static Reservoir create(){
-        Reservoir r;
-        r.lightIdx = 0;
-        r.M = 0;
-        r.weightSum = 0.f;
-        r.W = 0.f;
-        r.targetPdf = 0.f;
-        r.lightType = 0;
-        r.age = 0;
-        r.uv = 0;
-        return r;
+    //UV
+    property float2 uv
+    {
+        get{ return float2(f16tof32((packedUV >> 16) & 0xFFFF), f16tof32(packedUV & 0xFFFF)); }
+        set { packedUV = (f32tof16(newValue.x) << 16u) | f32tof16(newValue.y); }
     }
     
-    [mutating] void setUV(float2 uvF){
-        uint u = f32tof16(uvF.x);
-        uint v = f32tof16(uvF.y);
-        uv = (u << 16u) | v;
+    //Empty init
+    __init(){
+        this = {};
+        M = 0;
+        weightSum = 0.f;
     }
-    
-    float2 getUV(){
-        float u = f16tof32((uv >> 16) & 0xFFFF);
-        float v = f16tof32(uv & 0xFFFF);
-        return float2(u,v);
+
+    //Init for analytic light types
+    __init(const uint4 packed){
+        lightIdx = packed.x;
+        M = packed.y;
+        weightSum = asfloat(packed.z);
+        targetPdf = asfloat(packed.w);
+        this.packedUV = 0;
+    }
+
+    //Init for Emissive light types
+    __init(const uint4 packed, const uint packedUV){
+        lightIdx = packed.x;
+        M = packed.y;
+        weightSum = asfloat(packed.z);
+        targetPdf = asfloat(packed.w);
+        this.packedUV = packedUV;
+    }
+
+    //Pack for uint texture
+    uint4 pack(){
+        uint4 packed;
+        packed.x = lightIdx;
+        packed.y = M;
+        packed.z = asuint(weightSum);
+        packed.w = asuint(targetPdf);
+
+        return packed;
     }
 };

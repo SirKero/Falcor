@@ -14,8 +14,11 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
 
-StructuredBuffer<Reservoir> gReservoirPrev;
-RWStructuredBuffer<Reservoir> gReservoir;
+RWTexture2D<uint4> gReservoir;
+RWTexture2D<uint> gReservoirUV;
+Texture2D<uint4> gReservoirPrev;
+Texture2D<uint> gReservoirUVPrev;
+
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -51,6 +54,22 @@ struct LightSample{
 
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
+}
+
+Reservoir getReservoir(int2 idx, bool prev)
+{
+    Reservoir r;
+    if (prev)
+    {
+        r = Reservoir(gReservoirPrev[idx], gReservoirUVPrev[idx]);
+    }
+    else
+    {
+        r = Reservoir(gReservoir[idx], gReservoirUV[idx]);
+    }
+    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+        r = Reservoir();
+    return r;
 }
 
 Surface getSurface(uint2 idx, bool prev){
@@ -134,7 +153,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
 }
 
 bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
-    float normalizationFactor = prev.W * prev.M;
+    float normalizationFactor = prev.weightSum * prev.M;
 
     float risWeight = targetPDF * normalizationFactor;
     
@@ -146,7 +165,7 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
     
     if(selectSample){
         r.lightIdx = prev.lightIdx;
-        r.uv = prev.uv;
+        r.packedUV = prev.packedUV;
         r.targetPdf = targetPDF;
     }
 
@@ -157,33 +176,15 @@ void finalizeSample(inout Reservoir r, float normalizationNumerator, float norma
 {
     float denominator = r.targetPdf * normalizationDenominator;
 
-    r.W = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
+    r.weightSum = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
 }
-
-Reservoir getReservoir(int2 idx, bool prev)
-{
-    Reservoir r = Reservoir.create();
-    if (prev)
-    {
-        r = gReservoirPrev[index2Dto1D(idx, gFrameDim.x)];
-    }
-    else
-    {
-        r = gReservoir[index2Dto1D(idx, gFrameDim.x)];
-    }
-    if (r.W <= 0 || isinf(r.W) || isnan(r.W))
-        r = Reservoir.create();
-    return r;
-}
-
-
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 4 * 13);
     bool valid = true;
-    Reservoir r = Reservoir.create();
+    Reservoir r = Reservoir();
     
     //Check if surface is valid
     Surface currentSurface = getSurface(dTid, false);
@@ -245,14 +246,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         prev.M = min(prev.M, historyLimit);
         previousM = prev.M;
-        prev.age += 1;
 
         //Get new target pdf if valid
         float targetPdf = 0;
         if(prev.M > 0){
             LightSample ls = { };
             float dis = 0;
-            getEmissiveTriangle(prev.lightIdx, prev.getUV(), currentSurface.posW, ls, dis);
+            getEmissiveTriangle(prev.lightIdx, prev.uv, currentSurface.posW, ls, dis);
             targetPdf = getSurfacePdf(currentSurface, ls);
         }
 
@@ -268,7 +268,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     {
         LightSample ls = { };
         float distance = 0;
-        bool valid = getEmissiveTriangle(r.lightIdx, r.getUV(), temporalSurface.posW, ls, distance);
+        bool valid = getEmissiveTriangle(r.lightIdx, r.uv, temporalSurface.posW, ls, distance);
         float ps = valid ? getSurfacePdf(temporalSurface, ls) : 0.0;
 
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
@@ -293,10 +293,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else    
     finalizeSample(r, 1.0f, r.M);
 #endif //BIAS_MODE_BASIC
-    if (r.W <= 0 || isnan(r.W) || isinf(r.W))
+    if (r.weightSum <= 0 || isnan(r.weightSum) || isinf(r.weightSum))
     {
         r = current; //If resampled is invalid use the current reservoir instead
     }
     
-    gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+    gReservoir[dTid] = r.pack();
+    gReservoirUV[dTid] = r.packedUV;
 }

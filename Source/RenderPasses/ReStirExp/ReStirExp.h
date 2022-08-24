@@ -117,7 +117,7 @@ private:
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
 
     //UI
-    uint mResamplingMode = ResamplingMode::SpartioTemporal;
+    uint mResamplingMode = ResamplingMode::NoResampling;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
@@ -149,7 +149,8 @@ private:
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
 
     //Buffer
-    Buffer::SharedPtr mpReservoirBuffer[2];  //Buffers for the reservoir
-    Buffer::SharedPtr mpSurfaceBuffer[2];   //Buffer for surface data
+    Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
+    Texture::SharedPtr mpReservoirUVBuffer[2];  //Buffer for the uv component of the reservoir
+    Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
 };

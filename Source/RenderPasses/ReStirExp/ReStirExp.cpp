@@ -221,18 +221,29 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
         mScreenRes = renderData.getDefaultTextureDims();
         for (size_t i = 0; i <= 1; i++) {
             mpReservoirBuffer[i].reset();
+            mpReservoirUVBuffer[i].reset();
             mpSurfaceBuffer[i].reset();
         }
         mReset = true;  //TODO: Dont rebuild everything on screen size change
     }
     //TODO check if resolution changed
     if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1]) {
+        mpReservoirBuffer[0] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
+                                                 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpReservoirBuffer[0]->setName("ReStirExp::ReservoirBuf1");
+        mpReservoirBuffer[1] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
+                                                 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
+    }
+    if (!mpReservoirUVBuffer[0] || !mpReservoirUVBuffer[1]) {
         uint2 texDim = renderData.getDefaultTextureDims();
         uint bufferSize = texDim.x * texDim.y;
-        mpReservoirBuffer[0] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
-        mpReservoirBuffer[0]->setName("ReStirExp::ReservoirBuf1");
-        mpReservoirBuffer[1] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
-        mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
+        mpReservoirUVBuffer[0] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::R32Uint,
+                                                 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpReservoirUVBuffer[0]->setName("ReStirExp::ReservoirBuf1");
+        mpReservoirUVBuffer[1] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::R32Uint,
+                                                 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpReservoirUVBuffer[1]->setName("ReStirExp::ReservoirBuf2");
     }
 
     //Create a buffer filled with surface info for current and last frame
@@ -317,7 +328,8 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     FALCOR_PROFILE("GenerateCandidates");
 
     //Clear current reservoir
-    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2].get()->getUAV().get(), float4(0.f));
+    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2].get()->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpReservoirUVBuffer[mFrameCount % 2].get()->getUAV().get(), uint4(0));
 
     if (mReset) mpGenerateCandidates.reset();
 
@@ -350,6 +362,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    var["gReservoirUV"] = mpReservoirUVBuffer[mFrameCount % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
 
     //Uniform
@@ -370,6 +383,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
 
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpReservoirUVBuffer[mFrameCount % 2].get());
 }
 
 void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
@@ -403,6 +417,8 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
 
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    var["gReservoirUVPrev"] = mpReservoirUVBuffer[(mFrameCount + 1) % 2];
+    var["gReservoirUV"] = mpReservoirUVBuffer[mFrameCount % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
 
@@ -426,6 +442,7 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
 
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpReservoirUVBuffer[mFrameCount % 2].get());
 }
 
 void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderData& renderData)
@@ -433,7 +450,8 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     FALCOR_PROFILE("SpartialResampling");
 
     //Clear the other reservoir
-    pRenderContext->clearUAV(mpReservoirBuffer[(mFrameCount+1) % 2].get()->getUAV().get(), float4(0.f));
+    pRenderContext->clearUAV(mpReservoirBuffer[(mFrameCount+1) % 2].get()->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpReservoirUVBuffer[(mFrameCount + 1) % 2].get()->getUAV().get(), uint4(0));
 
     if (mReset ||mBiasCorrectionChanged) mpSpartialResampling.reset();
 
@@ -463,6 +481,8 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
 
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gOutReservoir"] = mpReservoirBuffer[(mFrameCount+1) % 2];
+    var["gOutReservoirUV"] = mpReservoirUVBuffer[(mFrameCount + 1) % 2];
+    var["gReservoirUV"] = mpReservoirUVBuffer[mFrameCount % 2];
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
 
@@ -486,7 +506,8 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     mpSpartialResampling->execute(pRenderContext, uint3(targetDim, 1));
 
     //Barrier for written buffer
-    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpReservoirBuffer[(mFrameCount + 1) % 2].get());
+    pRenderContext->uavBarrier(mpReservoirUVBuffer[(mFrameCount + 1) % 2].get());
 }
 
 void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
@@ -523,6 +544,8 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    var["gReservoirUVPrev"] = mpReservoirUVBuffer[(mFrameCount + 1) % 2];
+    var["gReservoirUV"] = mpReservoirUVBuffer[mFrameCount % 2];
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
     var["gMVec"] = renderData[kInputs[1].name]->asTexture();    //BindMvec
@@ -592,6 +615,7 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
     uint reservoirIndex = mResamplingMode == ResamplingMode::Spartial ? (mFrameCount + 1) % 2 : mFrameCount % 2;
 
     var["gReservoir"] = mpReservoirBuffer[reservoirIndex];
+    var["gReservoirUV"] = mpReservoirUVBuffer[reservoirIndex];
     for (auto& inp : kInputs) bindAsTex(inp);
     for (auto& out : kOutputs) bindAsTex(out);
 

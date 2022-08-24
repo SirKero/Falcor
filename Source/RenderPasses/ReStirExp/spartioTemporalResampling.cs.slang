@@ -14,8 +14,10 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
 
-StructuredBuffer<Reservoir> gReservoirPrev;
-RWStructuredBuffer<Reservoir> gReservoir;
+RWTexture2D<uint4> gReservoir;
+RWTexture2D<uint> gReservoirUV;
+Texture2D<uint4> gReservoirPrev;
+Texture2D<uint> gReservoirUVPrev;
 
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
@@ -46,7 +48,6 @@ cbuffer Constant{
     uint gDisocclusionBoostSamples; //Number of spartial samples if no temporal surface was found
 }
 
-
 struct LightSample{
     uint lightIdx;
     float3 dir;
@@ -71,15 +72,19 @@ Surface getSurface(uint2 idx, bool prev){
     return Surface(surfaceData, -viewDir);
 }
 
-Reservoir getReservoir(int2 idx, bool prev){
-    Reservoir r = Reservoir.create();
-    if(prev){
-        r = gReservoirPrev[index2Dto1D(idx, gFrameDim.x)];
-    }else{
-       r = gReservoir[index2Dto1D(idx, gFrameDim.x)]; 
-    } 
-    if(r.W <= 0||isinf(r.W) || isnan(r.W))
-        r = Reservoir.create();
+Reservoir getReservoir(int2 idx, bool prev)
+{
+    Reservoir r;
+    if (prev)
+    {
+        r = Reservoir(gReservoirPrev[idx], gReservoirUVPrev[idx]);
+    }
+    else
+    {
+        r = Reservoir(gReservoir[idx], gReservoirUV[idx]);
+    }
+    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+        r = Reservoir();
     return r;
 }
 
@@ -164,7 +169,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
 }
 
 bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
-    float normalizationFactor = prev.W * prev.M;
+    float normalizationFactor = prev.weightSum * prev.M;
 
     float risWeight = targetPDF * normalizationFactor;
     
@@ -176,7 +181,7 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
     
     if(selectSample){
         r.lightIdx = prev.lightIdx;
-        r.uv = prev.uv;
+        r.packedUV = prev.packedUV;
         r.targetPdf = targetPDF;
     }
 
@@ -186,16 +191,14 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
 void finalizeSample(inout Reservoir r, float normalizationNumerator, float normalizationDenominator){
     float denominator = r.targetPdf * normalizationDenominator;
 
-    r.W = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
+    r.weightSum = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
 }
-
-
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 6 * 13);
-    Reservoir r = Reservoir.create();
+    Reservoir r = Reservoir();
     
     //Check if surface is valid
     Surface currentSurface = getSurface(dTid, false);
@@ -299,7 +302,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
         Reservoir sampledReservoir = getReservoir(idx, true);
         
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
-        sampledReservoir.age += 1;
 
         cachedResults |= (1u << i);
         
@@ -310,7 +312,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         {
             LightSample ls = { };
             float dis;
-            valid = getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.getUV(), currentSurface.posW, ls, dis);
+            valid = getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.uv, currentSurface.posW, ls, dis);
             sampleTargetPdf = valid ? getSurfacePdf(currentSurface, ls): 0.0;
         }
         //Combine Reservoirs
@@ -321,7 +323,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
 
     
-    if(validSample && ( r.W > 0 || !isnan(r.W) || !isinf(r.W))){
+    if(validSample && ( r.weightSum > 0 || !isnan(r.weightSum) || !isinf(r.weightSum))){
 
         //Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
@@ -363,7 +365,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             float dist = 0;
             if (biasRes.M > 0)
             {
-                valid |= getEmissiveTriangle(r.lightIdx, r.getUV(), biasSurface.posW, ls, dist);
+                valid |= getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, dist);
                 float ps = valid ? getSurfacePdf(biasSurface, ls) : 0.0;
             }
         
@@ -393,5 +395,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
         #endif //BIAS MODE BASIC
     }    
         
-    gReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+    gReservoir[dTid] = r.pack();
+    gReservoirUV[dTid] = r.packedUV;
 }

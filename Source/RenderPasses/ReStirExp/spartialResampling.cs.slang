@@ -14,8 +14,10 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
 
-StructuredBuffer<Reservoir> gReservoir;
-RWStructuredBuffer<Reservoir> gOutReservoir;
+Texture2D<uint4> gReservoir;
+Texture2D<uint> gReservoirUV;
+RWTexture2D<uint4> gOutReservoir;
+RWTexture2D<uint> gOutReservoirUV;
 
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -56,8 +58,17 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
+Reservoir getReservoir(int2 idx)
+{
+    Reservoir r =  Reservoir(gReservoir[idx], gReservoirUV[idx]);
+    
+    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+        r = Reservoir();
+    return r;
+}
+
 Surface getSurface(uint2 idx){
-    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;//TODO: Use prev view dir for last frame
+    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;
     PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
     return Surface(surfaceData, -viewDir);
@@ -133,7 +144,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
 }
 
 bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
-    float normalizationFactor = prev.W * prev.M;
+    float normalizationFactor = prev.weightSum * prev.M;
 
     float risWeight = targetPDF * normalizationFactor;
     
@@ -145,7 +156,7 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
     
     if(selectSample){
         r.lightIdx = prev.lightIdx;
-        r.uv = prev.uv;
+        r.packedUV = prev.packedUV;
         r.targetPdf = targetPDF;
     }
 
@@ -156,23 +167,14 @@ void finalizeSample(inout Reservoir r, float normalizationNumerator, float norma
 {
     float denominator = r.targetPdf * normalizationDenominator;
 
-    r.W = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
-}
-
-Reservoir getReservoir(int2 idx)
-{
-    Reservoir r = gReservoir[index2Dto1D(idx, gFrameDim.x)];
-    
-    if (r.W <= 0 || isinf(r.W) || isnan(r.W))
-        r = Reservoir.create();
-    return r;
+    r.weightSum = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
 }
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 5 * 13);
-    Reservoir r = Reservoir.create();
+    Reservoir r = Reservoir();
 
     //Check if surface is valid
     Surface currentSurface = getSurface(dTid);
@@ -219,7 +221,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         if(neigh.M > 0){
             LightSample ls = { };
             float distance = 0;
-            bool valid = getEmissiveTriangle(neigh.lightIdx, neigh.getUV(), currentSurface.posW, ls, distance);
+            bool valid = getEmissiveTriangle(neigh.lightIdx, neigh.uv, currentSurface.posW, ls, distance);
             targetPdf = valid ?  getSurfacePdf(currentSurface, ls): 0.f;
         }
         
@@ -257,7 +259,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //Get light pdf
         LightSample ls = { };
         float distance = 0;
-        bool valid = getEmissiveTriangle(r.lightIdx, r.getUV(), biasSurface.posW, ls, distance);
+        bool valid = getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, distance);
         float ps = valid ? getSurfacePdf(biasSurface, ls) : 0.0;
 
         //Trace ray
@@ -287,10 +289,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
     finalizeSample(r, 1.0f, r.M);
 #endif
     
-        if (r.W <= 0 || isnan(r.W) || isinf(r.W))
+        if (r.weightSum <= 0 || isnan(r.weightSum) || isinf(r.weightSum))
         {
             r = current; //If resampled is invalid use the current reservoir instead
         }
     
-    gOutReservoir[index2Dto1D(dTid, gFrameDim.x)] = r;
+    gOutReservoir[dTid] = r.pack();
+    gOutReservoirUV[dTid] = r.packedUV;
 }
