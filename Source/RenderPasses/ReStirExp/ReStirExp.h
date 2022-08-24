@@ -85,6 +85,10 @@ private:
     */
     void prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Prepares the surface info buffer
+   */
+   void prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Generates the canidates for the pass and stores them inside the reservoir
     */
     void generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -121,8 +125,8 @@ private:
     float mSamplingRadius = 20.f;           //Sampling radius in pixel
     float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
-    bool mUseEmissiveTexture = true;        //Use Emissive texture in final shading
-    uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
+    bool mUseEmissiveTexture = false;        //Use Emissive texture in final shading
+    uint mBiasCorrectionMode = BiasCorrectionMode::Off;   //Bias Correction Mode
     
     //Runtime
     bool mReset = true;
@@ -137,6 +141,7 @@ private:
     SampleGenerator::SharedPtr mpGenerateSampleGenerator;       //Sample generator for Generate pass
 
     //Passes
+    ComputePass::SharedPtr mpFillSurfaceInfoPass;               //Fills the surfaceInformation
     ComputePass::SharedPtr mpGenerateCandidates;            //Generate Candidates Pass
     ComputePass::SharedPtr mpTemporalResampling;            //Temporal Resampling Pass
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
@@ -144,8 +149,7 @@ private:
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
 
     //Buffer
-    ResourceFormat    mVBufferFormat = HitInfo::kDefaultFormat;
     Buffer::SharedPtr mpReservoirBuffer[2];  //Buffers for the reservoir
-    Texture::SharedPtr mpPreviousVBuffer;    //Previous V-Buffer Data TODO: Use a surface buffer construct?
+    Buffer::SharedPtr mpSurfaceBuffer[2];   //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
 };

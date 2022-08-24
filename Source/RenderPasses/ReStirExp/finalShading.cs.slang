@@ -15,7 +15,6 @@ import Reservoir;
 StructuredBuffer<Reservoir> gReservoir;
 
 Texture2D<PackedHitInfo> gVBuffer;
-RWTexture2D<PackedHitInfo> gPrevVBuffer;
 Texture2D<float2> gMVec;
 RWTexture2D<float4> gColor;
 RWTexture2D<float4> gDiffuseIllumination;
@@ -93,10 +92,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //Get shading data
     PackedHitInfo packedHitInfo = gVBuffer[dTid];
     HitInfo hitInfo = HitInfo(packedHitInfo);
-
-    //Copy VBuffer for next frames passes
-    gPrevVBuffer[dTid] = packedHitInfo;
-      
+          
     let lod = ExplicitLodTextureSampler(0.f);
     //Recreate the V-Buffer ray for direction
     Ray cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
@@ -140,7 +136,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
     
 
-    float3 outColor = diffuse + specular + bsdfProperties.emission; //Clamp diffuse and specular because light can be invalid
+    float3 outColor = diffuse + specular + bsdfProperties.emission;
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;

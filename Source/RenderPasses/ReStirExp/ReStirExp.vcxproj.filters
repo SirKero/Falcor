@@ -13,5 +13,7 @@
     <ShaderSource Include="temporalResampling.cs.slang" />
     <ShaderSource Include="spartialResampling.cs.slang" />
     <ShaderSource Include="spartioTemporalResampling.cs.slang" />
+    <ShaderSource Include="fillSurfaceInfo.cs.slang" />
+    <ShaderSource Include="SurfaceData.slang" />
   </ItemGroup>
 </Project>

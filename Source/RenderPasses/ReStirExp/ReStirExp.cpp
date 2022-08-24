@@ -43,6 +43,7 @@ extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
 
 namespace {
     //Shaders
+    const char kShaderFillSurfaceInformation[] = "RenderPasses/ReStirExp/fillSurfaceInfo.cs.slang";
     const char kShaderGenerateCandidates[] = "RenderPasses/ReStirExp/generateCandidates.cs.slang";
     const char kShaderTemporalPass[] = "RenderPasses/ReStirExp/temporalResampling.cs.slang";
     const char kShaderSpartialPass[] = "RenderPasses/ReStirExp/spartialResampling.cs.slang";
@@ -112,8 +113,13 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     prepareBuffers(pRenderContext, renderData);
 
+    //Prepare the surface buffer
+    prepareSurfaceBufferPass(pRenderContext, renderData);
+
+    //Generate Canditdates
     generateCandidatesPass(pRenderContext, renderData);
 
+    //Spartiotemporal Resampling
     switch (mResamplingMode) {
     case ResamplingMode::Temporal:
         temporalResampling(pRenderContext, renderData);
@@ -138,6 +144,7 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
         break;
     }
 
+    //Shade the pixel
     finalShadingPass(pRenderContext, renderData);
 
     mReuploadBuffers = mReset ? true: false;
@@ -212,8 +219,10 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
     if ((mScreenRes.x != renderData.getDefaultTextureDims().x) || (mScreenRes.y != renderData.getDefaultTextureDims().y) || mReset)
     {
         mScreenRes = renderData.getDefaultTextureDims();
-        mpReservoirBuffer[0].reset(); mpReservoirBuffer[1].reset();
-        mpPreviousVBuffer.reset();
+        for (size_t i = 0; i <= 1; i++) {
+            mpReservoirBuffer[i].reset();
+            mpSurfaceBuffer[i].reset();
+        }
         mReset = true;  //TODO: Dont rebuild everything on screen size change
     }
     //TODO check if resolution changed
@@ -226,10 +235,14 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
         mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
     }
 
-    //Create a VBuffer for temporal Surface resampling
-    if (!mpPreviousVBuffer) {
-        mpPreviousVBuffer = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, mVBufferFormat,1 ,1 ,nullptr, Resource::BindFlags::UnorderedAccess | Resource::BindFlags::ShaderResource);
-        mpPreviousVBuffer->setName("ReStirExp:PreviousVBuffer");
+    //Create a buffer filled with surface info for current and last frame
+    if (!mpSurfaceBuffer[0] || !mpSurfaceBuffer[1]) {
+        uint2 texDim = renderData.getDefaultTextureDims();
+        uint bufferSize = texDim.x * texDim.y;
+        mpSurfaceBuffer[0] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
+        mpSurfaceBuffer[0]->setName("ReStirExp::SurfaceBuffer1");
+        mpSurfaceBuffer[1] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
+        mpSurfaceBuffer[1]->setName("ReStirExp::SurfaceBuffer2");
     }
 
     //Create an fill the neighbor offset buffer
@@ -251,6 +264,52 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
     if (!mpGenerateSampleGenerator) {
         mpGenerateSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
     }
+}
+
+void ReStirExp::prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("FillSurfaceBuffer");
+
+    if (mReset) mpFillSurfaceInfoPass.reset();
+
+    //init
+    if (!mpFillSurfaceInfoPass) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderFillSurfaceInformation).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        mpFillSurfaceInfoPass = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpFillSurfaceInfoPass);
+
+    //Set variables
+    auto var = mpFillSurfaceInfoPass->getRootVar();
+
+    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
+    auto bindAsTex = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+    bindAsTex(kInputs[0]);
+    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
+    var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
+
+    if (mReset || mReuploadBuffers) {
+        var["Constant"]["gFrameDim"] = renderData.getDefaultTextureDims();
+    }
+
+    //Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpFillSurfaceInfoPass->execute(pRenderContext, uint3(targetDim, 1));
+
+    // Barrier for written buffer
+    pRenderContext->uavBarrier(mpSurfaceBuffer[mFrameCount % 2].get());
 }
 
 void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -291,7 +350,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
-    for (auto& inp : kInputs) bindAsTex(inp);
+    var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -339,22 +398,15 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
     //Set variables
     auto var = mpTemporalResampling->getRootVar();
 
-    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
-    auto bindAsTex = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData[desc.name]->asTexture();
-        }
-    };
-
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
-    for (auto& inp : kInputs) bindAsTex(inp);
-    var["gPrevVBuffer"] = mpPreviousVBuffer;
+    var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+    var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
+
+    var["gMVec"] = renderData[kInputs[1].name]->asTexture();    //BindMvec
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -406,22 +458,15 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     //Set variables
     auto var = mpSpartialResampling->getRootVar();
 
-    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
-    auto bindAsTex = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData[desc.name]->asTexture();
-        }
-    };
-
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gOutReservoir"] = mpReservoirBuffer[(mFrameCount+1) % 2];
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
-    for (auto& inp : kInputs) bindAsTex(inp);
+    var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+
+    var["gMVec"] = renderData[kInputs[1].name]->asTexture();    //BindMvec
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -471,24 +516,16 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     //Set variables
     auto var = mpSpartioTemporalResampling->getRootVar();
 
-    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
-    auto bindAsTex = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData[desc.name]->asTexture();
-        }
-    };
-
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
-    var["gPrevVBuffer"] = mpPreviousVBuffer;
+    var["gSurfacePrev"] =  mpSurfaceBuffer[(mFrameCount + 1) % 2];
+    var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
-    for (auto& inp : kInputs) bindAsTex(inp);
+    var["gMVec"] = renderData[kInputs[1].name]->asTexture();    //BindMvec
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -556,7 +593,6 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
 
     var["gReservoir"] = mpReservoirBuffer[reservoirIndex];
     for (auto& inp : kInputs) bindAsTex(inp);
-    var["gPrevVBuffer"] = mpPreviousVBuffer;        //For copying 
     for (auto& out : kOutputs) bindAsTex(out);
 
     //Uniform

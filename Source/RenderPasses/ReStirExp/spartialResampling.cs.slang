@@ -12,12 +12,13 @@ import Utils.Color.ColorHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
+import SurfaceData;
 
 StructuredBuffer<Reservoir> gReservoir;
 RWStructuredBuffer<Reservoir> gOutReservoir;
 
 Texture1D<snorm float2> gNeighOffsetBuffer;
-Texture2D<PackedHitInfo> gVBuffer;
+StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
 
 #define BIAS_MODE_BASIC 1
@@ -55,21 +56,11 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
-uint float2toUint(float2 xy){
-    uint u = f32tof16(xy.x);
-    uint v = f32tof16(xy.y);
-    return (u << 16u) | v;
-}
-
-ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
-{
-    const TriangleHit triangleHit = hit.getTriangleHit();
-    VertexData v = gScene.getVertexData(triangleHit);
-    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
-    adjustShadingNormal(sd, v);
+Surface getSurface(uint2 idx){
+    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;//TODO: Use prev view dir for last frame
+    PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
-    return sd;
+    return Surface(surfaceData, -viewDir);
 }
 
 bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
@@ -79,7 +70,7 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out LightSample ls, out float distance){
+bool getEmissiveTriangle(uint triangleIdx, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
     const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
     ls.lightIdx = triangleIdx;
     ls.selectPdf = 1.f/activeTriangleCount;
@@ -88,7 +79,7 @@ bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out Lig
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(ls.lightIdx);
     const float3 barycentrics = sample_triangle(uv);
     float3 posW = tri.getPosition(barycentrics);
-    float3 toLight = posW - sd.posW;
+    float3 toLight = posW - surfacePos;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     distance = sqrt(distSqr);
     ls.dir = toLight / distance; //normalize
@@ -114,19 +105,21 @@ bool getEmissiveTriangle(uint triangleIdx, float2 uv, in ShadingData sd, out Lig
 }
 
 //gets the target pdf averaged to one channel
-float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, in LightSample ls){
+float getSurfacePdf(in Surface surface, in LightSample ls){
 
-    float3 H = normalize(sd.V + ls.dir);
-    float NdotV = saturate(dot(sd.N, sd.V));
-    float NdotL = saturate(dot(sd.N, ls.dir));
-    float NdotH = saturate(dot(sd.N, H));
-    float LdotH = saturate(dot(ls.dir, H));
+    const float3 N = surface.normal;
+    const float3 H = normalize(surface.viewDir + ls.dir);
+    const float NdotV = saturate(dot(N, surface.viewDir));
+    const float NdotL = saturate(dot(N, ls.dir));
+    const float NdotH = saturate(dot(N, H));
+    const float LdotH = saturate(dot(ls.dir, H));
 
     //BRDF terms for target function (DGF Microfaset BRDF)
-    float D = evalNdfGGX(bsdfProperties.roughness * bsdfProperties.roughness, NdotH);
-    float G = evalMaskingSmithGGXSeparable(bsdfProperties.roughness, NdotL, NdotV);
+    const float roughness = surface.roughness;
+    float D = evalNdfGGX(roughness * roughness, NdotH);
+    float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
 
-    float specular = luminance(bsdfProperties.specularReflectance);
+    float specular = surface.specular;
     //float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
     float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH)/specular; //Not "right" but less noisier
 
@@ -135,8 +128,7 @@ float getSurfacePdf(in BSDFProperties bsdfProperties, in ShadingData sd, in Ligh
     float specularBRDF = D*G*F/(4.f * NdotV);
 
     //Mix diffuse and specular BRDF
-    float diffuseProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
-    float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, diffuseProb));
+    float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, surface.diffuseProb));
     return brdf * ls.Li; 
 }
 
@@ -183,19 +175,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
     Reservoir r = Reservoir.create();
 
     //Check if surface is valid
-    HitInfo hitInfo = HitInfo(gVBuffer[dTid]);
-    if(!hitInfo.isValid())
+    Surface currentSurface = getSurface(dTid);
+    if (!currentSurface.valid)
         return;
     
-    //Get Hit shading information
-    let lod = ExplicitLodTextureSampler(0.f);
-    Ray cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
-    ShadingData sd = loadShadingData(hitInfo, cameraRay.dir, lod);
-    let bsdf = gScene.materials.getBSDF(sd, lod);
-    let bsdfProperties = bsdf.getProperties(sd);
-    float3 camPos = gScene.camera.getPosition();
-    float currLinZ = distance(camPos, sd.posW); //for now it is approximated as the distance from the point to the camera
-
     //Load reservoir from current iteration
     Reservoir current = getReservoir(dTid);
     
@@ -220,12 +203,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
             continue;
 
         //Get surface and check if valid
-        HitInfo neightHit = HitInfo(gVBuffer[idx]);
-        if(!neightHit.isValid())
+        Surface neighSurface = getSurface(idx);
+        if (!neighSurface.valid)
             continue;
-        VertexData neighVertexData = gScene.getVertexData(neightHit.getTriangleHit());
-        float neighLinZ = distance(camPos, neighVertexData.posW);
-        if(!isValidNeighbor(sd.N, currLinZ, neighVertexData.normalW, neighLinZ))
+        
+        if(!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, neighSurface.normal, neighSurface.viewDepth))
             continue;
 
         //If neighbor has passed the tests get reservoir and compair them
@@ -237,8 +219,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
         if(neigh.M > 0){
             LightSample ls = { };
             float distance = 0;
-            bool valid = getEmissiveTriangle(neigh.lightIdx, neigh.getUV(), sd, ls, distance);
-            targetPdf = valid ?  getSurfacePdf(bsdfProperties, sd, ls): 0.f;
+            bool valid = getEmissiveTriangle(neigh.lightIdx, neigh.getUV(), currentSurface.posW, ls, distance);
+            targetPdf = valid ?  getSurfacePdf(currentSurface, ls): 0.f;
         }
         
         if (combineReservoir(r, neigh, targetPdf, sampleNext1D(sg)))
@@ -268,25 +250,24 @@ void main(uint2 dTid : SV_DispatchThreadID)
         int2 idx = currentIndex + spartialOffset;
 
         //Get Surface
-        HitInfo biasHit = HitInfo(gVBuffer[idx]);
-        Ray biasCameraRay = gScene.camera.computeRayPinhole(idx, gFrameDim);
-        ShadingData biasSD = loadShadingData(biasHit, biasCameraRay.dir, lod);
-        let biasBsdf = gScene.materials.getBSDF(biasSD, lod);
-        let biasBsdfProperties = biasBsdf.getProperties(biasSD);
+        Surface biasSurface = getSurface(idx);
+        if (!biasSurface.valid)
+            continue;
 
         //Get light pdf
         LightSample ls = { };
         float distance = 0;
-        bool valid = getEmissiveTriangle(r.lightIdx, r.getUV(), biasSD, ls, distance);
-        float ps = valid ? getSurfacePdf(biasBsdfProperties, biasSD, ls) : 0.0;
+        bool valid = getEmissiveTriangle(r.lightIdx, r.getUV(), biasSurface.posW, ls, distance);
+        float ps = valid ? getSurfacePdf(biasSurface, ls) : 0.0;
 
         //Trace ray
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
         if (ps > 0)
         {
-            SceneRayQuery < 1 > rayQuery;
+            SceneRayQuery < 0 > rayQuery;
             distance *= 0.99;
-            const Ray ray = Ray(biasSD.computeNewRayOrigin(), ls.dir, 0.f, distance);
+            float3 rayPos = biasSurface.posW + biasSurface.normal * 0.01;
+            const Ray ray = Ray(rayPos, ls.dir, 0.f, distance);
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             {
                 ps = 0;
