@@ -190,6 +190,8 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
 
 void finalizeSample(inout Reservoir r, float normalizationNumerator, float normalizationDenominator){
     float denominator = r.targetPdf * normalizationDenominator;
+    if (isnan(denominator) | isinf(denominator))
+        denominator = 0.f;
 
     r.weightSum = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
 }
@@ -259,9 +261,12 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //
     //Spartio Temporal Resampling
     //
-    uint cachedResults = 0;  //Remember which sample was valid
-    uint neighOffsetStartIdx = uint(sampleNext1D(sg) * float(kNeighOffsetMask-1));
+    
     uint numSamples = clamp(gSpartialSamples + 1,1,32); //Cap at 32 samples for the later bias correction
+    const uint maxNeighStartIndex = kNeighOffsetMask - (numSamples + 1);
+    const uint neighOffsetStartIdx = min(uint(sampleNext1D(sg) * float(maxNeighStartIndex)), maxNeighStartIndex);
+    uint cachedResults = 0; //Remember which sample was valid
+    
     if(!foundTemporalSurface)
         numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,32);
 
@@ -270,19 +275,17 @@ void main(uint2 dTid : SV_DispatchThreadID)
     
     //Go through all neighbors
     for(uint i=0 ; i<numSamples; i++){
-        int2 spartialOffset = int2(0);
         int2 idx = int2(0);
 
         //Take temporal sample or generate a new neighbor sample
         if(i==0 && foundTemporalSurface){
-           spartialOffset = temporalOffset;
            idx = prevIdx + temporalOffset;
         }
         else{
             //Get sample from sampling mask
-            uint neighBufferIdx = (neighOffsetStartIdx + i) % (kNeighOffsetMask-1);
+            uint neighBufferIdx = neighOffsetStartIdx + i;
             float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
-            spartialOffset = int2(randSamp * gSamplingRadius);
+            int2 spartialOffset = int2(randSamp * gSamplingRadius);
             idx = prevIdx + spartialOffset;
 
             //Check if index is valid
@@ -313,7 +316,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             LightSample ls = { };
             float dis;
             valid = getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.uv, currentSurface.posW, ls, dis);
-            sampleTargetPdf = valid ? getSurfacePdf(currentSurface, ls): 0.0;
+            sampleTargetPdf = valid ? max(0.f, getSurfacePdf(currentSurface, ls)) : 0.0;
         }
         //Combine Reservoirs
         if(combineReservoir(r, sampledReservoir, sampleTargetPdf, sampleNext1D(sg))){
@@ -327,7 +330,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
-    
+        
         float pi = r.targetPdf;
         float piSum = r.targetPdf * current.M;
         
@@ -343,7 +346,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
                 offset = temporalOffset;
             else
             {
-                uint neighBufferIdx = (neighOffsetStartIdx + i) % (kNeighOffsetMask - 1);
+                uint neighBufferIdx = neighOffsetStartIdx + i;
                 float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
                 offset = int2(randSamp * gSamplingRadius);
             }
@@ -354,31 +357,32 @@ void main(uint2 dTid : SV_DispatchThreadID)
             if(!biasSurface.valid)  //TODO: This should not be necessary
                 continue;
 
+            if (!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, biasSurface.normal, biasSurface.viewDepth))
+                continue;
+            
             //getReservoir
             Reservoir biasRes = getReservoir(idx, true);
             biasRes.M = min(biasRes.M, historyLimit); //cap M
         
             //Get light pdf
-            bool valid = true;
-            float ps = 0;
+            bool valid = false;
+            float ps = 0.0f;
             LightSample ls = { };
             float dist = 0;
             if (biasRes.M > 0)
             {
-                valid |= getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, dist);
-                float ps = valid ? getSurfacePdf(biasSurface, ls) : 0.0;
+                valid = getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, dist);
+                ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
             }
-        
-
+            
             //Trace ray
             #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
-            if (ps > 0 && valid)
+            if (ps > 0.0001 && valid)
             {
                 SceneRayQuery < 0 > rayQuery;
                 dist *= 0.99;
-                float3 rayPos = biasSurface.posW + biasSurface.normal * 0.01;
-                const Ray ray = Ray(rayPos, ls.dir, 0.f, dist);
-                if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+                const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), 0.001f, dist);
+                if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
                 {
                     ps = 0;
                 }

@@ -158,6 +158,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float3 specularFactor = specularReflectance <= 0.f ? 0.f : 1.f / specularReflectance;
     float3 specularIllumination = specular * specularFactor;
 
+    //DEBUG
+    //float4 debugReservoir = float4(float(r.lightIdx), float(r.M), r.weightSum, r.targetPdf);
+    //gDiffuseReflectance[dTid] = debugReservoir;
+    
     if (is_valid(gDiffuseReflectance)) gDiffuseReflectance[dTid] = float4(diffuseReflectance, 1.f);
     if (is_valid(gDiffuseIllumination)) gDiffuseIllumination[dTid] = float4(diffuseIllumination, distance);
     if (is_valid(gSpecularReflectance)) gSpecularReflectance[dTid] = float4(specularReflectance, 1.f);

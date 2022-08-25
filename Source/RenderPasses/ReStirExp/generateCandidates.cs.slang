@@ -194,8 +194,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         selectedDistance *= kRayEpsilon;
         // Ray Query for shadow test; <0> means disabled alpha testing; TODO: Add static const for alpha test
         SceneRayQuery<0> rayQuery;
-        float3 rayPos = surface.posW + surface.normal * 0.01; //Add a little offset
-        const Ray ray = Ray(rayPos, selectedDirection, 0.f, selectedDistance);
+        const Ray ray = Ray(surface.posW, selectedDirection, 0.1f, selectedDistance);
         if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
         {
             r.weightSum = 0.f;  //Set weight to zero if light is not visible
