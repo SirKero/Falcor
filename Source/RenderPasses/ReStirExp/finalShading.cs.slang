@@ -33,6 +33,7 @@ cbuffer Constant
 {
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool  gUseEmissiveTexture;      //Enables emissive texture for shading
+    bool gEnableVisRay;             //Enables the final visibilty ray
 }
 
 static const float kRayEpsilon = 0.99f;
@@ -122,7 +123,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
     Li = max(0.f, Li * r.weightSum);
 
     //Check light visibility with a shadow ray
-    if(valid){
+    if (valid && gEnableVisRay)
+    {
         distance *= kRayEpsilon;
         // Ray Query for shadow test; <1> means enabled alpha testing; TODO: Add static const for alpha test
         SceneRayQuery<1> rayQuery;

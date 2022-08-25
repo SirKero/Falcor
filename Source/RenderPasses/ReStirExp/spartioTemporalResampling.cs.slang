@@ -354,11 +354,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
             //Get Surface
             Surface biasSurface = getSurface(idx, true);
-            if(!biasSurface.valid)  //TODO: This should not be necessary
-                continue;
-
-            if (!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, biasSurface.normal, biasSurface.viewDepth))
-                continue;
             
             //getReservoir
             Reservoir biasRes = getReservoir(idx, true);
@@ -369,19 +364,18 @@ void main(uint2 dTid : SV_DispatchThreadID)
             float ps = 0.0f;
             LightSample ls = { };
             float dist = 0;
-            if (biasRes.M > 0)
-            {
-                valid = getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, dist);
-                ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
-            }
-            
+
+            valid = getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, dist);
+            ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
+
+            bool rayHit = false;
             //Trace ray
             #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
-            if (ps > 0.0001 && valid)
+            if (ps > 0.0 && valid)
             {
                 SceneRayQuery < 0 > rayQuery;
                 dist *= 0.99;
-                const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), 0.001f, dist);
+                const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), VIS_RAY_OFFSET, dist);
                 if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
                 {
                     ps = 0;

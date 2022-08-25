@@ -276,8 +276,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         {
             SceneRayQuery < 0 > rayQuery;
             distance *= 0.99;
-            float3 rayPos = temporalSurface.posW + temporalSurface.normal * 0.01;
-            const Ray ray = Ray(rayPos, ls.dir, 0.f, distance);
+            const Ray ray = Ray(temporalSurface.posW, ls.dir, VIS_RAY_OFFSET, distance);
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             {
                 ps = 0;

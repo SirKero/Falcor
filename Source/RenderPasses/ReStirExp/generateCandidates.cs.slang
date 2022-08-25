@@ -21,8 +21,6 @@ RWTexture2D<uint> gReservoirUV;
 
 
 StructuredBuffer<PackedSurfaceData>gSurface;
-//Texture2D<PackedHitInfo> gVBuffer;
-//Texture2D<float2> gMVec;
 
 
 cbuffer PerFrame
@@ -194,7 +192,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         selectedDistance *= kRayEpsilon;
         // Ray Query for shadow test; <0> means disabled alpha testing; TODO: Add static const for alpha test
         SceneRayQuery<0> rayQuery;
-        const Ray ray = Ray(surface.posW, selectedDirection, 0.1f, selectedDistance);
+        const Ray ray = Ray(surface.posW, selectedDirection, VIS_RAY_OFFSET, selectedDistance);
         if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
         {
             r.weightSum = 0.f;  //Set weight to zero if light is not visible

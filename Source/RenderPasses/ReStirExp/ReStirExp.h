@@ -126,7 +126,10 @@ private:
     float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
     bool mUseEmissiveTexture = false;        //Use Emissive texture in final shading
-    uint mBiasCorrectionMode = BiasCorrectionMode::Off;   //Bias Correction Mode
+    uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
+    bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
+    float mVisibilityRayOffset = 0.01f;      //TMin for visibility rays
+
     
     //Runtime
     bool mReset = true;

@@ -194,9 +194,13 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
     if (auto group = widget.group("Misc")) {
         changed |= widget.checkbox("Use Emissive Texture", mUseEmissiveTexture);
         widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
+        changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
+        widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
+        mReset |= widget.var("Visibility Ray TMin Offset", mVisibilityRayOffset, 0.00001f, 10.f, 0.00001f);
+        widget.tooltip("Changes offset for visibility ray. Triggers recompilation so typing in the value is advised");
     }
 
-    mReset = widget.button("Recompile");
+    mReset |= widget.button("Recompile");
     mReuploadBuffers |= changed;
 }
 
@@ -342,6 +346,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -373,7 +378,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         uniformName = "Constant";
         var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[uniformName]["gTestVisibility"] = mResamplingMode > 0;   //TODO: Also add a variable to manually disable
+        var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay;   //TODO: Also add a variable to manually disable
     }
 
     //Execute
@@ -402,6 +407,7 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
+        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
 
         mpTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -466,6 +472,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
         defines.add(mpGenerateSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
+        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
 
         mpSpartialResampling = ComputePass::create(desc, defines, true);
     }
@@ -527,6 +534,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
         defines.add(mpGenerateSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
+        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
 
         mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -626,6 +634,7 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gUseEmissiveTexture"] = mUseEmissiveTexture;
+        var[uniformName]["gEnableVisRay"] = mUseFinalVisibilityRay;
     }
 
     //Execute
