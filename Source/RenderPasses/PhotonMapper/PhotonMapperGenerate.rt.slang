@@ -122,7 +122,7 @@ void fromLocalToWorld(in float3 lightDirW, inout float3 dir)
         tangent = cross(lightDirW, float3(1., 0., 0.));
     else
         tangent = cross(lightDirW, float3(0., 1., 0.));
-    //tangent = normalize(tangent);
+    tangent = normalize(tangent);
     bitangent = cross(tangent, lightDirW);
 
     dir = dir.x * tangent + dir.y * bitangent + dir.z * lightDirW;

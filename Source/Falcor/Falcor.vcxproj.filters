@@ -484,7 +484,7 @@
       <Filter>Rendering\Lights</Filter>
     </ClInclude>
     <ClInclude Include="Rendering\Volumes\GridVolumeSampler.h">
-      <Filter>Rendering\Volumes</Filter>
+      <Filter>RenderPasses\Volumes</Filter>
     </ClInclude>
     <ClInclude Include="Rendering\Utils\PixelStats.h">
       <Filter>Rendering\Utils</Filter>
@@ -836,9 +836,6 @@
     <Filter Include="Rendering\Lights">
       <UniqueIdentifier>{ea4ac2e4-adfa-47a5-b3b4-8fa122869c1d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Rendering\Volumes">
-      <UniqueIdentifier>{679c016a-0763-441a-b7d9-13d2b62ee1bc}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Scene\SDFs">
       <UniqueIdentifier>{76faf58f-c5a1-4579-8b88-3efa90cfa7d5}</UniqueIdentifier>
     </Filter>
@@ -874,6 +871,9 @@
     </Filter>
     <Filter Include="Rendering\RTXGI">
       <UniqueIdentifier>{44daa05f-64e2-4689-a953-005853ed107a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="RenderPasses\Volumes">
+      <UniqueIdentifier>{679c016a-0763-441a-b7d9-13d2b62ee1bc}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -1329,7 +1329,7 @@
       <Filter>Rendering\Materials</Filter>
     </ClCompile>
     <ClCompile Include="Rendering\Volumes\GridVolumeSampler.cpp">
-      <Filter>Rendering\Volumes</Filter>
+      <Filter>RenderPasses\Volumes</Filter>
     </ClCompile>
     <ClCompile Include="Rendering\Utils\PixelStats.cpp">
       <Filter>Rendering\Utils</Filter>
@@ -1967,13 +1967,13 @@
       <Filter>Rendering\Materials</Filter>
     </ShaderSource>
     <ShaderSource Include="Rendering\Volumes\HomogeneousVolumeSampler.slang">
-      <Filter>Rendering\Volumes</Filter>
+      <Filter>RenderPasses\Volumes</Filter>
     </ShaderSource>
     <ShaderSource Include="Rendering\Volumes\GridVolumeSampler.slang">
-      <Filter>Rendering\Volumes</Filter>
+      <Filter>RenderPasses\Volumes</Filter>
     </ShaderSource>
     <ShaderSource Include="Rendering\Volumes\GridVolumeSamplerParams.slang">
-      <Filter>Rendering\Volumes</Filter>
+      <Filter>RenderPasses\Volumes</Filter>
     </ShaderSource>
     <ShaderSource Include="Rendering\Materials\InteriorList.slang">
       <Filter>Rendering\Materials</Filter>
@@ -1991,10 +1991,10 @@
       <Filter>Rendering\Utils</Filter>
     </ShaderSource>
     <ShaderSource Include="Rendering\Volumes\IPhaseFunction.slang">
-      <Filter>Rendering\Volumes</Filter>
+      <Filter>RenderPasses\Volumes</Filter>
     </ShaderSource>
     <ShaderSource Include="Rendering\Volumes\PhaseFunction.slang">
-      <Filter>Rendering\Volumes</Filter>
+      <Filter>RenderPasses\Volumes</Filter>
     </ShaderSource>
     <ShaderSource Include="Scene\Material\BasicMaterialData.slang">
       <Filter>Scene\Material</Filter>
