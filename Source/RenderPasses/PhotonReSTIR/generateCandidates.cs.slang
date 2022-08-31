@@ -21,7 +21,6 @@ import SurfaceData;
 
 
 RWTexture2D<uint4> gReservoir;
-RWTexture2D<uint> gReservoirUV;
 
 struct PhotonLight{
     float3 posW;
@@ -38,6 +37,9 @@ struct PhotonLight{
 
 StructuredBuffer<PhotonLight> gPhotonLights;
 Buffer<uint> gPhotonCounter;
+
+RWTexture2D<float4> gPhotonReservoirPos;
+RWTexture2D<float4> gPhotonReservoirFlux;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
 
@@ -116,7 +118,7 @@ bool sampleEmissiveTriangle(float3 rnd, const float3 surfacePosition, out LightS
 }
 
 //Generates a light sample. Returns false if sample is invalid
-bool generateSample(inout SampleGenerator sg, const float3 surfacePosition,out LightSample ls, out float sampleDistance){
+bool generateSample(inout SampleGenerator sg, const float3 surfacePosition,out LightSample ls, out PhotonLight pl, out float sampleDistance){
     const uint lightCount = gPhotonCounter[0];
     if(lightCount == 0) return false;
     //get random light
@@ -124,7 +126,7 @@ bool generateSample(inout SampleGenerator sg, const float3 surfacePosition,out L
     ls.lightIdx = rndLightIndex;
     ls.selectPdf = 1.f/lightCount;
 
-    const PhotonLight pl = gPhotonLights[rndLightIndex];
+    pl = gPhotonLights[rndLightIndex];
     float3 toLight = pl.posW - surfacePosition;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
@@ -203,16 +205,19 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
     float selectedDistance = 0;
     float3 selectedDirection = float3(0,1,0);
+    PhotonLight selectedPhotonLight = {};
     
     for(uint i = 0; i< gNumEmissiveSamples; i++){
         LightSample ls;
+        PhotonLight pl;
         float sampleDistance;
-        bool valid = generateSample(sg,surface.posW, ls, sampleDistance);
+        bool valid = generateSample(sg,surface.posW, ls, pl, sampleDistance);
         if(!valid) continue;
         float targetPdf = getSurfacePdf(surface, ls);
         if(updateReservoir(r,ls, targetPdf, sampleNext1D(sg))){
             selectedDistance = sampleDistance;
             selectedDirection = ls.dir;
+            selectedPhotonLight = pl;
         }
     }
 
@@ -239,4 +244,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
         r = Reservoir();
     
     gReservoir[dTid] = r.pack();
+    gPhotonReservoirPos[dTid] = float4(selectedPhotonLight.posW, asfloat(selectedPhotonLight.packedNormal));
+    gPhotonReservoirFlux[dTid] = float4(selectedPhotonLight.flux,1);
 }

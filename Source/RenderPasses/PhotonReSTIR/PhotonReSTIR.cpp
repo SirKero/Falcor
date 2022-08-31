@@ -52,7 +52,7 @@ namespace {
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIR/finalShading.cs.slang";
 
     // Ray tracing settings that affect the traversal stack size.
-    const uint32_t kMaxPayloadSizeBytes = 80u;
+    const uint32_t kMaxPayloadSizeBytes = 96u;
     const uint32_t kMaxAttributeSizeBytes = 8u;
     const uint32_t kMaxRecursionDepth = 2u;
 
@@ -123,12 +123,15 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
 
     prepareLighting(pRenderContext);
 
-    preparePhotonBuffers(pRenderContext);
+    preparePhotonBuffers(pRenderContext,renderData);
 
     prepareBuffers(pRenderContext, renderData);
 
     //Generate Photons
     generatePhotonsPass(pRenderContext, renderData);
+
+    //Copy the counter for UI
+    copyPhotonCounter(pRenderContext);
 
     //Prepare the surface buffer
     prepareSurfaceBufferPass(pRenderContext, renderData);
@@ -174,49 +177,72 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
 void PhotonReSTIR::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
-    changed |= widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
-    //UI here
-    changed |= widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
-    widget.tooltip("Number of emissive candidates generated per iteration");
 
-    if (mResamplingMode > 0) {
-        if (auto group = widget.group("Resamling")) {
-            mBiasCorrectionChanged |= widget.dropdown("BiasCorrection", kBiasCorrectionModeList, mBiasCorrectionMode);
+    if (auto group = widget.group("PhotonMapper")) {
+        //Dispatched Photons
+        uint dispatchedPhotons = mNumDispatchedPhotons;
+        bool disPhotonChanged = widget.var("Dispatched Photons", dispatchedPhotons, mPhotonYExtent, 9984000u, (float)mPhotonYExtent);
+        if (disPhotonChanged)
+            mNumDispatchedPhotons = (uint)(dispatchedPhotons / mPhotonYExtent) * mPhotonYExtent;
+        //Buffer size
+        widget.text("Photon Lights: " + std::to_string(mCurrentPhotonLightsCount) + " / " + std::to_string(mNumMaxPhotons));
+        widget.var("Photon Light Buffer Size", mNumMaxPhotonsUI, 100u, 100000000u, 100);
+        mChangePhotonLightBufferSize = widget.button("Apply", true);
+        if (mChangePhotonLightBufferSize) mNumMaxPhotons = mNumMaxPhotonsUI;
 
-            changed |= widget.var("Depth Threshold", mRelativeDepthThreshold, 0.0f, 1.0f, 0.0001f);
-            widget.tooltip("Relative depth threshold. 0.1 = within 10% of current depth (linZ)");
+        changed |= widget.var("Light Store Probability", mPhotonRejection, 0.f, 1.f, 0.0001f);
+        widget.tooltip("Probability a photon light is stored on diffuse hit. Flux is scaled up appropriately");
 
-            changed |= widget.var("Normal Threshold", mNormalThreshold, 0.0f, 1.0f, 0.0001f);
-            widget.tooltip("Maximum cosine of angle between normals. 1 = Exactly the same ; 0 = disabled");
+        changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
+        changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
+    }
+
+    if (auto group = widget.group("ReSTIR")) {
+        changed |= widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
+        //UI here
+        changed |= widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
+        widget.tooltip("Number of emissive candidates generated per iteration");
+
+        if (mResamplingMode > 0) {
+            if (auto group = widget.group("Resamling")) {
+                mBiasCorrectionChanged |= widget.dropdown("BiasCorrection", kBiasCorrectionModeList, mBiasCorrectionMode);
+
+                changed |= widget.var("Depth Threshold", mRelativeDepthThreshold, 0.0f, 1.0f, 0.0001f);
+                widget.tooltip("Relative depth threshold. 0.1 = within 10% of current depth (linZ)");
+
+                changed |= widget.var("Normal Threshold", mNormalThreshold, 0.0f, 1.0f, 0.0001f);
+                widget.tooltip("Maximum cosine of angle between normals. 1 = Exactly the same ; 0 = disabled");
+            }
+        }
+        if ((mResamplingMode & ResamplingMode::Temporal) > 0) {
+            if (auto group = widget.group("Temporal Options")) {
+                changed |= widget.var("Temporal age", mTemporalMaxAge, 0u, 512u);
+                widget.tooltip("Temporal age a sample should have");
+            }
+        }
+        if ((mResamplingMode & ResamplingMode::Spartial) > 0) {
+            if (auto group = widget.group("Spartial Options")) {
+                changed |= widget.var("Spartial Samples", mSpartialSamples, 0u, 32u);
+                widget.tooltip("Number of spartial samples");
+
+                changed |= widget.var("Disocclusion Sample Boost", mDisocclusionBoostSamples, 0u, 32u);
+                widget.tooltip("Number of spartial samples if no temporal surface was found. Needs to be bigger than \"Spartial Samples\" + 1 to have an effect");
+
+                changed |= widget.var("Sampling Radius", mSamplingRadius, 0.0f, 200.f);
+                widget.tooltip("Radius for the Spartial Samples");
+            }
+        }
+
+        if (auto group = widget.group("Misc")) {
+            changed |= widget.checkbox("Use Emissive Texture", mUseEmissiveTexture);
+            widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
+            changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
+            widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
+            mReset |= widget.var("Visibility Ray TMin Offset", mVisibilityRayOffset, 0.00001f, 10.f, 0.00001f);
+            widget.tooltip("Changes offset for visibility ray. Triggers recompilation so typing in the value is advised");
         }
     }
-    if ((mResamplingMode & ResamplingMode::Temporal) > 0) {
-        if (auto group = widget.group("Temporal Options")) {
-            changed |= widget.var("Temporal age", mTemporalMaxAge, 0u, 512u);
-            widget.tooltip("Temporal age a sample should have");
-        }
-    }
-    if ((mResamplingMode & ResamplingMode::Spartial) > 0) {
-        if (auto group = widget.group("Spartial Options")) {
-            changed |= widget.var("Spartial Samples", mSpartialSamples, 0u, 32u);
-            widget.tooltip("Number of spartial samples");
-
-            changed |= widget.var("Disocclusion Sample Boost", mDisocclusionBoostSamples, 0u, 32u);
-            widget.tooltip("Number of spartial samples if no temporal surface was found. Needs to be bigger than \"Spartial Samples\" + 1 to have an effect");
-
-            changed |= widget.var("Sampling Radius", mSamplingRadius, 0.0f, 200.f);
-            widget.tooltip("Radius for the Spartial Samples");
-        }
-    }
-
-    if (auto group = widget.group("Misc")) {
-        changed |= widget.checkbox("Use Emissive Texture", mUseEmissiveTexture);
-        widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
-        changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
-        widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
-        mReset |= widget.var("Visibility Ray TMin Offset", mVisibilityRayOffset, 0.00001f, 10.f, 0.00001f);
-        widget.tooltip("Changes offset for visibility ray. Triggers recompilation so typing in the value is advised");
-    }
+   
 
     mReset |= widget.button("Recompile");
     mReuploadBuffers |= changed;
@@ -305,26 +331,46 @@ bool PhotonReSTIR::prepareLighting(RenderContext* pRenderContext)
     return lightingChanged;
 }
 
-void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext)
+void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const RenderData& renderData)
 {
+    //Has resolution changed ?. New Value for mScreenRes is set in the prepareBuffer() function
+    if ((mScreenRes.x != renderData.getDefaultTextureDims().x) || (mScreenRes.y != renderData.getDefaultTextureDims().y) || mReset)
+    {
+        for (size_t i = 0; i <= 1; i++) {
+            mpPhotonReservoirPos[i].reset();
+            mpPhotonReservoirFlux[i].reset();
+        }
+    }
+
+    if (mChangePhotonLightBufferSize) {
+        mpPhotonLights.reset();
+        mChangePhotonLightBufferSize = false;
+    }
+
+
     if (!mpPhotonLightCounter) {
         mpPhotonLightCounter = Buffer::create(sizeof(uint));
         mpPhotonLightCounter->setName("PhotonReSTIR::PhotonCounterGPU");
     }
     if (!mpPhotonLightCounterCPU) {
-        mpPhotonLightCounterCPU = Buffer::create(sizeof(uint),ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::Read);
+        mpPhotonLightCounterCPU = Buffer::create(sizeof(uint),ResourceBindFlags::None, Buffer::CpuAccess::Read);
         mpPhotonLightCounterCPU->setName("PhotonReSTIR::PhotonCounterCPU");
     }
     if (!mpPhotonLights) {
         //Calculate real photon max size
-        uint xExtent = mNumMaxPhotons / mPhotonYExtent;
-        mNumMaxPhotons = (xExtent + 1) * mPhotonYExtent;
         mpPhotonLights = Buffer::createStructured(sizeof(float) * 8, mNumMaxPhotons);
         mpPhotonLights->setName("PhotonReSTIR::PhotonLights");
     }
-    //TODO Generate Photon reservoir texture
-
-
+    //Photon reservoir textures
+    if (!mpPhotonReservoirPos[0] || !mpPhotonReservoirPos[1] || !mpPhotonReservoirFlux[0] || !mpPhotonReservoirFlux[1]) {
+        uint2 texDim = renderData.getDefaultTextureDims();
+        for (uint i = 0; i < 2; i++) {
+            mpPhotonReservoirPos[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA32Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+            mpPhotonReservoirPos[i]->setName("PhotonReSTIR::PhotonReservoirPos" + i);
+            mpPhotonReservoirFlux[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+            mpPhotonReservoirFlux[i]->setName("PhotonReSTIR::PhotonReservoirFlux" + i);
+        }
+    }
 }
 
 void PhotonReSTIR::prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData)
@@ -339,7 +385,7 @@ void PhotonReSTIR::prepareBuffers(RenderContext* pRenderContext, const RenderDat
         }
         mReuploadBuffers = true; 
     }
-    //TODO check if resolution changed
+
     if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1]) {
         mpReservoirBuffer[0] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
                                                  1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
@@ -429,7 +475,6 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
     //Defines
     
-    
 
     if (!mPhotonGeneratePass.pVars) {
         FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
@@ -462,8 +507,8 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
         nameBuf = "CB";
         var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
         var[nameBuf]["gRejection"] = mPhotonRejection;
-        var[nameBuf]["gUseAlphaTest"] = true;   //TODO UI variable
-        var[nameBuf]["gAdjustShadingNormals"] = true;   //TODO UI variable
+        var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
+        var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal; 
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
@@ -472,7 +517,7 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     var["gPhotonCounter"] = mpPhotonLightCounter;
 
     // Get dimensions of ray dispatch.
-    const uint2 targetDim = uint2(2048/mPhotonYExtent, mPhotonYExtent);
+    const uint2 targetDim = uint2(mNumDispatchedPhotons/mPhotonYExtent, mPhotonYExtent);
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     //Trace the photons
@@ -522,6 +567,8 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gPhotonCounter"] = mpPhotonLightCounter;
     var["gPhotonLights"] = mpPhotonLights;
+    var["gPhotonReservoirPos"] = mpPhotonReservoirPos[mFrameCount % 2];
+    var["gPhotonReservoirFlux"] = mpPhotonReservoirFlux[mFrameCount % 2];
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -541,6 +588,8 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
 
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpPhotonReservoirPos[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpPhotonReservoirFlux[mFrameCount % 2].get());
 }
 
 void PhotonReSTIR::temporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
@@ -764,11 +813,14 @@ void PhotonReSTIR::finalShadingPass(RenderContext* pRenderContext, const RenderD
     uint reservoirIndex = mResamplingMode == ResamplingMode::Spartial ? (mFrameCount + 1) % 2 : mFrameCount % 2;
 
     var["gReservoir"] = mpReservoirBuffer[reservoirIndex];
+    var["gPhotonReservoirPos"] = mpPhotonReservoirPos[reservoirIndex];
+    var["gPhotonReservoirFlux"] = mpPhotonReservoirFlux[reservoirIndex];
+
     //for (auto& inp : kInputChannels) bindAsTex(inp);
     bindAsTex(kInVBufferDesc);
     bindAsTex(kInMVecDesc);
-    var["gPhotonCounter"] = mpPhotonLightCounter;
-    var["gPhotonLights"] = mpPhotonLights;
+    //var["gPhotonCounter"] = mpPhotonLightCounter;
+    //var["gPhotonLights"] = mpPhotonLights;
     for (auto& out : kOutputChannels) bindAsTex(out);
 
     //Uniform
@@ -812,4 +864,14 @@ void PhotonReSTIR::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
         buffer[num++] = int8_t((u - 0.5f) * R);
         buffer[num++] = int8_t((v - 0.5f) * R);
     }
+}
+
+void PhotonReSTIR::copyPhotonCounter(RenderContext* pRenderContext)
+{
+    //Copy the photonConter to a CPU Buffer
+    pRenderContext->copyBufferRegion(mpPhotonLightCounterCPU.get(), 0, mpPhotonLightCounter.get(), 0, sizeof(uint32_t));
+
+    void* data = mpPhotonLightCounterCPU->map(Buffer::MapType::Read);
+    std::memcpy(&mCurrentPhotonLightsCount, data, sizeof(uint));
+    mpPhotonLightCounterCPU->unmap();
 }

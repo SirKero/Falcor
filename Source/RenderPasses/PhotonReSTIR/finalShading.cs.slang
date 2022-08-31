@@ -16,21 +16,8 @@ import Reservoir;
 
 Texture2D<uint4> gReservoir;
 
-struct PhotonLight{
-    float3 posW;
-    uint packedNormal;
-    float3 flux;
-    uint _pad;
-
-    //Shading world normal
-    property float3 normal{
-        get { return decodeNormal2x16(packedNormal); }
-        set { packedNormal = encodeNormal2x16(newValue); }
-    }
-};
-
-StructuredBuffer<PhotonLight> gPhotonLights;
-Buffer<uint> gPhotonCounter;
+Texture2D<float4> gPhotonReservoirPos;
+Texture2D<float4> gPhotonReservoirFlux;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
@@ -80,19 +67,21 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-void getEmissiveLight(in Reservoir r, in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
+void getEmissiveLight(uint2 idx,in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
     //Get light position
-    const PhotonLight pl = gPhotonLights[r.lightIdx];
+    float4 photonPos = gPhotonReservoirPos[idx];
+    float3 photonNormal = decodeNormal2x16(asuint(photonPos.z));
+    float3 photonFlux = gPhotonReservoirFlux[idx].xyz;
     
-    toLight = pl.posW - worldPos;
+    toLight = photonPos.xyz - worldPos;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     distance = sqrt(distSqr);
     toLight = toLight/ distance;    //normalize
 
-    float cosTheta = dot(pl.normal, -toLight);
+    float cosTheta = dot(photonNormal, -toLight);
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
-    Li = pl.flux / pdf;
+    Li = photonFlux / pdf;
 }
 
 [numthreads(16, 16, 1)]
@@ -123,7 +112,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float distance = 0;
     float3 toLight = { };
     float3 Li = { };
-    getEmissiveLight(r,sd.posW ,distance , toLight, Li);
+    getEmissiveLight(dTid,sd.posW ,distance , toLight, Li);
     Li = max(0.f, Li * r.weightSum);
 
     //Check light visibility with a shadow ray

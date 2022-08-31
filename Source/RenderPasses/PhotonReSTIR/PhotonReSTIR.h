@@ -83,7 +83,7 @@ private:
 
     /** Prepares the photon light buffers
     */
-    void preparePhotonBuffers(RenderContext* pRenderContext);
+    void preparePhotonBuffers(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Prepare the reservoir and photon buffers
     */
@@ -121,6 +121,7 @@ private:
     */
     void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
 
+    void copyPhotonCounter(RenderContext* pRenderContext);
 
     //Constants
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
@@ -141,10 +142,16 @@ private:
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     float mVisibilityRayOffset = 0.01f;      //TMin for visibility rays
     //Photon
-    uint mNumMaxPhotons = 500000;           //Max number of photons
+    bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
+    uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
+    uint mNumMaxPhotonsUI = mNumMaxPhotons;
+    uint mCurrentPhotonLightsCount = 0;             //Gets data from GPU buffer
+    uint mNumDispatchedPhotons = 262144;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 1;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
+    bool mPhotonUseAlphaTest = true;
+    bool mPhotonAdjustShadingNormal = true;
 
 
     //Runtime
@@ -175,7 +182,8 @@ private:
     Buffer::SharedPtr mpPhotonLights;           //Buffer containing the photon light sources
     Buffer::SharedPtr mpPhotonLightCounter;     //Counter for the number of lights
     Buffer::SharedPtr mpPhotonLightCounterCPU;  //For showing the current number of photons in the UI
-    Texture::SharedPtr mpPhotonReservoir[4];    //Encoded Photon reservoir. One reservoir is two textures
+    Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures
+    Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
 
     //
     //Ray tracing programms and helper
