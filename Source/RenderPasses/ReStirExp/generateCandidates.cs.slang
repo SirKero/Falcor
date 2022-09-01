@@ -90,7 +90,7 @@ bool sampleEmissiveTriangle(float3 rnd, const float3 surfacePosition, out LightS
     float pdf = distSqr / denom;
     //float LeF = (Le.x + Le.y + Le.z)/3;
     float LeF = luminance(Le);
-    pdf *= ls.selectPdf;
+    //pdf *= ls.selectPdf;
     ls.Li = LeF / pdf;
 
     return true;

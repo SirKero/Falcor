@@ -109,7 +109,7 @@ bool getEmissiveTriangle(uint triangleIdx, float2 uv, const float3 surfacePos, o
     float pdf = distSqr / denom;
     //float LeF = (Le.x + Le.y + Le.z)/3;
     float LeF = luminance(Le);
-    pdf *= ls.selectPdf;
+    //pdf *= ls.selectPdf;
     ls.Li = LeF / pdf;
 
     return true;
