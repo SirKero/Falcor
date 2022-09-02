@@ -366,9 +366,9 @@ void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const Rend
         uint2 texDim = renderData.getDefaultTextureDims();
         for (uint i = 0; i < 2; i++) {
             mpPhotonReservoirPos[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA32Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-            mpPhotonReservoirPos[i]->setName("PhotonReSTIR::PhotonReservoirPos" + i);
+            mpPhotonReservoirPos[i]->setName("PhotonReSTIR::PhotonReservoirPos" + std::to_string(i));
             mpPhotonReservoirFlux[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-            mpPhotonReservoirFlux[i]->setName("PhotonReSTIR::PhotonReservoirFlux" + i);
+            mpPhotonReservoirFlux[i]->setName("PhotonReSTIR::PhotonReservoirFlux" + std::to_string(i));
         }
     }
 }
@@ -533,6 +533,8 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
 
     //Clear current reservoir
     pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2].get()->getUAV().get(), uint4(0));
+    pRenderContext->clearTexture(mpPhotonReservoirPos[mFrameCount % 2].get() , float4(0));
+    pRenderContext->clearTexture(mpPhotonReservoirFlux[mFrameCount % 2].get(), float4(0));
 
     //Create pass
     if (!mpGenerateCandidates) {
@@ -563,12 +565,10 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
 
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpSampleGenerator->setShaderData(var);          //Sample generator
-    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    bindReservoirs(var, mFrameCount, false);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gPhotonCounter"] = mpPhotonLightCounter;
     var["gPhotonLights"] = mpPhotonLights;
-    var["gPhotonReservoirPos"] = mpPhotonReservoirPos[mFrameCount % 2];
-    var["gPhotonReservoirFlux"] = mpPhotonReservoirFlux[mFrameCount % 2];
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -622,8 +622,7 @@ void PhotonReSTIR::temporalResampling(RenderContext* pRenderContext, const Rende
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpSampleGenerator->setShaderData(var);          //Sample generator
 
-    var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
-    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
+    bindReservoirs(var, mFrameCount);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
 
@@ -683,8 +682,7 @@ void PhotonReSTIR::spartialResampling(RenderContext* pRenderContext, const Rende
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpSampleGenerator->setShaderData(var);          //Sample generator
 
-    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
-    var["gOutReservoir"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
+    bindReservoirs(var, mFrameCount, true); //Use "Previous" as output 
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
 
@@ -742,10 +740,9 @@ void PhotonReSTIR::spartioTemporalResampling(RenderContext* pRenderContext, cons
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpSampleGenerator->setShaderData(var);          //Sample generator
 
+    bindReservoirs(var, mFrameCount, true); //Use "Previous" as output 
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
-    var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
-    var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
     var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
@@ -812,9 +809,7 @@ void PhotonReSTIR::finalShadingPass(RenderContext* pRenderContext, const RenderD
 
     uint reservoirIndex = mResamplingMode == ResamplingMode::Spartial ? (mFrameCount + 1) % 2 : mFrameCount % 2;
 
-    var["gReservoir"] = mpReservoirBuffer[reservoirIndex];
-    var["gPhotonReservoirPos"] = mpPhotonReservoirPos[reservoirIndex];
-    var["gPhotonReservoirFlux"] = mpPhotonReservoirFlux[reservoirIndex];
+    bindReservoirs(var, reservoirIndex ,false);
 
     //for (auto& inp : kInputChannels) bindAsTex(inp);
     bindAsTex(kInVBufferDesc);
@@ -874,4 +869,16 @@ void PhotonReSTIR::copyPhotonCounter(RenderContext* pRenderContext)
     void* data = mpPhotonLightCounterCPU->map(Buffer::MapType::Read);
     std::memcpy(&mCurrentPhotonLightsCount, data, sizeof(uint));
     mpPhotonLightCounterCPU->unmap();
+}
+
+void PhotonReSTIR::bindReservoirs(ShaderVar& var, uint index , bool bindPrev)
+{
+    var["gReservoir"] = mpReservoirBuffer[index % 2];
+    var["gPhotonReservoirPos"] = mpPhotonReservoirPos[index % 2];
+    var["gPhotonReservoirFlux"] = mpPhotonReservoirFlux[index % 2];
+    if (bindPrev) {
+        var["gReservoirPrev"] = mpReservoirBuffer[(index +1) % 2];
+        var["gPhotonReservoirPosPrev"] = mpPhotonReservoirPos[(index +1) % 2];
+        var["gPhotonReservoirFluxPrev"] = mpPhotonReservoirFlux[(index +1) % 2];
+    }
 }

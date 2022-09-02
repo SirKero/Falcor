@@ -121,7 +121,14 @@ private:
     */
     void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
 
+    /** Copies the photon counter to a uint to show the number in UI
+    */
     void copyPhotonCounter(RenderContext* pRenderContext);
+
+    /** Binds all the reservoirs
+    */
+    void bindReservoirs(ShaderVar& var, uint index , bool bindPrev = true);
+
 
     //Constants
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer

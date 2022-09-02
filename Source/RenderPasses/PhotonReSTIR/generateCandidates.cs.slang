@@ -78,45 +78,6 @@ Surface getSurface(uint2 idx){
     
     return Surface(surfaceData, -viewDir);
 }
-
-bool sampleEmissiveTriangle(float3 rnd, const float3 surfacePosition, out LightSample ls, out float sampleDistance){
-    const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
-    if(activeTriangleCount == 0) return false;
-    //get random active triangle
-    const uint rndTriangleIndex = min(uint(activeTriangleCount * rnd.x), activeTriangleCount-1);
-    ls.lightIdx = gScene.lightCollection.activeTriangles[rndTriangleIndex];
-    ls.selectPdf = 1.f/activeTriangleCount;
-
-    //get triangle data and sample uniformly
-    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(ls.lightIdx);
-    const float3 barycentrics = sample_triangle(rnd.yz);
-    ls.uv = rnd.yz; //store uv for later
-    float3 posW = tri.getPosition(barycentrics);
-    float3 toLight = posW - surfacePosition;
-    float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
-    sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
-    ls.dir = toLight/ sampleDistance;    //normalize
-
-    //Reject sample if light is backfacing
-    //TODO Set this an an define?
-    float cosTheta = dot(tri.normal, -ls.dir);
-    if(cosTheta < 0) return false;
-
-    //TODO: Add define if pre integrated emission or texture should be used
-    //Get emission
-    float3 Le = gScene.lightCollection.getAverageRadiance(ls.lightIdx);
-
-    //Calculate Li for later
-    float denom = max(FLT_MIN, cosTheta * tri.area); //Clamp to avoid nans
-    float pdf = distSqr / denom;
-    //float LeF = (Le.x + Le.y + Le.z)/3;
-    float LeF = luminance(Le);
-    pdf *= ls.selectPdf;
-    ls.Li = LeF / pdf;
-
-    return true;
-}
-
 //Generates a light sample. Returns false if sample is invalid
 bool generateSample(inout SampleGenerator sg, const float3 surfacePosition,out LightSample ls, out PhotonLight pl, out float sampleDistance){
     const uint lightCount = gPhotonCounter[0];

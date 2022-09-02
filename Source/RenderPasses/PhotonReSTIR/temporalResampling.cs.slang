@@ -1,6 +1,9 @@
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
+import Utils.Math.PackedFormats;
+import Utils.Math.FormatConversion;
+
 import Scene.RaytracingInline;
 import Scene.Material.ShadingUtils;
 import Rendering.Materials.Microfacet;
@@ -15,9 +18,12 @@ import Reservoir;
 import SurfaceData;
 
 RWTexture2D<uint4> gReservoir;
-RWTexture2D<uint> gReservoirUV;
 Texture2D<uint4> gReservoirPrev;
-Texture2D<uint> gReservoirUVPrev;
+
+RWTexture2D<float4> gPhotonReservoirPos;
+RWTexture2D<float4> gPhotonReservoirFlux;
+Texture2D<float4> gPhotonReservoirPosPrev;
+Texture2D<float4> gPhotonReservoirFluxPrev;
 
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -44,12 +50,13 @@ cbuffer Constant
 }
 
 struct LightSample{
-    uint lightIdx;
     float3 dir;
     float Li;
-    float selectPdf;
-    float2 uv;
-    //Enum type later ? 
+};
+
+struct PhotonLight{
+    float4 pos;
+    float4 flux;
 };
 
 uint index2Dto1D(uint2 idx, uint width){
@@ -61,11 +68,11 @@ Reservoir getReservoir(int2 idx, bool prev)
     Reservoir r;
     if (prev)
     {
-        r = Reservoir(gReservoirPrev[idx], gReservoirUVPrev[idx]);
+        r = Reservoir(gReservoirPrev[idx], 0);
     }
     else
     {
-        r = Reservoir(gReservoir[idx], gReservoirUV[idx]);
+        r = Reservoir(gReservoir[idx], 0);
     }
     if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
         r = Reservoir();
@@ -90,36 +97,33 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getEmissiveTriangle(uint triangleIdx, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
-    const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
-    ls.lightIdx = triangleIdx;
-    ls.selectPdf = 1.f/activeTriangleCount;
+PhotonLight getPhotonLight(int2 idx, bool prev){
+    PhotonLight pl;
+    if(prev){
+        pl.pos = gPhotonReservoirPosPrev[idx];
+        pl.flux = gPhotonReservoirFluxPrev[idx];
+    }else{
+        pl.pos = gPhotonReservoirPos[idx];
+        pl.flux = gPhotonReservoirFlux[idx];
+    }
+    return pl;
+}
 
-    //get triangle data and sample uniformly
-    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(ls.lightIdx);
-    const float3 barycentrics = sample_triangle(uv);
-    float3 posW = tri.getPosition(barycentrics);
-    float3 toLight = posW - surfacePos;
-    float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
-    distance = sqrt(distSqr);
-    ls.dir = toLight/ distance;    //normalize
+bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
+    //Get light position
+    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.z));
 
-    //Reject sample if light is backfacing
-    //TODO Set this an an define?
-    float cosTheta = dot(tri.normal, -ls.dir);
-    if(cosTheta < 0) return false;
+    if(any(pl.flux.xyz <= 0)) return false;
+    
+    ls.dir = pl.pos.xyz - worldPos;
+    float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
+    sampleDistance = sqrt(distSqr);
+    ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    //TODO: Add define if pre integrated emission or texture should be used
-    //Get emission
-    float3 Le = gScene.lightCollection.getAverageRadiance(ls.lightIdx);
-
-    //Calculate Li for later
-    float denom = max(FLT_MIN, cosTheta * tri.area); //Clamp to avoid nans
-    float pdf = distSqr / denom;
-    //float LeF = (Le.x + Le.y + Le.z)/3;
-    float LeF = luminance(Le);
-    pdf *= ls.selectPdf;
-    ls.Li = LeF / pdf;
+    float cosTheta = dot(photonNormal, -ls.dir);
+    
+    float pdf = distSqr / max(FLT_MIN, cosTheta);
+    ls.Li = luminance(pl.flux.xyz) / pdf;
 
     return true;
 }
@@ -183,13 +187,12 @@ void finalizeSample(inout Reservoir r, float normalizationNumerator, float norma
 void main(uint2 dTid : SV_DispatchThreadID)
 {
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 4 * 13);
-    bool valid = true;
     Reservoir r = Reservoir();
     
     //Check if surface is valid
     Surface currentSurface = getSurface(dTid, false);
     if(!currentSurface.valid)
-        valid = false;
+        return;
         
     //Load reservoir from current iteration
     Reservoir current = getReservoir(dTid, false);
@@ -205,15 +208,18 @@ void main(uint2 dTid : SV_DispatchThreadID)
     
     uint2 prevIdx = uint2(round(prevIdxF));
 
+        
     //Check if a neighbor surface matches up
     //Try to find a matching surface in the neighborhood of the reprojected pixel
     Surface temporalSurface;
+    PhotonLight selectPL = getPhotonLight(dTid, false);
     bool selectPrevSample = false;
     uint previousM = 0;
     bool foundTemporalSurface = false;
     int2 temporalOffset;
     int2 idx = (0,0);
     float temporalSearchRadius = 4.f;
+    
     for(uint i=0 ; i<9; i++){
         int2 offset = int2(0,0);
         if(i > 0){
@@ -243,20 +249,22 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
     if(foundTemporalSurface){
         Reservoir prev = getReservoir(idx, true);
-
         prev.M = min(prev.M, historyLimit);
         previousM = prev.M;
-
+        
+        PhotonLight pl = getPhotonLight(idx, true);
         //Get new target pdf if valid
         float targetPdf = 0;
         if(prev.M > 0){
             LightSample ls = { };
             float dis = 0;
-            getEmissiveTriangle(prev.lightIdx, prev.uv, currentSurface.posW, ls, dis);
-            targetPdf = getSurfacePdf(currentSurface, ls);
+            bool validLS = getLightSample(pl, currentSurface.posW, ls, dis);
+            targetPdf = validLS ? getSurfacePdf(currentSurface, ls) : 0;
         }
 
         selectPrevSample = combineReservoir(r, prev, targetPdf, sampleNext1D(sg));
+        if(selectPrevSample)
+            selectPL = pl;
     }
 
 //Bias correction
@@ -268,7 +276,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     {
         LightSample ls = { };
         float distance = 0;
-        bool valid = getEmissiveTriangle(r.lightIdx, r.uv, temporalSurface.posW, ls, distance);
+        bool valid = getLightSample(selectPL, temporalSurface.posW, ls, distance);
         float ps = valid ? getSurfacePdf(temporalSurface, ls) : 0.0;
 
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
@@ -298,5 +306,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
     
     gReservoir[dTid] = r.pack();
-    gReservoirUV[dTid] = r.packedUV;
+    if(selectPrevSample){
+        gPhotonReservoirPos[dTid] = selectPL.pos;
+        gPhotonReservoirFlux[dTid] = selectPL.flux;
+    }
 }
