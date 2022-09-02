@@ -193,6 +193,8 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
         changed |= widget.var("Light Store Probability", mPhotonRejection, 0.f, 1.f, 0.0001f);
         widget.tooltip("Probability a photon light is stored on diffuse hit. Flux is scaled up appropriately");
 
+        changed |= widget.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
+
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
     }

@@ -281,6 +281,7 @@ void rayGen()
             pl.flux = photon.flux;
 
             gPhotonLights[photonIndex] = pl;
+            break;  //Stop here to not sample points multiple times
         }
    
         //Russian Roulette
