@@ -118,8 +118,8 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
 
     //Get Flux
     float2 uv = tri.getTexCoord(barycentrics);
-    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv);
-    pls.flux *= tri.area / triangleSelectionPdf;
+    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area * M_PI;
+    pls.flux /= triangleSelectionPdf;
 
     return true;
 }
