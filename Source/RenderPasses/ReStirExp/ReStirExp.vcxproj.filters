@@ -7,13 +7,46 @@
     <ClInclude Include="ReStirExp.h" />
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="Reservoir.slang" />
-    <ShaderSource Include="generateCandidates.cs.slang" />
-    <ShaderSource Include="finalShading.cs.slang" />
-    <ShaderSource Include="temporalResampling.cs.slang" />
-    <ShaderSource Include="spartialResampling.cs.slang" />
-    <ShaderSource Include="spartioTemporalResampling.cs.slang" />
-    <ShaderSource Include="fillSurfaceInfo.cs.slang" />
-    <ShaderSource Include="SurfaceData.slang" />
+    <ShaderSource Include="fillSurfaceInfo.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="finalShading.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="generateCandidates.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="spartialResampling.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="spartioTemporalResampling.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="temporalResampling.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Reservoir.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="SurfaceData.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Lights.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="updateLightBuffer.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="presampleLights.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Shader">
+      <UniqueIdentifier>{b4d1748e-3b78-4151-9cd3-f4f9302a604c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader\Structs">
+      <UniqueIdentifier>{f8b0406a-e470-4d94-8f4f-6c8f7c2c5070}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

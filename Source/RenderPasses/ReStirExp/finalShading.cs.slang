@@ -10,10 +10,12 @@ import Utils.Math.MathHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
+import Lights;
 
 Texture2D<uint4> gReservoir;
 Texture2D<uint> gReservoirUV;
 
+StructuredBuffer<PackedReSTIRLight> gLights;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
 RWTexture2D<float4> gColor;
@@ -64,7 +66,9 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 
 void getEmissiveLight(in Reservoir r, in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
     //Get triangle position
-    EmissiveTriangle tri = gScene.lightCollection.getTriangle(r.lightIdx);
+    ReSTIRLight light = ReSTIRLight(gLights[r.lightIdx]);
+    
+    EmissiveTriangle tri = gScene.lightCollection.getTriangle(light.lightIdx);
     const float3 barycentrics = sample_triangle(r.uv);
     float3 lightPos = tri.getPosition(barycentrics);
     //Get light dir
@@ -81,7 +85,7 @@ void getEmissiveLight(in Reservoir r, in float3 worldPos, out float distance ,ou
         float2 texCoord = tri.getTexCoord(barycentrics);
         Le = gScene.materials.evalEmissive(tri.materialID, texCoord);
     }else{
-        Le = gScene.lightCollection.getAverageRadiance(r.lightIdx);
+        Le = gScene.lightCollection.getAverageRadiance(light.lightIdx);
     }
     
 

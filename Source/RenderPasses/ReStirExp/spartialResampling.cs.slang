@@ -13,6 +13,7 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
+import Lights;
 
 Texture2D<uint4> gReservoir;
 Texture2D<uint> gReservoirUV;
@@ -20,6 +21,7 @@ RWTexture2D<uint4> gOutReservoir;
 RWTexture2D<uint> gOutReservoirUV;
 
 Texture1D<snorm float2> gNeighOffsetBuffer;
+StructuredBuffer<PackedReSTIRLight> gLights;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
 
@@ -82,37 +84,31 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
 }
 
 bool getEmissiveTriangle(uint triangleIdx, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
-    const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
-    ls.lightIdx = triangleIdx;
-    ls.selectPdf = 1.f/activeTriangleCount;
+    ReSTIRLight light = ReSTIRLight(gLights[triangleIdx]);
 
-    //get triangle data and sample uniformly
-    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(ls.lightIdx);
-    const float3 barycentrics = sample_triangle(uv);
-    float3 posW = tri.getPosition(barycentrics);
-    float3 toLight = posW - surfacePos;
+    ls.uv = uv;
+    
+    float3 normal = cross(light.edge0 , light.edge1);
+    const float normalLength = length(normal);
+    const float area = 0.5f * normalLength;
+    normal /= normalLength;
+
+    float3 pos = light.pos + ls.uv.x * light.edge0 + ls.uv.y * light.edge1;
+    const float3 toLight = pos - surfacePos;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
-    distance = sqrt(distSqr);
-    ls.dir = toLight / distance; //normalize
+    distance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
+    ls.dir = toLight/ distance;    //normalize
 
     //Reject sample if light is backfacing
-    //TODO Set this an an define?
-    float cosTheta = dot(tri.normal, -ls.dir);
-    if(cosTheta < 0) return false;
-
-    //TODO: Add define if pre integrated emission or texture should be used
-    //Get emission
-    float3 Le = gScene.lightCollection.getAverageRadiance(ls.lightIdx);
+    float cosTheta = dot(normal, -ls.dir);
+    if(cosTheta <= 0) return false;
 
     //Calculate Li for later
-    float denom = max(FLT_MIN, cosTheta * tri.area); //Clamp to avoid nans
+    float denom = max(FLT_MIN, cosTheta * area); //Clamp to avoid nans
     float pdf = distSqr / denom;
-    //float LeF = (Le.x + Le.y + Le.z)/3;
-    float LeF = luminance(Le);
-    //pdf *= ls.selectPdf;
-    ls.Li = LeF / pdf;
-
-    return true;
+    ls.Li = light.avgRadiance / pdf;
+    
+    return ls.Li > 0;   //true if sample is valid
 }
 
 //gets the target pdf averaged to one channel

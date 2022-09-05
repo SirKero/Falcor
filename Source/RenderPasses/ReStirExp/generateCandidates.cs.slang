@@ -14,11 +14,14 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
+import Lights;
 
 
 RWTexture2D<uint4> gReservoir;
 RWTexture2D<uint> gReservoirUV;
 
+StructuredBuffer<uint2> gPresampledLight;
+StructuredBuffer<PackedReSTIRLight> gLights;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
 
@@ -33,6 +36,9 @@ cbuffer Constant
     uint gNumEmissiveSamples;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
+    uint gPresampledLightBufferSize;
+    uint gLightBufferSize;
+    uint2 _pad;
 }
 
 
@@ -40,7 +46,7 @@ struct LightSample{
     uint lightIdx;
     float3 dir;
     float Li;
-    float selectPdf;
+    float invSelectPdf;
     float2 uv;
     //Enum type later ? 
 };
@@ -58,50 +64,41 @@ Surface getSurface(uint2 idx){
     return Surface(surfaceData, -viewDir);
 }
 
-bool sampleEmissiveTriangle(float3 rnd, const float3 surfacePosition, out LightSample ls, out float sampleDistance){
-    const uint activeTriangleCount = gScene.lightCollection.getActiveTriangleCount();
-    if(activeTriangleCount == 0) return false;
-    //get random active triangle
-    const uint rndTriangleIndex = min(uint(activeTriangleCount * rnd.x), activeTriangleCount-1);
-    ls.lightIdx = gScene.lightCollection.activeTriangles[rndTriangleIndex];
-    ls.selectPdf = 1.f/activeTriangleCount;
+//Generates a light sample. Returns false if sample is invalid
+bool sampleLight(float3 rnd, const float3 surfacePosition, out LightSample ls, out float sampleDistance){
+    //get sample
+    uint sample = min(uint(floor(rnd.x * float(gPresampledLightBufferSize))), gPresampledLightBufferSize - 1);
+    uint2 presampleData = gPresampledLight[sample]; //x = idx, y = invSourcePdf
+    ls.invSelectPdf = asfloat(presampleData.y);
+    if(ls.invSelectPdf <= 0) return false;
+    //Get Light
+    ReSTIRLight light = ReSTIRLight(gLights[presampleData.x]);
+    ls.lightIdx = presampleData.x;
+    
+    // Uniformly sample the triangle's area by folding the random numbers such that u & v sum to less than 1.
+    ls.uv = ((rnd.y + rnd.z) <= 1.f) ? rnd.yz : 1.f - rnd.yz;
+    float3 normal = cross(light.edge0 , light.edge1);
+    const float normalLength = length(normal);
+    const float area = 0.5f * normalLength;
+    normal /= normalLength;
 
-    //get triangle data and sample uniformly
-    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(ls.lightIdx);
-    const float3 barycentrics = sample_triangle(rnd.yz);
-    ls.uv = rnd.yz; //store uv for later
-    float3 posW = tri.getPosition(barycentrics);
-    float3 toLight = posW - surfacePosition;
+    float3 pos = light.pos + ls.uv.x * light.edge0 + ls.uv.y * light.edge1;
+    const float3 toLight = pos - surfacePosition;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
 
     //Reject sample if light is backfacing
-    //TODO Set this an an define?
-    float cosTheta = dot(tri.normal, -ls.dir);
-    if(cosTheta < 0) return false;
+    float cosTheta = dot(normal, -ls.dir);
+    if(cosTheta <= 0) return false;
 
-    //TODO: Add define if pre integrated emission or texture should be used
-    //Get emission
-    float3 Le = gScene.lightCollection.getAverageRadiance(ls.lightIdx);
-
+    //TODO add option for emissive texture evaluation here
     //Calculate Li for later
-    float denom = max(FLT_MIN, cosTheta * tri.area); //Clamp to avoid nans
+    float denom = max(FLT_MIN, cosTheta * area); //Clamp to avoid nans
     float pdf = distSqr / denom;
-    //float LeF = (Le.x + Le.y + Le.z)/3;
-    float LeF = luminance(Le);
-    //pdf *= ls.selectPdf;
-    ls.Li = LeF / pdf;
-
-    return true;
-}
-
-//Generates a light sample. Returns false if sample is invalid
-bool generateSample(inout SampleGenerator sg, const float3 surfacePosition,out LightSample ls, out float sampleDistance){
-    if(!sampleEmissiveTriangle(sampleNext3D(sg), surfacePosition, ls, sampleDistance)) return false;
-        
-    //If different lights are supported add MIS weight
-    return (ls.Li > 0.f);    //return true if valid sample
+    ls.Li = light.avgRadiance / pdf;
+    
+    return ls.Li > 0;   //true if sample is valid
 }
 
 //gets the target pdf averaged to one channel
@@ -133,7 +130,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
 }
 
 bool updateReservoir(inout Reservoir r, in LightSample ls,float targetPdf, float rnd){
-    float risWeight = targetPdf / ls.selectPdf;
+    float risWeight = targetPdf * ls.invSelectPdf;
     r.weightSum += risWeight;
     r.M += 1;
     bool selectSample = (rnd * r.weightSum < risWeight);
@@ -171,7 +168,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     for(uint i = 0; i< gNumEmissiveSamples; i++){
         LightSample ls;
         float sampleDistance;
-        bool valid = generateSample(sg,surface.posW, ls, sampleDistance);
+        bool valid = sampleLight(sampleNext3D(sg),surface.posW, ls, sampleDistance);
         if(!valid) continue;
         float targetPdf = getSurfacePdf(surface, ls);
         if(updateReservoir(r,ls, targetPdf, sampleNext1D(sg))){

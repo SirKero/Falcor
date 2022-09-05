@@ -43,7 +43,9 @@ extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
 
 namespace {
     //Shaders
+    const char kShaderUpdateLightInfo[] = "RenderPasses/ReStirExp/updateLightBuffer.cs.slang";
     const char kShaderFillSurfaceInformation[] = "RenderPasses/ReStirExp/fillSurfaceInfo.cs.slang";
+    const char kShaderPresampleLights[] = "RenderPasses/ReStirExp/presampleLights.cs.slang";
     const char kShaderGenerateCandidates[] = "RenderPasses/ReStirExp/generateCandidates.cs.slang";
     const char kShaderTemporalPass[] = "RenderPasses/ReStirExp/temporalResampling.cs.slang";
     const char kShaderSpartialPass[] = "RenderPasses/ReStirExp/spartialResampling.cs.slang";
@@ -113,8 +115,14 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     prepareBuffers(pRenderContext, renderData);
 
+    //Update/Fill the lightBuffer
+    updateLightsBufferPass(pRenderContext, renderData);
+
     //Prepare the surface buffer
     prepareSurfaceBufferPass(pRenderContext, renderData);
+
+    //Presample lights with light pdf
+    presampleLightsPass(pRenderContext, renderData);
 
     //Generate Canditdates
     generateCandidatesPass(pRenderContext, renderData);
@@ -211,10 +219,49 @@ void ReStirExp::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& 
     mReset = true;
 }
 
-bool ReStirExp::prepareLighting(RenderContext* pRenderContext)
+void ReStirExp::prepareLighting(RenderContext* pRenderContext)
 {
-    //TODO set up a lighting texture for emissive and area light
-    return false;
+    //Check if light count has changed
+    mUpdateLightBuffer |= mpScene->getLightCollection(pRenderContext)->update(pRenderContext);
+
+    bool countChanged = false;
+    uint sceneLightCount = mpScene->getLightCollection(pRenderContext)->getActiveLightCount();
+    if (mNumLights != sceneLightCount) {
+        mNumLights = sceneLightCount;
+        countChanged = true;
+    }
+
+    //Create light buffer
+    if (!mpLightBuffer || countChanged) {
+        mpLightBuffer = Buffer::createStructured(sizeof(uint) * 8, mNumLights);
+        mpLightBuffer->setName("ReStirExp::LightsBuffer");
+    }
+
+    //Create pdf texture
+    uint width, height, mip;
+    computePdfTextureSize(mNumLights, width, height, mip);
+    if (!mpLightPdfTexture || mpLightPdfTexture->getWidth() != width || mpLightPdfTexture->getHeight() != height || mpLightPdfTexture->getMipCount() != mip) {
+        mpLightPdfTexture = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip,nullptr,
+                                              ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
+        mpLightPdfTexture->setName("ReStirExp::LightPdfTex");
+        mUpdateLightBuffer = true;
+    }
+
+    //Create Buffer for the presampled lights
+    if (!mpPresampledLight || mPresampledTitleSizeChanged) {
+        mpPresampledLight = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
+        mpPresampledLight->setName("ReStirExp::PresampledLights");
+        mPresampledTitleSizeChanged = false;
+    }
+
+    //Rebuild if count changed
+    mUpdateLightBuffer |= countChanged;
+
+    //Clear texture if count changed
+    if(mUpdateLightBuffer)
+        pRenderContext->clearUAV(mpLightPdfTexture->getUAV().get(), float4(0.f));
+    
+    
 }
 
 void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData)
@@ -281,6 +328,45 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
     }
 }
 
+void ReStirExp::updateLightsBufferPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("UpdateLights");
+    //Skip Pass if light buffer is up to date
+    if (!mUpdateLightBuffer) return;
+
+    //init
+    if (!mpUpdateLightBufferPass) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderUpdateLightInfo).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        mpUpdateLightBufferPass = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpUpdateLightBufferPass);
+
+    //Set variables
+    auto var = mpUpdateLightBufferPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
+
+    var["gLightBuffer"] = mpLightBuffer;
+    var["gLightPdf"] = mpLightPdfTexture;
+
+    uint2 targetDim = uint2(8192u, div_round_up(mNumLights, 8192u));
+
+    if (mReset || mReuploadBuffers) {
+        var["Constant"]["gThreadDim"] = targetDim;
+        var["Constant"]["gMaxNumLights"] = mNumLights;
+    }
+
+    mpUpdateLightBufferPass->execute(pRenderContext, uint3(targetDim, 1));
+
+    //Create Mip chain
+    mpLightPdfTexture->generateMips(pRenderContext);
+    mUpdateLightBuffer = false;
+}
+
 void ReStirExp::prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("FillSurfaceBuffer");
@@ -327,6 +413,41 @@ void ReStirExp::prepareSurfaceBufferPass(RenderContext* pRenderContext, const Re
     pRenderContext->uavBarrier(mpSurfaceBuffer[mFrameCount % 2].get());
 }
 
+void ReStirExp::presampleLightsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("PresampleLight");
+    if (!mpPresampleLightsPass) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderPresampleLights).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpGenerateSampleGenerator->getDefines());
+        mpPresampleLightsPass = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpPresampleLightsPass);
+
+    //Set variables
+    auto var = mpPresampleLightsPass->getRootVar();
+
+    var["PerFrame"]["gFrameCount"] = mFrameCount;
+
+    if (mReset || mReuploadBuffers) {
+        var["Constant"]["gPdfTexSize"] = uint2(mpLightPdfTexture->getWidth(), mpLightPdfTexture->getHeight());
+        var["Constant"]["gTileSizes"] = mPresampledTitleSize;
+    }
+
+    //var["gLights"] = mpLightBuffer;
+    var["gLightPdf"] = mpLightPdfTexture;
+    var["gPresampledLights"] = mpPresampledLight;
+
+    uint2 targetDim = mPresampledTitleSize;
+    mpPresampleLightsPass->execute(pRenderContext, uint3(targetDim, 1));
+
+    pRenderContext->uavBarrier(mpPresampledLight.get());
+}
+
 void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("GenerateCandidates");
@@ -369,6 +490,8 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gReservoirUV"] = mpReservoirUVBuffer[mFrameCount % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+    var["gPresampledLight"] = mpPresampledLight;
+    var["gLights"] = mpLightBuffer;
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -379,6 +502,8 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay;   //TODO: Also add a variable to manually disable
+        var[uniformName]["gPresampledLightBufferSize"] = mPresampledTitleSize.x * mPresampledTitleSize.y;
+        var[uniformName]["gLightBufferSize"] = mNumLights;
     }
 
     //Execute
@@ -421,6 +546,7 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
+    var["gLights"] = mpLightBuffer;
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gReservoirUVPrev"] = mpReservoirUVBuffer[(mFrameCount + 1) % 2];
@@ -486,6 +612,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
+    var["gLights"] = mpLightBuffer;
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gOutReservoir"] = mpReservoirBuffer[(mFrameCount+1) % 2];
     var["gOutReservoirUV"] = mpReservoirUVBuffer[(mFrameCount + 1) % 2];
@@ -548,6 +675,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
 
+    var["gLights"] = mpLightBuffer;
     var["gSurfacePrev"] =  mpSurfaceBuffer[(mFrameCount + 1) % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gReservoirPrev"] = mpReservoirBuffer[(mFrameCount + 1) % 2];
@@ -624,6 +752,7 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
 
     var["gReservoir"] = mpReservoirBuffer[reservoirIndex];
     var["gReservoirUV"] = mpReservoirUVBuffer[reservoirIndex];
+    var["gLights"] = mpLightBuffer;
     for (auto& inp : kInputs) bindAsTex(inp);
     for (auto& out : kOutputs) bindAsTex(out);
 
@@ -671,4 +800,18 @@ void ReStirExp::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
         buffer[num++] = int8_t((u - 0.5f) * R);
         buffer[num++] = int8_t((v - 0.5f) * R);
     }
+}
+
+void ReStirExp::computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels)
+{
+    // Compute the size of a power-of-2 rectangle that fits all items, 1 item per pixel
+    double textureWidth = std::max(1.0, ceil(sqrt(double(maxItems))));
+    textureWidth = exp2(ceil(log2(textureWidth)));
+    double textureHeight = std::max(1.0, ceil(maxItems / textureWidth));
+    textureHeight = exp2(ceil(log2(textureHeight)));
+    double textureMips = std::max(1.0, log2(std::max(textureWidth, textureHeight)));
+
+    outWidth = uint32_t(textureWidth);
+    outHeight = uint32_t(textureHeight);
+    outMipLevels = uint32_t(textureMips);
 }

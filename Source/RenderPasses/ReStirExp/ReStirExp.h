@@ -77,17 +77,25 @@ private:
 
     ReStirExp() : RenderPass(kInfo) {}
 
-    /** Prepares the samplers etc needed for lighting. Returns true if lighting has changed
+    /** Prepares the samplers etc needed for lighting.
     */
-    bool prepareLighting(RenderContext* pRenderContext);
+    void prepareLighting(RenderContext* pRenderContext);
 
     /** Prepare the reservoir buffers
     */
     void prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Update/Fill lights buffer
+    */
+    void updateLightsBufferPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Prepares the surface info buffer
    */
    void prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+   /**Presample lights with light pdf texture
+   */
+   void presampleLightsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Generates the canidates for the pass and stores them inside the reservoir
     */
@@ -113,11 +121,17 @@ private:
     */
     void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
 
+    /** Gets PDF texture size. Taken from RTXDI
+    */
+    void computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels);
+
     //Constants
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
+    const uint2 kPresampledTitleCount = uint2(1,1024);
+    const uint2 kPresampledTitleSize = uint2(256, 8192);
 
     //UI
-    uint mResamplingMode = ResamplingMode::SpartioTemporal;
+    uint mResamplingMode = ResamplingMode::NoResampling;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
@@ -129,6 +143,8 @@ private:
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     float mVisibilityRayOffset = 0.01f;      //TMin for visibility rays
+    uint2 mPresampledTitleSize = uint2(128, 1024);
+    bool mPresampledTitleSizeChanged = true;
 
     
     //Runtime
@@ -138,13 +154,18 @@ private:
     uint2 mScreenRes = { 0,0 };
     bool mUpdateRenderSettings = true;
     uint mFrameCount = 0;
+    uint mNumLights = 0;
+    bool mUpdateLightBuffer = true;
+    
 
     //Falcor Vars
     Scene::SharedPtr mpScene;       //Pointer for scene
     SampleGenerator::SharedPtr mpGenerateSampleGenerator;       //Sample generator for Generate pass
 
     //Passes
-    ComputePass::SharedPtr mpFillSurfaceInfoPass;               //Fills the surfaceInformation
+    ComputePass::SharedPtr mpUpdateLightBufferPass;         //Updates the light buffer
+    ComputePass::SharedPtr mpFillSurfaceInfoPass;           //Fills the surfaceInformation
+    ComputePass::SharedPtr mpPresampleLightsPass;           //Presamples lights
     ComputePass::SharedPtr mpGenerateCandidates;            //Generate Candidates Pass
     ComputePass::SharedPtr mpTemporalResampling;            //Temporal Resampling Pass
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
@@ -156,4 +177,7 @@ private:
     Texture::SharedPtr mpReservoirUVBuffer[2];  //Buffer for the uv component of the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
+    Texture::SharedPtr mpLightPdfTexture;
+    Buffer::SharedPtr mpLightBuffer;
+    Buffer::SharedPtr mpPresampledLight;
 };
