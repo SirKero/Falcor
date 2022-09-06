@@ -218,7 +218,8 @@ void rayGen()
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
 
-    const float invRejection = 1/gRejection;
+    const float invRejection = 1.f/gRejection;
+    const float invInvRejection = 1.f/(1.f-gRejection);
      // Prepare ray payload.
     RayData rayData = RayData.create();
     rayData.sg = SampleGenerator(launchIndex, gFrameCount +8 * 13 );
@@ -267,7 +268,7 @@ void rayGen()
         float rndRoulette = sampleNext1D(rayData.sg);
         bool roulette = rndRoulette <= gRejection;
               
-        //store photon light       
+        //store photon light
         if (reflectedDiffuse && roulette)
         { 
             uint photonIndex = 0;
@@ -285,6 +286,7 @@ void rayGen()
         }
    
         //Russian Roulette
+        if(reflectedDiffuse) rayData.thp * invInvRejection; //Scale global photon up if it was not stored
         const float rrVal = luminance(rayData.thp);
         const float prob = max(0.f, 1.f - rrVal);
         float rnd = sampleNext1D(rayData.sg);
