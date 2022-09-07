@@ -131,12 +131,12 @@ private:
     const uint2 kPresampledTitleSize = uint2(256, 8192);
 
     //UI
-    uint mResamplingMode = ResamplingMode::NoResampling;
+    uint mResamplingMode = ResamplingMode::SpartioTemporal;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
-    float mSamplingRadius = 20.f;           //Sampling radius in pixel
+    float mSpartialSamplingRadius = 30.f;   //Spartial Sampling radius in pixel
     float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
     bool mUseEmissiveTexture = false;        //Use Emissive texture in final shading

@@ -194,7 +194,7 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
             changed |= widget.var("Disocclusion Sample Boost", mDisocclusionBoostSamples, 0u, 32u);
             widget.tooltip("Number of spartial samples if no temporal surface was found. Needs to be bigger than \"Spartial Samples\" + 1 to have an effect");
 
-            changed |= widget.var("Sampling Radius", mSamplingRadius, 0.0f, 200.f);
+            changed |= widget.var("Sampling Radius", mSpartialSamplingRadius, 0.0f, 200.f);
             widget.tooltip("Radius for the Spartial Samples");
         }
     }
@@ -501,7 +501,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         uniformName = "Constant";
         var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay;   //TODO: Also add a variable to manually disable
+        var[uniformName]["gTestVisibility"] = true;   //TODO: Also add a variable to manually disable
         var[uniformName]["gPresampledLightBufferSize"] = mPresampledTitleSize.x * mPresampledTitleSize.y;
         var[uniformName]["gLightBufferSize"] = mNumLights;
     }
@@ -629,7 +629,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gSpartialSamples"] = mSpartialSamples;
-        var[uniformName]["gSamplingRadius"] = mSamplingRadius;
+        var[uniformName]["gSamplingRadius"] = mSpartialSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
     }
@@ -694,7 +694,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gSpartialSamples"] = mSpartialSamples;
-        var[uniformName]["gSamplingRadius"] = mSamplingRadius;
+        var[uniformName]["gSamplingRadius"] = mSpartialSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gDisocclusionBoostSamples"] = mDisocclusionBoostSamples;

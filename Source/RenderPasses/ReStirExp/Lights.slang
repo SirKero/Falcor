@@ -13,7 +13,7 @@ struct ReSTIRLight{
     float3 edge0;
     float avgRadiance;
     float3 edge1;
-    uint _pad;
+    int valid;
 
     //Init
     __init(PackedReSTIRLight packed){
@@ -22,6 +22,16 @@ struct ReSTIRLight{
         edge0 = f16tof32(packed.data1.xyz & 0xffff);
         edge1 = f16tof32(packed.data1.xyz >> 16);
         avgRadiance = asfloat(packed.data1.w);
+        valid = 1;
+    }
+
+    __init(){
+        this = {};
+        valid = -1;
+    }
+
+    bool isValid(){
+        return valid > 0;
     }
 
     PackedReSTIRLight pack(){

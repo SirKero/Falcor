@@ -85,7 +85,8 @@ Reservoir getReservoir(int2 idx, bool prev)
     {
         r = Reservoir(gReservoir[idx], gReservoirUV[idx]);
     }
-    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+    //Discard NaN reservoirs
+    if (isinf(r.weightSum) || isnan(r.weightSum))
         r = Reservoir();
     return r;
 }
@@ -108,8 +109,8 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getEmissiveTriangle(uint triangleIdx, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
-    ReSTIRLight light = ReSTIRLight(gLights[triangleIdx]);
+bool getEmissiveTriangle(in ReSTIRLight light, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
+    if(!light.isValid()) return false;
 
     ls.uv = uv;
     
@@ -203,8 +204,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if(!currentSurface.valid)
         return;
 
+     ReSTIRLight selectedLight = ReSTIRLight();
     //Load reservoir from current iteration
     Reservoir current =  getReservoir(dTid, false);
+    if(current.weightSum > 0)
+        selectedLight = ReSTIRLight(gLights[current.lightIdx]);
     
     uint historyLimit = uint(gMaxAge * current.M);
     
@@ -267,7 +271,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
         numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,32);
 
     int selectedSample = -1;
-    bool validSample = true;
     
     //Go through all neighbors
     for(uint i=0 ; i<numSamples; i++){
@@ -299,8 +302,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
             
         //If neighbor surface has passed the tests get reservoir and compair them
         Reservoir sampledReservoir = getReservoir(idx, true);
-        
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
+        ReSTIRLight resLight = ReSTIRLight(gLights[sampledReservoir.lightIdx]);
 
         cachedResults |= (1u << i);
         
@@ -311,83 +314,78 @@ void main(uint2 dTid : SV_DispatchThreadID)
         {
             LightSample ls = { };
             float dis;
-            valid = getEmissiveTriangle(sampledReservoir.lightIdx, sampledReservoir.uv, currentSurface.posW, ls, dis);
+            valid = getEmissiveTriangle(resLight, sampledReservoir.uv, currentSurface.posW, ls, dis);
             sampleTargetPdf = valid ? max(0.f, getSurfacePdf(currentSurface, ls)) : 0.0;
         }
         //Combine Reservoirs
         if(combineReservoir(r, sampledReservoir, sampleTargetPdf, sampleNext1D(sg))){
             selectedSample = i;
-            validSample = valid;
+            selectedLight = resLight;
         }
     }
 
-    
-    if(validSample && ( r.weightSum > 0 || !isnan(r.weightSum) || !isinf(r.weightSum))){
 
-        //Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
-        #if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
+//Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
+#if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
+
+    float pi = r.targetPdf;
+    float piSum = r.targetPdf * current.M;
         
-        float pi = r.targetPdf;
-        float piSum = r.targetPdf * current.M;
-        
-        //go through all neighbors again
-        for (int i = 0; i < numSamples; i++)
+    //go through all neighbors again
+    for (int i = 0; i < numSamples; i++)
+    {
+        //Skip if we skipped in last loop
+        if ((cachedResults & (1u << i)) == 0)
+            continue;
+        //Get Index
+        int2 offset = int2(0);
+        if (i == 0 && foundTemporalSurface)
+            offset = temporalOffset;
+        else
         {
-            //Skip if we skipped in last loop
-            if ((cachedResults & (1u << i)) == 0)
-                continue;
-            //Get Index
-            int2 offset = int2(0);
-            if (i == 0 && foundTemporalSurface)
-                offset = temporalOffset;
-            else
-            {
-                uint neighBufferIdx = neighOffsetStartIdx + i;
-                float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
-                offset = int2(randSamp * gSamplingRadius);
-            }
-            int2 idx = prevIdx + offset;
-
-            //Get Surface
-            Surface biasSurface = getSurface(idx, true);
-            
-            //getReservoir
-            Reservoir biasRes = getReservoir(idx, true);
-            biasRes.M = min(biasRes.M, historyLimit); //cap M
-        
-            //Get light pdf
-            bool valid = false;
-            float ps = 0.0f;
-            LightSample ls = { };
-            float dist = 0;
-
-            valid = getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, dist);
-            ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
-
-            bool rayHit = false;
-            //Trace ray
-            #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
-            if (ps > 0.0 && valid)
-            {
-                SceneRayQuery < 0 > rayQuery;
-                dist *= 0.99;
-                const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), VIS_RAY_OFFSET, dist);
-                if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
-                {
-                    ps = 0;
-                }
-            }
-            #endif // BIAS MODE RAYTRACE
-        
-            pi = selectedSample == i ? ps : pi;
-            piSum += ps * biasRes.M;
+            uint neighBufferIdx = neighOffsetStartIdx + i;
+            float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
+            offset = int2(randSamp * gSamplingRadius);
         }
-        finalizeSample(r, pi, piSum);
+        int2 idx = prevIdx + offset;
+
+        //Get Surface
+        Surface biasSurface = getSurface(idx, true);
+         
+        //getReservoir
+        Reservoir biasRes = getReservoir(idx, true);
+        biasRes.M = min(biasRes.M, historyLimit); //cap M
         
-        #else //BIAS MODE BASIC
-        finalizeSample(r, 1.0f, r.M);
-        #endif //BIAS MODE BASIC
-    }    
+        //Get light pdf
+        float ps = 0.0f;
+        LightSample ls = { };
+        float dist = 0;
+        bool valid = getEmissiveTriangle(selectedLight, r.uv, biasSurface.posW, ls, dist);
+        ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
+
+        bool rayHit = false;
+        //Trace ray
+        #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
+        if (ps > 0)
+        {
+            SceneRayQuery < 0 > rayQuery;
+            dist *= 0.99;
+            const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), VIS_RAY_OFFSET, dist);
+            if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
+            {
+                ps = 0;
+            }
+        }
+        #endif // BIAS MODE RAYTRACE
+        
+        pi = selectedSample == i ? ps : pi;
+        piSum += ps * biasRes.M;
+    }
+    finalizeSample(r, pi, piSum);
+        
+#else //BIAS MODE BASIC
+    finalizeSample(r, 1.0f, r.M);
+#endif //BIAS MODE BASIC  
         
     gReservoir[dTid] = r.pack();
     gReservoirUV[dTid] = r.packedUV;

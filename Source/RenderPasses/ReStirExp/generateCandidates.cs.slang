@@ -195,10 +195,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             r.weightSum = 0.f;  //Set weight to zero if light is not visible
         }
     }
-
-    if(!validSample)
-        r = Reservoir();
-    
+        
     gReservoir[dTid] = r.pack();
     gReservoirUV[dTid] = r.packedUV;
 }

@@ -63,8 +63,9 @@ uint index2Dto1D(uint2 idx, uint width){
 Reservoir getReservoir(int2 idx)
 {
     Reservoir r =  Reservoir(gReservoir[idx], gReservoirUV[idx]);
-    
-    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+
+    //Discard invalid reservoirs
+    if (isinf(r.weightSum) || isnan(r.weightSum))
         r = Reservoir();
     return r;
 }
@@ -83,8 +84,8 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getEmissiveTriangle(uint triangleIdx, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
-    ReSTIRLight light = ReSTIRLight(gLights[triangleIdx]);
+bool getEmissiveTriangle(in ReSTIRLight light, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
+    if(!light.isValid()) return false;
 
     ls.uv = uv;
     
@@ -176,9 +177,12 @@ void main(uint2 dTid : SV_DispatchThreadID)
     Surface currentSurface = getSurface(dTid);
     if (!currentSurface.valid)
         return;
-    
+
+    ReSTIRLight selectedLight = ReSTIRLight();
     //Load reservoir from current iteration
     Reservoir current = getReservoir(dTid);
+    if(current.weightSum > 0)
+        selectedLight = ReSTIRLight(gLights[current.lightIdx]);
     
     combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
     
@@ -210,20 +214,22 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //If neighbor has passed the tests get reservoir and compair them
         Reservoir neigh = getReservoir(idx);
-
+        ReSTIRLight neighLight = ReSTIRLight(gLights[neigh.lightIdx]);
+        
         cachedResults |= (1u << i);
         //Get neightbor light target PDF for current surface
         float targetPdf = 0;
         if(neigh.M > 0){
             LightSample ls = { };
             float distance = 0;
-            bool valid = getEmissiveTriangle(neigh.lightIdx, neigh.uv, currentSurface.posW, ls, distance);
+            bool valid = getEmissiveTriangle(neighLight, neigh.uv, currentSurface.posW, ls, distance);
             targetPdf = valid ?  getSurfacePdf(currentSurface, ls): 0.f;
         }
         
         if (combineReservoir(r, neigh, targetPdf, sampleNext1D(sg)))
         {
             selectedSample = i;
+            selectedLight = neighLight;
         }
 
     }
@@ -255,7 +261,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //Get light pdf
         LightSample ls = { };
         float distance = 0;
-        bool valid = getEmissiveTriangle(r.lightIdx, r.uv, biasSurface.posW, ls, distance);
+        bool valid = getEmissiveTriangle(selectedLight, r.uv, biasSurface.posW, ls, distance);
         float ps = valid ? getSurfacePdf(biasSurface, ls) : 0.0;
 
         //Trace ray
@@ -283,12 +289,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else
     finalizeSample(r, 1.0f, r.M);
 #endif
-    
-        if (r.weightSum <= 0 || isnan(r.weightSum) || isinf(r.weightSum))
-        {
-            r = current; //If resampled is invalid use the current reservoir instead
-        }
-    
+            
     gOutReservoir[dTid] = r.pack();
     gOutReservoirUV[dTid] = r.packedUV;
 }

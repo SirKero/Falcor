@@ -69,8 +69,11 @@ Reservoir getReservoir(int2 idx, bool prev)
     {
         r = Reservoir(gReservoir[idx], gReservoirUV[idx]);
     }
-    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+    //Discard NaN Reservoirs
+    if (isinf(r.weightSum) || isnan(r.weightSum)){
         r = Reservoir();
+    }
+        
     return r;
 }
 
@@ -92,9 +95,8 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getEmissiveTriangle(uint triangleIdx, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
-    ReSTIRLight light = ReSTIRLight(gLights[triangleIdx]);
-
+bool getEmissiveTriangle(in ReSTIRLight light, float2 uv, const float3 surfacePos, out LightSample ls, out float distance){
+    if(!light.isValid()) return false;
     ls.uv = uv;
     
     float3 normal = cross(light.edge0 , light.edge1);
@@ -157,7 +159,7 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
     
     r.weightSum += risWeight;
 
-    bool selectSample = (rnd * r.weightSum < risWeight);
+    bool selectSample = (rnd * r.weightSum <= risWeight);
     
     if(selectSample){
         r.lightIdx = prev.lightIdx;
@@ -185,10 +187,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //Check if surface is valid
     Surface currentSurface = getSurface(dTid, false);
     if(!currentSurface.valid)
-        valid = false;
+        return;
         
     //Load reservoir from current iteration
+    ReSTIRLight selectedLight = ReSTIRLight();
     Reservoir current = getReservoir(dTid, false);
+    if(current.weightSum > 0)
+        selectedLight = ReSTIRLight(gLights[current.lightIdx]);
 
     uint historyLimit = gMaxAge * current.M;
     combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
@@ -199,15 +204,15 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float2 rndOffset = sampleNext2D(sg) - 0.5f;
     prevIdxF += rndOffset;
     
-    uint2 prevIdx = uint2(round(prevIdxF));
+    int2 prevIdx = int2(round(prevIdxF));
 
     //Check if a neighbor surface matches up
     //Try to find a matching surface in the neighborhood of the reprojected pixel
     Surface temporalSurface;
     bool selectPrevSample = false;
+   
     uint previousM = 0;
     bool foundTemporalSurface = false;
-    int2 temporalOffset;
     int2 idx = (0,0);
     float temporalSearchRadius = 4.f;
     for(uint i=0 ; i<9; i++){
@@ -233,7 +238,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //Valid hit was found
         foundTemporalSurface = true;
-        temporalOffset = offset;
         break;
     }
 
@@ -242,17 +246,21 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         prev.M = min(prev.M, historyLimit);
         previousM = prev.M;
+        //Load light idx;
+        ReSTIRLight prevLight = ReSTIRLight(gLights[prev.lightIdx]);
 
         //Get new target pdf if valid
         float targetPdf = 0;
         if(prev.M > 0){
             LightSample ls = { };
             float dis = 0;
-            getEmissiveTriangle(prev.lightIdx, prev.uv, currentSurface.posW, ls, dis);
-            targetPdf = getSurfacePdf(currentSurface, ls);
+            bool validSample = getEmissiveTriangle(prevLight, prev.uv, currentSurface.posW, ls, dis);
+            targetPdf = validSample ? getSurfacePdf(currentSurface, ls) : 0.f;
         }
 
         selectPrevSample = combineReservoir(r, prev, targetPdf, sampleNext1D(sg));
+        if(selectPrevSample)
+            selectedLight = prevLight;
     }
 
 //Bias correction
@@ -264,7 +272,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     {
         LightSample ls = { };
         float distance = 0;
-        bool valid = getEmissiveTriangle(r.lightIdx, r.uv, temporalSurface.posW, ls, distance);
+        bool valid = getEmissiveTriangle(selectedLight, r.uv, temporalSurface.posW, ls, distance);
         float ps = valid ? getSurfacePdf(temporalSurface, ls) : 0.0;
 
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
@@ -288,11 +296,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else    
     finalizeSample(r, 1.0f, r.M);
 #endif //BIAS_MODE_BASIC
-    if (r.weightSum <= 0 || isnan(r.weightSum) || isinf(r.weightSum))
-    {
-        r = current; //If resampled is invalid use the current reservoir instead
-    }
-    
+        
     gReservoir[dTid] = r.pack();
     gReservoirUV[dTid] = r.packedUV;
 }
