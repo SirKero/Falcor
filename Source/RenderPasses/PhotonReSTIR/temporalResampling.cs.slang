@@ -47,6 +47,8 @@ cbuffer Constant
     uint gMaxAge;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
+    float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
+    uint3 _pad;
 }
 
 struct LightSample{
@@ -74,7 +76,8 @@ Reservoir getReservoir(int2 idx, bool prev)
     {
         r = Reservoir(gReservoir[idx], 0);
     }
-    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+    //Discard NaN Reservoirs
+    if (isinf(r.weightSum) || isnan(r.weightSum))
         r = Reservoir();
     return r;
 }
@@ -111,7 +114,7 @@ PhotonLight getPhotonLight(int2 idx, bool prev){
 
 bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
     //Get light position
-    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.z));
+    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.w));
 
     if(any(pl.flux.xyz <= 0)) return false;
     
@@ -121,11 +124,12 @@ bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, ou
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
     float cosTheta = dot(photonNormal, -ls.dir);
+    if(cosTheta <= 0 || sampleDistance < gGeometryTermBand) return false;
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
     ls.Li = luminance(pl.flux.xyz) / pdf;
 
-    return true;
+    return ls.Li > 0;   //true if sample is valid
 }
 
 //gets the target pdf averaged to one channel
@@ -195,7 +199,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
         return;
         
     //Load reservoir from current iteration
+    PhotonLight selectPL = { };
     Reservoir current = getReservoir(dTid, false);
+    if(current.weightSum > 0){
+        selectPL = getPhotonLight(dTid, false);
+    }
 
     uint historyLimit = gMaxAge * current.M;
     combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
@@ -207,16 +215,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
     prevIdxF += rndOffset;
     
     uint2 prevIdx = uint2(round(prevIdxF));
-
-        
+    
     //Check if a neighbor surface matches up
     //Try to find a matching surface in the neighborhood of the reprojected pixel
     Surface temporalSurface;
-    PhotonLight selectPL = getPhotonLight(dTid, false);
     bool selectPrevSample = false;
     uint previousM = 0;
     bool foundTemporalSurface = false;
-    int2 temporalOffset;
     int2 idx = (0,0);
     float temporalSearchRadius = 4.f;
     
@@ -243,7 +248,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //Valid hit was found
         foundTemporalSurface = true;
-        temporalOffset = offset;
         break;
     }
 
@@ -300,14 +304,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else    
     finalizeSample(r, 1.0f, r.M);
 #endif //BIAS_MODE_BASIC
-    if (r.weightSum <= 0 || isnan(r.weightSum) || isinf(r.weightSum))
-    {
-        r = current; //If resampled is invalid use the current reservoir instead
-    }
-    
+        
     gReservoir[dTid] = r.pack();
-    if(selectPrevSample){
-        gPhotonReservoirPos[dTid] = selectPL.pos;
-        gPhotonReservoirFlux[dTid] = selectPL.flux;
-    }
+    gPhotonReservoirPos[dTid] = selectPL.pos;
+    gPhotonReservoirFlux[dTid] = selectPL.flux;
 }

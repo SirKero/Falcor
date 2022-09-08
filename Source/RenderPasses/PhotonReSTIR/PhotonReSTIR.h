@@ -148,6 +148,7 @@ private:
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     float mVisibilityRayOffset = 0.01f;      //TMin for visibility rays
+    float mGeometryTermBand = 0.00001f;     //Rejects samples with a small distance due to infinetly large geometry term (Adds Bias)
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
@@ -159,6 +160,7 @@ private:
     float mPhotonRejection = 0.3f;          //Rejection probability
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
+    bool mGeneratePhotons = true;
 
 
     //Runtime

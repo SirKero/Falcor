@@ -68,8 +68,9 @@ uint index2Dto1D(uint2 idx, uint width){
 Reservoir getReservoir(int2 idx)
 {
     Reservoir r =  Reservoir(gReservoir[idx], 0);
-    
-    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+
+    //Discard NaN Reservoirs
+    if ( isinf(r.weightSum) || isnan(r.weightSum))
         r = Reservoir();
     return r;
 }
@@ -102,7 +103,7 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
 
 bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
     //Get light position
-    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.z));
+    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.w));
 
     if(any(pl.flux.xyz <= 0)) return false;
     
@@ -294,15 +295,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else
     finalizeSample(r, 1.0f, r.M);
 #endif
-    
-        if (r.weightSum <= 0 || isnan(r.weightSum) || isinf(r.weightSum))
-        {
-            r = current; //If resampled is invalid use the current reservoir instead
-        }
-    
+        
     gReservoirPrev[dTid] = r.pack();
-    if(selectedSample >= 0){
-        gPhotonReservoirPosPrev[dTid] = selectedPL.pos;
-        gPhotonReservoirFluxPrev[dTid] = selectedPL.flux;
-    }
+    
+    gPhotonReservoirPosPrev[dTid] = selectedPL.pos;
+    gPhotonReservoirFluxPrev[dTid] = selectedPL.flux;
 }

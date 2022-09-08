@@ -90,7 +90,8 @@ Reservoir getReservoir(int2 idx, bool prev)
     {
         r = Reservoir(gReservoir[idx], 0);
     }
-    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+    //Discrad NaN Reservoirs
+    if (isinf(r.weightSum) || isnan(r.weightSum))
         r = Reservoir();
     return r;
 }
@@ -128,7 +129,7 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
 
 bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
     //Get light position
-    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.z));
+    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.w));
 
     if(any(pl.flux.xyz <= 0)) return false;
     
@@ -317,90 +318,82 @@ void main(uint2 dTid : SV_DispatchThreadID)
         
         //Get neightbor light target PDF for current surface
         float sampleTargetPdf = 0.f;
-        bool valid = false;
         if (sampledReservoir.M > 0)
         {
             LightSample ls = { };
             float dis;
-            valid = getLightSample(pl, currentSurface.posW, ls, dis);
+            bool valid = getLightSample(pl, currentSurface.posW, ls, dis);
             sampleTargetPdf = valid ? max(0.f, getSurfacePdf(currentSurface, ls)) : 0.0;
         }
         //Combine Reservoirs
         if(combineReservoir(r, sampledReservoir, sampleTargetPdf, sampleNext1D(sg))){
             selectedSample = i;
-            validSample = valid;
             selectedPL = pl;
         }
     }
 
-    
-    if(validSample && ( r.weightSum > 0 || !isnan(r.weightSum) || !isinf(r.weightSum))){
-
-        //Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
-        #if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
+//Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
+#if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
         
-        float pi = r.targetPdf;
-        float piSum = r.targetPdf * current.M;
+    float pi = r.targetPdf;
+    float piSum = r.targetPdf * current.M;
         
-        //go through all neighbors again
-        for (int i = 0; i < numSamples; i++)
+    //go through all neighbors again
+    for (int i = 0; i < numSamples; i++){
+        //Skip if we skipped in last loop
+        if ((cachedResults & (1u << i)) == 0)
+            continue;
+        //Get Index
+        int2 offset = int2(0);
+        if (i == 0 && foundTemporalSurface)
+            offset = temporalOffset;
+        else
         {
-            //Skip if we skipped in last loop
-            if ((cachedResults & (1u << i)) == 0)
-                continue;
-            //Get Index
-            int2 offset = int2(0);
-            if (i == 0 && foundTemporalSurface)
-                offset = temporalOffset;
-            else
-            {
-                uint neighBufferIdx = neighOffsetStartIdx + i;
-                float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
-                offset = int2(randSamp * gSamplingRadius);
-            }
-            int2 idx = prevIdx + offset;
-
-            //Get Surface
-            Surface biasSurface = getSurface(idx, true);
-            
-            //getReservoir
-            Reservoir biasRes = getReservoir(idx, true);
-            biasRes.M = min(biasRes.M, historyLimit); //cap M
-        
-            //Get light pdf
-            bool valid = false;
-            float ps = 0.0f;
-            LightSample ls = { };
-            float dist = 0;
-            
-            valid = getLightSample(selectedPL, biasSurface.posW, ls, dist);
-            ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
-
-            bool rayHit = false;
-            //Trace ray
-            #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
-            if (ps > 0.0 && valid)
-            {
-                SceneRayQuery < 0 > rayQuery;
-                dist *= 0.99;
-                const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), VIS_RAY_OFFSET, dist);
-                if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
-                {
-                    ps = 0;
-                }
-            }
-            #endif // BIAS MODE RAYTRACE
-        
-            pi = selectedSample == i ? ps : pi;
-            piSum += ps * biasRes.M;
+            uint neighBufferIdx = neighOffsetStartIdx + i;
+            float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
+            offset = int2(randSamp * gSamplingRadius);
         }
-        finalizeSample(r, pi, piSum);
+        int2 idx = prevIdx + offset;
+
+        //Get Surface
+        Surface biasSurface = getSurface(idx, true);
+            
+        //getReservoir
+        Reservoir biasRes = getReservoir(idx, true);
+        biasRes.M = min(biasRes.M, historyLimit); //cap M
         
-        #else //BIAS MODE BASIC
-        finalizeSample(r, 1.0f, r.M);
-        #endif //BIAS MODE BASIC
-    }    
+        //Get light pdf
+        float ps = 0.0f;
+        LightSample ls = { };
+        float dist = 0;
+            
+        bool valid = getLightSample(selectedPL, biasSurface.posW, ls, dist);
+        ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
+
+        bool rayHit = false;
+        //Trace ray
+        #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
+        if (ps > 0.0 && valid)
+        {
+            SceneRayQuery < 0 > rayQuery;
+            dist *= 0.99;
+            const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), VIS_RAY_OFFSET, dist);
+            if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
+            {
+                ps = 0;
+            }
+        }
+        #endif // BIAS MODE RAYTRACE
         
+        pi = selectedSample == i ? ps : pi;
+        piSum += ps * biasRes.M;
+    }
+    finalizeSample(r, pi, piSum);
+        
+#else //BIAS MODE BASIC
+    finalizeSample(r, 1.0f, r.M);
+#endif //BIAS MODE BASIC
+    
     gReservoir[dTid] = r.pack();
     gPhotonReservoirPos[dTid] = selectedPL.pos;
     gPhotonReservoirFlux[dTid] = selectedPL.flux;

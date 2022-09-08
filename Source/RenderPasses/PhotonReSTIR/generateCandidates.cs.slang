@@ -54,6 +54,8 @@ cbuffer Constant
     uint gNumEmissiveSamples;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
+    float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
+    uint3 _pad;
 }
 
 
@@ -93,7 +95,7 @@ bool generateSample(inout SampleGenerator sg, const float3 surfacePosition,out L
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
     float cosTheta = dot(pl.normal, -ls.dir);
-    if(cosTheta < 0) return false;
+    if(cosTheta <= 0 || sampleDistance < gGeometryTermBand) return false;
 
     float pdf = distSqr / max(FLT_MIN, cosTheta);
     float Le = luminance(pl.flux);
@@ -200,10 +202,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             r.weightSum = 0.f;  //Set weight to zero if light is not visible
         }
     }
-
-    if(!validSample)
-        r = Reservoir();
-    
+        
     gReservoir[dTid] = r.pack();
     gPhotonReservoirPos[dTid] = float4(selectedPhotonLight.posW, asfloat(selectedPhotonLight.packedNormal));
     gPhotonReservoirFlux[dTid] = float4(selectedPhotonLight.flux,1);

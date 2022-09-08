@@ -49,8 +49,9 @@ uint index2Dto1D(uint2 idx, uint width){
 
 Reservoir getReservoir(uint2 idx){
     Reservoir r =  Reservoir(gReservoir[idx], 0);
-    
-    if (r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum))
+
+    //Discard invalid Reservoirs
+    if (isinf(r.weightSum) || isnan(r.weightSum))
         r = Reservoir();
     
     return r;

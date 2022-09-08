@@ -128,10 +128,14 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
     prepareBuffers(pRenderContext, renderData);
 
     //Generate Photons
-    generatePhotonsPass(pRenderContext, renderData);
+    if (mGeneratePhotons) {
+        generatePhotonsPass(pRenderContext, renderData);
 
-    //Copy the counter for UI
-    copyPhotonCounter(pRenderContext);
+        //Copy the counter for UI
+        copyPhotonCounter(pRenderContext);
+        mGeneratePhotons = false;
+    }
+    
 
     //Prepare the surface buffer
     prepareSurfaceBufferPass(pRenderContext, renderData);
@@ -197,6 +201,8 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
 
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
+
+        mGeneratePhotons |= widget.button("Generate Photons");
     }
 
     if (auto group = widget.group("ReSTIR")) {
@@ -242,6 +248,8 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
             widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
             mReset |= widget.var("Visibility Ray TMin Offset", mVisibilityRayOffset, 0.00001f, 10.f, 0.00001f);
             widget.tooltip("Changes offset for visibility ray. Triggers recompilation so typing in the value is advised");
+            changed |= widget.var("Geometry Term Band", mGeometryTermBand, 0.f, 1.f, 0.0000001f);
+            widget.tooltip("Discards samples with a very small distance. Adds a little bias but removes extremly bright spots at corners");
         }
     }
    
@@ -255,7 +263,7 @@ void PhotonReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPt
     resetPass(true);
 
     //Recreate RayTracing Program on Scene reset
-    mPhotonGeneratePass.create();
+    mPhotonGeneratePass = RayTraceProgramHelper::create();
 
     mpScene = pScene;
 
@@ -505,12 +513,12 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     var[nameBuf]["gFrameCount"] = mFrameCount;
 
     //Upload constant buffer only if options changed
-    if (mReuploadBuffers) {
+    if (mReuploadBuffers || mGeneratePhotons) {
         nameBuf = "CB";
         var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
         var[nameBuf]["gRejection"] = mPhotonRejection;
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
-        var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal; 
+        var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
@@ -580,7 +588,8 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
         uniformName = "Constant";
         var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay;   //TODO: Also add a variable to manually disable
+        var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
+        var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
     }
 
     //Execute
@@ -639,6 +648,7 @@ void PhotonReSTIR::temporalResampling(RenderContext* pRenderContext, const Rende
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
     }
 
     //Execute
