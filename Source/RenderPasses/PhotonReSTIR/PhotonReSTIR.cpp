@@ -211,15 +211,18 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
         widget.tooltip("Number of emissive candidates generated per iteration");
 
         if (auto group = widget.group("Light Sampling")) {
-            widget.checkbox("Use PDF Sampling",mUsePdfSampling);
+            changed |= widget.checkbox("Use PDF Sampling",mUsePdfSampling);
             widget.tooltip("If enabled use a pdf texture to generate the samples. If disabled the light is sampled uniformly");
             if (mUsePdfSampling) {
                 widget.text("Presample texture size");
                 widget.var("Title Count", mPresampledTitleSizeUI.x, 1u, 1024u);
                 widget.var("Title Size", mPresampledTitleSizeUI.y, 256u, 8192u, 256.f);
                 mPresampledTitleSizeChanged |= widget.button("Apply");
-                if (mPresampledTitleSizeChanged)
+                if (mPresampledTitleSizeChanged) {
                     mPresampledTitleSize = mPresampledTitleSizeUI;
+                    changed |= true;
+                }
+                    
             }
         }
 
@@ -579,9 +582,14 @@ void PhotonReSTIR::presamplePhotonLightsPass(RenderContext* pRenderContext, cons
             mpPresampledPhotonLights.reset();
             mpPhotonLightPdfTex.reset();
             mpPresamplePhotonLightsPass.reset();
+            mpGenerateCandidates.reset();   //Reset other compute pass that uses this mode
         }
         return;
     }
+    //Reset compute pass on change
+    if(mUsePdfSampling && !mpPresamplePhotonLightsPass)
+        mpGenerateCandidates.reset();
+
     FALCOR_PROFILE("PresamplePhotonLight");
     if (!mpPresamplePhotonLightsPass) {
         Program::Desc desc;
@@ -657,7 +665,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gPhotonCounter"] = mpPhotonLightCounter;
     var["gPhotonLights"] = mpPhotonLights;
-    var["gPresampledPhotonLights"] = mpPresampledPhotonLights;
+    if(mUsePdfSampling) var["gPresampledPhotonLights"] = mpPresampledPhotonLights;
 
     //Uniform
     std::string uniformName = "PerFrame";
