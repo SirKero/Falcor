@@ -12,6 +12,7 @@ import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
+import PhotonReStirFunctions;
 
 cbuffer PerFrame
 {
@@ -35,7 +36,7 @@ struct PhotonLight{
     float3 posW;
     uint packedNormal;
     float3 flux;
-    uint _pad;
+    uint valid;
 
     //Shading world normal
     property float3 normal{
@@ -46,8 +47,10 @@ struct PhotonLight{
 
 RWStructuredBuffer<PhotonLight> gPhotonLights;
 RWBuffer<uint> gPhotonCounter;
+RWTexture2D<float> gPhotonPdfTexture;
 
-//static const uint kPhotonBufferMaxSize = PHOTON_BUFFER_MAX_SIZE;
+static const uint kPhotonLightBufferSize = PHOTON_BUFFER_SIZE;
+static const bool kUsePdfSampling = USE_PDF_SAMPLING;
 
 /** Payload for scatter ray (80B).
 */
@@ -274,14 +277,16 @@ void rayGen()
             uint photonIndex = 0;
             photon.flux *= rayData.diffuseScalar * invRejection;
             InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
-            photonIndex = min(photonIndex, 500000); //TODO set as uniform
+            photonIndex = min(photonIndex, kPhotonLightBufferSize); //TODO set as uniform
 
             PhotonLight pl = {};
             pl.posW = photonPos;
             pl.packedNormal = rayData.packedNormal;
             pl.flux = photon.flux;
+            pl.valid = 1;
             
             gPhotonLights[photonIndex] = pl;
+            if(kUsePdfSampling) gPhotonPdfTexture[ReSTIR_LinearIndexToZCurve(photonIndex)] = luminance(photon.flux);
             break;  //Stop here to not sample points multiple times
         }
    

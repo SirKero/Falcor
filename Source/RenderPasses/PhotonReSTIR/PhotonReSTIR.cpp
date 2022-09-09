@@ -44,6 +44,7 @@ extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
 namespace {
     //Shaders
     const char kShaderGeneratePhoton[] = "RenderPasses/PhotonReSTIR/generatePhotons.rt.slang";
+    const char kShaderPhotonPresampleLights[] = "RenderPasses/PhotonReSTIR/presamplePhotonLights.cs.slang";
     const char kShaderFillSurfaceInformation[] = "RenderPasses/PhotonReSTIR/fillSurfaceInfo.cs.slang";
     const char kShaderGenerateCandidates[] = "RenderPasses/PhotonReSTIR/generateCandidates.cs.slang";
     const char kShaderTemporalPass[] = "RenderPasses/PhotonReSTIR/temporalResampling.cs.slang";
@@ -128,15 +129,14 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
     prepareBuffers(pRenderContext, renderData);
 
     //Generate Photons
-    if (mGeneratePhotons) {
-        generatePhotonsPass(pRenderContext, renderData);
+    generatePhotonsPass(pRenderContext, renderData);
 
-        //Copy the counter for UI
-        copyPhotonCounter(pRenderContext);
-        mGeneratePhotons = false;
-    }
+    //Presample generated photon lights
+    presamplePhotonLightsPass(pRenderContext, renderData);
+
+    //Copy the counter for UI
+    copyPhotonCounter(pRenderContext);
     
-
     //Prepare the surface buffer
     prepareSurfaceBufferPass(pRenderContext, renderData);
 
@@ -202,7 +202,6 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
 
-        mGeneratePhotons |= widget.button("Generate Photons");
     }
 
     if (auto group = widget.group("ReSTIR")) {
@@ -210,6 +209,19 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
         //UI here
         changed |= widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
         widget.tooltip("Number of emissive candidates generated per iteration");
+
+        if (auto group = widget.group("Light Sampling")) {
+            widget.checkbox("Use PDF Sampling",mUsePdfSampling);
+            widget.tooltip("If enabled use a pdf texture to generate the samples. If disabled the light is sampled uniformly");
+            if (mUsePdfSampling) {
+                widget.text("Presample texture size");
+                widget.var("Title Count", mPresampledTitleSizeUI.x, 1u, 1024u);
+                widget.var("Title Size", mPresampledTitleSizeUI.y, 256u, 8192u, 256.f);
+                mPresampledTitleSizeChanged |= widget.button("Apply");
+                if (mPresampledTitleSizeChanged)
+                    mPresampledTitleSize = mPresampledTitleSizeUI;
+            }
+        }
 
         if (mResamplingMode > 0) {
             if (auto group = widget.group("Resamling")) {
@@ -371,6 +383,24 @@ void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const Rend
         mpPhotonLights = Buffer::createStructured(sizeof(float) * 8, mNumMaxPhotons);
         mpPhotonLights->setName("PhotonReSTIR::PhotonLights");
     }
+    //Create pdf texture
+    if (mUsePdfSampling) {
+        uint width, height, mip;
+        computePdfTextureSize(mNumMaxPhotons, width, height, mip);
+        if (!mpPhotonLightPdfTex || mpPhotonLightPdfTex->getWidth() != width || mpPhotonLightPdfTex->getHeight() != height || mpPhotonLightPdfTex->getMipCount() != mip) {
+            mpPhotonLightPdfTex = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
+                                                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
+            mpPhotonLightPdfTex->setName("PhotonReSTIR::PhotonLightPdfTex");
+        }
+
+        //Create Buffer for the presampled lights
+        if (!mpPresampledPhotonLights || mPresampledTitleSizeChanged) {
+            mpPresampledPhotonLights = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
+            mpPresampledPhotonLights->setName("PhotonReSTIR::PresampledPhotonLights");
+            mPresampledTitleSizeChanged = false;
+        }
+    }
+    
     //Photon reservoir textures
     if (!mpPhotonReservoirPos[0] || !mpPhotonReservoirPos[1] || !mpPhotonReservoirFlux[0] || !mpPhotonReservoirFlux[1]) {
         uint2 texDim = renderData.getDefaultTextureDims();
@@ -484,7 +514,8 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     pRenderContext->clearUAV(mpPhotonLights.get()->getUAV().get(), uint4(0));
 
     //Defines
-    
+    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mPhotonGeneratePass.pProgram->addDefine("USE_PDF_SAMPLING", std::to_string(mUsePdfSampling));
 
     if (!mPhotonGeneratePass.pVars) {
         FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
@@ -513,7 +544,7 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     var[nameBuf]["gFrameCount"] = mFrameCount;
 
     //Upload constant buffer only if options changed
-    if (mReuploadBuffers || mGeneratePhotons) {
+    if (mReuploadBuffers) {
         nameBuf = "CB";
         var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
         var[nameBuf]["gRejection"] = mPhotonRejection;
@@ -525,6 +556,7 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
     var["gPhotonLights"] = mpPhotonLights;
     var["gPhotonCounter"] = mpPhotonLightCounter;
+    if(mUsePdfSampling) var["gPhotonPdfTexture"] = mpPhotonLightPdfTex;
 
     // Get dimensions of ray dispatch.
     const uint2 targetDim = uint2(mNumDispatchedPhotons/mPhotonYExtent, mPhotonYExtent);
@@ -535,6 +567,51 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
     pRenderContext->uavBarrier(mpPhotonLightCounter.get());
     pRenderContext->uavBarrier(mpPhotonLights.get());
+    if (mUsePdfSampling) mpPhotonLightPdfTex->generateMips(pRenderContext);
+}
+
+void PhotonReSTIR::presamplePhotonLightsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    //Check if it is enabled
+    if (!mUsePdfSampling) {
+        //Reset buffer and passes if not used
+        if (mpPresamplePhotonLightsPass) {
+            mpPresampledPhotonLights.reset();
+            mpPhotonLightPdfTex.reset();
+            mpPresamplePhotonLightsPass.reset();
+        }
+        return;
+    }
+    FALCOR_PROFILE("PresamplePhotonLight");
+    if (!mpPresamplePhotonLightsPass) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderPhotonPresampleLights).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        mpPresamplePhotonLightsPass = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpPresamplePhotonLightsPass);
+
+    //Set variables
+    auto var = mpPresamplePhotonLightsPass->getRootVar();
+
+    var["PerFrame"]["gFrameCount"] = mFrameCount;
+
+    if (mReset || mReuploadBuffers) {
+        var["Constant"]["gPdfTexSize"] = uint2(mpPhotonLightPdfTex->getWidth(), mpPhotonLightPdfTex->getHeight());
+        var["Constant"]["gTileSizes"] = mPresampledTitleSize;
+    }
+
+    var["gLightPdf"] = mpPhotonLightPdfTex;
+    var["gPresampledLights"] = mpPresampledPhotonLights;
+
+    uint2 targetDim = mPresampledTitleSize;
+    mpPresamplePhotonLightsPass->execute(pRenderContext, uint3(targetDim, 1));
+
+    pRenderContext->uavBarrier(mpPresampledPhotonLights.get());
 }
 
 void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -556,6 +633,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add("USE_PDF_SAMPLING", std::to_string(mUsePdfSampling));
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -579,6 +657,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gPhotonCounter"] = mpPhotonLightCounter;
     var["gPhotonLights"] = mpPhotonLights;
+    var["gPresampledPhotonLights"] = mpPresampledPhotonLights;
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -590,6 +669,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
         var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
+        var[uniformName]["gPresampledPhotonLightBufferSize"] = mPresampledTitleSize.x * mPresampledTitleSize.y;
     }
 
     //Execute
@@ -893,4 +973,18 @@ void PhotonReSTIR::bindReservoirs(ShaderVar& var, uint index , bool bindPrev)
         var["gPhotonReservoirPosPrev"] = mpPhotonReservoirPos[(index +1) % 2];
         var["gPhotonReservoirFluxPrev"] = mpPhotonReservoirFlux[(index +1) % 2];
     }
+}
+
+void PhotonReSTIR::computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels)
+{
+    // Compute the size of a power-of-2 rectangle that fits all items, 1 item per pixel
+    double textureWidth = std::max(1.0, ceil(sqrt(double(maxItems))));
+    textureWidth = exp2(ceil(log2(textureWidth)));
+    double textureHeight = std::max(1.0, ceil(maxItems / textureWidth));
+    textureHeight = exp2(ceil(log2(textureHeight)));
+    double textureMips = std::max(1.0, log2(std::max(textureWidth, textureHeight)));
+
+    outWidth = uint32_t(textureWidth);
+    outHeight = uint32_t(textureHeight);
+    outMipLevels = uint32_t(textureMips);
 }

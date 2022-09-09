@@ -93,6 +93,10 @@ private:
    */
     void prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Presample the photon lights
+    */
+    void presamplePhotonLightsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Generate Photon lights
     */
     void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -129,6 +133,9 @@ private:
     */
     void bindReservoirs(ShaderVar& var, uint index , bool bindPrev = true);
 
+    /** Gets PDF texture size.
+    */
+    void computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels);
 
     //Constants
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
@@ -136,7 +143,7 @@ private:
     //
     //UI
     //
-    uint mResamplingMode = ResamplingMode::NoResampling;
+    uint mResamplingMode = ResamplingMode::SpartioTemporal;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
@@ -148,19 +155,23 @@ private:
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     float mVisibilityRayOffset = 0.01f;      //TMin for visibility rays
-    float mGeometryTermBand = 0.00001f;     //Rejects samples with a small distance due to infinetly large geometry term (Adds Bias)
+    float mGeometryTermBand = 0.0f;     //Rejects samples with a small distance due to infinetly large geometry term (Adds Bias)
+    uint2 mPresampledTitleSize = uint2(128, 1024);
+    uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
+    bool mPresampledTitleSizeChanged = true;
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
+    uint mNumMaxPhotons = 100000;               //Max number of photon lights per iteration
     uint mNumMaxPhotonsUI = mNumMaxPhotons;
     uint mCurrentPhotonLightsCount = 0;             //Gets data from GPU buffer
     uint mNumDispatchedPhotons = 262144;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
-    uint mPhotonMaxBounces = 1;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
+    uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
-    bool mGeneratePhotons = true;
+
+    bool mUsePdfSampling = false;
 
 
     //Runtime
@@ -178,6 +189,7 @@ private:
 
     //Compute Passes
     ComputePass::SharedPtr mpFillSurfaceInfoPass;               //Fills the surfaceInformation
+    ComputePass::SharedPtr mpPresamplePhotonLightsPass;     //Presample the photon lights
     ComputePass::SharedPtr mpGenerateCandidates;            //Generate Candidates Pass
     ComputePass::SharedPtr mpTemporalResampling;            //Temporal Resampling Pass
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
@@ -189,6 +201,8 @@ private:
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
     Buffer::SharedPtr mpPhotonLights;           //Buffer containing the photon light sources
+    Texture::SharedPtr mpPhotonLightPdfTex;    //1 Channel luminance texture for power presampling
+    Buffer::SharedPtr mpPresampledPhotonLights; //Presampled Photon lights
     Buffer::SharedPtr mpPhotonLightCounter;     //Counter for the number of lights
     Buffer::SharedPtr mpPhotonLightCounterCPU;  //For showing the current number of photons in the UI
     Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures

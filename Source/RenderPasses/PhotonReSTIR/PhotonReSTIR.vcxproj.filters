@@ -16,16 +16,10 @@
     <ShaderSource Include="generateCandidates.cs.slang">
       <Filter>Shader</Filter>
     </ShaderSource>
-    <ShaderSource Include="Reservoir.slang">
-      <Filter>Shader</Filter>
-    </ShaderSource>
     <ShaderSource Include="spartialResampling.cs.slang">
       <Filter>Shader</Filter>
     </ShaderSource>
     <ShaderSource Include="spartioTemporalResampling.cs.slang">
-      <Filter>Shader</Filter>
-    </ShaderSource>
-    <ShaderSource Include="SurfaceData.slang">
       <Filter>Shader</Filter>
     </ShaderSource>
     <ShaderSource Include="temporalResampling.cs.slang">
@@ -34,10 +28,25 @@
     <ShaderSource Include="generatePhotons.rt.slang">
       <Filter>Shader</Filter>
     </ShaderSource>
+    <ShaderSource Include="SurfaceData.slang">
+      <Filter>Shader\StructsAndFunctions</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Reservoir.slang">
+      <Filter>Shader\StructsAndFunctions</Filter>
+    </ShaderSource>
+    <ShaderSource Include="PhotonReStirFunctions.slang">
+      <Filter>Shader\StructsAndFunctions</Filter>
+    </ShaderSource>
+    <ShaderSource Include="presamplePhotonLights.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shader">
       <UniqueIdentifier>{54cfa5bc-896c-4d6f-ad96-e2d1dffca00b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader\StructsAndFunctions">
+      <UniqueIdentifier>{4e241808-1372-4f9f-ac08-3c0df873bf18}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>
