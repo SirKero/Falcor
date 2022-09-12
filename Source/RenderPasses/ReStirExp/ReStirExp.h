@@ -144,7 +144,9 @@ private:
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     float mVisibilityRayOffset = 0.01f;      //TMin for visibility rays
     uint2 mPresampledTitleSize = uint2(128, 1024);
+    uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
+    bool mUsePdfSampling;
 
     
     //Runtime

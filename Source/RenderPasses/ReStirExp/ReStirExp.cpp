@@ -169,6 +169,28 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
     changed |= widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
     widget.tooltip("Number of emissive candidates generated per iteration");
 
+    if (auto group = widget.group("Light Sampling")) {
+        bool changeCheck = mUsePdfSampling;
+        changed |= widget.checkbox("Use PDF Sampling", mUsePdfSampling);
+        //Reset the light buffer pass on change
+        if (changeCheck != mUsePdfSampling) {
+            mpGenerateCandidates.reset();
+            mpUpdateLightBufferPass.reset();
+            mUpdateLightBuffer |= true;
+        }
+            
+
+        widget.tooltip("If enabled use a pdf texture to generate the samples. If disabled the light is sampled uniformly");
+        if (mUsePdfSampling) {
+            widget.text("Presample texture size");
+            widget.var("Title Count", mPresampledTitleSizeUI.x, 1u, 1024u);
+            widget.var("Title Size", mPresampledTitleSizeUI.y, 256u, 8192u, 256.f);
+            mPresampledTitleSizeChanged |= widget.button("Apply");
+            if (mPresampledTitleSizeChanged)
+                mPresampledTitleSize = mPresampledTitleSizeUI;
+        }
+    }
+
     if (mResamplingMode > 0) {
         if (auto group = widget.group("Resamling")) {
             mBiasCorrectionChanged |= widget.dropdown("BiasCorrection", kBiasCorrectionModeList, mBiasCorrectionMode);
@@ -237,28 +259,38 @@ void ReStirExp::prepareLighting(RenderContext* pRenderContext)
         mpLightBuffer->setName("ReStirExp::LightsBuffer");
     }
 
-    //Create pdf texture
-    uint width, height, mip;
-    computePdfTextureSize(mNumLights, width, height, mip);
-    if (!mpLightPdfTexture || mpLightPdfTexture->getWidth() != width || mpLightPdfTexture->getHeight() != height || mpLightPdfTexture->getMipCount() != mip) {
-        mpLightPdfTexture = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip,nullptr,
-                                              ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
-        mpLightPdfTexture->setName("ReStirExp::LightPdfTex");
-        mUpdateLightBuffer = true;
-    }
+    if (mUsePdfSampling) {
+        //Create pdf texture
+        uint width, height, mip;
+        computePdfTextureSize(mNumLights, width, height, mip);
+        if (!mpLightPdfTexture || mpLightPdfTexture->getWidth() != width || mpLightPdfTexture->getHeight() != height || mpLightPdfTexture->getMipCount() != mip) {
+            mpLightPdfTexture = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
+                                                  ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
+            mpLightPdfTexture->setName("ReStirExp::LightPdfTex");
+            mUpdateLightBuffer = true;
+        }
 
-    //Create Buffer for the presampled lights
-    if (!mpPresampledLight || mPresampledTitleSizeChanged) {
-        mpPresampledLight = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
-        mpPresampledLight->setName("ReStirExp::PresampledLights");
-        mPresampledTitleSizeChanged = false;
+        //Create Buffer for the presampled lights
+        if (!mpPresampledLight || mPresampledTitleSizeChanged) {
+            mpPresampledLight = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
+            mpPresampledLight->setName("ReStirExp::PresampledLights");
+            mPresampledTitleSizeChanged = false;
+        }
     }
+    //Reset buffer if they exist
+    else {
+        if (mpLightPdfTexture)
+            mpLightPdfTexture.reset();
+        if (mpPresampledLight)
+            mpPresampledLight.reset();
+    }
+    
 
     //Rebuild if count changed
     mUpdateLightBuffer |= countChanged;
 
     //Clear texture if count changed
-    if(mUpdateLightBuffer)
+    if(mUpdateLightBuffer && mUsePdfSampling)
         pRenderContext->clearUAV(mpLightPdfTexture->getUAV().get(), float4(0.f));
     
     
@@ -342,6 +374,7 @@ void ReStirExp::updateLightsBufferPass(RenderContext* pRenderContext, const Rend
 
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
+        defines.add("USE_PDF_TEX", mUsePdfSampling ? "1" : "0");
         mpUpdateLightBufferPass = ComputePass::create(desc, defines, true);
     }
     FALCOR_ASSERT(mpUpdateLightBufferPass);
@@ -351,7 +384,7 @@ void ReStirExp::updateLightsBufferPass(RenderContext* pRenderContext, const Rend
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
 
     var["gLightBuffer"] = mpLightBuffer;
-    var["gLightPdf"] = mpLightPdfTexture;
+    if(mUsePdfSampling) var["gLightPdf"] = mpLightPdfTexture;
 
     uint2 targetDim = uint2(8192u, div_round_up(mNumLights, 8192u));
 
@@ -363,7 +396,7 @@ void ReStirExp::updateLightsBufferPass(RenderContext* pRenderContext, const Rend
     mpUpdateLightBufferPass->execute(pRenderContext, uint3(targetDim, 1));
 
     //Create Mip chain
-    mpLightPdfTexture->generateMips(pRenderContext);
+    if (mUsePdfSampling) mpLightPdfTexture->generateMips(pRenderContext);
     mUpdateLightBuffer = false;
 }
 
@@ -415,6 +448,12 @@ void ReStirExp::prepareSurfaceBufferPass(RenderContext* pRenderContext, const Re
 
 void ReStirExp::presampleLightsPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    if (!mUsePdfSampling) {
+        if (mpPresampleLightsPass)
+            mpPresampleLightsPass.reset();
+        return;
+    }
+
     FALCOR_PROFILE("PresampleLight");
     if (!mpPresampleLightsPass) {
         Program::Desc desc;
@@ -468,6 +507,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add("USE_PRESAMPLED", mUsePdfSampling ? "1" : "0");
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -490,7 +530,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
     var["gReservoirUV"] = mpReservoirUVBuffer[mFrameCount % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
-    var["gPresampledLight"] = mpPresampledLight;
+    if(mUsePdfSampling) var["gPresampledLight"] = mpPresampledLight;
     var["gLights"] = mpLightBuffer;
 
     //Uniform

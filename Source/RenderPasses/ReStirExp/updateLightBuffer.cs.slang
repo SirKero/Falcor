@@ -6,8 +6,15 @@ import Utils.Color.ColorHelpers;
 
 import Lights;
 
+#ifndef USE_PDF_TEX
+#define USE_PDF_TEX 1
+#endif
+
 RWStructuredBuffer<PackedReSTIRLight> gLightBuffer;
+
+#if USE_PDF_TEX
 RWTexture2D<float> gLightPdf;
+#endif //IF USE_PDF_TEX
 
 cbuffer Constant{
     uint2 gThreadDim;                //ThreadDims
@@ -37,5 +44,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     light.avgRadiance = luminance(ef.averageRadiance);
 
     gLightBuffer[lightIdx] = light.pack();
+#if USE_PDF_TEX
     gLightPdf[ReSTIR_LinearIndexToZCurve(lightIdx)] =  light.avgRadiance * M_PI * et.area;
+#endif //IF USE_PDF_TEX
 }

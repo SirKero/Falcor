@@ -16,15 +16,21 @@ import Reservoir;
 import SurfaceData;
 import Lights;
 
+#ifndef USE_PRESAMPLED
+#define USE_PRESAMPLED 1
+#endif
 
 RWTexture2D<uint4> gReservoir;
 RWTexture2D<uint> gReservoirUV;
 
-StructuredBuffer<uint2> gPresampledLight;
 StructuredBuffer<PackedReSTIRLight> gLights;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
 
+#if USE_PRESAMPLED
+StructuredBuffer<uint2> gPresampledLight;
+#endif //USE_PRESAMPLED
+static const bool kUsePdfSampling = USE_PRESAMPLED;
 
 cbuffer PerFrame
 {
@@ -66,14 +72,21 @@ Surface getSurface(uint2 idx){
 
 //Generates a light sample. Returns false if sample is invalid
 bool sampleLight(float3 rnd, const float3 surfacePosition, out LightSample ls, out float sampleDistance){
-    //get sample
+#if USE_PRESAMPLED
+    //Get light idx and invSelectPdf
     uint sample = min(uint(floor(rnd.x * float(gPresampledLightBufferSize))), gPresampledLightBufferSize - 1);
     uint2 presampleData = gPresampledLight[sample]; //x = idx, y = invSourcePdf
     ls.invSelectPdf = asfloat(presampleData.y);
     if(ls.invSelectPdf <= 0) return false;
-    //Get Light
-    ReSTIRLight light = ReSTIRLight(gLights[presampleData.x]);
     ls.lightIdx = presampleData.x;
+#else//USE_PRESAMPLED || Random Uniform sampling
+    ls.lightIdx = min(uint(floor(rnd.x * gLightBufferSize)), gLightBufferSize-1);
+    ls.invSelectPdf = gLightBufferSize;
+    if(ls.invSelectPdf <= 0) return false;
+#endif //USE_PRESAMPLED
+
+    //Get Light
+    ReSTIRLight light = ReSTIRLight(gLights[ls.lightIdx]);
     
     // Uniformly sample the triangle's area by folding the random numbers such that u & v sum to less than 1.
     ls.uv = ((rnd.y + rnd.z) <= 1.f) ? rnd.yz : 1.f - rnd.yz;
