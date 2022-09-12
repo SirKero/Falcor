@@ -211,7 +211,11 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
         widget.tooltip("Number of emissive candidates generated per iteration");
 
         if (auto group = widget.group("Light Sampling")) {
+            bool changeCheck = mUsePdfSampling;
             changed |= widget.checkbox("Use PDF Sampling",mUsePdfSampling);
+            if (changeCheck != mUsePdfSampling) {
+                mpGenerateCandidates.reset();
+            }
             widget.tooltip("If enabled use a pdf texture to generate the samples. If disabled the light is sampled uniformly");
             if (mUsePdfSampling) {
                 widget.text("Presample texture size");
@@ -403,6 +407,11 @@ void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const Rend
             mPresampledTitleSizeChanged = false;
         }
     }
+    //Reset buffers if they exist
+    else {
+        if (mpPhotonLightPdfTex)mpPhotonLightPdfTex.reset();
+        if (mpPresampledPhotonLights) mpPresampledPhotonLights.reset();
+    }
     
     //Photon reservoir textures
     if (!mpPhotonReservoirPos[0] || !mpPhotonReservoirPos[1] || !mpPhotonReservoirFlux[0] || !mpPhotonReservoirFlux[1]) {
@@ -518,7 +527,7 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
     //Defines
     mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
-    mPhotonGeneratePass.pProgram->addDefine("USE_PDF_SAMPLING", std::to_string(mUsePdfSampling));
+    mPhotonGeneratePass.pProgram->addDefine("USE_PDF_SAMPLING", mUsePdfSampling ? "1": "0");
 
     if (!mPhotonGeneratePass.pVars) {
         FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
@@ -578,17 +587,9 @@ void PhotonReSTIR::presamplePhotonLightsPass(RenderContext* pRenderContext, cons
     //Check if it is enabled
     if (!mUsePdfSampling) {
         //Reset buffer and passes if not used
-        if (mpPresamplePhotonLightsPass) {
-            mpPresampledPhotonLights.reset();
-            mpPhotonLightPdfTex.reset();
-            mpPresamplePhotonLightsPass.reset();
-            mpGenerateCandidates.reset();   //Reset other compute pass that uses this mode
-        }
+        if (mpPresamplePhotonLightsPass) mpPresamplePhotonLightsPass.reset();
         return;
     }
-    //Reset compute pass on change
-    if(mUsePdfSampling && !mpPresamplePhotonLightsPass)
-        mpGenerateCandidates.reset();
 
     FALCOR_PROFILE("PresamplePhotonLight");
     if (!mpPresamplePhotonLightsPass) {
@@ -641,7 +642,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
-        defines.add("USE_PDF_SAMPLING", std::to_string(mUsePdfSampling));
+        defines.add("USE_PDF_SAMPLING", mUsePdfSampling ? "1" : "0");
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
