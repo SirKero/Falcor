@@ -13,6 +13,12 @@
     <Filter Include="Shader\Structs">
       <UniqueIdentifier>{9dc43648-906e-4748-92f8-ae08ba97bb87}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Shader\ReStir">
+      <UniqueIdentifier>{8c647998-00fc-4db6-a91d-74243cd75964}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader\PhotonVPLS">
+      <UniqueIdentifier>{aea653f7-df5f-46e4-8d44-314188ebd0cc}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ShaderSource Include="PhotonReStirFunctions.slang">
@@ -24,29 +30,41 @@
     <ShaderSource Include="SurfaceData.slang">
       <Filter>Shader\Structs</Filter>
     </ShaderSource>
+    <ShaderSource Include="distributeVPLs.rt.slang">
+      <Filter>Shader\PhotonVPLS</Filter>
+    </ShaderSource>
     <ShaderSource Include="fillSurfaceInfo.cs.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\ReStir</Filter>
     </ShaderSource>
     <ShaderSource Include="finalShading.cs.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\ReStir</Filter>
     </ShaderSource>
     <ShaderSource Include="generateCandidates.cs.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\ReStir</Filter>
     </ShaderSource>
     <ShaderSource Include="generatePhotons.rt.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\PhotonVPLS</Filter>
     </ShaderSource>
     <ShaderSource Include="presamplePhotonLights.cs.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\PhotonVPLS</Filter>
     </ShaderSource>
     <ShaderSource Include="spartialResampling.cs.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\ReStir</Filter>
     </ShaderSource>
     <ShaderSource Include="spartioTemporalResampling.cs.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\ReStir</Filter>
     </ShaderSource>
     <ShaderSource Include="temporalResampling.cs.slang">
-      <Filter>Shader</Filter>
+      <Filter>Shader\ReStir</Filter>
+    </ShaderSource>
+    <ShaderSource Include="showVPLsAABBcalc.cs.slang">
+      <Filter>Shader\PhotonVPLS</Filter>
+    </ShaderSource>
+    <ShaderSource Include="showVPLs.rt.slang">
+      <Filter>Shader\PhotonVPLS</Filter>
+    </ShaderSource>
+    <ShaderSource Include="VPLs.slang">
+      <Filter>Shader\Structs</Filter>
     </ShaderSource>
   </ItemGroup>
 </Project>

@@ -36,6 +36,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ShaderSource Include="distributeVPLs.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="generateCandidates.cs.slang" />
@@ -43,10 +44,13 @@
     <ShaderSource Include="PhotonReStirFunctions.slang" />
     <ShaderSource Include="presamplePhotonLights.cs.slang" />
     <ShaderSource Include="Reservoir.slang" />
+    <ShaderSource Include="showVPLs.rt.slang" />
+    <ShaderSource Include="showVPLsAABBcalc.cs.slang" />
     <ShaderSource Include="spartialResampling.cs.slang" />
     <ShaderSource Include="spartioTemporalResampling.cs.slang" />
     <ShaderSource Include="SurfaceData.slang" />
     <ShaderSource Include="temporalResampling.cs.slang" />
+    <ShaderSource Include="VPLs.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

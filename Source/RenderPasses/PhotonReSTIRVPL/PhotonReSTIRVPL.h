@@ -72,6 +72,37 @@ public:
         RayTraced = 2u
     };
 private:
+    //Acceleration Structure helpers Structs
+    struct BLASData {
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuildInfo;
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS buildInputs;
+        D3D12_RAYTRACING_GEOMETRY_DESC geomDescs;
+
+        uint64_t blasByteSize = 0;                    ///< Maximum result data size for the BLAS build, including padding.
+        uint64_t scratchByteSize = 0;                   ///< Maximum scratch data size for the BLAS build, including padding.
+    };
+
+    struct TLASData {
+        Buffer::SharedPtr pTlas;
+        ShaderResourceView::SharedPtr pSrv;             ///< Shader Resource View for binding the TLAS.
+        Buffer::SharedPtr pInstanceDescs;               ///< Buffer holding instance descs for the TLAS.
+    };
+
+    //Holds all needed data for an Acceleration Structure
+    struct SphereAccelerationStructure {
+        size_t numberBlas = 1;
+        bool fastBuild = false;
+        bool update = false;    
+        size_t blasScratchMaxSize;
+        std::vector<BLASData> blasData;
+        std::vector<Buffer::SharedPtr> blas;
+        std::vector<D3D12_RAYTRACING_INSTANCE_DESC> instanceDesc;
+        Buffer::SharedPtr blasScratch;
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlasPrebuildInfo;
+        Buffer::SharedPtr tlasScratch;
+        TLASData tlas;
+    };
+
     PhotonReSTIRVPL() : RenderPass(kInfo) {}
 
     /** Resets the pass
@@ -85,13 +116,17 @@ private:
     */
     void preparePhotonBuffers(RenderContext* pRenderContext, const RenderData& renderData);
 
-    /** Prepare the reservoir and photon buffers
+    /** Prepare the reservoir and VPL buffers
     */
     void prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Prepares the surface info buffer
    */
     void prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    /** Distrubute VPLs
+    */
+    void distributeVPLsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Presample the photon lights
     */
@@ -121,6 +156,10 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /**
+    */
+    void showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /* Fills the neighbor offset buffer with psyeudo random numbers
     */
     void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
@@ -136,6 +175,32 @@ private:
     /** Gets PDF texture size.
     */
     void computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels);
+
+    /*  * Creates the acceleration structure.
+        * Has to be called at least once to create the AS. buildAccelerationStructure(...) needs to be called after that to build/update the AS
+        * Calling it with an existing AS rebuilds it
+    */
+    void createAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel, const uint numberBlas, const std::vector<uint>& aabbCount, const std::vector<uint64_t>& aabbGpuAddress);
+
+    /** Creates the TLAS
+    */
+    void createTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel);
+
+    /** Creates the BLAS
+    */
+    void createBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel, const std::vector<uint> aabbCount, const std::vector<uint64_t> aabbGpuAddress);
+
+    /* * Builds the acceleration structure. Is needed every time one of the aabb buffers changes
+    */
+    void buildAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel, const std::vector<uint>& aabbCount);
+
+    /** Build or Update the TLAS
+    */
+    void buildTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel);
+
+    /** Build the BLAS
+    */
+    void buildBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel,const std::vector<uint>& aabbCount);
 
     //Constants
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
@@ -159,6 +224,7 @@ private:
     uint2 mPresampledTitleSize = uint2(128, 1024);
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
+    bool mUsePdfSampling = false;
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 100000;               //Max number of photon lights per iteration
@@ -170,9 +236,10 @@ private:
     float mPhotonRejection = 0.3f;          //Rejection probability
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
-
-    bool mUsePdfSampling = false;
-
+    //VPL
+    uint mNumberVPL = 28000;                //Number of VPL lights
+    float mVPLCollectionRadius = 0.01f;
+    bool mShowVPLs = true;
 
     //Runtime
     bool mReset = true;
@@ -195,8 +262,11 @@ private:
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
     ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
+    ComputePass::SharedPtr mpShowVPLsCalcAABBsPass;             //Calcs the AABB buffer for showing the vpls
 
     //Buffer
+    Buffer::SharedPtr mpVPLBuffer;              //Buffer for the VPLs
+    Buffer::SharedPtr mpVPLBufferCounter;       //Counter for the VPL buffer
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
@@ -207,6 +277,7 @@ private:
     Buffer::SharedPtr mpPhotonLightCounterCPU;  //For showing the current number of photons in the UI
     Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
+    Buffer::SharedPtr mpShowVPLsAABBsBuffer;              //AABB buffer for showing the vpls
 
     //
     //Ray tracing programms and helper
@@ -227,5 +298,10 @@ private:
         }
     };
 
-    RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass 
+    RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass
+    RayTraceProgramHelper mDistributeVPlsPass;          ///<Description for the Distribute VPL Pass
+    RayTraceProgramHelper mVPLDebugPass;                ///<A pass to visualize the VPLs
+
+    SphereAccelerationStructure mPhotonAS;
+    SphereAccelerationStructure mVPLDebugAS;
 };

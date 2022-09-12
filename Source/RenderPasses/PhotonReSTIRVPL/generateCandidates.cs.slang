@@ -5,7 +5,6 @@
 import Utils.Math.PackedFormats;
 import Utils.Math.FormatConversion;
 
-
 import Scene.RaytracingInline;
 import Scene.Material.ShadingUtils;
 import Rendering.Materials.Microfacet;

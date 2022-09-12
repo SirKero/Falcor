@@ -43,6 +43,7 @@ extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
 
 namespace {
     //Shaders
+    const char kShaderDistributeVPLs[] = "RenderPasses/PhotonReSTIRVPL/distributeVPLs.rt.slang";
     const char kShaderGeneratePhoton[] = "RenderPasses/PhotonReSTIRVPL/generatePhotons.rt.slang";
     const char kShaderPhotonPresampleLights[] = "RenderPasses/PhotonReSTIRVPL/presamplePhotonLights.cs.slang";
     const char kShaderFillSurfaceInformation[] = "RenderPasses/PhotonReSTIRVPL/fillSurfaceInfo.cs.slang";
@@ -51,8 +52,11 @@ namespace {
     const char kShaderSpartialPass[] = "RenderPasses/PhotonReSTIRVPL/spartialResampling.cs.slang";
     const char kShaderSpartioTemporalPass[] = "RenderPasses/PhotonReSTIRVPL/spartioTemporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIRVPL/finalShading.cs.slang";
+    const char kShaderShowAABBVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLsAABBcalc.cs.slang";
+    const char kShaderShowVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLs.rt.slang";
 
     // Ray tracing settings that affect the traversal stack size.
+    const uint32_t kMaxPayloadSizeBytesVPL = 32u;
     const uint32_t kMaxPayloadSizeBytes = 96u;
     const uint32_t kMaxAttributeSizeBytes = 8u;
     const uint32_t kMaxRecursionDepth = 2u;
@@ -65,9 +69,10 @@ namespace {
     const ChannelList kInputChannels = { kInVBufferDesc, kInMVecDesc, kInViewDesc };
 
     //Outputs
+    const ChannelDesc kOutColorDec = { "color" ,"gColor" , "Indirect illumination of the scene" ,false,  ResourceFormat::RGBA16Float };
     const ChannelList kOutputChannels =
     {
-        {"color" ,                  "gColor" ,               "Indirect illumination of the scene" ,      false,  ResourceFormat::RGBA16Float},
+        kOutColorDec,
         {"diffuseIllumination",     "gDiffuseIllumination",     "Diffuse Illumination and hit distance",    true,   ResourceFormat::RGBA16Float},
         {"diffuseReflectance",      "gDiffuseReflectance",      "Diffuse Reflectance",                      true,   ResourceFormat::RGBA16Float},
         {"specularIllumination",    "gSpecularIllumination",    "Specular illumination and hit distance",   true,   ResourceFormat::RGBA16Float},
@@ -128,6 +133,9 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
 
     prepareBuffers(pRenderContext, renderData);
 
+    //Distribute the vpls
+    distributeVPLsPass(pRenderContext, renderData);
+
     //Generate Photons
     generatePhotonsPass(pRenderContext, renderData);
 
@@ -171,6 +179,9 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     //Shade the pixel
     finalShadingPass(pRenderContext, renderData);
 
+    //Show the vpls as spheres for debug purposes (functions return if deactivated)
+    showVPLDebugPass(pRenderContext, renderData);
+
     //Reset the reset vars
     mReuploadBuffers = mReset ? true : false;
     mBiasCorrectionChanged = false;
@@ -201,6 +212,8 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
 
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
+
+        changed |= widget.checkbox("Show VPLs", mShowVPLs);
 
     }
 
@@ -283,6 +296,7 @@ void PhotonReSTIRVPL::setScene(RenderContext* pRenderContext, const Scene::Share
 
     //Recreate RayTracing Program on Scene reset
     mPhotonGeneratePass = RayTraceProgramHelper::create();
+    mDistributeVPlsPass = RayTraceProgramHelper::create();
 
     mpScene = pScene;
 
@@ -292,24 +306,27 @@ void PhotonReSTIRVPL::setScene(RenderContext* pRenderContext, const Scene::Share
             logWarning("This render pass only supports triangles. Other types of geometry will be ignored.");
         }
 
-        // Create ray tracing program.
-        {
+        //Lambda for standard init of a RT Program
+        auto initStandardRTProgram = [&](RayTraceProgramHelper& rtHelper, const char shader[], uint maxPayloadBites) {
             RtProgram::Desc desc;
-            desc.addShaderLibrary(kShaderGeneratePhoton);
-            desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
+            desc.addShaderLibrary(shader);
+            desc.setMaxPayloadSize(maxPayloadBites);
             desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
             desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
 
-            mPhotonGeneratePass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-            auto& sbt = mPhotonGeneratePass.pBindingTable;
+            rtHelper.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+            auto& sbt = rtHelper.pBindingTable;
             sbt->setRayGen(desc.addRayGen("rayGen"));
             sbt->setMiss(0, desc.addMiss("miss"));
             if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh)) {
                 sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
             }
 
-            mPhotonGeneratePass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
-        }
+            rtHelper.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+        };
+
+        initStandardRTProgram(mPhotonGeneratePass, kShaderGeneratePhoton, kMaxPayloadSizeBytes);    //Generate Photons
+        initStandardRTProgram(mDistributeVPlsPass, kShaderDistributeVPLs, kMaxPayloadSizeBytesVPL);  //Distributre VPLs
     }
 
 }
@@ -441,10 +458,10 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
     if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1]) {
         mpReservoirBuffer[0] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
                                                  1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpReservoirBuffer[0]->setName("ReStirExp::ReservoirBuf1");
+        mpReservoirBuffer[0]->setName("PhotonReStir::ReservoirBuf1");
         mpReservoirBuffer[1] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
                                                  1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
+        mpReservoirBuffer[1]->setName("PhotonReStir::ReservoirBuf2");
     }
     
     //Create a buffer filled with surface info for current and last frame
@@ -452,9 +469,9 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
         uint2 texDim = renderData.getDefaultTextureDims();
         uint bufferSize = texDim.x * texDim.y;
         mpSurfaceBuffer[0] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
-        mpSurfaceBuffer[0]->setName("ReStirExp::SurfaceBuffer1");
+        mpSurfaceBuffer[0]->setName("PhotonReStir::SurfaceBuffer1");
         mpSurfaceBuffer[1] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
-        mpSurfaceBuffer[1]->setName("ReStirExp::SurfaceBuffer2");
+        mpSurfaceBuffer[1]->setName("PhotonReStir::SurfaceBuffer2");
     }
 
     //Create an fill the neighbor offset buffer
@@ -465,7 +482,20 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
         mpNeighborOffsetBuffer = Texture::create1D(kNumNeighborOffsets, ResourceFormat::RG8Snorm, 1, 1, offsets.data());
 
 
-        mpNeighborOffsetBuffer->setName("ReStirExp::NeighborOffsetBuffer");
+        mpNeighborOffsetBuffer->setName("PhotonReStir::NeighborOffsetBuffer");
+    }
+
+    //Create buffer for VPLs
+    if (!mpVPLBuffer) {
+        mpVPLBuffer = Buffer::createStructured(sizeof(uint) * 8, mNumberVPL, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                                               Buffer::CpuAccess::None, nullptr, false);
+        mpVPLBuffer->setName("PhotonReStir::VPLBuffer");
+    }
+    if (!mpVPLBufferCounter) {
+        uint counterInit = 0;
+        mpVPLBufferCounter = Buffer::create(sizeof(uint), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                                            Buffer::CpuAccess::None, &counterInit);
+        mpVPLBufferCounter->setName("PhotonReStir::VPLBufferCounter");
     }
 
     if (!mpSampleGenerator) {
@@ -515,6 +545,56 @@ void PhotonReSTIRVPL::prepareSurfaceBufferPass(RenderContext* pRenderContext, co
 
     // Barrier for written buffer
     pRenderContext->uavBarrier(mpSurfaceBuffer[mFrameCount % 2].get());
+}
+
+void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("DistributeVPLs");
+
+    //Defines
+
+    if (!mDistributeVPlsPass.pVars) {
+        FALCOR_ASSERT(mDistributeVPlsPass.pProgram);
+
+        // Configure program.
+        mDistributeVPlsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
+        mDistributeVPlsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        // Create program variables for the current program.
+        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+        mDistributeVPlsPass.pVars = RtProgramVars::create(mDistributeVPlsPass.pProgram, mDistributeVPlsPass.pBindingTable);
+
+        // Bind utility classes into shared data.
+        auto var = mDistributeVPlsPass.pVars->getRootVar();
+        mpSampleGenerator->setShaderData(var);
+    };
+    FALCOR_ASSERT(mDistributeVPlsPass.pVars);
+
+    auto var = mDistributeVPlsPass.pVars->getRootVar();
+    // Set constants (uniforms).
+   // 
+   //PerFrame Constant Buffer
+    std::string nameBuf = "PerFrame";
+    var[nameBuf]["gFrameCount"] = mFrameCount;
+
+    //Upload constant buffer only if options changed
+    if (mReuploadBuffers) {
+        nameBuf = "CB";
+        var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
+        var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
+        var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
+        var[nameBuf]["gMaxNumberVPL"] = mNumberVPL;
+    }
+
+
+    var["gVPLs"] = mpVPLBuffer;
+    var["gVPLCounter"] = mpVPLBufferCounter;
+    var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
+
+    uint2 targetDim = uint2(1024u, div_round_up(uint(mNumberVPL * 1.5f), 1024u));
+    //Trace the photons
+    mpScene->raytrace(pRenderContext, mDistributeVPlsPass.pProgram.get(), mDistributeVPlsPass.pVars, uint3(targetDim, 1));
+
+    pRenderContext->uavBarrier(mpVPLBuffer.get());
 }
 
 void PhotonReSTIRVPL::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -935,6 +1015,138 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
     mpFinalShading->execute(pRenderContext, uint3(targetDim, 1));
 }
 
+void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    //TODO delete needed data here if pass becomes invalid
+    if (!mShowVPLs) {
+        //Reset all data if the buffer is active
+        if (mpShowVPLsAABBsBuffer) {
+            mpShowVPLsAABBsBuffer.reset();
+            mpShowVPLsCalcAABBsPass.reset();
+            //Clear all acceleration structure data
+            for (uint i = 0; i < mVPLDebugAS.blas.size(); i++)
+                mVPLDebugAS.blas[i].reset();
+            mVPLDebugAS.blas.clear();
+            mVPLDebugAS.blasData.clear();
+            mVPLDebugAS.instanceDesc.clear();
+            mVPLDebugAS.tlasScratch.reset();
+            mVPLDebugAS.tlas.pInstanceDescs.reset();  mVPLDebugAS.tlas.pSrv = nullptr;  mVPLDebugAS.tlas.pTlas.reset();
+            mVPLDebugPass = RayTraceProgramHelper::create();
+        }
+
+        return;
+    }
+        
+
+    FALCOR_PROFILE("ShowVPL");
+
+    //Convert Buffer pos to vpls
+
+    //Put a write barrier for the output here to be sure that the final shading shader finished writing
+    //auto outTexture = renderData[kOutColorDec.name]->asTexture();
+    //pRenderContext->uavBarrier(outTexture.get());
+
+    //AABB create pass
+    {
+        //Create AABB buffer
+        if (!mpShowVPLsAABBsBuffer) {
+            mpShowVPLsAABBsBuffer = Buffer::createStructured(sizeof(D3D12_RAYTRACING_AABB), mNumberVPL);
+            mpShowVPLsAABBsBuffer->setName("PhotonReStir::VPLaabbBuffer");
+        }
+        FALCOR_ASSERT(mpShowVPLsAABBsBuffer);
+        //Create pass
+        if (!mpShowVPLsCalcAABBsPass) {
+            Program::Desc desc;
+            desc.addShaderLibrary(kShaderShowAABBVPLs).csEntry("main").setShaderModel("6_5");
+
+            Program::DefineList defines;
+
+            mpShowVPLsCalcAABBsPass = ComputePass::create(desc, defines, true);
+        }
+        FALCOR_ASSERT(mpShowVPLsCalcAABBsPass);
+
+        auto var = mpShowVPLsCalcAABBsPass->getRootVar();
+
+        var["gVPLs"] = mpVPLBuffer;
+        var["gVPLCounter"] = mpVPLBufferCounter;
+        var["gAABBs"] = mpShowVPLsAABBsBuffer;
+
+        uint2 targetDim = uint2(1024u, div_round_up(uint(mNumberVPL), 1024u));
+
+        var["Uniform"]["gRadius"] = mVPLCollectionRadius;
+        var["Uniform"]["gNumVPLs"] = mNumberVPL;
+        var["Uniform"]["gDimY"] = targetDim.y;
+
+        mpShowVPLsCalcAABBsPass->execute(pRenderContext, uint3(targetDim, 1));
+
+        pRenderContext->uavBarrier(mpShowVPLsAABBsBuffer.get());
+    }
+    //Create the AS
+    if (!mVPLDebugAS.tlas.pTlas) {
+        mVPLDebugAS.update = true;
+        createAccelerationStructure(pRenderContext, mVPLDebugAS, 1, { mNumberVPL }, { mpShowVPLsAABBsBuffer->getGpuAddress() });
+    }
+
+    buildAccelerationStructure(pRenderContext, mVPLDebugAS, { mNumberVPL });
+
+    // Sphere Ray Trace pass
+    {
+        //Create the pass if there is none
+        if (!mVPLDebugPass.pProgram) {
+            RtProgram::Desc desc;
+            desc.addShaderLibrary(kShaderShowVPLs);
+            desc.setMaxPayloadSize(16u);
+            desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
+            desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+            mVPLDebugPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+            auto& sbt = mVPLDebugPass.pBindingTable;
+            sbt->setRayGen(desc.addRayGen("rayGen"));
+            sbt->setMiss(0, desc.addMiss("miss"));
+            sbt->setHitGroup(0, 0, desc.addHitGroup("closestHit", "", "intersection"));
+
+            mVPLDebugPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+        }
+
+        if (!mVPLDebugPass.pVars) {
+            FALCOR_ASSERT(mVPLDebugPass.pProgram);
+
+            // Configure program.
+            mVPLDebugPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+            // Create program variables for the current program.
+            // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+            mVPLDebugPass.pVars = RtProgramVars::create(mVPLDebugPass.pProgram, mVPLDebugPass.pBindingTable);
+        };
+        FALCOR_ASSERT(mVPLDebugPass.pVars);
+
+        auto var = mVPLDebugPass.pVars->getRootVar();
+
+        // Set constants (uniforms).
+        // 
+        //PerFrame Constant Buffer
+        std::string nameBuf = "PerFrame";
+        var[nameBuf]["gFrameCount"] = mFrameCount;
+
+        //Upload constant buffer only if options changed
+        if (mReuploadBuffers) {
+            nameBuf = "CB";
+            var[nameBuf]["gVplRadius"] = mVPLCollectionRadius;
+            var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
+        }
+
+
+        var["gVPLs"] = mpVPLBuffer;
+        var["gAABBs"] = mpShowVPLsAABBsBuffer;
+        var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
+        var["gColor"] = renderData[kOutColorDec.name]->asTexture();
+        bool tlasValid = var["gVplAS"].setSrv(mVPLDebugAS.tlas.pSrv);
+
+        uint2 targetDim = renderData.getDefaultTextureDims();
+        //Trace the photons
+        mpScene->raytrace(pRenderContext, mVPLDebugPass.pProgram.get(), mVPLDebugPass.pVars, uint3(targetDim, 1));
+    }
+}
+
 void PhotonReSTIRVPL::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
 {
     // Taken from the RTXDI implementation
@@ -996,4 +1208,183 @@ void PhotonReSTIRVPL::computePdfTextureSize(uint32_t maxItems, uint32_t& outWidt
     outWidth = uint32_t(textureWidth);
     outHeight = uint32_t(textureHeight);
     outMipLevels = uint32_t(textureMips);
+}
+
+void PhotonReSTIRVPL::createAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel,const uint numberBlas,const std::vector<uint>& aabbCount,const std::vector<uint64_t>& aabbGpuAddress)
+{
+    //clear all previous data
+    for (uint i = 0; i < accel.blas.size(); i++)
+        accel.blas[i].reset();
+    accel.blas.clear();
+    accel.blasData.clear();
+    accel.instanceDesc.clear();
+    accel.tlasScratch.reset();
+    accel.tlas.pInstanceDescs.reset();  accel.tlas.pSrv = nullptr;  accel.tlas.pTlas.reset();
+
+    accel.numberBlas = numberBlas;
+
+    createBottomLevelAS(pRenderContext, accel, aabbCount, aabbGpuAddress);
+    createTopLevelAS(pRenderContext, accel);
+}
+
+void PhotonReSTIRVPL::createTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel)
+{
+    accel.instanceDesc.clear(); //clear to be sure that it is empty
+
+    //fill the instance description if empty
+    for (int i = 0; i < accel.numberBlas; i++) {
+        D3D12_RAYTRACING_INSTANCE_DESC desc = {};
+        desc.AccelerationStructure = accel.blas[i]->getGpuAddress();
+        desc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        desc.InstanceID = i;
+        desc.InstanceMask = accel.numberBlas < 8 ? 1 << i : 0xFF;  //For up to 8 they are instanced seperatly
+        desc.InstanceContributionToHitGroupIndex = 0;
+
+        //Create a identity matrix for the transform and copy it to the instance desc
+        glm::mat4 transform4x4 = glm::identity<glm::mat4>();
+        std::memcpy(desc.Transform, &transform4x4, sizeof(desc.Transform));
+        accel.instanceDesc.push_back(desc);
+    }
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+    inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    inputs.NumDescs = (uint32_t)accel.numberBlas;
+    inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+
+    //Prebuild
+    FALCOR_GET_COM_INTERFACE(gpDevice->getApiHandle(), ID3D12Device5, pDevice5);
+    pDevice5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &accel.tlasPrebuildInfo);
+    accel.tlasScratch = Buffer::create(accel.tlasPrebuildInfo.ScratchDataSizeInBytes, Buffer::BindFlags::UnorderedAccess, Buffer::CpuAccess::None);
+    accel.tlasScratch->setName("PhotonReStir::TLAS_Scratch");
+
+    //Create buffers for the TLAS
+    accel.tlas.pTlas = Buffer::create(accel.tlasPrebuildInfo.ResultDataMaxSizeInBytes, Buffer::BindFlags::AccelerationStructure, Buffer::CpuAccess::None);
+    accel.tlas.pTlas->setName("PhotonReStir::TLAS");
+    accel.tlas.pInstanceDescs = Buffer::create((uint32_t)accel.numberBlas * sizeof(D3D12_RAYTRACING_INSTANCE_DESC), Buffer::BindFlags::None, Buffer::CpuAccess::Write, accel.instanceDesc.data());
+    accel.tlas.pInstanceDescs->setName("PhotonReStir::TLAS_Instance_Description");
+
+    //Acceleration Structure Buffer view for access in shader
+    accel.tlas.pSrv = ShaderResourceView::createViewForAccelerationStructure(accel.tlas.pTlas);
+}
+
+void PhotonReSTIRVPL::createBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel, const std::vector<uint> aabbCount, const std::vector<uint64_t> aabbGpuAddress)
+{
+    //Create Number of desired blas and reset max size
+    accel.blasData.resize(accel.numberBlas);
+    accel.blas.resize(accel.numberBlas);
+    accel.blasScratchMaxSize = 0;
+
+    FALCOR_ASSERT(aabbCount.size() >= accel.numberBlas);
+    FALCOR_ASSERT(aabbGpuAddress.size() >= accel.numberBlas);
+
+    //Prebuild
+    for (size_t i = 0; i < accel.numberBlas; i++) {
+        auto& blas = accel.blasData[i];
+
+        //Create geometry description
+        D3D12_RAYTRACING_GEOMETRY_DESC& desc = blas.geomDescs;
+        desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+        desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_NO_DUPLICATE_ANYHIT_INVOCATION;         //< Important! So that photons are not collected multiple times
+        desc.AABBs.AABBCount = aabbCount[i];
+        desc.AABBs.AABBs.StartAddress = aabbGpuAddress[i];
+        desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+
+        //Create input for blas
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS& inputs = blas.buildInputs;
+        inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+        inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+        inputs.NumDescs = 1;
+        inputs.pGeometryDescs = &blas.geomDescs;
+
+        //Build option flags
+        inputs.Flags = accel.fastBuild ? D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        if (accel.update) inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        //get prebuild Info
+        FALCOR_GET_COM_INTERFACE(gpDevice->getApiHandle(), ID3D12Device5, pDevice5);
+        pDevice5->GetRaytracingAccelerationStructurePrebuildInfo(&blas.buildInputs, &blas.prebuildInfo);
+
+        // Figure out the padded allocation sizes to have proper alignment.
+        FALCOR_ASSERT(blas.prebuildInfo.ResultDataMaxSizeInBytes > 0);
+        blas.blasByteSize = align_to((uint64_t)D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT, blas.prebuildInfo.ResultDataMaxSizeInBytes);
+
+        uint64_t scratchByteSize = std::max(blas.prebuildInfo.ScratchDataSizeInBytes, blas.prebuildInfo.UpdateScratchDataSizeInBytes);
+        blas.scratchByteSize = align_to((uint64_t)D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT, scratchByteSize);
+
+        accel.blasScratchMaxSize = std::max(blas.scratchByteSize, accel.blasScratchMaxSize);
+    }
+
+    //Create the scratch and blas buffers
+    accel.blasScratch = Buffer::create(accel.blasScratchMaxSize, Buffer::BindFlags::UnorderedAccess);
+    accel.blasScratch->setName("PhotonReStir::BlasScratch");
+
+    for (uint i = 0; i < accel.numberBlas; i++) {
+        accel.blas[0] = Buffer::create(accel.blasData[i].blasByteSize, Buffer::BindFlags::AccelerationStructure);
+        accel.blas[0]->setName("PhotonReStir::BlasBuffer" + std::to_string(i));
+    }
+}
+
+void PhotonReSTIRVPL::buildAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel, const std::vector<uint>& aabbCount)
+{
+    //TODO check per assert if buffers are set
+    buildBottomLevelAS(pRenderContext, accel, aabbCount);
+    buildTopLevelAS(pRenderContext, accel);
+}
+
+void PhotonReSTIRVPL::buildTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel)
+{
+    FALCOR_PROFILE("buildPhotonTlas");
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+    inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    inputs.NumDescs = (uint32_t)accel.instanceDesc.size();
+    //Update Flag could be set for TLAS. This made no real time difference in our test so it is left out. Updating could reduce the memory of the TLAS scratch buffer a bit
+    inputs.Flags = accel.fastBuild ? D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+    if(accel.update) inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
+    asDesc.Inputs = inputs;
+    asDesc.Inputs.InstanceDescs = accel.tlas.pInstanceDescs->getGpuAddress();
+    asDesc.ScratchAccelerationStructureData = accel.tlasScratch->getGpuAddress();
+    asDesc.DestAccelerationStructureData = accel.tlas.pTlas->getGpuAddress();
+
+    // Create TLAS
+    FALCOR_GET_COM_INTERFACE(pContext->getLowLevelData()->getCommandList(), ID3D12GraphicsCommandList4, pList4);
+    pContext->resourceBarrier(accel.tlas.pInstanceDescs.get(), Resource::State::NonPixelShader);
+    pList4->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
+    pContext->uavBarrier(accel.tlas.pTlas.get());                   //barrier for the tlas so it can be used savely after creation
+}
+
+void PhotonReSTIRVPL::buildBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel, const std::vector<uint>& aabbCount)
+{
+
+    FALCOR_PROFILE("buildPhotonBlas");
+    if (!gpDevice->isFeatureSupported(Device::SupportedFeatures::Raytracing))
+    {
+        throw std::exception("Raytracing is not supported by the current device");
+    }
+
+    for (size_t i = 0; i < accel.numberBlas; i++) {
+        auto& blas = accel.blasData[i];
+
+        //barriers for the scratch and blas buffer
+        pContext->uavBarrier(accel.blasScratch.get());
+        pContext->uavBarrier(accel.blas[i].get());
+
+        blas.geomDescs.AABBs.AABBCount = static_cast<UINT64>(aabbCount[i]);
+
+        //Fill the build desc struct
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
+        asDesc.Inputs = blas.buildInputs;
+        asDesc.ScratchAccelerationStructureData = accel.blasScratch->getGpuAddress();
+        asDesc.DestAccelerationStructureData = accel.blas[i]->getGpuAddress();
+
+        //Build the acceleration structure
+        FALCOR_GET_COM_INTERFACE(pContext->getLowLevelData()->getCommandList(), ID3D12GraphicsCommandList4, pList4);
+        pList4->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
+
+        //Barrier for the blas
+        pContext->uavBarrier(accel.blas[i].get());
+    }
 }
