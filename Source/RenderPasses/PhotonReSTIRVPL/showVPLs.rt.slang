@@ -23,7 +23,7 @@ cbuffer CB
 {
     float gVplRadius;       //Radius for the VPLs
     uint2 gFrameDim;
-    uint _pad;
+    float gScalar;          //Scalar for the flux
 }
 
 StructuredBuffer<VPL> gVPLs;
@@ -166,7 +166,7 @@ void rayGen()
         
         //Get flux
         VPL vpl = gVPLs[rayData.hitIndex];
-        //gColor[launchIndex] = float4(vpl.flux,1);
-        gColor[launchIndex] = float4(1,1,1,1);  //TODO: Currently flux is 0 so use white instead
+        //gColor[launchIndex] = float4(vpl.flux * gScalar,1);
+        gColor[launchIndex] = float4(float3(gScalar),1);  //TODO: Currently flux is 0 so use Scalar value instead
     }
 }

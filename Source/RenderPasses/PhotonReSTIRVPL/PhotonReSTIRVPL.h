@@ -240,6 +240,7 @@ private:
     uint mNumberVPL = 28000;                //Number of VPL lights
     float mVPLCollectionRadius = 0.01f;
     bool mShowVPLs = true;
+    float mShowVPLsScalar = 1.f;
 
     //Runtime
     bool mReset = true;

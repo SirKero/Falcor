@@ -212,9 +212,16 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
 
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
+    }
 
+    if (auto group = widget.group("VPL")) {
+
+        changed |= widget.var("Radius", mVPLCollectionRadius);
+        widget.tooltip("Collection Radius for the VPLs");
         changed |= widget.checkbox("Show VPLs", mShowVPLs);
-
+        if (mShowVPLs) {
+            widget.var("Debug Scalar", mShowVPLsScalar);
+        }
     }
 
     if (auto group = widget.group("ReSTIR")) {
@@ -1124,17 +1131,11 @@ void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const Rend
         // Set constants (uniforms).
         // 
         //PerFrame Constant Buffer
-        std::string nameBuf = "PerFrame";
-        var[nameBuf]["gFrameCount"] = mFrameCount;
-
-        //Upload constant buffer only if options changed
-        if (mReuploadBuffers) {
-            nameBuf = "CB";
-            var[nameBuf]["gVplRadius"] = mVPLCollectionRadius;
-            var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
-        }
-
-
+        std::string nameBuf = "CB";
+        var[nameBuf]["gVplRadius"] = mVPLCollectionRadius;
+        var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
+        var[nameBuf]["gScalar"] = mShowVPLsScalar;
+        
         var["gVPLs"] = mpVPLBuffer;
         var["gAABBs"] = mpShowVPLsAABBsBuffer;
         var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
