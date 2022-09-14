@@ -238,9 +238,10 @@ private:
     bool mPhotonAdjustShadingNormal = true;
     //VPL
     uint mNumberVPL = 28000;                //Number of VPL lights
-    float mVPLCollectionRadius = 0.01f;
+    float mVPLCollectionRadius = 0.05f;
     bool mShowVPLs = true;
     float mShowVPLsScalar = 1.f;
+    bool mResetVPLs = false;
 
     //Runtime
     bool mReset = true;

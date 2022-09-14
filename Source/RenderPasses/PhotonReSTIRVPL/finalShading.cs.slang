@@ -26,6 +26,7 @@ RWTexture2D<float4> gDiffuseIllumination;
 RWTexture2D<float4> gDiffuseReflectance;
 RWTexture2D<float4> gSpecularIllumination;
 RWTexture2D<float4> gSpecularReflectance;
+RWTexture2D<float4> gDebug;
 
 #define is_valid(name) (is_valid_##name != 0)
 

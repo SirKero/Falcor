@@ -69,14 +69,16 @@ namespace {
     const ChannelList kInputChannels = { kInVBufferDesc, kInMVecDesc, kInViewDesc };
 
     //Outputs
-    const ChannelDesc kOutColorDec = { "color" ,"gColor" , "Indirect illumination of the scene" ,false,  ResourceFormat::RGBA16Float };
+    const ChannelDesc kOutColorDesc = { "color" ,"gColor" , "Indirect illumination of the scene" ,false,  ResourceFormat::RGBA16Float };
+    const ChannelDesc kOutDebugDesc = { "debug" ,"gDebug" , "For Debug Purposes" ,false,  ResourceFormat::RGBA32Float };     //TODO: Remove if not needed
     const ChannelList kOutputChannels =
     {
-        kOutColorDec,
+        kOutColorDesc,
         {"diffuseIllumination",     "gDiffuseIllumination",     "Diffuse Illumination and hit distance",    true,   ResourceFormat::RGBA16Float},
         {"diffuseReflectance",      "gDiffuseReflectance",      "Diffuse Reflectance",                      true,   ResourceFormat::RGBA16Float},
         {"specularIllumination",    "gSpecularIllumination",    "Specular illumination and hit distance",   true,   ResourceFormat::RGBA16Float},
         {"specularReflectance",     "gSpecularReflectance",     "Specular reflectance",                     true,   ResourceFormat::RGBA16Float},
+        kOutDebugDesc,
     };
 
     const Gui::DropdownList kResamplingModeList{
@@ -134,7 +136,8 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     prepareBuffers(pRenderContext, renderData);
 
     //Distribute the vpls
-    distributeVPLsPass(pRenderContext, renderData);
+    if(mFrameCount == 0 || mResetVPLs)
+        distributeVPLsPass(pRenderContext, renderData);
 
     //Generate Photons
     generatePhotonsPass(pRenderContext, renderData);
@@ -222,6 +225,8 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
         if (mShowVPLs) {
             widget.var("Debug Scalar", mShowVPLsScalar);
         }
+        mResetVPLs = widget.button("Redistribute VPLs");
+        changed |= mResetVPLs;
     }
 
     if (auto group = widget.group("ReSTIR")) {
@@ -558,6 +563,13 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
 {
     FALCOR_PROFILE("DistributeVPLs");
 
+    if (mResetVPLs) {
+        pRenderContext->clearUAV(mpVPLBuffer->getUAV().get(), uint4(0));
+        pRenderContext->clearUAV(mpVPLBufferCounter->getUAV().get(), uint4(0));
+        pRenderContext->clearTexture(renderData[kOutDebugDesc.name]->asTexture().get());
+        mResetVPLs = false;
+    }
+
     //Defines
 
     if (!mDistributeVPlsPass.pVars) {
@@ -596,8 +608,10 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
     var["gVPLs"] = mpVPLBuffer;
     var["gVPLCounter"] = mpVPLBufferCounter;
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
+    var["gDebug"] = renderData[kOutDebugDesc.name]->asTexture();
 
-    uint2 targetDim = uint2(1024u, div_round_up(uint(mNumberVPL * 1.5f), 1024u));
+    uint2 targetDim = uint2(div_round_up(uint(mNumberVPL * 1.5f), 1024u), 1024u);
+    //uint2 targetDim = renderData.getDefaultTextureDims();
     //Trace the photons
     mpScene->raytrace(pRenderContext, mDistributeVPlsPass.pProgram.get(), mDistributeVPlsPass.pVars, uint3(targetDim, 1));
 
@@ -1050,7 +1064,7 @@ void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const Rend
     //Convert Buffer pos to vpls
 
     //Put a write barrier for the output here to be sure that the final shading shader finished writing
-    //auto outTexture = renderData[kOutColorDec.name]->asTexture();
+    //auto outTexture = renderData[kOutColorDesc.name]->asTexture();
     //pRenderContext->uavBarrier(outTexture.get());
 
     //AABB create pass
@@ -1139,7 +1153,7 @@ void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const Rend
         var["gVPLs"] = mpVPLBuffer;
         var["gAABBs"] = mpShowVPLsAABBsBuffer;
         var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
-        var["gColor"] = renderData[kOutColorDec.name]->asTexture();
+        var["gColor"] = renderData[kOutColorDesc.name]->asTexture();
         bool tlasValid = var["gVplAS"].setSrv(mVPLDebugAS.tlas.pSrv);
 
         uint2 targetDim = renderData.getDefaultTextureDims();

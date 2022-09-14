@@ -34,6 +34,8 @@ RWStructuredBuffer<VPL> gVPLs;
 RWBuffer<uint> gVPLCounter;
 Texture2D<PackedHitInfo> gVBuffer;
 
+RWTexture2D<float4> gDebug;
+
 /** Payload for scatter ray (16sB).
 */
 struct RayData
@@ -86,13 +88,18 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
 
-    bool valid = bsdf.sample(sd, rayData.sg, bsdfSample, true /*ImportanceSampling*/);    
-    bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+    //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
+    float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
 
-    if(valid){
+    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo)/luminance(norm);
+    
+    float rnd = sampleNext1D(rayData.sg);
+    bool diffuseHit = rnd <= pDiffuseRef; //Check if diffuse
+
+    if(diffuseHit){
         rayData.distance = RayTCurrent();
         rayData.packedNormal = encodeNormal2x16(sd.N);
-        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
+        rayData.diffuseHit = diffuseHit;
     }else{
         rayData.distance = -1.f;
     }
@@ -124,17 +131,34 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
+//transforms direction from local to world space
+void fromLocalToWorld(in float3 lightDirW, inout float3 dir)
+{
+    //transform from local space -> random dir vector in world space
+    float3 tangent, bitangent;
+    if (abs(lightDirW.x) < 0.99)
+        tangent = cross(lightDirW, float3(1., 0., 0.));
+    else
+        tangent = cross(lightDirW, float3(0., 1., 0.));
+    tangent = normalize(tangent);
+    bitangent = cross(tangent, lightDirW);
+
+    dir = dir.x * tangent + dir.y * bitangent + dir.z * lightDirW;
+}
+
 [shader("raygeneration")]
 void rayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
-
+  
     RayData rd = RayData::create();
     rd.sg = SampleGenerator(launchIndex, gFrameCount + 2 * 13);    //TODO add seed offset
 
     //Get random shading data
-    uint2 randomIndex = max(uint2(sampleNext2D(rd.sg) * float2(launchDim)),launchDim - 1);
+    uint2 randomIndex = min(uint2(sampleNext2D(rd.sg) * float2(gFrameDim)),gFrameDim - 1);
+    //uint2 randomIndex = launchIndex;
+    gDebug[randomIndex] = float4(1,0,0,1);
     
     PackedHitInfo packedHitInfo = gVBuffer[randomIndex];
     HitInfo hitInfo = HitInfo(packedHitInfo);
@@ -148,18 +172,40 @@ void rayGen()
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
 
-    bool valid = bsdf.sample(sd, rd.sg, bsdfSample, true /*ImportanceSampling*/);
+    //Only distribute on Reflections
     
-    bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+    //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
+    float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
+
+    float pReflection = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo)/luminance(norm);
+
+    float rnd = sampleNext1D(rd.sg);
+    if(rnd > pReflection) return;
     
+    //BSDF sampling
+    sd.mtl.setActiveLobes((uint)LobeType::Reflection);
+    bool valid = bsdf.sample(sd, rd.sg, bsdfSample, true);
+        
     RayDesc ray;
-    ray.Origin =  sd.computeNewRayOrigin(!transmission); //false is for transmissions
+    ray.Origin =  sd.computeNewRayOrigin(); //false is for transmissions
     ray.Direction = bsdfSample.wo;
     ray.TMin = 0.01f;
     ray.TMax = 10000.f;
+    
 
+    /*
+    float3 dir = sample_cosine_hemisphere_polar(sampleNext2D(rd.sg));
+    fromLocalToWorld(sd.faceN,dir);
+    
+    //Cosine Sampling
+    RayDesc ray;
+    ray.Origin =  sd.computeNewRayOrigin();
+    ray.Direction = dir;   //Cosine sampling     
+    ray.TMin = 0.01f;
+    ray.TMax = 10000.f;
+    */
     uint rayFlags = 0;
-
+    
     TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rd);
 
     //If hit is valid store
@@ -172,8 +218,14 @@ void rayGen()
 
         uint vplIndex = 0;
         InterlockedAdd(gVPLCounter[0], 1u, vplIndex);
+
+        if(vplIndex < gMaxNumberVPL){
+          vplIndex = min(uint(sampleNext1D(rd.sg) * float(vplIndex)), vplIndex-1);  
+        }
+        
         if(vplIndex < gMaxNumberVPL){
             gVPLs[vplIndex] = vpl;
+            
         }
     }
 }
