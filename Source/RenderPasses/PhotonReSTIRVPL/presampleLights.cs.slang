@@ -2,7 +2,7 @@ import Scene.Scene;
 import Utils.Color.ColorHelpers;
 import Utils.Sampling.SampleGenerator;
 
-import PhotonReStirFunctions;
+import VPLs;
 
 Texture2D<float> gLightPdf;
 RWStructuredBuffer<uint2> gPresampledLights;

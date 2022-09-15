@@ -16,6 +16,7 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
+import VPLs;
 
 Texture2D<uint4> gReservoir;
 RWTexture2D<uint4> gReservoirPrev;
@@ -25,6 +26,7 @@ Texture2D<float4> gPhotonReservoirFlux;
 RWTexture2D<float4> gPhotonReservoirPosPrev;
 RWTexture2D<float4> gPhotonReservoirFluxPrev;
 
+StructuredBuffer<VPL> gVPLs;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -82,18 +84,6 @@ Surface getSurface(uint2 idx){
     return Surface(surfaceData, -viewDir);
 }
 
-PhotonLight getPhotonLight(int2 idx, bool prev){
-    PhotonLight pl;
-    if(prev){
-        pl.pos = gPhotonReservoirPosPrev[idx];
-        pl.flux = gPhotonReservoirFluxPrev[idx];
-    }else{
-        pl.pos = gPhotonReservoirPos[idx];
-        pl.flux = gPhotonReservoirFlux[idx];
-    }
-    return pl;
-}
-
 bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
     float normalCheck = dot(currNormal, neighNormal);
     float minLinZDiff = currLinZ * gDepthThreshold;
@@ -101,21 +91,19 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
+bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float sampleDistance){
     //Get light position
-    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.w));
-
-    if(any(pl.flux.xyz <= 0)) return false;
+    if(any(vpl.flux < 0)) return false;
     
-    ls.dir = pl.pos.xyz - worldPos;
+    ls.dir = vpl.posW - worldPos;
     float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    float cosTheta = dot(photonNormal, -ls.dir);
+    float cosTheta = dot(vpl.normal, -ls.dir);
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
-    ls.Li = luminance(pl.flux.xyz) / pdf;
+    ls.Li = luminance(vpl.flux) / pdf;
 
     return true;
 }
@@ -187,7 +175,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
         return;
     
     //Load reservoir from current iteration
+    VPL selectedVPL = VPL();
     Reservoir current = getReservoir(dTid);
+    if(current.weightSum > 0){
+        selectedVPL = gVPLs[current.lightIdx];
+    }
     
     combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
     
@@ -196,7 +188,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
     uint numSpartialSamples = min(gSpartialSamples,32); //Cap at 32 samples for the later bias correction
     uint cachedResults = 0;  //Mask for valid neighbor samples
     int selectedSample = -1;  //Index of the selected sample
-    PhotonLight selectedPL = getPhotonLight(dTid, false);
 
     //Go through all neighbors
     for(uint i=0 ; i<numSpartialSamples; i++){
@@ -220,7 +211,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //If neighbor has passed the tests get reservoir and compair them
         Reservoir neigh = getReservoir(idx);
-        PhotonLight pl = getPhotonLight(idx, false);
+        VPL vpl = gVPLs[neigh.lightIdx];
         
         cachedResults |= (1u << i);
         //Get neightbor light target PDF for current surface
@@ -228,14 +219,14 @@ void main(uint2 dTid : SV_DispatchThreadID)
         if(neigh.M > 0){
             LightSample ls = { };
             float distance = 0;
-            bool valid = getLightSample(pl, currentSurface.posW, ls, distance);
+            bool valid = getLightSample(vpl, currentSurface.posW, ls, distance);
             targetPdf = valid ?  getSurfacePdf(currentSurface, ls): 0.f;
         }
         
         if (combineReservoir(r, neigh, targetPdf, sampleNext1D(sg)))
         {
             selectedSample = i;
-            selectedPL = pl;
+            selectedVPL = vpl;
         }
 
     }
@@ -267,7 +258,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //Get light pdf
         LightSample ls = { };
         float distance = 0;
-        bool valid = getLightSample(selectedPL, biasSurface.posW, ls, distance);
+        bool valid = getLightSample(selectedVPL, biasSurface.posW, ls, distance);
         float ps = valid ? getSurfacePdf(biasSurface, ls) : 0.0;
 
         //Trace ray
@@ -297,7 +288,4 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif
         
     gReservoirPrev[dTid] = r.pack();
-    
-    gPhotonReservoirPosPrev[dTid] = selectedPL.pos;
-    gPhotonReservoirFluxPrev[dTid] = selectedPL.flux;
 }

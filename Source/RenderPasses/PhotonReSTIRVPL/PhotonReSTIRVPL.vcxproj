@@ -36,13 +36,14 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ShaderSource Include="collectPhotons.rt.slang" />
     <ShaderSource Include="distributeVPLs.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="generateCandidates.cs.slang" />
     <ShaderSource Include="generatePhotons.rt.slang" />
     <ShaderSource Include="PhotonReStirFunctions.slang" />
-    <ShaderSource Include="presamplePhotonLights.cs.slang" />
+    <ShaderSource Include="presampleLights.cs.slang" />
     <ShaderSource Include="Reservoir.slang" />
     <ShaderSource Include="showVPLs.rt.slang" />
     <ShaderSource Include="showVPLsAABBcalc.cs.slang" />

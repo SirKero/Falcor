@@ -45,7 +45,8 @@ namespace {
     //Shaders
     const char kShaderDistributeVPLs[] = "RenderPasses/PhotonReSTIRVPL/distributeVPLs.rt.slang";
     const char kShaderGeneratePhoton[] = "RenderPasses/PhotonReSTIRVPL/generatePhotons.rt.slang";
-    const char kShaderPhotonPresampleLights[] = "RenderPasses/PhotonReSTIRVPL/presamplePhotonLights.cs.slang";
+    const char kShaderCollectPhoton[] = "RenderPasses/PhotonReSTIRVPL/collectPhotons.rt.slang";
+    const char kShaderPresampleLights[] = "RenderPasses/PhotonReSTIRVPL/presampleLights.cs.slang";
     const char kShaderFillSurfaceInformation[] = "RenderPasses/PhotonReSTIRVPL/fillSurfaceInfo.cs.slang";
     const char kShaderGenerateCandidates[] = "RenderPasses/PhotonReSTIRVPL/generateCandidates.cs.slang";
     const char kShaderTemporalPass[] = "RenderPasses/PhotonReSTIRVPL/temporalResampling.cs.slang";
@@ -56,7 +57,8 @@ namespace {
     const char kShaderShowVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLs.rt.slang";
 
     // Ray tracing settings that affect the traversal stack size.
-    const uint32_t kMaxPayloadSizeBytesVPL = 32u;
+    const uint32_t kMaxPayloadSizeBytesVPL = 48u;
+    const uint32_t kMaxPayloadSizeBytesCollect = 80u;
     const uint32_t kMaxPayloadSizeBytes = 96u;
     const uint32_t kMaxAttributeSizeBytes = 8u;
     const uint32_t kMaxRecursionDepth = 2u;
@@ -117,6 +119,9 @@ RenderPassReflection PhotonReSTIRVPL::reflect(const CompileData& compileData)
 
 void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    //clear color output |TODO: Clear all valid outputs
+    pRenderContext->clearTexture(renderData[kOutColorDesc.name]->asTexture().get());
+    
     //Return on empty scene
     if (!mpScene)
         return;
@@ -136,12 +141,15 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     prepareBuffers(pRenderContext, renderData);
 
     //Distribute the vpls
-    if(mFrameCount == 0 || mResetVPLs)
+    if (mFrameCount == 0 || mResetVPLs) {
         distributeVPLsPass(pRenderContext, renderData);
-
-    //Generate Photons
+    }
     generatePhotonsPass(pRenderContext, renderData);
 
+    collectPhotonsPass(pRenderContext, renderData);
+
+    //Generate Photons
+    
     //Presample generated photon lights
     presamplePhotonLightsPass(pRenderContext, renderData);
 
@@ -181,7 +189,7 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
 
     //Shade the pixel
     finalShadingPass(pRenderContext, renderData);
-
+    
     //Show the vpls as spheres for debug purposes (functions return if deactivated)
     showVPLDebugPass(pRenderContext, renderData);
 
@@ -339,6 +347,24 @@ void PhotonReSTIRVPL::setScene(RenderContext* pRenderContext, const Scene::Share
 
         initStandardRTProgram(mPhotonGeneratePass, kShaderGeneratePhoton, kMaxPayloadSizeBytes);    //Generate Photons
         initStandardRTProgram(mDistributeVPlsPass, kShaderDistributeVPLs, kMaxPayloadSizeBytesVPL);  //Distributre VPLs
+
+        //Init the raytracing collection programm
+        {
+            RtProgram::Desc desc;
+            desc.addShaderLibrary(kShaderCollectPhoton);
+            desc.setMaxPayloadSize(kMaxPayloadSizeBytesCollect);
+            desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
+            desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+            //Scene geometry count is needed as the scene acceleration struture bound with the scene defines
+            mCollectPhotonsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+            auto& sbt = mCollectPhotonsPass.pBindingTable;
+            sbt->setRayGen(desc.addRayGen("rayGen"));
+            sbt->setMiss(0, desc.addMiss("miss"));
+            sbt->setHitGroup(0, 0, desc.addHitGroup("", "anyHit", "intersection"));
+            
+            mCollectPhotonsPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+        }
     }
 
 }
@@ -400,46 +426,53 @@ void PhotonReSTIRVPL::preparePhotonBuffers(RenderContext* pRenderContext,const R
         }
     }
 
+    
     if (mChangePhotonLightBufferSize) {
-        mpPhotonLights.reset();
+        mpPhotonAABB.reset();
+        mpPhotonData.reset();
+        mPhotonAS.tlas.pTlas.reset();       //This triggers photon as recreation
         mChangePhotonLightBufferSize = false;
     }
+    
 
+    if (!mpPhotonCounter) {
+        mpPhotonCounter = Buffer::create(sizeof(uint));
+        mpPhotonCounter->setName("PhotonReSTIRVPL::PhotonCounterGPU");
+    }
+    if (!mpPhotonCounterCPU) {
+        mpPhotonCounterCPU = Buffer::create(sizeof(uint),ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonCounterCPU->setName("PhotonReSTIRVPL::PhotonCounterCPU");
+    }
+    if (!mpPhotonAABB) {
+        mpPhotonAABB = Buffer::createStructured(sizeof(D3D12_RAYTRACING_AABB), mNumMaxPhotons);
+        mpPhotonAABB->setName("PhotonReStir::PhotonAABB");
+    }
+    if (!mpPhotonData) {
+        mpPhotonData = Buffer::createStructured(sizeof(uint) * 4, mNumMaxPhotons);
+        mpPhotonData->setName("PhotonReStir::PhotonData");
+    }
 
-    if (!mpPhotonLightCounter) {
-        mpPhotonLightCounter = Buffer::create(sizeof(uint));
-        mpPhotonLightCounter->setName("PhotonReSTIRVPL::PhotonCounterGPU");
-    }
-    if (!mpPhotonLightCounterCPU) {
-        mpPhotonLightCounterCPU = Buffer::create(sizeof(uint),ResourceBindFlags::None, Buffer::CpuAccess::Read);
-        mpPhotonLightCounterCPU->setName("PhotonReSTIRVPL::PhotonCounterCPU");
-    }
-    if (!mpPhotonLights) {
-        //Calculate real photon max size
-        mpPhotonLights = Buffer::createStructured(sizeof(float) * 8, mNumMaxPhotons);
-        mpPhotonLights->setName("PhotonReSTIRVPL::PhotonLights");
-    }
     //Create pdf texture
     if (mUsePdfSampling) {
         uint width, height, mip;
-        computePdfTextureSize(mNumMaxPhotons, width, height, mip);
-        if (!mpPhotonLightPdfTex || mpPhotonLightPdfTex->getWidth() != width || mpPhotonLightPdfTex->getHeight() != height || mpPhotonLightPdfTex->getMipCount() != mip) {
-            mpPhotonLightPdfTex = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
+        computePdfTextureSize(mNumberVPL, width, height, mip);
+        if (!mpLightPdfTex || mpLightPdfTex->getWidth() != width || mpLightPdfTex->getHeight() != height || mpLightPdfTex->getMipCount() != mip) {
+            mpLightPdfTex = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
                                                     ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
-            mpPhotonLightPdfTex->setName("PhotonReSTIRVPL::PhotonLightPdfTex");
+            mpLightPdfTex->setName("PhotonReSTIRVPL::PhotonLightPdfTex");
         }
 
         //Create Buffer for the presampled lights
-        if (!mpPresampledPhotonLights || mPresampledTitleSizeChanged) {
-            mpPresampledPhotonLights = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
-            mpPresampledPhotonLights->setName("PhotonReSTIRVPL::PresampledPhotonLights");
+        if (!mpPresampledLights || mPresampledTitleSizeChanged) {
+            mpPresampledLights = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
+            mpPresampledLights->setName("PhotonReSTIRVPL::PresampledPhotonLights");
             mPresampledTitleSizeChanged = false;
         }
     }
     //Reset buffers if they exist
     else {
-        if (mpPhotonLightPdfTex)mpPhotonLightPdfTex.reset();
-        if (mpPresampledPhotonLights) mpPresampledPhotonLights.reset();
+        if (mpLightPdfTex)mpLightPdfTex.reset();
+        if (mpPresampledLights) mpPresampledLights.reset();
     }
     
     //Photon reservoir textures
@@ -622,9 +655,8 @@ void PhotonReSTIRVPL::generatePhotonsPass(RenderContext* pRenderContext, const R
 {
     FALCOR_PROFILE("GeneratePhotons");
     //Clear Counter
-    pRenderContext->clearUAV(mpPhotonLightCounter.get()->getUAV().get(), uint4(0));
-
-    pRenderContext->clearUAV(mpPhotonLights.get()->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpPhotonAABB->getUAV().get(), uint4(0));
 
     //Defines
     mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
@@ -663,13 +695,14 @@ void PhotonReSTIRVPL::generatePhotonsPass(RenderContext* pRenderContext, const R
         var[nameBuf]["gRejection"] = mPhotonRejection;
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
+        var[nameBuf]["gPhotonRadius"] = mVPLCollectionRadius;
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
-    var["gPhotonLights"] = mpPhotonLights;
-    var["gPhotonCounter"] = mpPhotonLightCounter;
-    if(mUsePdfSampling) var["gPhotonPdfTexture"] = mpPhotonLightPdfTex;
+    var["gPhotonAABB"] = mpPhotonAABB;
+    var["gPackedPhotonData"] = mpPhotonData;
+    var["gPhotonCounter"] = mpPhotonCounter;
 
     // Get dimensions of ray dispatch.
     const uint2 targetDim = uint2(mNumDispatchedPhotons/mPhotonYExtent, mPhotonYExtent);
@@ -678,9 +711,78 @@ void PhotonReSTIRVPL::generatePhotonsPass(RenderContext* pRenderContext, const R
     //Trace the photons
     mpScene->raytrace(pRenderContext, mPhotonGeneratePass.pProgram.get(), mPhotonGeneratePass.pVars, uint3(targetDim, 1));
 
-    pRenderContext->uavBarrier(mpPhotonLightCounter.get());
-    pRenderContext->uavBarrier(mpPhotonLights.get());
-    if (mUsePdfSampling) mpPhotonLightPdfTex->generateMips(pRenderContext);
+    pRenderContext->uavBarrier(mpPhotonCounter.get());
+    pRenderContext->uavBarrier(mpPhotonAABB.get());
+    pRenderContext->uavBarrier(mpPhotonData.get());
+
+    //Build Acceleration Structure
+    //Create as if not valid
+    if (!mPhotonAS.tlas.pTlas) {
+        mPhotonAS.update = false;
+        createAccelerationStructure(pRenderContext, mPhotonAS, 1, { mNumMaxPhotons }, { mpPhotonAABB->getGpuAddress() });
+    }
+
+    buildAccelerationStructure(pRenderContext, mPhotonAS, { mNumMaxPhotons });
+}
+
+void PhotonReSTIRVPL::collectPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("CollectPhotons");
+
+    //Defines
+    mCollectPhotonsPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mCollectPhotonsPass.pProgram->addDefine("USE_PDF_SAMPLING", mUsePdfSampling ? "1" : "0");
+
+    if (!mCollectPhotonsPass.pVars) {
+        FALCOR_ASSERT(mCollectPhotonsPass.pProgram);
+
+        // Configure program.
+        mCollectPhotonsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
+        mCollectPhotonsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        // Create program variables for the current program.
+        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+        mCollectPhotonsPass.pVars = RtProgramVars::create(mCollectPhotonsPass.pProgram, mCollectPhotonsPass.pBindingTable);
+
+        // Bind utility classes into shared data.
+        auto var = mCollectPhotonsPass.pVars->getRootVar();
+        mpSampleGenerator->setShaderData(var);
+    };
+    FALCOR_ASSERT(mCollectPhotonsPass.pVars);
+
+    auto var = mCollectPhotonsPass.pVars->getRootVar();
+
+    // Set constants (uniforms).
+    // 
+    //PerFrame Constant Buffer
+    std::string nameBuf = "PerFrame";
+    var[nameBuf]["gFrameCount"] = mFrameCount;
+
+    //Upload constant buffer only if options changed
+    if (mReuploadBuffers) {
+        nameBuf = "CB";
+        var[nameBuf]["gPhotonRadius"] = mVPLCollectionRadius;
+        var[nameBuf]["gMaxVPLs"] = mNumberVPL;
+    }
+
+    var["gPhotonAABB"] = mpPhotonAABB;
+    var["gPackedPhotonData"] = mpPhotonData;
+    var["gPhotonCounter"] = mpPhotonCounter;
+    var["gVPLs"] = mpVPLBuffer;
+    var["gVPLCounter"] = mpVPLBufferCounter;
+    if (mUsePdfSampling) var["gLightPdf"] = mpLightPdfTex;
+
+    bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
+    FALCOR_ASSERT(tlasValid);
+
+    //Create dimensions based on the number of VPLs
+    uint2 targetDim = uint2(div_round_up(uint(mNumberVPL), 1024u), 1024u);
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    //Trace the photons
+    mpScene->raytrace(pRenderContext, mCollectPhotonsPass.pProgram.get(), mCollectPhotonsPass.pVars, uint3(targetDim, 1));
+
+    //Generate mip chain
+    if (mUsePdfSampling) mpLightPdfTex->generateMips(pRenderContext);
 }
 
 void PhotonReSTIRVPL::presamplePhotonLightsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -695,7 +797,7 @@ void PhotonReSTIRVPL::presamplePhotonLightsPass(RenderContext* pRenderContext, c
     FALCOR_PROFILE("PresamplePhotonLight");
     if (!mpPresamplePhotonLightsPass) {
         Program::Desc desc;
-        desc.addShaderLibrary(kShaderPhotonPresampleLights).csEntry("main").setShaderModel("6_5");
+        desc.addShaderLibrary(kShaderPresampleLights).csEntry("main").setShaderModel("6_5");
         desc.addTypeConformances(mpScene->getTypeConformances());
 
         Program::DefineList defines;
@@ -711,17 +813,17 @@ void PhotonReSTIRVPL::presamplePhotonLightsPass(RenderContext* pRenderContext, c
     var["PerFrame"]["gFrameCount"] = mFrameCount;
 
     if (mReset || mReuploadBuffers) {
-        var["Constant"]["gPdfTexSize"] = uint2(mpPhotonLightPdfTex->getWidth(), mpPhotonLightPdfTex->getHeight());
+        var["Constant"]["gPdfTexSize"] = uint2(mpLightPdfTex->getWidth(), mpLightPdfTex->getHeight());
         var["Constant"]["gTileSizes"] = mPresampledTitleSize;
     }
 
-    var["gLightPdf"] = mpPhotonLightPdfTex;
-    var["gPresampledLights"] = mpPresampledPhotonLights;
+    var["gLightPdf"] = mpLightPdfTex;
+    var["gPresampledLights"] = mpPresampledLights;
 
     uint2 targetDim = mPresampledTitleSize;
     mpPresamplePhotonLightsPass->execute(pRenderContext, uint3(targetDim, 1));
 
-    pRenderContext->uavBarrier(mpPresampledPhotonLights.get());
+    pRenderContext->uavBarrier(mpPresampledLights.get());
 }
 
 void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -765,9 +867,9 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
     mpSampleGenerator->setShaderData(var);          //Sample generator
     bindReservoirs(var, mFrameCount, false);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
-    var["gPhotonCounter"] = mpPhotonLightCounter;
-    var["gPhotonLights"] = mpPhotonLights;
-    if(mUsePdfSampling) var["gPresampledPhotonLights"] = mpPresampledPhotonLights;
+    var["gVPLCounter"] = mpVPLBufferCounter;
+    var["gVPLs"] = mpVPLBuffer;
+    if(mUsePdfSampling) var["gPresampledLights"] = mpPresampledLights;
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -779,7 +881,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
         var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
-        var[uniformName]["gPresampledPhotonLightBufferSize"] = mPresampledTitleSize.x * mPresampledTitleSize.y;
+        var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize.x * mPresampledTitleSize.y :  mNumberVPL;
     }
 
     //Execute
@@ -827,6 +929,8 @@ void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const Re
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
 
+
+    var["gVPLs"] = mpVPLBuffer;
     var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
@@ -887,6 +991,7 @@ void PhotonReSTIRVPL::spartialResampling(RenderContext* pRenderContext, const Re
     bindReservoirs(var, mFrameCount, true); //Use "Previous" as output 
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+    var["gVPLs"] = mpVPLBuffer;
 
     var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
@@ -947,6 +1052,7 @@ void PhotonReSTIRVPL::spartioTemporalResampling(RenderContext* pRenderContext, c
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
+    var["gVPLs"] = mpVPLBuffer;
     var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
@@ -1013,10 +1119,11 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
 
     bindReservoirs(var, reservoirIndex ,false);
 
+    var["gVPLs"] = mpVPLBuffer;
     //for (auto& inp : kInputChannels) bindAsTex(inp);
     bindAsTex(kInVBufferDesc);
     bindAsTex(kInMVecDesc);
-    //var["gPhotonCounter"] = mpPhotonLightCounter;
+    //var["gPhotonCounter"] = mpPhotonCounter;
     //var["gPhotonLights"] = mpPhotonLights;
     for (auto& out : kOutputChannels) bindAsTex(out);
 
@@ -1156,6 +1263,8 @@ void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const Rend
         var["gColor"] = renderData[kOutColorDesc.name]->asTexture();
         bool tlasValid = var["gVplAS"].setSrv(mVPLDebugAS.tlas.pSrv);
 
+        FALCOR_ASSERT(tlasValid);
+
         uint2 targetDim = renderData.getDefaultTextureDims();
         //Trace the photons
         mpScene->raytrace(pRenderContext, mVPLDebugPass.pProgram.get(), mVPLDebugPass.pVars, uint3(targetDim, 1));
@@ -1192,22 +1301,18 @@ void PhotonReSTIRVPL::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
 void PhotonReSTIRVPL::copyPhotonCounter(RenderContext* pRenderContext)
 {
     //Copy the photonConter to a CPU Buffer
-    pRenderContext->copyBufferRegion(mpPhotonLightCounterCPU.get(), 0, mpPhotonLightCounter.get(), 0, sizeof(uint32_t));
+    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint32_t));
 
-    void* data = mpPhotonLightCounterCPU->map(Buffer::MapType::Read);
+    void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
     std::memcpy(&mCurrentPhotonLightsCount, data, sizeof(uint));
-    mpPhotonLightCounterCPU->unmap();
+    mpPhotonCounterCPU->unmap();
 }
 
 void PhotonReSTIRVPL::bindReservoirs(ShaderVar& var, uint index , bool bindPrev)
 {
     var["gReservoir"] = mpReservoirBuffer[index % 2];
-    var["gPhotonReservoirPos"] = mpPhotonReservoirPos[index % 2];
-    var["gPhotonReservoirFlux"] = mpPhotonReservoirFlux[index % 2];
     if (bindPrev) {
         var["gReservoirPrev"] = mpReservoirBuffer[(index +1) % 2];
-        var["gPhotonReservoirPosPrev"] = mpPhotonReservoirPos[(index +1) % 2];
-        var["gPhotonReservoirFluxPrev"] = mpPhotonReservoirFlux[(index +1) % 2];
     }
 }
 

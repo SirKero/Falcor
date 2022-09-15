@@ -136,6 +136,10 @@ private:
     */
     void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Collects the photons in the vpls
+    */
+    void collectPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Generates the canidates for the pass and stores them inside the reservoir
     */
     void generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -156,7 +160,7 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    /**
+    /** Pass for showing the VPLs 
     */
     void showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -208,7 +212,7 @@ private:
     //
     //UI
     //
-    uint mResamplingMode = ResamplingMode::SpartioTemporal;
+    uint mResamplingMode = ResamplingMode::NoResampling;        //TODO: Change light settings for other modes
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
@@ -224,10 +228,10 @@ private:
     uint2 mPresampledTitleSize = uint2(128, 1024);
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
-    bool mUsePdfSampling = false;
+    bool mUsePdfSampling = true;
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint mNumMaxPhotons = 100000;               //Max number of photon lights per iteration
+    uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
     uint mNumMaxPhotonsUI = mNumMaxPhotons;
     uint mCurrentPhotonLightsCount = 0;             //Gets data from GPU buffer
     uint mNumDispatchedPhotons = 262144;        //Number of dispatched photons 
@@ -272,11 +276,13 @@ private:
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
-    Buffer::SharedPtr mpPhotonLights;           //Buffer containing the photon light sources
-    Texture::SharedPtr mpPhotonLightPdfTex;    //1 Channel luminance texture for power presampling
-    Buffer::SharedPtr mpPresampledPhotonLights; //Presampled Photon lights
-    Buffer::SharedPtr mpPhotonLightCounter;     //Counter for the number of lights
-    Buffer::SharedPtr mpPhotonLightCounterCPU;  //For showing the current number of photons in the UI
+    //Buffer::SharedPtr mpPhotonLights;           //Buffer containing the photon light sources
+    Buffer::SharedPtr mpPhotonAABB;              //Photon AABBs for Acceleration Structure building
+    Buffer::SharedPtr mpPhotonData;              //Additional Photon data (flux, dir)
+    Texture::SharedPtr mpLightPdfTex;           //1 Channel luminance texture for power presampling
+    Buffer::SharedPtr mpPresampledLights; //Presampled Photon lights
+    Buffer::SharedPtr mpPhotonCounter;     //Counter for the number of lights
+    Buffer::SharedPtr mpPhotonCounterCPU;  //For showing the current number of photons in the UI
     Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
     Buffer::SharedPtr mpShowVPLsAABBsBuffer;              //AABB buffer for showing the vpls
@@ -302,6 +308,7 @@ private:
 
     RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass
     RayTraceProgramHelper mDistributeVPlsPass;          ///<Description for the Distribute VPL Pass
+    RayTraceProgramHelper mCollectPhotonsPass;          ///<Description for collecting the photons
     RayTraceProgramHelper mVPLDebugPass;                ///<A pass to visualize the VPLs
 
     SphereAccelerationStructure mPhotonAS;

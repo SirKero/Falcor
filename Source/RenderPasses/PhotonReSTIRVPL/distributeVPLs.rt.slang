@@ -36,14 +36,15 @@ Texture2D<PackedHitInfo> gVBuffer;
 
 RWTexture2D<float4> gDebug;
 
-/** Payload for scatter ray (16sB).
+/** Payload for scatter ray (48sB).
 */
 struct RayData
 {
+    float3 diffuseReflectionAlbedo;  //< Reflection albedo of the current hit point
     float  distance;            ///< Current path throughput. This is updated at each path vertex.
     uint   packedNormal;   ///< Face normal encoded in 16 bit polar coordinates
     bool diffuseHit;
-    uint _pad;
+    uint2 _pad;
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
     
@@ -53,6 +54,7 @@ struct RayData
     {
         RayData d;
         d._pad = 0;
+        d.diffuseReflectionAlbedo = float3(0);
         d.packedNormal = 0;
         d.distance = -1;
         d.diffuseHit = false;
@@ -100,6 +102,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         rayData.distance = RayTCurrent();
         rayData.packedNormal = encodeNormal2x16(sd.N);
         rayData.diffuseHit = diffuseHit;
+        rayData.diffuseReflectionAlbedo = bsdfProperties.diffuseReflectionAlbedo;
     }else{
         rayData.distance = -1.f;
     }
@@ -215,13 +218,16 @@ void rayGen()
         vpl.packedNormal = rd.packedNormal;
         vpl.flux = float3(0);
         vpl.valid = 1;
+        vpl.age = 0;
 
         uint vplIndex = 0;
         InterlockedAdd(gVPLCounter[0], 1u, vplIndex);
 
+        /* IF full randomly choose an intervall
         if(vplIndex < gMaxNumberVPL){
           vplIndex = min(uint(sampleNext1D(rd.sg) * float(vplIndex)), vplIndex-1);  
         }
+        */
         
         if(vplIndex < gMaxNumberVPL){
             gVPLs[vplIndex] = vpl;

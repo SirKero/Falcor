@@ -13,6 +13,7 @@ import Utils.Color.ColorHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import PhotonReStirFunctions;
+import VPLs;
 
 cbuffer PerFrame
 {
@@ -26,30 +27,20 @@ cbuffer CB
     float gRejection; //Probability that a photon is stored as a light
     bool gUseAlphaTest;
     bool gAdjustShadingNormals;
+    float gPhotonRadius;        //Radius for the vpl collection
+    uint3 _pad;
 };
 
 cbuffer Light{
     EmissiveLightSampler gEmissiveSampler;
 }
 
-struct PhotonLight{
-    float3 posW;
-    uint packedNormal;
-    float3 flux;
-    uint valid;
-
-    //Shading world normal
-    property float3 normal{
-        get { return decodeNormal2x16(packedNormal); }
-        set { packedNormal = encodeNormal2x16(newValue); }
-    }
-};
-
-RWStructuredBuffer<PhotonLight> gPhotonLights;
+RWStructuredBuffer<AABB> gPhotonAABB;
+RWStructuredBuffer<uint4> gPackedPhotonData;
 RWBuffer<uint> gPhotonCounter;
 RWTexture2D<float> gPhotonPdfTexture;
 
-static const uint kPhotonLightBufferSize = PHOTON_BUFFER_SIZE;
+static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
 static const bool kUsePdfSampling = USE_PDF_SAMPLING;
 
 /** Payload for scatter ray (80B).
@@ -75,10 +66,8 @@ struct RayData
         d.terminated = false;
         d.packedNormal = 0;
         d.thp = float3(1);
-        d.diffuseScalar = float3(1);
         d.origin = float3(0);
         d.direction = float3(0);
-        d._pad = 0;
         return d;
     }
 };
@@ -185,6 +174,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 
     //get diffuse power
+    
     if(rayData.diffuseHit){
         //Slower
         //sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
@@ -194,6 +184,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
         
     }
+    
     //if throughput is 0, return
     if (!valid || any(rayData.thp <= 0))
         rayData.terminated = true;
@@ -277,21 +268,20 @@ void rayGen()
             uint photonIndex = 0;
             photon.flux *= rayData.diffuseScalar * invRejection;
             InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
-            photonIndex = min(photonIndex, kPhotonLightBufferSize); //TODO set as uniform
-
-            PhotonLight pl = {};
-            pl.posW = photonPos;
-            pl.packedNormal = rayData.packedNormal;
-            pl.flux = photon.flux;
-            pl.valid = 1;
-            
-            gPhotonLights[photonIndex] = pl;
-            if(kUsePdfSampling) gPhotonPdfTexture[ReSTIR_LinearIndexToZCurve(photonIndex)] = luminance(photon.flux);
-            break;  //Stop here to not sample points multiple times
+            //Only store photon if the buffer space allows it
+            if(photonIndex <= kPhotonBufferSize){
+                AABB photonAABB = AABB(photonPos - gPhotonRadius, photonPos + gPhotonRadius);
+                gPhotonAABB[photonIndex] = photonAABB;
+                PhotonData pd = PhotonData();
+                pd.flux = photon.flux;
+                pd.dir = -photon.dir;
+                pd.packedNormal = rayData.packedNormal;
+                
+                gPackedPhotonData[photonIndex] = pd.pack();
+            }
         }
    
         //Russian Roulette
-        if(reflectedDiffuse) rayData.thp * invInvRejection; //Scale global photon up if it was not stored
         const float rrVal = luminance(rayData.thp);
         const float prob = max(0.f, 1.f - rrVal);
         float rnd = sampleNext1D(rayData.sg);

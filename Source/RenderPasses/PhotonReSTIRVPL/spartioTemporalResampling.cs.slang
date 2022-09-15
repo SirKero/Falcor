@@ -16,15 +16,12 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
+import VPLs;
 
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 
-RWTexture2D<float4> gPhotonReservoirPos;
-RWTexture2D<float4> gPhotonReservoirFlux;
-Texture2D<float4> gPhotonReservoirPosPrev;
-Texture2D<float4> gPhotonReservoirFluxPrev;
-
+StructuredBuffer<VPL> gVPLs;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -96,19 +93,6 @@ Reservoir getReservoir(int2 idx, bool prev)
     return r;
 }
 
-
-PhotonLight getPhotonLight(int2 idx, bool prev){
-    PhotonLight pl;
-    if(prev){
-        pl.pos = gPhotonReservoirPosPrev[idx];
-        pl.flux = gPhotonReservoirFluxPrev[idx];
-    }else{
-        pl.pos = gPhotonReservoirPos[idx];
-        pl.flux = gPhotonReservoirFlux[idx];
-    }
-    return pl;
-}
-
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -127,21 +111,19 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
     return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
-bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
+bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float sampleDistance){
     //Get light position
-    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.w));
-
-    if(any(pl.flux.xyz <= 0)) return false;
+    if(any(vpl.flux < 0)) return false;
     
-    ls.dir = pl.pos.xyz - worldPos;
+    ls.dir = vpl.posW - worldPos;
     float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    float cosTheta = dot(photonNormal, -ls.dir);
+    float cosTheta = dot(vpl.normal, -ls.dir);
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
-    ls.Li = luminance(pl.flux.xyz) / pdf;
+    ls.Li = luminance(vpl.flux) / pdf;
 
     return true;
 }
@@ -214,7 +196,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
         return;
 
     //Load reservoir from current iteration
+    VPL selectedVPL = VPL();
     Reservoir current =  getReservoir(dTid, false);
+    if(current.weightSum > 0){
+        selectedVPL = gVPLs[current.lightIdx];
+    }
     
     uint historyLimit = uint(gMaxAge * current.M);
     
@@ -277,7 +263,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
         numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,32);
 
     int selectedSample = -1;
-    PhotonLight selectedPL = getPhotonLight(dTid, false); //Set it to current for bias correction
     bool validSample = true;
     
     //Go through all neighbors
@@ -310,7 +295,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             
         //If neighbor surface has passed the tests get reservoir and compair them
         Reservoir sampledReservoir = getReservoir(idx, true);
-        PhotonLight pl = getPhotonLight(idx, true);
+        VPL vpl = gVPLs[sampledReservoir.lightIdx];
         
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
 
@@ -322,13 +307,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
         {
             LightSample ls = { };
             float dis;
-            bool valid = getLightSample(pl, currentSurface.posW, ls, dis);
+            bool valid = getLightSample(vpl, currentSurface.posW, ls, dis);
             sampleTargetPdf = valid ? max(0.f, getSurfacePdf(currentSurface, ls)) : 0.0;
         }
         //Combine Reservoirs
         if(combineReservoir(r, sampledReservoir, sampleTargetPdf, sampleNext1D(sg))){
             selectedSample = i;
-            selectedPL = pl;
+            selectedVPL = vpl;
         }
     }
 
@@ -367,7 +352,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         LightSample ls = { };
         float dist = 0;
             
-        bool valid = getLightSample(selectedPL, biasSurface.posW, ls, dist);
+        bool valid = getLightSample(selectedVPL, biasSurface.posW, ls, dist);
         ps = valid ? max(getSurfacePdf(biasSurface, ls), 0.f) : 0.0;
 
         bool rayHit = false;
@@ -395,6 +380,4 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif //BIAS MODE BASIC
     
     gReservoir[dTid] = r.pack();
-    gPhotonReservoirPos[dTid] = selectedPL.pos;
-    gPhotonReservoirFlux[dTid] = selectedPL.flux;
 }

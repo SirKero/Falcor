@@ -13,11 +13,11 @@ import Utils.Math.MathHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
+import VPLs;
 
 Texture2D<uint4> gReservoir;
 
-Texture2D<float4> gPhotonReservoirPos;
-Texture2D<float4> gPhotonReservoirFlux;
+StructuredBuffer<VPL> gVPLs;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
@@ -69,21 +69,19 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-void getEmissiveLight(uint2 idx,in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
+void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
     //Get light position
-    float4 photonPos = gPhotonReservoirPos[idx];
-    float3 photonNormal = decodeNormal2x16(asuint(photonPos.z));
-    float3 photonFlux = gPhotonReservoirFlux[idx].xyz;
+    VPL vpl = gVPLs[idx];
     
-    toLight = photonPos.xyz - worldPos;
+    toLight = vpl.posW - worldPos;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     distance = sqrt(distSqr);
     toLight = toLight/ distance;    //normalize
 
-    float cosTheta = dot(photonNormal, -toLight);
+    float cosTheta = dot(vpl.normal, -toLight);
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
-    Li = photonFlux / pdf;
+    Li = vpl.flux / pdf;
 }
 
 [numthreads(16, 16, 1)]
@@ -114,7 +112,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float distance = 0;
     float3 toLight = { };
     float3 Li = { };
-    getEmissiveLight(dTid,sd.posW ,distance , toLight, Li);
+    getEmissiveLight(r.lightIdx,sd.posW ,distance , toLight, Li);
     Li = max(0.f, Li * r.weightSum);
 
     //Check light visibility with a shadow ray

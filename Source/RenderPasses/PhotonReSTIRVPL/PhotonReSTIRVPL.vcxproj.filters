@@ -45,7 +45,7 @@
     <ShaderSource Include="generatePhotons.rt.slang">
       <Filter>Shader\PhotonVPLS</Filter>
     </ShaderSource>
-    <ShaderSource Include="presamplePhotonLights.cs.slang">
+    <ShaderSource Include="presampleLights.cs.slang">
       <Filter>Shader\PhotonVPLS</Filter>
     </ShaderSource>
     <ShaderSource Include="spartialResampling.cs.slang">
@@ -65,6 +65,9 @@
     </ShaderSource>
     <ShaderSource Include="VPLs.slang">
       <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="collectPhotons.rt.slang">
+      <Filter>Shader\PhotonVPLS</Filter>
     </ShaderSource>
   </ItemGroup>
 </Project>
