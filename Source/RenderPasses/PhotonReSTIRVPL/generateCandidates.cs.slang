@@ -40,7 +40,8 @@ cbuffer Constant
     bool gTestVisibility;
     float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
     uint gNumLights;                //Sample size. If Pdf-sampling enabled, size of presampled. If disabled number of lights
-    uint2 _pad;
+    float gRadius;
+    uint _pad;
 }
 
 
@@ -91,9 +92,9 @@ bool generateSample(float rnd, const float3 surfacePosition,out LightSample ls, 
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
     float cosTheta = dot(vpl.normal, -ls.dir);
-    if(cosTheta <= 0 || sampleDistance < gGeometryTermBand || vpl.valid == 0) return false;
-
-    float pdf = distSqr / max(FLT_MIN, cosTheta);
+    if(cosTheta <= 0 || sampleDistance < gRadius || vpl.valid == 0) return false;
+    
+    float pdf = distSqr / max(FLT_MIN,cosTheta);
     float Le = luminance(vpl.flux);
     
     ls.Li = Le / pdf;

@@ -36,13 +36,12 @@ RaytracingAccelerationStructure gPhotonAS;
 
 // Outputs
 RWStructuredBuffer<VPL> gVPLs;
-#if USE_PDF_SAMPLING
 RWTexture2D<float> gLightPdf;
-#endif
 
 
 // Static configuration based on defines set from the host.
 static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
+static const bool kUsePdfSampling = USE_PDF_SAMPLING;
 
 /** Payload for ray (48B).
 */
@@ -179,9 +178,9 @@ void rayGen()
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-    //float w = 1 / (M_PI * gPhotonRadius * gPhotonRadius);
-    float3 radiance = rayData.radiance;    //Get new flux
-
+    float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius);    //Get new flux
+    radiance *= 0.008;   //TODO: Remove this factor
+    
     if (vpl.age > 0 )
     {
         vpl.flux = vpl.flux * vpl.age;
@@ -190,9 +189,9 @@ void rayGen()
     vpl.flux += radiance;
     vpl.flux /= vpl.age;
     
+    
     //Write vpl back
     gVPLs[index] = vpl;
-#if USE_PDF_SAMPLING
-    gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = luminance(vpl.flux);
-#endif
+    if(kUsePdfSampling)
+        gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = luminance(vpl.flux);
 }

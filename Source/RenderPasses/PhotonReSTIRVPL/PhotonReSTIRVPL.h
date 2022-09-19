@@ -228,7 +228,7 @@ private:
     uint2 mPresampledTitleSize = uint2(128, 1024);
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
-    bool mUsePdfSampling = true;
+    bool mUsePdfSampling = false;
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration

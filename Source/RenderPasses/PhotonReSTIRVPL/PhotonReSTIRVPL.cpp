@@ -314,9 +314,11 @@ void PhotonReSTIRVPL::setScene(RenderContext* pRenderContext, const Scene::Share
 {
     resetPass(true);
 
+    mFrameCount = 0;
     //Recreate RayTracing Program on Scene reset
     mPhotonGeneratePass = RayTraceProgramHelper::create();
     mDistributeVPlsPass = RayTraceProgramHelper::create();
+    mCollectPhotonsPass = RayTraceProgramHelper::create();
 
     mpScene = pScene;
 
@@ -882,6 +884,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
         var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
         var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize.x * mPresampledTitleSize.y :  mNumberVPL;
+        var[uniformName]["gRadius"] = mVPLCollectionRadius;
     }
 
     //Execute
@@ -1135,6 +1138,7 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gUseEmissiveTexture"] = mUseEmissiveTexture;
         var[uniformName]["gEnableVisRay"] = mUseFinalVisibilityRay;
+        var[uniformName]["gRadius"] = mVPLCollectionRadius;
     }
 
     //Execute

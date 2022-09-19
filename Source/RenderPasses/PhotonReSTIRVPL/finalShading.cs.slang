@@ -40,6 +40,8 @@ cbuffer Constant
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool  gUseEmissiveTexture;      //Enables emissive texture for shading
     bool gEnableVisRay;             //Enables the final visibilty ray
+    float gRadius;
+    uint3 _pad;
 }
 
 static const float kRayEpsilon = 0.99f;
@@ -79,7 +81,6 @@ void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float
     toLight = toLight/ distance;    //normalize
 
     float cosTheta = dot(vpl.normal, -toLight);
-    
     float pdf = distSqr / max(FLT_MIN, cosTheta);
     Li = vpl.flux / pdf;
 }

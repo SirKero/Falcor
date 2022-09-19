@@ -234,7 +234,7 @@ void rayGen()
     float lightDirPDF = 1.0;
     ray.Direction = sample_cosine_hemisphere_polar(sampleNext2D(rayData.sg), lightDirPDF);
     fromLocalToWorld(pls.normal, ray.Direction);
-    pls.flux /= lightDirPDF;
+    //pls.flux /= lightDirPDF;
     pls.flux /= launchDim.x * launchDim.y;  //Division through all photons
 
     ray.Origin = pls.posW + 0.01 * pls.normal;
