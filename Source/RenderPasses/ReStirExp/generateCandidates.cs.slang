@@ -20,6 +20,11 @@ import Lights;
 #define USE_PRESAMPLED 1
 #endif
 
+//define a title size for Presampled light sampling
+#ifndef PRESAMPLED_TITLE_SIZE
+#define PRESAMPLED_TITLE_SIZE 16
+#endif
+
 RWTexture2D<uint4> gReservoir;
 RWTexture2D<uint> gReservoirUV;
 
@@ -42,8 +47,7 @@ cbuffer Constant
     uint gNumEmissiveSamples;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
-    uint gPresampledLightBufferSize;
-    uint gLightBufferSize;
+    uint2 gLightBufferSize;         //Light buffer size vars. If UsePdf x = Title Count, y = Title Size. If !UsePdf x = lightBufferSize, y = empty
     uint2 _pad;
 }
 
@@ -71,17 +75,21 @@ Surface getSurface(uint2 idx){
 }
 
 //Generates a light sample. Returns false if sample is invalid
-bool sampleLight(float3 rnd, const float3 surfacePosition, out LightSample ls, out float sampleDistance){
+bool sampleLight(float3 rnd, const float3 surfacePosition, 
+#if USE_PRESAMPLED
+                 uint titleIdx,  
+#endif
+                 out LightSample ls, out float sampleDistance){
 #if USE_PRESAMPLED
     //Get light idx and invSelectPdf
-    uint sample = min(uint(floor(rnd.x * float(gPresampledLightBufferSize))), gPresampledLightBufferSize - 1);
-    uint2 presampleData = gPresampledLight[sample]; //x = idx, y = invSourcePdf
+    uint rndTitleSize = min(uint(rnd.x * gLightBufferSize.y), gLightBufferSize.y - 1);
+    uint2 presampleData = gPresampledLight[titleIdx + rndTitleSize]; //x = idx, y = invSourcePdf
     ls.invSelectPdf = asfloat(presampleData.y);
     if(ls.invSelectPdf <= 0) return false;
     ls.lightIdx = presampleData.x;
 #else//USE_PRESAMPLED || Random Uniform sampling
-    ls.lightIdx = min(uint(floor(rnd.x * gLightBufferSize)), gLightBufferSize-1);
-    ls.invSelectPdf = gLightBufferSize;
+    ls.lightIdx = min(uint(floor(rnd.x * gLightBufferSize.x)), gLightBufferSize.x-1);
+    ls.invSelectPdf = gLightBufferSize.x;
     if(ls.invSelectPdf <= 0) return false;
 #endif //USE_PRESAMPLED
 
@@ -178,10 +186,22 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float selectedDistance = 0;
     float3 selectedDirection = float3(0,1,0);
     
+#if USE_PRESAMPLED
+    SampleGenerator titleRng = SampleGenerator(dTid / PRESAMPLED_TITLE_SIZE, gFrameCount + 1 * 13);
+    uint rndTitle = min(uint(sampleNext1D(titleRng) * gLightBufferSize.x), gLightBufferSize.x-1);     //Get random title
+    rndTitle *= gLightBufferSize.y;      //Move to start index
+#endif
+    
     for(uint i = 0; i< gNumEmissiveSamples; i++){
         LightSample ls;
         float sampleDistance;
-        bool valid = sampleLight(sampleNext3D(sg),surface.posW, ls, sampleDistance);
+        //Sample light (presampled takes an additional input)
+        bool valid = sampleLight(sampleNext3D(sg),surface.posW,
+        #if USE_PRESAMPLED
+                                rndTitle, 
+        #endif
+                                ls, sampleDistance);
+        
         if(!valid) continue;
         float targetPdf = getSurfacePdf(surface, ls);
         if(updateReservoir(r,ls, targetPdf, sampleNext1D(sg))){

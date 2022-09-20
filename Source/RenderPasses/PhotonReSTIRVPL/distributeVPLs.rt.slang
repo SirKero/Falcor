@@ -156,7 +156,7 @@ void rayGen()
     uint2 launchDim = DispatchRaysDimensions().xy;
   
     RayData rd = RayData::create();
-    rd.sg = SampleGenerator(launchIndex, gFrameCount + 2 * 13);    //TODO add seed offset
+    rd.sg = SampleGenerator(launchIndex, gFrameCount + 0 * 13);    //TODO add seed offset
 
     //Get random shading data
     uint2 randomIndex = min(uint2(sampleNext2D(rd.sg) * float2(gFrameDim)),gFrameDim - 1);

@@ -542,8 +542,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = true;   //TODO: Also add a variable to manually disable
-        var[uniformName]["gPresampledLightBufferSize"] = mPresampledTitleSize.x * mPresampledTitleSize.y;
-        var[uniformName]["gLightBufferSize"] = mNumLights;
+        var[uniformName]["gLightBufferSize"] = mUsePdfSampling ? uint2(mPresampledTitleSize.x, mPresampledTitleSize.y) : uint2(mNumLights,0);
     }
 
     //Execute

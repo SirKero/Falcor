@@ -225,7 +225,7 @@ void rayGen()
     const float invInvRejection = 1.f/(1.f-gRejection);
      // Prepare ray payload.
     RayData rayData = RayData.create();
-    rayData.sg = SampleGenerator(launchIndex, gFrameCount +8 * 13 );
+    rayData.sg = SampleGenerator(launchIndex, gFrameCount +0 * 13 );
 
     PhotonLightSample pls;
     if(!createLightSample(rayData.sg, pls)) return;

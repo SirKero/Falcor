@@ -65,7 +65,7 @@ void samplePdfMip(inout SampleGenerator sg, out uint2 position, out float pdf){
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 3 * 13);
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 1 * 13);
     uint2 texPos;
     float pdf;
     samplePdfMip(sg,texPos,pdf);

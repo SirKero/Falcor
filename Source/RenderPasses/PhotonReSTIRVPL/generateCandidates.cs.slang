@@ -19,6 +19,14 @@ import Reservoir;
 import SurfaceData;
 import VPLs;
 
+#ifndef USE_PRESAMPLING
+#define USE_PRESAMPLING 1
+#endif
+
+//define a title size for Presampled light sampling
+#ifndef PRESAMPLED_TITLE_SIZE
+#define PRESAMPLED_TITLE_SIZE 16
+#endif
 
 RWTexture2D<uint4> gReservoir;
 
@@ -39,9 +47,8 @@ cbuffer Constant
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
     float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
-    uint gNumLights;                //Sample size. If Pdf-sampling enabled, size of presampled. If disabled number of lights
+    uint2 gNumLights;                //Light Buffer Size. If Presampling enabled, x = Title Count, y= Title Size. If !Presampling, then x = Size LightBuffer 
     float gRadius;
-    uint _pad;
 }
 
 
@@ -67,18 +74,22 @@ Surface getSurface(uint2 idx){
     return Surface(surfaceData, -viewDir);
 }
 //Generates a light sample. Returns false if sample is invalid
-bool generateSample(float rnd, const float3 surfacePosition,out LightSample ls, out VPL vpl, out float sampleDistance){
+bool generateSample(float rnd, const float3 surfacePosition,
+#if USE_PRESAMPLING
+                    uint titleIdx,
+#endif
+                    out LightSample ls, out VPL vpl, out float sampleDistance){
 
-#if USE_PDF_SAMPLING
+#if USE_PRESAMPLING
         //Sample the presample texture
-        uint sample = min(uint(floor(rnd * float(gNumLights))), gNumLights - 1);
-        uint2 presampleData = gPresampledLights[sample]; //x = idx, y = invSourcePdf
+        uint rndTitle = min(uint(floor(rnd * float(gNumLights.y))), gNumLights.y - 1);
+        uint2 presampleData = gPresampledLights[titleIdx + rndTitle]; //x = idx, y = invSourcePdf
         ls.invSelectPdf = asfloat(presampleData.y);
         if(ls.invSelectPdf <= 0) return false;
         ls.lightIdx = presampleData.x;
 #else
         //Old random sample code 
-        const uint lightCount = min(gVPLCounter[0], gNumLights);
+        const uint lightCount = min(gVPLCounter[0], gNumLights.x);
         if(lightCount == 0) return false;
         //get random light
         const uint rndLightIndex = min(uint(lightCount * rnd), lightCount-1);
@@ -152,7 +163,7 @@ void finalizeSample(inout Reservoir r, float normalizationNumerator, float norma
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount);
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 3 *13);
     Reservoir r = Reservoir();
 
     //Get shading data
@@ -165,12 +176,25 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float selectedDistance = 0;
     float3 selectedDirection = float3(0,1,0);
     VPL selectedLight = {};
+
+#if USE_PRESAMPLING
+    SampleGenerator titleRng = SampleGenerator(dTid / PRESAMPLED_TITLE_SIZE, gFrameCount + 4 * 13);
+    uint rndTitle = min(uint(sampleNext1D(titleRng) * gNumLights.x), gNumLights.x-1);     //Get random title
+    rndTitle *= gNumLights.y;      //Move to start index
+#endif
     
     for(uint i = 0; i< gNumEmissiveSamples; i++){
         LightSample ls;
         VPL vpl;
         float sampleDistance;
-        bool valid = generateSample(sampleNext1D(sg),surface.posW, ls, vpl, sampleDistance);
+        
+        bool valid = generateSample(sampleNext1D(sg),surface.posW,
+#if USE_PRESAMPLING
+                                    rndTitle,
+#endif
+                                    ls, vpl, sampleDistance);
+
+        
         if(!valid) continue;
         float targetPdf = getSurfacePdf(surface, ls);
         if(updateReservoir(r,ls, targetPdf, sampleNext1D(sg))){

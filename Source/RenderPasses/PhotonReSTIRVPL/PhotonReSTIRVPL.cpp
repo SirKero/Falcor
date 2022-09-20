@@ -847,7 +847,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
-        defines.add("USE_PDF_SAMPLING", mUsePdfSampling ? "1" : "0");
+        defines.add("USE_PRESAMPLING", mUsePdfSampling ? "1" : "0");
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -883,7 +883,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
         var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
-        var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize.x * mPresampledTitleSize.y :  mNumberVPL;
+        var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize : uint2(mNumberVPL,0);
         var[uniformName]["gRadius"] = mVPLCollectionRadius;
     }
 

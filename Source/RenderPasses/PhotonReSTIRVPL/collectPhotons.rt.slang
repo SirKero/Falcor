@@ -51,9 +51,7 @@ struct RayData
     uint packedNormal;                      ///< packed normal
     float3 diffuseReflectance;       //<Diffuse reflectance of the vpl
     uint _pad;         
-
-    SampleGenerator sg;             ///< Per-ray state for the sample generator (up to 16B).
-  
+      
     __init(){
         radiance = float3(0);
         packedNormal = 0;
@@ -163,7 +161,6 @@ void rayGen()
     
     //Prepare payload
     RayData rayData = RayData();
-    rayData.sg = SampleGenerator(launchIndex, gFrameCount + 9 * 13);
     rayData.diffuseReflectance = vpl.flux;          //Diffuse reflectance is stored in flux before collection
     rayData.packedNormal = vpl.packedNormal;
     

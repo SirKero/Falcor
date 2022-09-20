@@ -205,7 +205,7 @@ void finalizeSample(inout Reservoir r, float normalizationNumerator, float norma
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 6 * 13);
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 7 * 13);
     Reservoir r = Reservoir();
     
     //Check if surface is valid

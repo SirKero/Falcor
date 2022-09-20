@@ -19,6 +19,14 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
 
+#ifndef USE_PRESAMPLING
+#define USE_PRESAMPLING 1
+#endif
+
+//define a title size for Presampled light sampling
+#ifndef PRESAMPLED_TITLE_SIZE
+#define PRESAMPLED_TITLE_SIZE 16
+#endif
 
 RWTexture2D<uint4> gReservoir;
 
@@ -44,8 +52,6 @@ RWTexture2D<float4> gPhotonReservoirFlux;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
 
-static const bool kUsePdfSampling = USE_PDF_SAMPLING;
-
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
@@ -57,8 +63,8 @@ cbuffer Constant
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
     float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
-    uint gPresampledPhotonLightBufferSize;  //Size of the presampled photons buffer
-    uint2 _pad;
+    uint2 gPresampledPhotonLightBufferSize;  //Presampled buffer dim. x = Title Count, y = Title Size.
+    uint _pad;
 }
 
 
@@ -84,16 +90,20 @@ Surface getSurface(uint2 idx){
     return Surface(surfaceData, -viewDir);
 }
 //Generates a light sample. Returns false if sample is invalid
-bool generateSample(float rnd, const float3 surfacePosition,out LightSample ls, out PhotonLight pl, out float sampleDistance){
+bool generateSample(float rnd, const float3 surfacePosition,
+#if USE_PRESAMPLING
+                    uint titleIdx,
+#endif
+                    out LightSample ls, out PhotonLight pl, out float sampleDistance){
 
-    if(kUsePdfSampling){
+#if USE_PRESAMPLING
         //Sample the presample texture
-        uint sample = min(uint(floor(rnd * float(gPresampledPhotonLightBufferSize))), gPresampledPhotonLightBufferSize - 1);
-        uint2 presampleData = gPresampledPhotonLights[sample]; //x = idx, y = invSourcePdf
+        uint rndTitle = min(uint(floor(rnd * float(gPresampledPhotonLightBufferSize.y))), gPresampledPhotonLightBufferSize.y - 1);
+        uint2 presampleData = gPresampledPhotonLights[titleIdx + rndTitle]; //x = idx, y = invSourcePdf
         ls.invSelectPdf = asfloat(presampleData.y);
         if(ls.invSelectPdf <= 0) return false;
         ls.lightIdx = presampleData.x;
-    }else{
+#else
         //Old random sample code 
         const uint lightCount = gPhotonCounter[0];
         if(lightCount == 0) return false;
@@ -101,8 +111,8 @@ bool generateSample(float rnd, const float3 surfacePosition,out LightSample ls, 
         const uint rndLightIndex = min(uint(lightCount * rnd), lightCount-1);
         ls.lightIdx = rndLightIndex;
         ls.invSelectPdf = float(lightCount);
-    }
-        
+#endif
+     
     
     pl = gPhotonLights[ls.lightIdx];
     float3 toLight = pl.posW - surfacePosition;
@@ -170,7 +180,7 @@ void finalizeSample(inout Reservoir r, float normalizationNumerator, float norma
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount);
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 3 *13);
     Reservoir r = Reservoir();
 
     //Get shading data
@@ -180,6 +190,12 @@ void main(uint2 dTid : SV_DispatchThreadID)
         return;
     }
 
+#if USE_PRESAMPLING
+    SampleGenerator titleRng = SampleGenerator(dTid / PRESAMPLED_TITLE_SIZE, gFrameCount + 4 *13);
+    uint rndTitle = min(uint(sampleNext1D(titleRng) * gPresampledPhotonLightBufferSize.x), gPresampledPhotonLightBufferSize.x-1);     //Get random title
+    rndTitle *= gPresampledPhotonLightBufferSize.y;      //Move to start index
+#endif
+    
     float selectedDistance = 0;
     float3 selectedDirection = float3(0,1,0);
     PhotonLight selectedPhotonLight = {};
@@ -188,7 +204,14 @@ void main(uint2 dTid : SV_DispatchThreadID)
         LightSample ls;
         PhotonLight pl;
         float sampleDistance;
-        bool valid = generateSample(sampleNext1D(sg),surface.posW, ls, pl, sampleDistance);
+        
+        bool valid = generateSample(sampleNext1D(sg),surface.posW,
+#if USE_PRESAMPLING
+                                    rndTitle,
+#endif
+                                    ls, pl, sampleDistance);
+
+        
         if(!valid) continue;
         float targetPdf = getSurfacePdf(surface, ls);
         if(updateReservoir(r,ls, targetPdf, sampleNext1D(sg))){

@@ -642,7 +642,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
-        defines.add("USE_PDF_SAMPLING", mUsePdfSampling ? "1" : "0");
+        defines.add("USE_PRESAMPLING", mUsePdfSampling ? "1" : "0");
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -678,7 +678,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
         var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
-        var[uniformName]["gPresampledPhotonLightBufferSize"] = mPresampledTitleSize.x * mPresampledTitleSize.y;
+        var[uniformName]["gPresampledPhotonLightBufferSize"] = mPresampledTitleSize;
     }
 
     //Execute
