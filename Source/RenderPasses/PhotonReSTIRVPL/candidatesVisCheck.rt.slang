@@ -1,0 +1,96 @@
+#include "Scene/SceneDefines.slangh"
+#include "Utils/Math/MathConstants.slangh"
+
+import Scene.Raytracing;
+
+import Reservoir;
+import SurfaceData;
+import VPLs;
+
+cbuffer CB
+{
+    float gVisRayOffset;     //Offset for visibility ray 
+    uint3 _pad;       
+}
+
+StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedSurfaceData> gSurface;
+RWTexture2D<uint4> gReservoir;
+
+/** Payload for scatter ray (16B).
+*/
+struct RayData
+{
+    bool hit;   //< Has the ray hit something
+
+};
+
+//Attribs struct that needs to exist for the intersection shader
+struct SphereAttribs
+{
+    uint hitIdx;
+};
+
+[shader("miss")]
+void miss(inout RayData rayData : SV_RayPayload)
+{
+     rayData.hit = false;   
+}
+
+[shader("closesthit")]
+void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
+{
+
+}
+
+uint index2Dto1D(uint2 idx, uint width){
+    return idx.x + width * idx.y;
+}
+
+Surface getSurface(uint2 idx, uint2 frameDim){
+    float3 viewDir = gScene.camera.computeRayPinhole(idx, frameDim).dir;
+    PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, frameDim.x)];
+    
+    return Surface(surfaceData, -viewDir);
+}
+
+[shader("raygeneration")]
+void rayGen()
+{
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 launchDim = DispatchRaysDimensions().xy;
+
+    //Get Information for shadow ray
+    Reservoir r = Reservoir(gReservoir[launchIndex]);
+    Surface surface = getSurface(launchIndex, launchDim);
+    //When surface or reservoir is invalid return. If reservoir weight is already 0 it can be ignored too
+    if(!surface.valid || r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum)){
+        return;
+    }
+    
+    VPL vpl = gVPLs[r.lightIdx];
+
+    //Get
+    RayData rayData = {};
+    rayData.hit = true;
+
+    float3 toLight = vpl.posW - surface.posW;
+    float dist = length(toLight);
+    
+    RayDesc ray;
+    ray.Origin = surface.posW;
+    ray.Direction = toLight/dist;
+    ray.TMin = gVisRayOffset;
+    ray.TMax =  dist * 0.99f;
+
+    uint rayFlags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
+
+    TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+
+    //If hit is still true, we did not miss the geometry
+    if(rayData.hit){
+        //set visibility to zero
+        r.weightSum = 0;
+        gReservoir[launchIndex] = r.pack();        
+    }
+}

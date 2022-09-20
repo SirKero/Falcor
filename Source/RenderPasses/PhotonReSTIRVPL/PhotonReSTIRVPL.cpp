@@ -49,6 +49,7 @@ namespace {
     const char kShaderPresampleLights[] = "RenderPasses/PhotonReSTIRVPL/presampleLights.cs.slang";
     const char kShaderFillSurfaceInformation[] = "RenderPasses/PhotonReSTIRVPL/fillSurfaceInfo.cs.slang";
     const char kShaderGenerateCandidates[] = "RenderPasses/PhotonReSTIRVPL/generateCandidates.cs.slang";
+    const char kShaderCandidatesVisCheck[] = "RenderPasses/PhotonReSTIRVPL/candidatesVisCheck.rt.slang";
     const char kShaderTemporalPass[] = "RenderPasses/PhotonReSTIRVPL/temporalResampling.cs.slang";
     const char kShaderSpartialPass[] = "RenderPasses/PhotonReSTIRVPL/spartialResampling.cs.slang";
     const char kShaderSpartioTemporalPass[] = "RenderPasses/PhotonReSTIRVPL/spartioTemporalResampling.cs.slang";
@@ -144,12 +145,11 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     if (mFrameCount == 0 || mResetVPLs) {
         distributeVPLsPass(pRenderContext, renderData);
     }
+    //Generate Photons
     generatePhotonsPass(pRenderContext, renderData);
 
     collectPhotonsPass(pRenderContext, renderData);
 
-    //Generate Photons
-    
     //Presample generated photon lights
     presamplePhotonLightsPass(pRenderContext, renderData);
 
@@ -159,8 +159,11 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     //Prepare the surface buffer
     prepareSurfaceBufferPass(pRenderContext, renderData);
 
-    //Generate Canditdates
+    //Generate Candidates
     generateCandidatesPass(pRenderContext, renderData);
+
+    //Check candidates visibility. Only performed when !mUseVisibilityRayInline
+    candidatesVisibilityCheckPass(pRenderContext, renderData);
 
     //Spartiotemporal Resampling
     switch (mResamplingMode) {
@@ -294,6 +297,12 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
         }
 
         if (auto group = widget.group("Misc")) {
+            bool visChanged = widget.checkbox("Use Visbility Tracing Inline", mUseVisibiltyRayInline);
+            widget.tooltip("If enabled uses inline ray tracing for the visibility ray in Candidate Generate");
+            if (visChanged) {
+                mpGenerateCandidates.reset();   //Reset the pass (Recompile shader)
+                changed = true;
+            }
             changed |= widget.checkbox("Use Emissive Texture", mUseEmissiveTexture);
             widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
             changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
@@ -319,6 +328,7 @@ void PhotonReSTIRVPL::setScene(RenderContext* pRenderContext, const Scene::Share
     mPhotonGeneratePass = RayTraceProgramHelper::create();
     mDistributeVPlsPass = RayTraceProgramHelper::create();
     mCollectPhotonsPass = RayTraceProgramHelper::create();
+    mVisibilityCheckPass = RayTraceProgramHelper::create();
 
     mpScene = pScene;
 
@@ -848,6 +858,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         defines.add(mpSampleGenerator->getDefines());
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         defines.add("USE_PRESAMPLING", mUsePdfSampling ? "1" : "0");
+        defines.add("USE_VISIBILITY_CHECK_INLINE", mUseVisibiltyRayInline ? "1" : "0");
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -896,6 +907,60 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonReservoirPos[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonReservoirFlux[mFrameCount % 2].get());
+}
+
+void PhotonReSTIRVPL::candidatesVisibilityCheckPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    if (mUseVisibiltyRayInline) {
+        //Reset everything if it was set
+        if (mVisibilityCheckPass.pProgram) {
+            mVisibilityCheckPass = RayTraceProgramHelper::create();
+        }
+        return;
+    }
+
+    //Create the program
+    if (!mVisibilityCheckPass.pProgram) {
+        RtProgram::Desc desc;
+        desc.addShaderLibrary(kShaderCandidatesVisCheck);
+        desc.setMaxPayloadSize(8u);
+        desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
+        desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+        mVisibilityCheckPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mVisibilityCheckPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen"));
+        sbt->setMiss(0, desc.addMiss("miss"));
+        sbt->setHitGroup(0, 0, desc.addHitGroup("closestHit"));
+
+        mVisibilityCheckPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+    }
+
+    if (!mVisibilityCheckPass.pVars) {
+        FALCOR_ASSERT(mVisibilityCheckPass.pProgram);
+
+        // Configure program.
+        mVisibilityCheckPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        // Create program variables for the current program.
+        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+        mVisibilityCheckPass.pVars = RtProgramVars::create(mVisibilityCheckPass.pProgram, mVisibilityCheckPass.pBindingTable);
+    };
+    FALCOR_ASSERT(mVisibilityCheckPass.pVars);
+    auto var = mVisibilityCheckPass.pVars->getRootVar();
+
+    // Set constants (uniforms).
+    // 
+    //PerFrame Constant Buffer
+    std::string nameBuf = "CB";
+    var[nameBuf]["gVisRayOffset"] = mVisibilityRayOffset;
+
+    var["gVPLs"] = mpVPLBuffer;
+    bindReservoirs(var, mFrameCount, false);
+    var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+
+    uint2 targetDim = renderData.getDefaultTextureDims();
+    //Trace the photons
+    mpScene->raytrace(pRenderContext, mVisibilityCheckPass.pProgram.get(), mVisibilityCheckPass.pVars, uint3(targetDim, 1));
 }
 
 void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const RenderData& renderData)

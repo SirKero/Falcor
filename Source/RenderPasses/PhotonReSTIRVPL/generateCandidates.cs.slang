@@ -19,6 +19,10 @@ import Reservoir;
 import SurfaceData;
 import VPLs;
 
+#ifndef USE_VISIBILITY_CHECK_INLINE
+#define USE_VISIBILITY_CHECK_INLINE 0
+#endif
+
 #ifndef USE_PRESAMPLING
 #define USE_PRESAMPLING 1
 #endif
@@ -194,7 +198,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif
                                     ls, vpl, sampleDistance);
 
-        
         if(!valid) continue;
         float targetPdf = getSurfacePdf(surface, ls);
         if(updateReservoir(r,ls, targetPdf, sampleNext1D(sg))){
@@ -209,7 +212,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
     finalizeSample(r, 1.f, gNumEmissiveSamples);
 
     bool validSample = r.weightSum > 0 && !isnan(r.weightSum) && !isinf(r.weightSum);
-    
+
+#if USE_VISIBILITY_CHECK_INLINE
     //Test visibility and shoot a shadow ray from the surface to the selected light
     if(validSample && gTestVisibility){
         
@@ -222,6 +226,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             r.weightSum = 0.f;  //Set weight to zero if light is not visible
         }
     }
-        
+#endif
+    
     gReservoir[dTid] = r.pack();
 }

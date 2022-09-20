@@ -69,5 +69,8 @@
     <ShaderSource Include="collectPhotons.rt.slang">
       <Filter>Shader\PhotonVPLS</Filter>
     </ShaderSource>
+    <ShaderSource Include="candidatesVisCheck.rt.slang">
+      <Filter>Shader\ReStir</Filter>
+    </ShaderSource>
   </ItemGroup>
 </Project>

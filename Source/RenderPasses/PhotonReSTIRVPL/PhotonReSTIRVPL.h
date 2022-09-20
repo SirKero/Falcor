@@ -140,6 +140,10 @@ private:
     */
     void collectPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Visibility check in raytracing shader instead of Compute shader
+    */
+    void candidatesVisibilityCheckPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Generates the canidates for the pass and stores them inside the reservoir
     */
     void generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -212,6 +216,7 @@ private:
     //
     //UI
     //
+    //Resampling
     uint mResamplingMode = ResamplingMode::NoResampling;        //TODO: Change light settings for other modes
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
@@ -229,6 +234,7 @@ private:
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
     bool mUsePdfSampling = false;
+    bool mUseVisibiltyRayInline = false;         //If true, inline ray tracing is used for the visibility check
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
@@ -309,6 +315,7 @@ private:
     RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass
     RayTraceProgramHelper mDistributeVPlsPass;          ///<Description for the Distribute VPL Pass
     RayTraceProgramHelper mCollectPhotonsPass;          ///<Description for collecting the photons
+    RayTraceProgramHelper mVisibilityCheckPass;         ///< Description for the visibility check pass
     RayTraceProgramHelper mVPLDebugPass;                ///<A pass to visualize the VPLs
 
     SphereAccelerationStructure mPhotonAS;

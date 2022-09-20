@@ -36,6 +36,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ShaderSource Include="candidatesVisCheck.rt.slang" />
     <ShaderSource Include="collectPhotons.rt.slang" />
     <ShaderSource Include="distributeVPLs.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
