@@ -50,16 +50,6 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
-Reservoir getReservoir(uint2 idx){
-    Reservoir r =  Reservoir(gReservoir[idx], 0);
-
-    //Discard invalid Reservoirs
-    if (isinf(r.weightSum) || isnan(r.weightSum))
-        r = Reservoir();
-    
-    return r;
-}
-
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -90,7 +80,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 {
     bool valid = true;
     //Get reservoir
-    Reservoir r = getReservoir(dTid);
+    Reservoir r = Reservoir(gReservoir[dTid]);
     SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 8 * 13);    //TODO add seed offset
 
     //Get shading data

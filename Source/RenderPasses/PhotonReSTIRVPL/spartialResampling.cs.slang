@@ -21,11 +21,6 @@ import VPLs;
 Texture2D<uint4> gReservoir;
 RWTexture2D<uint4> gReservoirPrev;
 
-Texture2D<float4> gPhotonReservoirPos;
-Texture2D<float4> gPhotonReservoirFlux;
-RWTexture2D<float4> gPhotonReservoirPosPrev;
-RWTexture2D<float4> gPhotonReservoirFluxPrev;
-
 StructuredBuffer<PackedVPL> gVPLs;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -65,16 +60,6 @@ struct PhotonLight{
 
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
-}
-
-Reservoir getReservoir(int2 idx)
-{
-    Reservoir r =  Reservoir(gReservoir[idx], 0);
-
-    //Discard NaN Reservoirs
-    if ( isinf(r.weightSum) || isnan(r.weightSum))
-        r = Reservoir();
-    return r;
 }
 
 Surface getSurface(uint2 idx){
@@ -149,7 +134,6 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
     
     if(selectSample){
         r.lightIdx = prev.lightIdx;
-        r.packedUV = prev.packedUV;
         r.targetPdf = targetPDF;
     }
 
@@ -176,7 +160,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     
     //Load reservoir from current iteration
     VPL selectedVPL = VPL();
-    Reservoir current = getReservoir(dTid);
+    Reservoir current = Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
         selectedVPL = VPL(gVPLs[current.lightIdx]);
     }
@@ -210,7 +194,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             continue;
 
         //If neighbor has passed the tests get reservoir and compair them
-        Reservoir neigh = getReservoir(idx);
+        Reservoir neigh = Reservoir(gReservoir[idx]);
         VPL vpl = VPL(gVPLs[neigh.lightIdx]);
         
         cachedResults |= (1u << i);
@@ -276,7 +260,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         #endif // BIAS MODE RAYTRACE
         
         //getReservoir
-        Reservoir biasRes = getReservoir(idx);
+        Reservoir biasRes = Reservoir(gReservoir[idx]);
         
         pi = selectedSample == i ? ps : pi;
         piSum += ps * biasRes.M;

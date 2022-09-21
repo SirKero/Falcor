@@ -21,11 +21,6 @@ import VPLs;
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 
-RWTexture2D<float4> gPhotonReservoirPos;
-RWTexture2D<float4> gPhotonReservoirFlux;
-Texture2D<float4> gPhotonReservoirPosPrev;
-Texture2D<float4> gPhotonReservoirFluxPrev;
-
 StructuredBuffer<PackedVPL> gVPLs;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -65,23 +60,6 @@ struct PhotonLight{
 
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
-}
-
-Reservoir getReservoir(int2 idx, bool prev)
-{
-    Reservoir r;
-    if (prev)
-    {
-        r = Reservoir(gReservoirPrev[idx], 0);
-    }
-    else
-    {
-        r = Reservoir(gReservoir[idx], 0);
-    }
-    //Discard NaN Reservoirs
-    if (isinf(r.weightSum) || isnan(r.weightSum))
-        r = Reservoir();
-    return r;
 }
 
 Surface getSurface(uint2 idx, bool prev){
@@ -162,7 +140,6 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
     
     if(selectSample){
         r.lightIdx = prev.lightIdx;
-        r.packedUV = prev.packedUV;
         r.targetPdf = targetPDF;
     }
 
@@ -189,7 +166,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         
     //Load reservoir from current iteration
     VPL selectedVPL = VPL();
-    Reservoir current = getReservoir(dTid, false);
+    Reservoir current = Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
         selectedVPL = VPL(gVPLs[current.lightIdx]);
     }
@@ -241,7 +218,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
 
     if(foundTemporalSurface){
-        Reservoir prev = getReservoir(idx, true);
+        Reservoir prev = Reservoir(gReservoirPrev[idx]);
         prev.M = min(prev.M, historyLimit);
         previousM = prev.M;
         

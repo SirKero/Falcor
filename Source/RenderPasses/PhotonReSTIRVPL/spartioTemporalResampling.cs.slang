@@ -76,23 +76,6 @@ Surface getSurface(uint2 idx, bool prev){
     return Surface(surfaceData, -viewDir);
 }
 
-Reservoir getReservoir(int2 idx, bool prev)
-{
-    Reservoir r;
-    if (prev)
-    {
-        r = Reservoir(gReservoirPrev[idx], 0);
-    }
-    else
-    {
-        r = Reservoir(gReservoir[idx], 0);
-    }
-    //Discrad NaN Reservoirs
-    if (isinf(r.weightSum) || isnan(r.weightSum))
-        r = Reservoir();
-    return r;
-}
-
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -169,7 +152,6 @@ bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, floa
     
     if(selectSample){
         r.lightIdx = prev.lightIdx;
-        r.packedUV = prev.packedUV;
         r.targetPdf = targetPDF;
     }
 
@@ -197,7 +179,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
     //Load reservoir from current iteration
     VPL selectedVPL = VPL();
-    Reservoir current =  getReservoir(dTid, false);
+    Reservoir current =  Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
         selectedVPL = VPL(gVPLs[current.lightIdx]);
     }
@@ -294,7 +276,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         }
             
         //If neighbor surface has passed the tests get reservoir and compair them
-        Reservoir sampledReservoir = getReservoir(idx, true);
+        Reservoir sampledReservoir = Reservoir(gReservoirPrev[idx]);
         VPL vpl = VPL(gVPLs[sampledReservoir.lightIdx]);
         
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
@@ -344,7 +326,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         Surface biasSurface = getSurface(idx, true);
             
         //getReservoir
-        Reservoir biasRes = getReservoir(idx, true);
+        Reservoir biasRes = Reservoir(gReservoirPrev[idx]);
         biasRes.M = min(biasRes.M, historyLimit); //cap M
         
         //Get light pdf
