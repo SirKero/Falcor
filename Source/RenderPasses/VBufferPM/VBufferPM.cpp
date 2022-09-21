@@ -62,11 +62,11 @@ namespace
         { "emissive",       "gEmissive",        "Emissive color",                           false , ResourceFormat::RGBA32Float },
     };
 
-    //Additional output channels (currently not in use)
+    //Additional output channels
     const ChannelList kExtraOutputChannels =
     {
-        { "depth",          "gDepth",           "Depth buffer (NDC) (WIP)",               true /* optional */, ResourceFormat::R32Float    },
-        { "mvec",           "gMotionVector",    "Motion vector (WIP)",                    true /* optional */, ResourceFormat::RG32Float   },
+        { "linearDepth",          "gLinDepth",           "Distance from camera to hitpoint",  true /* optional */, ResourceFormat::R32Float    },
+        { "mvec",                 "gMVec",    "Motion vector",                    true /* optional */, ResourceFormat::RG32Float   },
     };
 
     // UI variables.

@@ -147,6 +147,7 @@ private:
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
     bool mUsePdfSampling;
+    bool mUseDiffuseShadingOnly = false;            //Only diffuse is used for shading (If a path traced V-Buffer that stops on diffuse is used)
 
     
     //Runtime

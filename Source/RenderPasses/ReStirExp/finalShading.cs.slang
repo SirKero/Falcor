@@ -6,6 +6,7 @@ import Scene.Material.ShadingUtils;
 import Rendering.Materials.Microfacet;
 import Utils.Sampling.SampleGenerator;
 import Utils.Math.MathHelpers;
+import Utils.Color.ColorHelpers;
 
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
@@ -154,8 +155,20 @@ void main(uint2 dTid : SV_DispatchThreadID)
         sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
         diffuse = bsdf.eval(sd, toLight, sg) * Li;
 
+#ifndef DIFFUSE_SHADING_ONLY
         sd.mtl.setActiveLobes((uint)LobeType::SpecularReflection);
         specular = bsdf.eval(sd, toLight, sg) * Li;
+#else
+        float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
+        float NdotV = saturate(dot(sd.N, sd.V));
+        float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
+        float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
+        float specProb = luminance(specularReflectance);
+
+        float diffFactor = (diffProb + specProb) / diffProb;
+        diffuse *= diffFactor;
+#endif
+        
     }
     
 

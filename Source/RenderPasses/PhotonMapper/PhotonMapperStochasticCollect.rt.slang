@@ -186,7 +186,7 @@ void rayGen()
     uint2 launchDim = DispatchRaysDimensions().xy;
     
     float4 thpMatID = gThp[launchIndex];
-    float3 viewW = gViewWorld[launchIndex].xyz;
+    float3 viewW = -gViewWorld[launchIndex].xyz;
 
     //Prepare payload
     RayData rayData;

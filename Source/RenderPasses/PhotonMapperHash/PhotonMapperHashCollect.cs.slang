@@ -229,7 +229,7 @@ float3 collectPhotons(in HitInfo hitInfo, in float3 dirVec, uint2 launchIndex,bo
 [numthreads(16, 16, 1)]
 void main(uint2 DTid : SV_DispatchThreadID, uint2 Gid : SV_GroupID, uint2 GTid : SV_GroupThreadID, uint GI : SV_GroupIndex)
 {
-    float3 viewVec = gViewWorld[DTid].xyz;
+    float3 viewVec = -gViewWorld[DTid].xyz;
     float4 thp = gThp[DTid];
     PackedHitInfo packedHitInfo = gVBuffer[DTid];
     const HitInfo hit = HitInfo(packedHitInfo);

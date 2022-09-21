@@ -35,8 +35,8 @@ RWTexture2D<float4> gThp;
 RWTexture2D<float4> gEmissive;
 
 //Optional
-RWTexture2D<float4> gDepth;
-RWTexture2D<float4> gMotionVector;
+RWTexture2D<float> gLinDepth;
+RWTexture2D<float2> gMVec;
 
 #define is_valid(name) (is_valid_##name != 0)
 
@@ -49,9 +49,9 @@ struct RayData
     float3 thp; ///< Current path throughput. This is updated at each path vertex.
     bool terminated; ///< Set to true when path is terminated.
     float3 origin; ///< Next path segment origin.
-    uint pathLength; ///<Path length
+    uint randomCamJitter; ///<Random jitter if uniform random sampling is used
     float3 direction; ///< Next path segment direction.
-    uint pad;
+    float distance;
     
     SampleGenerator sg; ///< Per-ray state for the sample generator (up to 16B).
 
@@ -61,9 +61,9 @@ struct RayData
         this.thp = float3(1.0);
         this.terminated = false; 
         this.origin = float3(0); 
-        this.pathLength = 0; 
+        this.distance = 0.f; 
         this.direction = float3(0); 
-        this.pad = 0;
+        this.randomCamJitter = 0;
         this.sg = sg;
     }
 };
@@ -89,7 +89,7 @@ Ray cameraComputeRandomRayThinlens(uint2 pixel, uint2 frameDim, float2 u , float
     // Compute the normalized ray direction assuming a thin-lens camera.
     ray.origin = data.posW;
     ray.dir = ndc.x * data.cameraU + ndc.y * data.cameraV + data.cameraW;
-    float2 apertureSample = sample_disk(u); // Sample lies in the unit disk [-1,1]^2
+    float2 apertureSample = sample_disk(v); // Sample lies in the unit disk [-1,1]^2
     float3 rayTarget = ray.origin + ray.dir;
     ray.origin += data.apertureRadius * (apertureSample.x * normalize(data.cameraU) + apertureSample.y * normalize(data.cameraV));
     ray.dir = normalize(rayTarget - ray.origin);
@@ -101,7 +101,7 @@ Ray cameraComputeRandomRayThinlens(uint2 pixel, uint2 frameDim, float2 u , float
     return ray;
 }
 
-void writeHit(uint2 pixel, float3 rayDir, float3 thp, float3 emissive, const HitInfo hit)
+void writeHit(uint2 pixel, float3 rayDir, float3 thp, float3 emissive, const in HitInfo hit,const float linZ, const float2 mVec )
 {
     gVBuffer[pixel] = hit.getData();
     gViewWorld[pixel] = float4(rayDir, 1);
@@ -109,16 +109,16 @@ void writeHit(uint2 pixel, float3 rayDir, float3 thp, float3 emissive, const Hit
     gEmissive[pixel] = float4(emissive, 1);
 
     //TODO: calculate these values
-    if (is_valid(gDepth)) gDepth[pixel] = 1.f;
-    if (is_valid(gMotionVector)) gMotionVector[pixel] = {};
+    if (is_valid(gLinDepth)) gLinDepth[pixel] = linZ;
+    if (is_valid(gMVec)) gMVec[pixel] = mVec;
 }
 
 void writeMiss(uint2 pixel)
 {
     gVBuffer[pixel] = { };
 
-    if (is_valid(gDepth)) gDepth[pixel] = 1.f;
-    if (is_valid(gMotionVector)) gMotionVector[pixel] = { };
+    if (is_valid(gLinDepth)) gLinDepth[pixel] = 0.f;
+    if (is_valid(gMVec)) gMVec[pixel] = { };
 }
 
 //TODO: Add other miss colors, as throughput then has to be respected
@@ -145,7 +145,7 @@ void anyHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAt
     }
 }
 
-bool generateNewRay(const ShadingData sd, const IBSDF bsdf, float3 rayOrigin, inout BSDFSample bsdfSample, inout RayData rayData)
+bool generateNewRay(const in ShadingData sd, const in IBSDF bsdf, float3 rayOrigin, inout BSDFSample bsdfSample, inout RayData rayData)
 {
     // Sample material.
     if (bsdf.sample(sd, rayData.sg, bsdfSample, true /*Importance Sampeling*/))
@@ -175,6 +175,20 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     triangleHit.barycentrics = attribs.barycentrics;
     VertexData v = gScene.getVertexData(triangleHit);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+
+    //Motion vector
+    float3 prevPosW = gScene.getPrevPosW(triangleHit);
+    float2 pixelPos = DispatchRaysIndex().xy + float2(0.5f, 0.5f);
+    float4 prevPosH = mul(float4(prevPosW, 1.f), gScene.camera.data.prevViewProjMatNoJitter);
+    float2 motionVec = calcMotionVector(pixelPos, prevPosH, DispatchRaysDimensions().xy);
+    // Remove camera jitter from motion vector 
+    if(gUseRandomPixelPosCamera){
+        float2 rndJitterVec = float2(f16tof32(rayData.randomCamJitter >> 16), f16tof32(rayData.randomCamJitter & 0xFFFF));
+        rndJitterVec -= 0.5;    //Convert form [0,1] to [-0.5,0.5]
+        motionVec -= rndJitterVec;
+    }else{
+        motionVec += float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); //JitterX is subtracted, JitterY is added in Cam jitter calc
+    }
     
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayData.direction, lod);
@@ -186,6 +200,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     }
     
     float3 thpStart = rayData.thp;
+    rayData.distance += distance(ObjectRayOrigin(), sd.posW);   //accumulate ray distance
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
@@ -202,15 +217,13 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     bool isDiffuse = bsdfProperties.roughness > gSpecularRougnessCutoff;
     isDiffuse |= any(bsdfProperties.emission > gEmissiveCutoff);
        
-    //save hit if lobe is diffuse
+    //store hit if lobe is diffuse
     if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
     {        
-        writeHit(launchIndex, WorldRayDirection(), thpStart, bsdfProperties.emission * bsdfSample.weight, HitInfo(triangleHit));
+        writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission * bsdfSample.weight, HitInfo(triangleHit), rayData.distance, motionVec);
         
         rayData.terminated = true;
     }
-
-    rayData.pathLength++;
 }
 
 [shader("raygeneration")]
@@ -225,7 +238,9 @@ void rayGen()
     Ray camRay;
     if (gUseRandomPixelPosCamera)
     {
-        camRay = cameraComputeRandomRayThinlens(launchIndex, launchDim, sampleNext2D(rayData.sg), sampleNext2D(rayData.sg), gScene.camera.data);
+        float2 rndJitter = sampleNext2D(rayData.sg);
+        camRay = cameraComputeRandomRayThinlens(launchIndex, launchDim, rndJitter, sampleNext2D(rayData.sg), gScene.camera.data);
+        rayData.randomCamJitter = (f32tof16(rndJitter.x) << 16) | f32tof16(rndJitter.y);
     }
     else
     {

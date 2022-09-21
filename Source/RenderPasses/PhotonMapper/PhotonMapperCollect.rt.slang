@@ -193,7 +193,7 @@ void rayGen()
     ray.Origin = v.posW;
     ray.TMin = RAY_TMIN;
     ray.TMax = RAY_TMAX;
-    ray.Direction = gViewWorld[launchIndex].xyz;    //we take the view dir as direction to save payload space
+    ray.Direction = -gViewWorld[launchIndex].xyz;    //we take the view dir as direction to save payload space
 
     //Closest hit shader can be skipped
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
