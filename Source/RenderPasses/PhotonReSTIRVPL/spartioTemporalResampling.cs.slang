@@ -21,7 +21,7 @@ import VPLs;
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 
-StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedVPL> gVPLs;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -199,7 +199,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current =  getReservoir(dTid, false);
     if(current.weightSum > 0){
-        selectedVPL = gVPLs[current.lightIdx];
+        selectedVPL = VPL(gVPLs[current.lightIdx]);
     }
     
     uint historyLimit = uint(gMaxAge * current.M);
@@ -295,7 +295,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             
         //If neighbor surface has passed the tests get reservoir and compair them
         Reservoir sampledReservoir = getReservoir(idx, true);
-        VPL vpl = gVPLs[sampledReservoir.lightIdx];
+        VPL vpl = VPL(gVPLs[sampledReservoir.lightIdx]);
         
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
 

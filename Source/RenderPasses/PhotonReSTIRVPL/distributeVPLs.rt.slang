@@ -30,7 +30,7 @@ cbuffer CB
     uint _pad2;
 };
 
-RWStructuredBuffer<VPL> gVPLs;
+RWStructuredBuffer<PackedVPL> gVPLs;
 RWBuffer<uint> gVPLCounter;
 Texture2D<PackedHitInfo> gVBuffer;
 
@@ -230,7 +230,7 @@ void rayGen()
         */
         
         if(vplIndex < gMaxNumberVPL){
-            gVPLs[vplIndex] = vpl;
+            gVPLs[vplIndex] = vpl.pack();
             
         }
     }

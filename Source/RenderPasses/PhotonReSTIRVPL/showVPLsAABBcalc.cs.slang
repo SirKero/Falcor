@@ -1,7 +1,7 @@
 import Utils.Math.AABB;
 import VPLs;
 
-StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedVPL> gVPLs;
 Buffer<uint> gVPLCounter;
 RWStructuredBuffer<AABB> gAABBs;
 
@@ -24,7 +24,7 @@ void main(uint2 dTid : SV_DispatchThreadID){
         return;
 
     //Load VPL and create AABB
-    VPL vpl = gVPLs[idx];
+    VPL vpl = VPL(gVPLs[idx]);
     AABB aabb = AABB(vpl.posW - gRadius, vpl.posW + gRadius);
 
     gAABBs[idx] = aabb; 

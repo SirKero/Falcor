@@ -35,7 +35,7 @@ import VPLs;
 RWTexture2D<uint4> gReservoir;
 
 StructuredBuffer<uint2> gPresampledLights;
-StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedVPL> gVPLs;
 Buffer<uint> gVPLCounter;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -101,7 +101,7 @@ bool generateSample(float rnd, const float3 surfacePosition,
         ls.invSelectPdf = float(lightCount);
 #endif   //USE_PDF_SAMPLING   
     
-    vpl = gVPLs[ls.lightIdx];
+    vpl = VPL(gVPLs[ls.lightIdx]);
     float3 toLight = vpl.posW - surfacePosition;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray

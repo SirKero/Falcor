@@ -26,7 +26,7 @@ RWTexture2D<float4> gPhotonReservoirFlux;
 Texture2D<float4> gPhotonReservoirPosPrev;
 Texture2D<float4> gPhotonReservoirFluxPrev;
 
-StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedVPL> gVPLs;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -191,7 +191,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current = getReservoir(dTid, false);
     if(current.weightSum > 0){
-        selectedVPL = gVPLs[current.lightIdx];
+        selectedVPL = VPL(gVPLs[current.lightIdx]);
     }
 
     uint historyLimit = gMaxAge * current.M;
@@ -245,7 +245,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         prev.M = min(prev.M, historyLimit);
         previousM = prev.M;
         
-        VPL vpl = gVPLs[prev.lightIdx];
+        VPL vpl = VPL(gVPLs[prev.lightIdx]);
         //Get new target pdf if valid
         float targetPdf = 0;
         if(prev.M > 0){

@@ -13,7 +13,7 @@ cbuffer CB
     uint3 _pad;       
 }
 
-StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedVPL> gVPLs;
 StructuredBuffer<PackedSurfaceData> gSurface;
 RWTexture2D<uint4> gReservoir;
 
@@ -68,7 +68,7 @@ void rayGen()
         return;
     }
     
-    VPL vpl = gVPLs[r.lightIdx];
+    VPL vpl = VPL(gVPLs[r.lightIdx]);
 
     //Get
     RayData rayData = {};

@@ -26,7 +26,7 @@ Texture2D<float4> gPhotonReservoirFlux;
 RWTexture2D<float4> gPhotonReservoirPosPrev;
 RWTexture2D<float4> gPhotonReservoirFluxPrev;
 
-StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedVPL> gVPLs;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -178,7 +178,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current = getReservoir(dTid);
     if(current.weightSum > 0){
-        selectedVPL = gVPLs[current.lightIdx];
+        selectedVPL = VPL(gVPLs[current.lightIdx]);
     }
     
     combineReservoir(r, current, current.targetPdf, 0.5 /* random */);
@@ -211,7 +211,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //If neighbor has passed the tests get reservoir and compair them
         Reservoir neigh = getReservoir(idx);
-        VPL vpl = gVPLs[neigh.lightIdx];
+        VPL vpl = VPL(gVPLs[neigh.lightIdx]);
         
         cachedResults |= (1u << i);
         //Get neightbor light target PDF for current surface

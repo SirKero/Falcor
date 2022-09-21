@@ -35,7 +35,7 @@ StructuredBuffer<AABB> gPhotonAABB;
 RaytracingAccelerationStructure gPhotonAS;
 
 // Outputs
-RWStructuredBuffer<VPL> gVPLs;
+RWStructuredBuffer<PackedVPL> gVPLs;
 RWTexture2D<float> gLightPdf;
 
 
@@ -157,7 +157,7 @@ void rayGen()
         return;
     
     //Get current VPL
-    VPL vpl = gVPLs[index];
+    VPL vpl = VPL(gVPLs[index]);
     
     //Prepare payload
     RayData rayData = RayData();
@@ -188,7 +188,7 @@ void rayGen()
     
     
     //Write vpl back
-    gVPLs[index] = vpl;
+    gVPLs[index] = vpl.pack();
     if(kUsePdfSampling)
         gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = luminance(vpl.flux);
 }

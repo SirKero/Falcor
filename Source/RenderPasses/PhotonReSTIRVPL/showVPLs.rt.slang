@@ -26,7 +26,7 @@ cbuffer CB
     float gScalar;          //Scalar for the flux
 }
 
-StructuredBuffer<VPL> gVPLs;
+StructuredBuffer<PackedVPL> gVPLs;
 StructuredBuffer<AABB> gAABBs;
 Texture2D<PackedHitInfo> gVBuffer;
 
@@ -165,7 +165,7 @@ void rayGen()
         if(distHitPoint < distVPL) return;
         
         //Get flux
-        VPL vpl = gVPLs[rayData.hitIndex];
+        VPL vpl = VPL(gVPLs[rayData.hitIndex]);
         gColor[launchIndex] = float4(vpl.flux * gScalar,1);
         //gColor[launchIndex] = float4(float3(gScalar),1);  //TODO: Currently flux is 0 so use Scalar value instead
     }

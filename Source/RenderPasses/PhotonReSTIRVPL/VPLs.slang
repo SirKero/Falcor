@@ -1,17 +1,35 @@
 import Utils.Math.PackedFormats;
 import Utils.Math.FormatConversion;
 
+//Packed VPL. 24 bytes
+struct PackedVPL{
+    uint2 data0;
+    uint2 data1;
+    uint2 data2;
+};
+
 struct VPL{
     float3 posW;
     uint packedNormal;
     float3 flux;
     uint extraData; //Age and valid (valid is first bit)
 
+    //Empty init
     __init(){
         posW = float3(0);
         packedNormal = 0;
         flux = float3(0);
         extraData = 0;
+    }
+
+    //Init from packed
+    __init(PackedVPL packed){
+        posW.xy = asfloat(packed.data0);
+        posW.z = asfloat(packed.data1.x);
+        packedNormal = packed.data1.y;
+        flux.xy = float2(f16tof32((packed.data2.x >> 16) & 0xFFFF), f16tof32(packed.data2.x & 0xFFFF));
+        flux.z = f16tof32((packed.data2.y >> 16) & 0xFFFF);
+        extraData = packed.data2.y & 0xFFFF;
     }
     
     //Shading world normal
@@ -29,12 +47,23 @@ struct VPL{
         get { return (extraData >> 1); }
         set { extraData = (extraData & 0x1) | (newValue << 1); }
     }
+
+    PackedVPL pack(){
+        PackedVPL packed = {};
+        packed.data0 = asuint(posW.xy);
+        packed.data1.x = asuint(posW.z);
+        packed.data1.y = packedNormal;
+        packed.data2.x = (f32tof16(flux.x) << 16u) | f32tof16(flux.y);
+        packed.data2.y = (f32tof16(flux.z) << 16u) | (extraData & 0xFFFF);
+        return packed;
+    }
 };
 
 struct PhotonData{
     float3 flux;
-    float3 dir;
     uint packedNormal;
+    float3 dir;
+    uint _pad;
 
     __init(){
         flux = float3(0);

@@ -544,7 +544,7 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
 
     //Create buffer for VPLs
     if (!mpVPLBuffer) {
-        mpVPLBuffer = Buffer::createStructured(sizeof(uint) * 8, mNumberVPL, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+        mpVPLBuffer = Buffer::createStructured(sizeof(uint) * 6, mNumberVPL, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                                                Buffer::CpuAccess::None, nullptr, false);
         mpVPLBuffer->setName("PhotonReStir::VPLBuffer");
     }
