@@ -53,10 +53,11 @@ namespace {
     const char kShaderFinalShading[] = "RenderPasses/ReStirExp/finalShading.cs.slang";
 
     //Input
-    const ChannelList kInputs = {
-          {"vbuffer",             "gVBuffer",                 "V Buffer to get the intersected triangle",         false},
-          {"mVec",                "gMVec",                    "Motion vector",         false}
-    };
+    const ChannelDesc kInVBuffer = { "vbuffer",             "gVBuffer",                 "V Buffer to get the intersected triangle",         false };
+    const ChannelDesc kInMVec = { "mVec",                "gMVec",                    "Motion vector",         false };
+    const ChannelDesc kInView = { "view",             "gView",                    "View Vector",           true };
+    const ChannelDesc kInLinZ = { "linZ",               "gLinZ",                   "Distance from Camera to hitpoint",  true };
+    const ChannelList kInputs = {kInVBuffer, kInMVec, kInView, kInLinZ };
 
     const ChannelList kOutputs = {
         {"color",                   "gColor",                   "Final shaded hdr image",                   false,  ResourceFormat::RGBA32Float},
@@ -155,6 +156,10 @@ void ReStirExp::execute(RenderContext* pRenderContext, const RenderData& renderD
     //Shade the pixel
     finalShadingPass(pRenderContext, renderData);
 
+    //Copy view pass (if resource is valid) for the next pass
+    if (renderData[kInView.name] != nullptr)
+        pRenderContext->copyResource(mpPrevViewTexture.get(), renderData[kInView.name]->asTexture().get());
+
     mReuploadBuffers = mReset ? true: false;
     mBiasCorrectionChanged = false;
     mReset = false;
@@ -236,7 +241,6 @@ void ReStirExp::renderUI(Gui::Widgets& widget)
 
 void ReStirExp::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
 {
-    //TODO: Reset Pass
     mpScene = pScene;
     mReset = true;
 }
@@ -292,8 +296,6 @@ void ReStirExp::prepareLighting(RenderContext* pRenderContext)
     //Clear texture if count changed
     if(mUpdateLightBuffer && mUsePdfSampling)
         pRenderContext->clearUAV(mpLightPdfTexture->getUAV().get(), float4(0.f));
-    
-    
 }
 
 void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData)
@@ -306,6 +308,7 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
             mpReservoirBuffer[i].reset();
             mpReservoirUVBuffer[i].reset();
             mpSurfaceBuffer[i].reset();
+            mpPrevViewTexture.reset();
         }
         mReset = true;  //TODO: Dont rebuild everything on screen size change
     }
@@ -353,6 +356,13 @@ void ReStirExp::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
 
         
         mpNeighborOffsetBuffer->setName("ReStirExp::NeighborOffsetBuffer");
+    }
+
+    //Create a prev view texture if the view texture is valid
+    if ((renderData[kInView.name] != nullptr) && !mpPrevViewTexture) {
+        mpPrevViewTexture = Texture::create2D(mScreenRes.x, mScreenRes.y, renderData[kInView.name]->asTexture()->getFormat(), 1, 1u,
+                                              nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpPrevViewTexture->setName("ReStirExp::PrevView");
     }
 
     if (!mpGenerateSampleGenerator) {
@@ -411,9 +421,10 @@ void ReStirExp::prepareSurfaceBufferPass(RenderContext* pRenderContext, const Re
         Program::Desc desc;
         desc.addShaderLibrary(kShaderFillSurfaceInformation).csEntry("main").setShaderModel("6_5");
         desc.addTypeConformances(mpScene->getTypeConformances());
-
+        
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
+        defines.add(getValidResourceDefines(kInputs, renderData));
         mpFillSurfaceInfoPass = ComputePass::create(desc, defines, true);
     }
     FALCOR_ASSERT(mpFillSurfaceInfoPass);
@@ -421,15 +432,9 @@ void ReStirExp::prepareSurfaceBufferPass(RenderContext* pRenderContext, const Re
     //Set variables
     auto var = mpFillSurfaceInfoPass->getRootVar();
 
-    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
-    auto bindAsTex = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData[desc.name]->asTexture();
-        }
-    };
-    bindAsTex(kInputs[0]);
+    var[kInVBuffer.texname] = renderData[kInVBuffer.name]->asTexture();
+    var[kInView.texname] = renderData[kInView.name]->asTexture();           //Optional view tex
+    var[kInLinZ.texname] = renderData[kInLinZ.name]->asTexture();           //Optional linZ texw]
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
 
@@ -477,7 +482,6 @@ void ReStirExp::presampleLightsPass(RenderContext* pRenderContext, const RenderD
         var["Constant"]["gTileSizes"] = mPresampledTitleSize;
     }
 
-    //var["gLights"] = mpLightBuffer;
     var["gLightPdf"] = mpLightPdfTexture;
     var["gPresampledLights"] = mpPresampledLight;
 
@@ -508,6 +512,7 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
         defines.add(mpGenerateSampleGenerator->getDefines());
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         defines.add("USE_PRESAMPLED", mUsePdfSampling ? "1" : "0");
+        defines.add(getValidResourceDefines(kInputs, renderData));
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -516,15 +521,6 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     //Set variables
     auto var = mpGenerateCandidates->getRootVar();
 
-    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
-    auto bindAsTex = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData[desc.name]->asTexture();
-        }
-    };
-
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpGenerateSampleGenerator->setShaderData(var);          //Sample generator
     var["gReservoir"] = mpReservoirBuffer[mFrameCount % 2];
@@ -532,6 +528,8 @@ void ReStirExp::generateCandidatesPass(RenderContext* pRenderContext, const Rend
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     if(mUsePdfSampling) var["gPresampledLight"] = mpPresampledLight;
     var["gLights"] = mpLightBuffer;
+
+    var[kInView.texname] = renderData[kInView.name]->asTexture();    //BindView buffer (is only used if valid)
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -572,6 +570,7 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
         defines.add(mpGenerateSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add(getValidResourceDefines(kInputs, renderData));
 
         mpTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -593,7 +592,9 @@ void ReStirExp::temporalResampling(RenderContext* pRenderContext, const RenderDa
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
 
-    var["gMVec"] = renderData[kInputs[1].name]->asTexture();    //BindMvec
+    var[kInMVec.texname] = renderData[kInMVec.name]->asTexture();    //BindMvec
+    var[kInView.texname] = renderData[kInView.name]->asTexture();    //BindView buffer (is only used if valid)
+    var["gPrevView"] = mpPrevViewTexture;                           //Is nullptr if view not set
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -638,6 +639,7 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add(getValidResourceDefines(kInputs, renderData));
 
         mpSpartialResampling = ComputePass::create(desc, defines, true);
     }
@@ -659,7 +661,8 @@ void ReStirExp::spartialResampling(RenderContext* pRenderContext, const RenderDa
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
 
-    var["gMVec"] = renderData[kInputs[1].name]->asTexture();    //BindMvec
+    var[kInMVec.texname] = renderData[kInMVec.name]->asTexture();    //BindMvec
+    var[kInView.texname] = renderData[kInView.name]->asTexture();    //BindView buffer (is only used if valid)
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -701,6 +704,7 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add(getValidResourceDefines(kInputs, renderData));
 
         mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -723,7 +727,9 @@ void ReStirExp::spartioTemporalResampling(RenderContext* pRenderContext, const R
     var["gReservoirUV"] = mpReservoirUVBuffer[mFrameCount % 2];
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
-    var["gMVec"] = renderData[kInputs[1].name]->asTexture();    //BindMvec
+    var[kInMVec.texname] = renderData[kInMVec.name]->asTexture();    //BindMvec
+    var[kInView.texname] = renderData[kInView.name]->asTexture();    //BindView buffer (is only used if valid)
+    var["gPrevView"] = mpPrevViewTexture;                            //Is nullptr if view not set
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -763,6 +769,7 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpGenerateSampleGenerator->getDefines());
+        defines.add(getValidResourceDefines(kInputs, renderData));
         defines.add(getValidResourceDefines(kOutputs, renderData));
 
         mpFinalShading = ComputePass::create(desc, defines, true);
@@ -792,7 +799,10 @@ void ReStirExp::finalShadingPass(RenderContext* pRenderContext, const RenderData
     var["gReservoir"] = mpReservoirBuffer[reservoirIndex];
     var["gReservoirUV"] = mpReservoirUVBuffer[reservoirIndex];
     var["gLights"] = mpLightBuffer;
-    for (auto& inp : kInputs) bindAsTex(inp);
+    //Bind I/O
+    bindAsTex(kInVBuffer);
+    bindAsTex(kInMVec);
+    bindAsTex(kInView);
     for (auto& out : kOutputs) bindAsTex(out);
 
     //Uniform

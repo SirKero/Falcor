@@ -27,8 +27,12 @@ def render_graph_ReStirExp():
     loadRenderPassLibrary('OptixDenoiser.dll')
     loadRenderPassLibrary('PassLibraryTemplate.dll')
     loadRenderPassLibrary('PhotonMapperHash.dll')
+    loadRenderPassLibrary('PathVBuffer.dll')
     loadRenderPassLibrary('PhotonMapperStochasticHash.dll')
+    loadRenderPassLibrary('PhotonReSTIR.dll')
+    loadRenderPassLibrary('PhotonReSTIRVPL.dll')
     loadRenderPassLibrary('PixelInspectorPass.dll')
+    loadRenderPassLibrary('PTVBuffer.dll')
     loadRenderPassLibrary('ReStirExp.dll')
     loadRenderPassLibrary('SkyBox.dll')
     loadRenderPassLibrary('RTXDIPass.dll')
@@ -53,6 +57,7 @@ def render_graph_ReStirExp():
     g.addEdge('VBufferRT.mvec', 'ReStirExp.mVec')
     g.addEdge('AccumulatePass.output', 'ToneMapper.src')
     g.addEdge('ReStirExp.color', 'AccumulatePass.input')
+    g.addEdge('VBufferRT.viewW', 'ReStirExp.view')
     g.markOutput('ToneMapper.dst')
     return g
 

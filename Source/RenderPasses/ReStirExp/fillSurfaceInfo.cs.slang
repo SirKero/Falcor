@@ -6,7 +6,13 @@ import Utils.Color.ColorHelpers;
 
 import SurfaceData;
 
+
+//Define for valid texture channels
+#define is_valid(name) (is_valid_##name != 0)
+
 Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<float4> gView;
+Texture2D<float> gLinZ;
 RWStructuredBuffer<PackedSurfaceData>gSurfaceData;
 
 cbuffer Constant{
@@ -40,15 +46,32 @@ void main(uint2 dTid : SV_DispatchThreadID){
     //Get Hit shading information
     if(valid){
         let lod = ExplicitLodTextureSampler(0.f);
-        Ray cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
-        ShadingData sd = loadShadingData(hitInfo, cameraRay.dir, lod);
+        float3 viewDir;
+        float linZ;
+        Ray cameraRay;
+        //If one of both is not set, calculate camera ray
+        if (!(is_valid(gView) && is_valid(gLinZ)))
+            cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
+        
+        if(is_valid(gView)){
+            viewDir = -gView[dTid].xyz;
+        }else{
+            viewDir = cameraRay.dir;
+        }
+        
+        ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
         let bsdf = gScene.materials.getBSDF(sd, lod);
         let bsdfProperties = bsdf.getProperties(sd);
-        float3 camPos = gScene.camera.getPosition();
-        float currLinZ = distance(camPos, sd.posW); //TODO use linZ
 
+        if(is_valid(gLinZ)){
+            linZ = gLinZ[dTid];
+        }else{
+            float3 camPos = gScene.camera.getPosition();
+            linZ = distance(camPos, sd.posW); 
+        }   
+        
         surface.posW = sd.posW;
-        surface.viewDepth = currLinZ;
+        surface.viewDepth = linZ;
         surface.normal = sd.N;
         surface.roughness = bsdfProperties.roughness;
         //Weights

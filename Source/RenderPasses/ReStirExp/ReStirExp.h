@@ -182,4 +182,5 @@ private:
     Texture::SharedPtr mpLightPdfTexture;
     Buffer::SharedPtr mpLightBuffer;
     Buffer::SharedPtr mpPresampledLight;
+    Texture::SharedPtr mpPrevViewTexture;       //Previous view Texture used in Temporal and SpartioTemporal resampling
 };
