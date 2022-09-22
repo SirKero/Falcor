@@ -207,6 +207,7 @@ private:
     Buffer::SharedPtr mpPhotonLightCounterCPU;  //For showing the current number of photons in the UI
     Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
+    Texture::SharedPtr mpPrevViewTex;               //If view buffer is set, this texture is used for view of the frame before
 
     //
     //Ray tracing programms and helper

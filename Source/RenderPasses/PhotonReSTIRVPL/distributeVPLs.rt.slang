@@ -14,6 +14,10 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import PhotonReStirFunctions;
 import VPLs;
+
+//Define for valid texture channels
+#define is_valid(name) (is_valid_##name != 0)
+
 cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
@@ -33,6 +37,7 @@ cbuffer CB
 RWStructuredBuffer<PackedVPL> gVPLs;
 RWBuffer<uint> gVPLCounter;
 Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<float4> gView;
 
 RWTexture2D<float4> gDebug;
 
@@ -167,10 +172,20 @@ void rayGen()
     HitInfo hitInfo = HitInfo(packedHitInfo);
           
     let lod = ExplicitLodTextureSampler(0.f);
-    //Recreate the V-Buffer ray for direction
-    Ray cameraRay = gScene.camera.computeRayPinhole(randomIndex, gFrameDim);
+
+    //Get view dir
+    float3 viewDir;
+    if (is_valid(gView))
+    {
+        viewDir = -gView[launchIndex].xyz;
+    }
+    else
+    {
+        viewDir = gScene.camera.computeRayPinhole(randomIndex, gFrameDim).dir;
+    }
+    
     //Get Material properties
-    ShadingData sd = loadShadingData(hitInfo, cameraRay.dir, lod);
+    ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);

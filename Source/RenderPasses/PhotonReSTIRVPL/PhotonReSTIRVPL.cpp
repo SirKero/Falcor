@@ -68,8 +68,9 @@ namespace {
     const ChannelDesc kInVBufferDesc = {"VBuffer" , "gVBuffer", "VBuffer hit information", false};
     const ChannelDesc kInMVecDesc = {"MVec" , "gMVec" , "Motion Vector", false};
     const ChannelDesc kInViewDesc = {"View" ,"gView", "View Vector", true};
+    const ChannelDesc kInRayDistance = { "RayDepth" , "gLinZ", "The ray distance from camera to hit point", true };
 
-    const ChannelList kInputChannels = { kInVBufferDesc, kInMVecDesc, kInViewDesc };
+    const ChannelList kInputChannels = { kInVBufferDesc, kInMVecDesc, kInViewDesc, kInRayDistance };
 
     //Outputs
     const ChannelDesc kOutColorDesc = { "color" ,"gColor" , "Indirect illumination of the scene" ,false,  ResourceFormat::RGBA16Float };
@@ -195,6 +196,11 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     
     //Show the vpls as spheres for debug purposes (functions return if deactivated)
     showVPLDebugPass(pRenderContext, renderData);
+
+    //Copy view buffer if it is used
+    if (renderData[kInViewDesc.name] != nullptr) {
+        pRenderContext->copyResource(mpPrevViewTex.get(), renderData[kInViewDesc.name]->asTexture().get());
+    }
 
     //Reset the reset vars
     mReuploadBuffers = mReset ? true : false;
@@ -508,6 +514,7 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
         for (size_t i = 0; i <= 1; i++) {
             mpReservoirBuffer[i].reset();
             mpSurfaceBuffer[i].reset();
+            mpPrevViewTex.reset();
         }
         mReuploadBuffers = true; 
     }
@@ -555,6 +562,14 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
         mpVPLBufferCounter->setName("PhotonReStir::VPLBufferCounter");
     }
 
+    //Create view tex for previous frame
+    if (renderData[kInViewDesc.name] != nullptr && !mpPrevViewTex) {
+        auto viewTex = renderData[kInViewDesc.name]->asTexture();
+        mpPrevViewTex = Texture::create2D(viewTex->getWidth(), viewTex->getHeight(), viewTex->getFormat(), 1, 1,
+            nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpPrevViewTex->setName("PhotonReStir::PrevViewTexture");
+    }
+
     if (!mpSampleGenerator) {
         mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
     }
@@ -572,6 +587,7 @@ void PhotonReSTIRVPL::prepareSurfaceBufferPass(RenderContext* pRenderContext, co
 
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
         mpFillSurfaceInfoPass = ComputePass::create(desc, defines, true);
     }
     FALCOR_ASSERT(mpFillSurfaceInfoPass);
@@ -590,6 +606,8 @@ void PhotonReSTIRVPL::prepareSurfaceBufferPass(RenderContext* pRenderContext, co
     bindAsTex(kInVBufferDesc);
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
+    var[kInRayDistance.texname] = renderData[kInRayDistance.name]->asTexture();
 
     if (mReset || mReuploadBuffers) {
         var["Constant"]["gFrameDim"] = renderData.getDefaultTextureDims();
@@ -623,6 +641,7 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
         // Configure program.
         mDistributeVPlsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
         mDistributeVPlsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        mDistributeVPlsPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
         // Create program variables for the current program.
         // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
         mDistributeVPlsPass.pVars = RtProgramVars::create(mDistributeVPlsPass.pProgram, mDistributeVPlsPass.pBindingTable);
@@ -653,6 +672,7 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
     var["gVPLs"] = mpVPLBuffer;
     var["gVPLCounter"] = mpVPLBufferCounter;
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gDebug"] = renderData[kOutDebugDesc.name]->asTexture();
 
     uint2 targetDim = uint2(div_round_up(uint(mNumberVPL * 1.5f), 1024u), 1024u);
@@ -859,6 +879,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         defines.add("USE_PRESAMPLING", mUsePdfSampling ? "1" : "0");
         defines.add("USE_VISIBILITY_CHECK_INLINE", mUseVisibiltyRayInline ? "1" : "0");
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
     }
@@ -880,6 +901,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
     mpSampleGenerator->setShaderData(var);          //Sample generator
     bindReservoirs(var, mFrameCount, false);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gVPLCounter"] = mpVPLBufferCounter;
     var["gVPLs"] = mpVPLBuffer;
     if(mUsePdfSampling) var["gPresampledLights"] = mpPresampledLights;
@@ -941,6 +963,7 @@ void PhotonReSTIRVPL::candidatesVisibilityCheckPass(RenderContext* pRenderContex
 
         // Configure program.
         mVisibilityCheckPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        mVisibilityCheckPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
         // Create program variables for the current program.
         // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
         mVisibilityCheckPass.pVars = RtProgramVars::create(mVisibilityCheckPass.pProgram, mVisibilityCheckPass.pBindingTable);
@@ -957,6 +980,7 @@ void PhotonReSTIRVPL::candidatesVisibilityCheckPass(RenderContext* pRenderContex
     var["gVPLs"] = mpVPLBuffer;
     bindReservoirs(var, mFrameCount, false);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
 
     uint2 targetDim = renderData.getDefaultTextureDims();
     //Trace the photons
@@ -980,6 +1004,7 @@ void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const Re
         defines.add(mpSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -996,10 +1021,11 @@ void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const Re
     bindReservoirs(var, mFrameCount);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
-
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
+    var["gPrevView"] = mpPrevViewTex;
 
     var["gVPLs"] = mpVPLBuffer;
-    var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
+    var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -1043,6 +1069,7 @@ void PhotonReSTIRVPL::spartialResampling(RenderContext* pRenderContext, const Re
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpSpartialResampling = ComputePass::create(desc, defines, true);
     }
@@ -1059,9 +1086,10 @@ void PhotonReSTIRVPL::spartialResampling(RenderContext* pRenderContext, const Re
     bindReservoirs(var, mFrameCount, true); //Use "Previous" as output 
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gVPLs"] = mpVPLBuffer;
 
-    var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
+    var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -1102,6 +1130,7 @@ void PhotonReSTIRVPL::spartioTemporalResampling(RenderContext* pRenderContext, c
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -1118,10 +1147,12 @@ void PhotonReSTIRVPL::spartioTemporalResampling(RenderContext* pRenderContext, c
     bindReservoirs(var, mFrameCount, true); //Use "Previous" as output 
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
+    var["gPrevView"] = mpPrevViewTex;
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
     var["gVPLs"] = mpVPLBuffer;
-    var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
+    var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -1160,6 +1191,7 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add(getValidResourceDefines(kOutputChannels, renderData));
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpFinalShading = ComputePass::create(desc, defines, true);
     }
@@ -1188,6 +1220,7 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
     bindReservoirs(var, reservoirIndex ,false);
 
     var["gVPLs"] = mpVPLBuffer;
+    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     //for (auto& inp : kInputChannels) bindAsTex(inp);
     bindAsTex(kInVBufferDesc);
     bindAsTex(kInMVecDesc);

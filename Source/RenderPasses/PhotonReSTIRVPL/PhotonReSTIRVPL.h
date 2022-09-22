@@ -292,6 +292,7 @@ private:
     Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
     Buffer::SharedPtr mpShowVPLsAABBsBuffer;              //AABB buffer for showing the vpls
+    Texture::SharedPtr mpPrevViewTex;                   //If view texture is used, we store the last frame here
 
     //
     //Ray tracing programms and helper

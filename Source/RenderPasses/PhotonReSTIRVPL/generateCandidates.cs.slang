@@ -32,11 +32,15 @@ import VPLs;
 #define PRESAMPLED_TITLE_SIZE 16
 #endif
 
+//Define for valid texture channels
+#define is_valid(name) (is_valid_##name != 0)
+
 RWTexture2D<uint4> gReservoir;
 
 StructuredBuffer<uint2> gPresampledLights;
 StructuredBuffer<PackedVPL> gVPLs;
 Buffer<uint> gVPLCounter;
+Texture2D<float4> gView;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
 
@@ -71,11 +75,20 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
-Surface getSurface(uint2 idx){
-    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;
+Surface getSurface(uint2 idx)
+{
+    float3 viewDir;
+    if (is_valid(gView))
+    {
+        viewDir = gView[idx].xyz;
+    }
+    else
+    {
+        viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir * -1; //Flip ViewDir here 
+    }
     PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
-    return Surface(surfaceData, -viewDir);
+    return Surface(surfaceData, viewDir);
 }
 //Generates a light sample. Returns false if sample is invalid
 bool generateSample(float rnd, const float3 surfacePosition,

@@ -26,6 +26,8 @@ Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
+Texture2D<float4> gView;
+Texture2D<float4> gPrevView;
 
 #define BIAS_MODE_BASIC 1
 #define BIAS_MODE_RAYTRACE 2
@@ -33,6 +35,9 @@ Texture2D<float2> gMVec;
 #ifndef BIAS_CORRECTION_MODE
 #define BIAS_CORRECTION_MODE 2
 #endif
+
+//Define for valid texture channels
+#define is_valid(name) (is_valid_##name != 0)
 static const uint kNeighOffsetMask = OFFSET_BUFFER_SIZE;
 
 cbuffer PerFrame
@@ -65,16 +70,30 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
-Surface getSurface(uint2 idx, bool prev){
-    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;//TODO: Use prev view dir for last frame
+
+Surface getSurface(uint2 idx, bool prev)
+{
+    float3 viewDir;
+    if (is_valid(gView))
+    {
+        if (prev)
+            viewDir = gPrevView[idx].xyz;
+        else
+            viewDir = gView[idx].xyz;
+    }
+    else
+    {
+        viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir * -1; //Flip ViewDir here 
+    }
     PackedSurfaceData surfaceData;
-    if(prev)
+    if (prev)
         surfaceData = gSurfacePrev[index2Dto1D(idx, gFrameDim.x)];
     else
         surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
-    return Surface(surfaceData, -viewDir);
+    return Surface(surfaceData, viewDir);
 }
+
 
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {

@@ -21,6 +21,7 @@ StructuredBuffer<PackedVPL> gVPLs;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
+Texture2D<float4> gView;
 RWTexture2D<float4> gColor;
 RWTexture2D<float4> gDiffuseIllumination;
 RWTexture2D<float4> gDiffuseReflectance;
@@ -88,10 +89,18 @@ void main(uint2 dTid : SV_DispatchThreadID)
     HitInfo hitInfo = HitInfo(packedHitInfo);
           
     let lod = ExplicitLodTextureSampler(0.f);
-    //Recreate the V-Buffer ray for direction
-    Ray cameraRay = gScene.camera.computeRayPinhole(dTid, gFrameDim);
+    //Get view buffer
+    float3 viewDir;
+    if (is_valid(gView))
+    {
+        viewDir = -gView[dTid].xyz;
+    }
+    else
+    {
+        viewDir = gScene.camera.computeRayPinhole(dTid, gFrameDim).dir;
+    }
     //Get Material properties
-    ShadingData sd = loadShadingData(hitInfo, cameraRay.dir, lod);
+    ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
 

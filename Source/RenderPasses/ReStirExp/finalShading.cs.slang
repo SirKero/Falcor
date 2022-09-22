@@ -109,7 +109,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     HitInfo hitInfo = HitInfo(packedHitInfo);
           
     let lod = ExplicitLodTextureSampler(0.f);
-    //Recreate the V-Buffer ray for direction
+    //Get view buffer
     float3 viewDir;
     if (is_valid(gView))
     {

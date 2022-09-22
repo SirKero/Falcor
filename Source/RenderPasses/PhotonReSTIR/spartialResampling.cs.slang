@@ -28,6 +28,7 @@ RWTexture2D<float4> gPhotonReservoirFluxPrev;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
+Texture2D<float4> gView;
 
 #define BIAS_MODE_BASIC 1
 #define BIAS_MODE_RAYTRACE 2
@@ -35,6 +36,10 @@ Texture2D<float2> gMVec;
 #ifndef BIAS_CORRECTION_MODE
     #define BIAS_CORRECTION_MODE 2
 #endif
+
+//Define for valid texture channels
+#define is_valid(name) (is_valid_##name != 0)
+
 static const uint kNeighOffsetMask = OFFSET_BUFFER_SIZE;
 
 cbuffer PerFrame
@@ -75,11 +80,21 @@ Reservoir getReservoir(int2 idx)
     return r;
 }
 
-Surface getSurface(uint2 idx){
-    float3 viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir;
+Surface getSurface(uint2 idx)
+{
+    float3 viewDir;
+    if (is_valid(gView))
+    {
+       viewDir = gView[idx].xyz;
+    }
+    else
+    {
+        viewDir = gScene.camera.computeRayPinhole(idx, gFrameDim).dir * -1; //Flip ViewDir here 
+    }
+    
     PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
-    return Surface(surfaceData, -viewDir);
+    return Surface(surfaceData, viewDir);
 }
 
 PhotonLight getPhotonLight(int2 idx, bool prev){

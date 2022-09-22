@@ -7,6 +7,9 @@ import Reservoir;
 import SurfaceData;
 import VPLs;
 
+//Define for valid texture channels
+#define is_valid(name) (is_valid_##name != 0)
+
 cbuffer CB
 {
     float gVisRayOffset;     //Offset for visibility ray 
@@ -16,6 +19,7 @@ cbuffer CB
 StructuredBuffer<PackedVPL> gVPLs;
 StructuredBuffer<PackedSurfaceData> gSurface;
 RWTexture2D<uint4> gReservoir;
+Texture2D<float4> gView;
 
 /** Payload for scatter ray (16B).
 */
@@ -47,11 +51,20 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
-Surface getSurface(uint2 idx, uint2 frameDim){
-    float3 viewDir = gScene.camera.computeRayPinhole(idx, frameDim).dir;
-    PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, frameDim.x)];
+Surface getSurface(uint2 idx)
+{
+    float3 viewDir;
+    if (is_valid(gView))
+    {
+        viewDir = gView[idx].xyz;
+    }
+    else
+    {
+        viewDir = gScene.camera.computeRayPinhole(idx, DispatchRaysDimensions().xy).dir * -1; //Flip ViewDir here 
+    }
+    PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, DispatchRaysDimensions().x)];
     
-    return Surface(surfaceData, -viewDir);
+    return Surface(surfaceData, viewDir);
 }
 
 [shader("raygeneration")]
@@ -62,7 +75,7 @@ void rayGen()
 
     //Get Information for shadow ray
     Reservoir r = Reservoir(gReservoir[launchIndex]);
-    Surface surface = getSurface(launchIndex, launchDim);
+    Surface surface = getSurface(launchIndex);
     //When surface or reservoir is invalid return. If reservoir weight is already 0 it can be ignored too
     if(!surface.valid || r.weightSum <= 0 || isinf(r.weightSum) || isnan(r.weightSum)){
         return;
