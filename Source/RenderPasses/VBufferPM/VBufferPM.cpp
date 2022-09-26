@@ -210,12 +210,10 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
         bufName = "CB";
         var[bufName]["gMaxRecursion"] = mRecursionDepth;
         var[bufName]["gSpecularRougnessCutoff"] = mSpecRoughCutoff;
-        var[bufName]["gEmissiveCutoff"] = mEmissiveCutoff;
         var[bufName]["gAdjustShadingNormals"] = mAdjustShadingNormals;
         var[bufName]["gUseAlphaTest"] = mUseAlphaTest;
         var[bufName]["gUseRandomPixelPosCamera"] = mCameraUseRandomSample;
     }
-
 
     // Bind Output Textures. These needs to be done per-frame as the buffers may change anytime.
     auto bindAsTex = [&](const ChannelDesc& desc)
@@ -296,14 +294,13 @@ void VBufferPM::renderUI(Gui::Widgets& widget)
 
     mOptionsChanged |= widget.var("SpecRoughCutoff", mSpecRoughCutoff, 0.0f, 1.0f, 0.01f);
     widget.tooltip("The cutoff for Specular Materials. All Reflections above this threshold are considered Diffuse");
-    mOptionsChanged |= widget.var("EmissionCutoff", mEmissiveCutoff, 0.0f, 1.0f, 0.01f);
-    widget.tooltip("The cutoff for Emissive Materials. All Reflections above this threshold are considered Emissive-Diffuse");
 
     // Sample pattern controls.
     bool updatePattern = widget.dropdown("Sample pattern", kSamplePatternList, (uint32_t&)mSamplePattern);
     widget.tooltip("Selects sample pattern for anti-aliasing over multiple frames.\n\n"
                    "The camera jitter is set at the start of each frame based on the chosen pattern. All render passes should see the same jitter.\n"
-                   "'Center' disables anti-aliasing by always sampling at the center of the pixel.", true);
+                   "\'Center\' disables anti-aliasing by always sampling at the center of the pixel.\n"
+                   "\'Random Uniform\' does not support Motion Vectors", true);
     if (mSamplePattern != SamplePattern::Center && mSamplePattern != SamplePattern::RandomUniform)
     {
         updatePattern |= widget.var("Sample count", mSampleCount, 1u);
