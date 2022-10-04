@@ -53,7 +53,7 @@ def render_graph_RTXDI():
     g.addPass(ToneMapper, 'ToneMapper')
     Composite = createPass('Composite', {'mode': CompositeMode.Add, 'scaleA': 1.0, 'scaleB': 1.0, 'outputFormat': ResourceFormat.RGBA32Float})
     g.addPass(Composite, 'Composite')
-    VBufferPM = createPass('VBufferPM', {'outputSize': IOSize.Default, 'samplePattern': 3, 'sampleCount': 32, 'useAlphaTest': True, 'adjustShadingNormals': True})
+    VBufferPM = createPass('VBufferPM', {'outputSize': IOSize.Default, 'samplePattern': 3, 'specRoughCutoff': 0.0, 'sampleCount': 32, 'useAlphaTest': True, 'adjustShadingNormals': True})
     g.addPass(VBufferPM, 'VBufferPM')
     ReStirExp = createPass('ReStirExp')
     g.addPass(ReStirExp, 'ReStirExp')

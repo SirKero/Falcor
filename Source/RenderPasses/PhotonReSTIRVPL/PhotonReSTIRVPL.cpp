@@ -238,6 +238,8 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
 
         changed |= widget.var("Radius", mVPLCollectionRadius);
         widget.tooltip("Collection Radius for the VPLs");
+        changed |= widget.checkbox("Use BSDF sampled distribution", mDistributeVplUseBsdfSampling);
+        widget.tooltip("If enabled use bsdf sampling for distribution. If disabled cosine distribution (diffuse) is used");
         changed |= widget.checkbox("Show VPLs", mShowVPLs);
         if (mShowVPLs) {
             widget.var("Debug Scalar", mShowVPLsScalar);
@@ -634,7 +636,7 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
     }
 
     //Defines
-
+    mDistributeVPlsPass.pProgram->addDefine("USE_BSDF_SAMPLING", mDistributeVplUseBsdfSampling ? "1" : "0");
     if (!mDistributeVPlsPass.pVars) {
         FALCOR_ASSERT(mDistributeVPlsPass.pProgram);
 

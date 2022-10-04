@@ -18,6 +18,10 @@ import VPLs;
 //Define for valid texture channels
 #define is_valid(name) (is_valid_##name != 0)
 
+#ifndef USE_BSDF_SAMPLING
+#define USE_BSDF_SAMPLING 0
+#endif
+
 cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
@@ -186,7 +190,6 @@ void rayGen()
     
     //Get Material properties
     ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
-    BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
 
@@ -201,27 +204,24 @@ void rayGen()
     if(rnd > pReflection) return;
     
     //BSDF sampling
-    sd.mtl.setActiveLobes((uint)LobeType::Reflection);
-    bool valid = bsdf.sample(sd, rd.sg, bsdfSample, true);
-        
-    RayDesc ray;
-    ray.Origin =  sd.computeNewRayOrigin(); //false is for transmissions
-    ray.Direction = bsdfSample.wo;
-    ray.TMin = 0.01f;
-    ray.TMax = 10000.f;
     
-
-    /*
+#if USE_BSDF_SAMPLING
+    BSDFSample bsdfSample;
+    sd.mtl.setActiveLobes((uint)LobeType::Reflection);
+    bool valid = bsdf.sample(sd, rd.sg, bsdfSample, true);   
+    float3 dir = bsdfSample.wo;
+#else
+    //Consine Sampling
     float3 dir = sample_cosine_hemisphere_polar(sampleNext2D(rd.sg));
     fromLocalToWorld(sd.faceN,dir);
+#endif  
     
-    //Cosine Sampling
     RayDesc ray;
-    ray.Origin =  sd.computeNewRayOrigin();
-    ray.Direction = dir;   //Cosine sampling     
+    ray.Origin =  sd.computeNewRayOrigin(); //false is for transmissions
+    ray.Direction = dir;
     ray.TMin = 0.01f;
     ray.TMax = 10000.f;
-    */
+    
     uint rayFlags = 0;
     
     TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rd);

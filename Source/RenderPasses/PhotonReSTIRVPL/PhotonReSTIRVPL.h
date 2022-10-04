@@ -235,6 +235,7 @@ private:
     bool mPresampledTitleSizeChanged = true;
     bool mUsePdfSampling = false;
     bool mUseVisibiltyRayInline = false;         //If true, inline ray tracing is used for the visibility check
+    
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
@@ -252,6 +253,7 @@ private:
     bool mShowVPLs = true;
     float mShowVPLsScalar = 1.f;
     bool mResetVPLs = false;
+    bool mDistributeVplUseBsdfSampling = false; //Use Bsdf or cosine sampling for vpl distribution
 
     //Runtime
     bool mReset = true;

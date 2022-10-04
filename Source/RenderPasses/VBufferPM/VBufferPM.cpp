@@ -86,6 +86,7 @@ namespace
     const char kSampleCount[] = "sampleCount";
     const char kUseAlphaTest[] = "useAlphaTest";
     const char kAdjustShadingNormals[] = "adjustShadingNormals";
+    const char kSpecRoughCutoff[] = "specRoughCutoff";
 }
 
 VBufferPM::SharedPtr VBufferPM::create(RenderContext* pRenderContext, const Dictionary& dict)
@@ -112,7 +113,8 @@ void VBufferPM::parseDictionary(const Dictionary& dict)
         else if (key == kSampleCount) mSampleCount = value;
         else if (key == kUseAlphaTest) mUseAlphaTest = value;
         else if (key == kAdjustShadingNormals) mAdjustShadingNormals = value;
-        // TODO: Check for unparsed fields, including those parsed in derived classes.
+        else if (key == kSpecRoughCutoff) mSpecRoughCutoff = value;
+        // TODO: Check for unparsed fields
     }
 }
 
@@ -122,6 +124,7 @@ Dictionary VBufferPM::getScriptingDictionary()
     dict[kOutputSize] = mOutputSizeSelection;
     if (mOutputSizeSelection == RenderPassHelpers::IOSize::Fixed) dict[kFixedOutputSize] = mFixedOutputSize;
     dict[kSamplePattern] = mSamplePattern;
+    dict[kSpecRoughCutoff] = mSpecRoughCutoff;
     dict[kSampleCount] = mSampleCount;
     dict[kUseAlphaTest] = mUseAlphaTest;
     dict[kAdjustShadingNormals] = mAdjustShadingNormals;
