@@ -97,7 +97,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //Get shading data
     PackedHitInfo packedHitInfo = gVBuffer[dTid];
     HitInfo hitInfo = HitInfo(packedHitInfo);
-          
+    if(!hitInfo.isValid())
+        return;
+    
     let lod = ExplicitLodTextureSampler(0.f);
     //Recreate the V-Buffer ray for direction
     float3 viewDir;
@@ -114,7 +116,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
 
-    if(r.weightSum < 0 || !hitInfo.isValid() || r.M == 0){
+    if(r.weightSum < 0 || r.M == 0){
         valid = false;
     }
     

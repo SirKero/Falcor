@@ -206,6 +206,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         
     if (!generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData))
     {
+        rayData.distance = -1.f;
         rayData.terminated = true;
         return;
     }
@@ -260,8 +261,12 @@ void rayGen()
         TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         //If ray is invalid return
-        if (rayData.terminated)
+        if (rayData.terminated){
+            if(rayData.distance < 0)
+                writeMiss(launchIndex);
             break;
+        }
+           
       
         //Update ray for next iteration
         ray.Origin = rayData.origin;
