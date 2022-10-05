@@ -120,8 +120,8 @@ bool generateSample(float rnd, const float3 surfacePosition,
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
     float cosTheta = dot(vpl.normal, -ls.dir);
-    if(cosTheta <= 0 || sampleDistance < gRadius || vpl.valid == 0) return false;
-    
+    //if(cosTheta <= 0 || sampleDistance < gRadius || vpl.valid == 0) return false;
+    float area = M_PI * gRadius * gRadius;
     float pdf = distSqr / max(FLT_MIN,cosTheta);
     float Le = luminance(vpl.flux);
     

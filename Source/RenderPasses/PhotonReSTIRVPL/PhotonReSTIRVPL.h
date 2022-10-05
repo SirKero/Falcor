@@ -234,7 +234,7 @@ private:
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
     bool mUsePdfSampling = false;
-    bool mUseVisibiltyRayInline = false;         //If true, inline ray tracing is used for the visibility check
+    bool mUseVisibiltyRayInline = true;         //If true, inline ray tracing is used for the visibility check
     
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
@@ -280,19 +280,17 @@ private:
 
     //Buffer
     Buffer::SharedPtr mpVPLBuffer;              //Buffer for the VPLs
+    Texture::SharedPtr mpVPLSurface;            //Surface of a vpl. Used to collect the photons and determine the flux
     Buffer::SharedPtr mpVPLBufferCounter;       //Counter for the VPL buffer
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
-    //Buffer::SharedPtr mpPhotonLights;           //Buffer containing the photon light sources
     Buffer::SharedPtr mpPhotonAABB;              //Photon AABBs for Acceleration Structure building
     Buffer::SharedPtr mpPhotonData;              //Additional Photon data (flux, dir)
     Texture::SharedPtr mpLightPdfTex;           //1 Channel luminance texture for power presampling
     Buffer::SharedPtr mpPresampledLights; //Presampled Photon lights
     Buffer::SharedPtr mpPhotonCounter;     //Counter for the number of lights
     Buffer::SharedPtr mpPhotonCounterCPU;  //For showing the current number of photons in the UI
-    Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures
-    Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
     Buffer::SharedPtr mpShowVPLsAABBsBuffer;              //AABB buffer for showing the vpls
     Texture::SharedPtr mpPrevViewTex;                   //If view texture is used, we store the last frame here
 

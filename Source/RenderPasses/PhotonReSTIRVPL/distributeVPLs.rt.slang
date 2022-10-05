@@ -12,7 +12,6 @@ import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
-import PhotonReStirFunctions;
 import VPLs;
 
 //Define for valid texture channels
@@ -38,6 +37,7 @@ cbuffer CB
     uint _pad2;
 };
 
+RWTexture2D<PackedHitInfo> gVplSurface;
 RWStructuredBuffer<PackedVPL> gVPLs;
 RWBuffer<uint> gVPLCounter;
 Texture2D<PackedHitInfo> gVBuffer;
@@ -49,11 +49,11 @@ RWTexture2D<float4> gDebug;
 */
 struct RayData
 {
-    float3 diffuseReflectionAlbedo;  //< Reflection albedo of the current hit point
-    float  distance;            ///< Current path throughput. This is updated at each path vertex.
+    PackedHitInfo packedHitInfo;  //< Reflection albedo of the current hit point
     uint   packedNormal;   ///< Face normal encoded in 16 bit polar coordinates
     bool diffuseHit;
-    uint2 _pad;
+    float  distance;            ///< Current path throughput. This is updated at each path vertex.
+    uint _pad;
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
     
@@ -63,7 +63,7 @@ struct RayData
     {
         RayData d;
         d._pad = 0;
-        d.diffuseReflectionAlbedo = float3(0);
+        d.packedHitInfo = {};
         d.packedNormal = 0;
         d.distance = -1;
         d.diffuseHit = false;
@@ -82,9 +82,12 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
 {
     const float3 incomingRayDir = -WorldRayDirection();
     // Evaluate Falcor's material parameters at the hit point.
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
+    TriangleHit triangleHit;
+    triangleHit.instanceID = getGeometryInstanceID();
+    triangleHit.primitiveIndex = PrimitiveIndex();
+    triangleHit.barycentrics = attribs.barycentrics;
+    VertexData v = getVertexData(triangleHit.instanceID, PrimitiveIndex(), attribs);
+    const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, incomingRayDir, lod);
 
@@ -111,7 +114,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         rayData.distance = RayTCurrent();
         rayData.packedNormal = encodeNormal2x16(sd.N);
         rayData.diffuseHit = diffuseHit;
-        rayData.diffuseReflectionAlbedo = bsdfProperties.diffuseReflectionAlbedo;
+        rayData.packedHitInfo = HitInfo(triangleHit).getData();
     }else{
         rayData.distance = -1.f;
     }
@@ -246,7 +249,7 @@ void rayGen()
         
         if(vplIndex < gMaxNumberVPL){
             gVPLs[vplIndex] = vpl.pack();
-            
+            gVplSurface[ReSTIR_LinearIndexToZCurve(vplIndex)] = rd.packedHitInfo;
         }
     }
 }

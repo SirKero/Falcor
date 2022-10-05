@@ -28,17 +28,16 @@ cbuffer CB
 };
 
 // Inputs
-Buffer<uint> gVPLCounter;
 Buffer<uint> gPhotonCounter;
-RWTexture2D<PackedHitInfo> gVplSurface;
+Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<float4> gView;
 StructuredBuffer<uint4> gPackedPhotonData;
 StructuredBuffer<AABB> gPhotonAABB;
 
 RaytracingAccelerationStructure gPhotonAS;
 
 // Outputs
-RWStructuredBuffer<PackedVPL> gVPLs;
-RWTexture2D<float> gLightPdf;
+RWTexture2D<float4> gColorOut;
 
 
 // Static configuration based on defines set from the host.
@@ -97,7 +96,7 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
         weight = 0;
     }
     const float NdotL = saturate(dot(normal, pd.dir));
-    const float3 diffuseBrdf =  rayData.diffuseReflectance *NdotL * M_1_PI;
+    const float3 diffuseBrdf =  rayData.diffuseReflectance * NdotL * M_1_PI;
    
     //weight = 1.f;
     rayData.radiance += weight * diffuseBrdf * pd.flux;
@@ -144,21 +143,14 @@ void rayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
-    uint index = launchIndex.x + launchDim.x * launchIndex.y;
 
-    // Return for invalid vpl indices
-    uint numberVPL = min(gVPLCounter[0], gMaxVPLs);
-    if(index >= numberVPL)
-        return;
-    
-    //Get current VPL
-    VPL vpl = VPL(gVPLs[index]);
-    HitInfo hitInfo = HitInfo(gVplSurface[ReSTIR_LinearIndexToZCurve(index)]);
+    HitInfo hitInfo = HitInfo(gVBuffer[launchIndex]);
     if(!hitInfo.isValid())
         return;
 
+    float3 view = -gView[launchIndex].xyz;
     let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = loadShadingData(hitInfo, -vpl.normal, lod);
+    ShadingData sd = loadShadingData(hitInfo, view, lod);
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
     
@@ -169,7 +161,7 @@ void rayGen()
     
     //Ray description 
     RayDesc ray;
-    ray.Origin = vpl.posW;
+    ray.Origin = sd.posW;
     ray.TMin = 0.0;
     ray.TMax = 0.0001;
     ray.Direction = sd.N;    //Use as Normal
@@ -178,8 +170,7 @@ void rayGen()
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-    float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius * M_2PI);    //Le from normal. Solid angle is 1/(2PI) [hemisphere]
-    //float3 radiance = rayData.radiance;
+    float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius);    //Get new flux
     //radiance *= 0.008;   //TODO: Remove this factor
     //Get diffuse probability as we ignore all specular parts
     float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
@@ -190,19 +181,6 @@ void rayGen()
 
     float diffFactor = (diffProb + specProb) / diffProb;
     radiance *= diffFactor;
-    radiance *= M_1_4PI;        //TODO Why is this factor needed ???
     
-    if (vpl.age > 0 )
-    {
-        vpl.flux = vpl.flux * vpl.age;
-    }
-    vpl.age = max(vpl.age + 1,20);
-    vpl.flux += radiance;
-    vpl.flux /= vpl.age;
-    
-    
-    //Write vpl back
-    gVPLs[index] = vpl.pack();
-    if(kUsePdfSampling)
-        gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = luminance(vpl.flux) * M_2PI * (M_PI * gPhotonRadius * gPhotonRadius);
+    gColorOut[launchIndex] = float4(radiance, 1.0);
 }

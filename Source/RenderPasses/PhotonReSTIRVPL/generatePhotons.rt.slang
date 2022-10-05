@@ -10,6 +10,7 @@ import Rendering.Materials.StandardMaterial;
 import Scene.Material.ShadingUtils;
 import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
+import Rendering.Materials.Microfacet;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import PhotonReStirFunctions;
@@ -176,13 +177,22 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     //get diffuse power
     
     if(rayData.diffuseHit){
+        //Get diffuse reflection factor
+        float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
+        float NdotV = saturate(dot(sd.N, sd.V));
+        float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
+        float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
+        float specProb = luminance(specularReflectance);
+        float diffFactor = (diffProb + specProb) / diffProb;
+        
         //Slower
         //sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
         //rayData.diffuseScalar = bsdf.eval(sd, sd.N, rayData.sg);
         //Faster same result
+        
         const float NdotL = saturate(dot(sd.N, incomingRayDir));
         rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
-        
+        rayData.diffuseScalar *= diffFactor; 
     }
     
     //if throughput is 0, return
@@ -266,7 +276,7 @@ void rayGen()
         if (reflectedDiffuse && roulette)
         { 
             uint photonIndex = 0;
-            photon.flux *= rayData.diffuseScalar * invRejection;
+            photon.flux *= invRejection;
             InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
             //Only store photon if the buffer space allows it
             if(photonIndex <= kPhotonBufferSize){

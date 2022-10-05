@@ -72,5 +72,8 @@
     <ShaderSource Include="candidatesVisCheck.rt.slang">
       <Filter>Shader\ReStir</Filter>
     </ShaderSource>
+    <ShaderSource Include="debugPhotonCollect.rt.slang">
+      <Filter>Shader\PhotonVPLS</Filter>
+    </ShaderSource>
   </ItemGroup>
 </Project>

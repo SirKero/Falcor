@@ -56,6 +56,7 @@ namespace {
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIRVPL/finalShading.cs.slang";
     const char kShaderShowAABBVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLsAABBcalc.cs.slang";
     const char kShaderShowVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLs.rt.slang";
+    const char kShaderDebugPhotonCollect[] = "RenderPasses/PhotonReSTIRVPL/debugPhotonCollect.rt.slang";    //TODO: Remove
 
     // Ray tracing settings that affect the traversal stack size.
     const uint32_t kMaxPayloadSizeBytesVPL = 48u;
@@ -372,6 +373,7 @@ void PhotonReSTIRVPL::setScene(RenderContext* pRenderContext, const Scene::Share
         {
             RtProgram::Desc desc;
             desc.addShaderLibrary(kShaderCollectPhoton);
+            //desc.addShaderLibrary(kShaderDebugPhotonCollect);
             desc.setMaxPayloadSize(kMaxPayloadSizeBytesCollect);
             desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
             desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
@@ -437,16 +439,7 @@ bool PhotonReSTIRVPL::prepareLighting(RenderContext* pRenderContext)
 
 void PhotonReSTIRVPL::preparePhotonBuffers(RenderContext* pRenderContext,const RenderData& renderData)
 {
-    //Has resolution changed ?. New Value for mScreenRes is set in the prepareBuffer() function
-    if ((mScreenRes.x != renderData.getDefaultTextureDims().x) || (mScreenRes.y != renderData.getDefaultTextureDims().y) || mReset)
-    {
-        for (size_t i = 0; i <= 1; i++) {
-            mpPhotonReservoirPos[i].reset();
-            mpPhotonReservoirFlux[i].reset();
-        }
-    }
-
-    
+        
     if (mChangePhotonLightBufferSize) {
         mpPhotonAABB.reset();
         mpPhotonData.reset();
@@ -454,7 +447,6 @@ void PhotonReSTIRVPL::preparePhotonBuffers(RenderContext* pRenderContext,const R
         mChangePhotonLightBufferSize = false;
     }
     
-
     if (!mpPhotonCounter) {
         mpPhotonCounter = Buffer::create(sizeof(uint));
         mpPhotonCounter->setName("PhotonReSTIRVPL::PhotonCounterGPU");
@@ -472,39 +464,6 @@ void PhotonReSTIRVPL::preparePhotonBuffers(RenderContext* pRenderContext,const R
         mpPhotonData->setName("PhotonReStir::PhotonData");
     }
 
-    //Create pdf texture
-    if (mUsePdfSampling) {
-        uint width, height, mip;
-        computePdfTextureSize(mNumberVPL, width, height, mip);
-        if (!mpLightPdfTex || mpLightPdfTex->getWidth() != width || mpLightPdfTex->getHeight() != height || mpLightPdfTex->getMipCount() != mip) {
-            mpLightPdfTex = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
-                                                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
-            mpLightPdfTex->setName("PhotonReSTIRVPL::PhotonLightPdfTex");
-        }
-
-        //Create Buffer for the presampled lights
-        if (!mpPresampledLights || mPresampledTitleSizeChanged) {
-            mpPresampledLights = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
-            mpPresampledLights->setName("PhotonReSTIRVPL::PresampledPhotonLights");
-            mPresampledTitleSizeChanged = false;
-        }
-    }
-    //Reset buffers if they exist
-    else {
-        if (mpLightPdfTex)mpLightPdfTex.reset();
-        if (mpPresampledLights) mpPresampledLights.reset();
-    }
-    
-    //Photon reservoir textures
-    if (!mpPhotonReservoirPos[0] || !mpPhotonReservoirPos[1] || !mpPhotonReservoirFlux[0] || !mpPhotonReservoirFlux[1]) {
-        uint2 texDim = renderData.getDefaultTextureDims();
-        for (uint i = 0; i < 2; i++) {
-            mpPhotonReservoirPos[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA32Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-            mpPhotonReservoirPos[i]->setName("PhotonReSTIRVPL::PhotonReservoirPos" + std::to_string(i));
-            mpPhotonReservoirFlux[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-            mpPhotonReservoirFlux[i]->setName("PhotonReSTIRVPL::PhotonReservoirFlux" + std::to_string(i));
-        }
-    }
 }
 
 void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData)
@@ -529,6 +488,7 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
                                                  1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
         mpReservoirBuffer[1]->setName("PhotonReStir::ReservoirBuf2");
     }
+   
     
     //Create a buffer filled with surface info for current and last frame
     if (!mpSurfaceBuffer[0] || !mpSurfaceBuffer[1]) {
@@ -562,6 +522,37 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
         mpVPLBufferCounter = Buffer::create(sizeof(uint), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                                             Buffer::CpuAccess::None, &counterInit);
         mpVPLBufferCounter->setName("PhotonReStir::VPLBufferCounter");
+    }
+    if (!mpVPLSurface) {
+        //Reuse same size as a pdf texture would use
+        uint width, height, mip;
+        computePdfTextureSize(mNumberVPL, width, height, mip);
+        mpVPLSurface = Texture::create2D(width, height, HitInfo::kDefaultFormat, 1u, 1u, nullptr,
+                                         ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpVPLSurface->setName("PhotonReSTIRVPL::VplSurface");
+    }
+
+    //Create pdf texture
+    if (mUsePdfSampling) {
+        uint width, height, mip;
+        computePdfTextureSize(mNumberVPL, width, height, mip);
+        if (!mpLightPdfTex || mpLightPdfTex->getWidth() != width || mpLightPdfTex->getHeight() != height || mpLightPdfTex->getMipCount() != mip) {
+            mpLightPdfTex = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
+                                              ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
+            mpLightPdfTex->setName("PhotonReSTIRVPL::PhotonLightPdfTex");
+        }
+
+        //Create Buffer for the presampled lights
+        if (!mpPresampledLights || mPresampledTitleSizeChanged) {
+            mpPresampledLights = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
+            mpPresampledLights->setName("PhotonReSTIRVPL::PresampledPhotonLights");
+            mPresampledTitleSizeChanged = false;
+        }
+    }
+    //Reset buffers if they exist
+    else {
+        if (mpLightPdfTex)mpLightPdfTex.reset();
+        if (mpPresampledLights) mpPresampledLights.reset();
     }
 
     //Create view tex for previous frame
@@ -670,7 +661,7 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
         var[nameBuf]["gMaxNumberVPL"] = mNumberVPL;
     }
 
-
+    var["gVplSurface"] = mpVPLSurface;
     var["gVPLs"] = mpVPLBuffer;
     var["gVPLCounter"] = mpVPLBufferCounter;
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
@@ -788,6 +779,7 @@ void PhotonReSTIRVPL::collectPhotonsPass(RenderContext* pRenderContext, const Re
     // Set constants (uniforms).
     // 
     //PerFrame Constant Buffer
+    
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
 
@@ -798,18 +790,38 @@ void PhotonReSTIRVPL::collectPhotonsPass(RenderContext* pRenderContext, const Re
         var[nameBuf]["gMaxVPLs"] = mNumberVPL;
     }
 
+    var["gVplSurface"] = mpVPLSurface;
     var["gPhotonAABB"] = mpPhotonAABB;
     var["gPackedPhotonData"] = mpPhotonData;
     var["gPhotonCounter"] = mpPhotonCounter;
     var["gVPLs"] = mpVPLBuffer;
     var["gVPLCounter"] = mpVPLBufferCounter;
     if (mUsePdfSampling) var["gLightPdf"] = mpLightPdfTex;
+    
+    /*
+    //TODO Debug stuff remove if done
+    std::string nameBuf = "PerFrame";
+    var[nameBuf]["gFrameCount"] = mFrameCount;
+
+    if (mReuploadBuffers) {
+        nameBuf = "CB";
+        var[nameBuf]["gPhotonRadius"] = mVPLCollectionRadius;
+        var[nameBuf]["gMaxVPLs"] = mNumberVPL;
+    }
+    var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
+    var["gView"] = renderData[kInViewDesc.name]->asTexture();
+    var["gPhotonAABB"] = mpPhotonAABB;
+    var["gPackedPhotonData"] = mpPhotonData;
+    var["gPhotonCounter"] = mpPhotonCounter;
+    var["gColorOut"] = renderData[kOutColorDesc.name]->asTexture();
+    */
 
     bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
     FALCOR_ASSERT(tlasValid);
 
     //Create dimensions based on the number of VPLs
     uint2 targetDim = uint2(div_round_up(uint(mNumberVPL), 1024u), 1024u);
+    //targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     //Trace the photons
@@ -865,9 +877,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
     FALCOR_PROFILE("GenerateCandidates");
 
     //Clear current reservoir
-    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2].get()->getUAV().get(), uint4(0));
-    pRenderContext->clearTexture(mpPhotonReservoirPos[mFrameCount % 2].get() , float4(0));
-    pRenderContext->clearTexture(mpPhotonReservoirFlux[mFrameCount % 2].get(), float4(0));
+    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
 
     //Create pass
     if (!mpGenerateCandidates) {
@@ -929,8 +939,6 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
 
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
-    pRenderContext->uavBarrier(mpPhotonReservoirPos[mFrameCount % 2].get());
-    pRenderContext->uavBarrier(mpPhotonReservoirFlux[mFrameCount % 2].get());
 }
 
 void PhotonReSTIRVPL::candidatesVisibilityCheckPass(RenderContext* pRenderContext, const RenderData& renderData)
