@@ -180,15 +180,16 @@ void rayGen()
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
     float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius * M_2PI);    //Le from normal. Solid angle is 1/(2PI) [hemisphere]
     //float3 radiance = rayData.radiance;
-    //radiance *= 0.008;   //TODO: Remove this factor
+    
     //Get diffuse probability as we ignore all specular parts
-    float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
+    //float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
     float NdotV = saturate(dot(sd.N, sd.V));
     float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
     float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
-    float specProb = luminance(specularReflectance);
+    //float specProb = luminance(specularReflectance);
 
-    float diffFactor = (diffProb + specProb) / diffProb;
+    //TODO Per channel diffuse prob? 
+    float3 diffFactor = (bsdfProperties.diffuseReflectionAlbedo + specularReflectance) / bsdfProperties.diffuseReflectionAlbedo;
     radiance *= diffFactor;
     radiance *= M_1_4PI;        //TODO Why is this factor needed ???
     
@@ -204,5 +205,5 @@ void rayGen()
     //Write vpl back
     gVPLs[index] = vpl.pack();
     if(kUsePdfSampling)
-        gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = luminance(vpl.flux) * M_2PI * (M_PI * gPhotonRadius * gPhotonRadius);
+        gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = luminance(vpl.flux) * M_2PI * (M_PI * gPhotonRadius * gPhotonRadius);    //Le to flux (Le * area * solid angle) TODO: (M_PI * area instead of M_2PI * area)?
 }

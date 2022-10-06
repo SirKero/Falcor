@@ -320,6 +320,8 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
             widget.tooltip("Changes offset for visibility ray. Triggers recompilation so typing in the value is advised");
             changed |= widget.var("Geometry Term Band", mGeometryTermBand, 0.f, 1.f, 0.0000001f);
             widget.tooltip("Discards samples with a very small distance. Adds a little bias but removes extremly bright spots at corners");
+            mReset |= widget.checkbox("Diffuse Shading Only", mUseDiffuseOnlyShading);
+            widget.tooltip("Uses only diffuse shading. Can be used if a Path traced V-Buffer is used. Triggers Recompilation of shaders");
         }
     }
    
@@ -891,6 +893,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         defines.add("USE_PRESAMPLING", mUsePdfSampling ? "1" : "0");
         defines.add("USE_VISIBILITY_CHECK_INLINE", mUseVisibiltyRayInline ? "1" : "0");
+        if(mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpGenerateCandidates = ComputePass::create(desc, defines, true);
@@ -927,7 +930,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
-        var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
+        var[uniformName]["gCosineCutoff"] = 0.001f;
         var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize : uint2(mNumberVPL,0);
         var[uniformName]["gRadius"] = mVPLCollectionRadius;
     }
@@ -1014,6 +1017,7 @@ void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const Re
         defines.add(mpSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpTemporalResampling = ComputePass::create(desc, defines, true);
@@ -1079,6 +1083,7 @@ void PhotonReSTIRVPL::spartialResampling(RenderContext* pRenderContext, const Re
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpSpartialResampling = ComputePass::create(desc, defines, true);
@@ -1140,6 +1145,7 @@ void PhotonReSTIRVPL::spartioTemporalResampling(RenderContext* pRenderContext, c
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
+        if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
@@ -1202,6 +1208,7 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
         defines.add(mpSampleGenerator->getDefines());
         defines.add(getValidResourceDefines(kOutputChannels, renderData));
         defines.add(getValidResourceDefines(kInputChannels, renderData));
+        if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
 
         mpFinalShading = ComputePass::create(desc, defines, true);
     }

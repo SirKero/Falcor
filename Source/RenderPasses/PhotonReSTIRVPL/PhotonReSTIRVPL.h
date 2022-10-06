@@ -235,6 +235,7 @@ private:
     bool mPresampledTitleSizeChanged = true;
     bool mUsePdfSampling = false;
     bool mUseVisibiltyRayInline = true;         //If true, inline ray tracing is used for the visibility check
+    bool mUseDiffuseOnlyShading = false;                //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
     
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer

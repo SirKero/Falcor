@@ -190,8 +190,9 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         //sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
         //rayData.diffuseScalar = bsdf.eval(sd, sd.N, rayData.sg);
         //Faster same result
+        float3 diffProb = (bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectance) / bsdfProperties.diffuseReflectionAlbedo;
         const float NdotL = saturate(dot(sd.N, incomingRayDir));
-        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
+        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI * diffProb;
         
     }
     //if throughput is 0, return

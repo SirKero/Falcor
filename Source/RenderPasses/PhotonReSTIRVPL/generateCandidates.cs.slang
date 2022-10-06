@@ -54,7 +54,7 @@ cbuffer Constant
     uint gNumEmissiveSamples;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
-    float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
+    float gCosineCutoff;        //Invalidates samples with very small distances (Adds Bias)
     uint2 gNumLights;                //Light Buffer Size. If Presampling enabled, x = Title Count, y= Title Size. If !Presampling, then x = Size LightBuffer 
     float gRadius;
 }
@@ -120,8 +120,8 @@ bool generateSample(float rnd, const float3 surfacePosition,
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
     float cosTheta = dot(vpl.normal, -ls.dir);
-    //if(cosTheta <= 0 || sampleDistance < gRadius || vpl.valid == 0) return false;
-    float area = M_PI * gRadius * gRadius;
+    if(cosTheta <= gCosineCutoff || sampleDistance < gRadius * 2 || vpl.valid == 0) return false;
+    
     float pdf = distSqr / max(FLT_MIN,cosTheta);
     float Le = luminance(vpl.flux);
     
@@ -132,7 +132,7 @@ bool generateSample(float rnd, const float3 surfacePosition,
 
 //gets the target pdf averaged to one channel
 float getSurfacePdf(in Surface surface, in LightSample ls){
-
+#ifndef DIFFUSE_SHADING_ONLY
     const float3 N = surface.normal;
     const float3 H = normalize(surface.viewDir + ls.dir);
     const float NdotV = saturate(dot(N, surface.viewDir));
@@ -156,6 +156,16 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
     //Mix diffuse and specular BRDF
     float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, surface.diffuseProb));
     return brdf * ls.Li; 
+#else //Diffuse shading only
+    const float3 N = surface.normal;
+    const float NdotL = saturate(dot(N, ls.dir));
+
+    //Eval BSDF
+    float diffuseBRDF = NdotL * M_1_PI;
+    diffuseBRDF /= surface.diffuseProb;
+    
+    return diffuseBRDF * ls.Li; 
+#endif   
 }
 
 bool updateReservoir(inout Reservoir r, in LightSample ls,float targetPdf, float rnd){

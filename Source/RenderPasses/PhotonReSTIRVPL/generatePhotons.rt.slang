@@ -55,7 +55,7 @@ struct RayData
     float3  direction;      ///< Next path segment direction.
     bool    diffuseHit;     ///< saves if the his is diffuse
     float3 diffuseScalar;
-    uint _pad;
+    float _pad;
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
 
@@ -169,13 +169,14 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     bool transmission = bsdfSample.isLobe(LobeType::Transmission);
     float3 rayOrigin = sd.computeNewRayOrigin(!transmission); //false is for transmissions
     rayData.origin = rayOrigin;
-    rayData.thp *= valid ? bsdfSample.weight : float3(0);
+    rayData.thp *= valid ? bsdfSample.weight: float3(0);
     rayData.packedNormal = encodeNormal2x16(sd.faceN);
     rayData.direction = bsdfSample.wo;
     rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 
     //get diffuse power
-    
+
+    /*
     if(rayData.diffuseHit){
         //Get diffuse reflection factor
         float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
@@ -194,7 +195,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
         rayData.diffuseScalar *= diffFactor; 
     }
-    
+    */
     //if throughput is 0, return
     if (!valid || any(rayData.thp <= 0))
         rayData.terminated = true;

@@ -147,7 +147,7 @@ bool generateSample(float rnd, const float3 surfacePosition,
 
 //gets the target pdf averaged to one channel
 float getSurfacePdf(in Surface surface, in LightSample ls){
-
+#ifndef DIFFUSE_SHADING_ONLY
     const float3 N = surface.normal;
     const float3 H = normalize(surface.viewDir + ls.dir);
     const float NdotV = saturate(dot(N, surface.viewDir));
@@ -171,6 +171,16 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
     //Mix diffuse and specular BRDF
     float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, surface.diffuseProb));
     return brdf * ls.Li; 
+#else //Diffuse shading only
+    const float3 N = surface.normal;
+    const float NdotL = saturate(dot(N, ls.dir));
+
+    //Eval BSDF
+    float diffuseBRDF = NdotL * M_1_PI;
+    diffuseBRDF /= surface.diffuseProb;
+    
+    return diffuseBRDF * ls.Li; 
+#endif   
 }
 
 bool updateReservoir(inout Reservoir r, in LightSample ls,float targetPdf, float rnd){

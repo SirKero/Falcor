@@ -159,6 +159,7 @@ private:
     uint2 mPresampledTitleSize = uint2(128, 1024);
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
+    bool mUseDiffuseShadingOnly = false;    //Use only diffuse shading for ReSTIR. Can be used if VBuffer is traced until diffuse hit
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 100000;               //Max number of photon lights per iteration
