@@ -13,7 +13,6 @@ import Utils.Color.ColorHelpers;
 import Rendering.Materials.Microfacet;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
-import PhotonReStirFunctions;
 import VPLs;
 
 cbuffer PerFrame

@@ -21,9 +21,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="PhotonReStirFunctions.slang">
-      <Filter>Shader\Structs</Filter>
-    </ShaderSource>
     <ShaderSource Include="Reservoir.slang">
       <Filter>Shader\Structs</Filter>
     </ShaderSource>
