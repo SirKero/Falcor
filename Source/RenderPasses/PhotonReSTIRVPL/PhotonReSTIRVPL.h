@@ -164,10 +164,6 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    /** Marks vpls that can be replaced
-    */
-    void vplFeedbackPass(RenderContext* pRenderContext, const RenderData& renderData);
-
     /** Pass for showing the VPLs 
     */
     void showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -232,7 +228,6 @@ private:
     bool mUseEmissiveTexture = false;        //Use Emissive texture in final shading
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
-    float mVisibilityRayOffset = 0.01f;      //TMin for visibility rays
     float mGeometryTermBand = 0.0f;     //Rejects samples with a small distance due to infinetly large geometry term (Adds Bias)
     uint2 mPresampledTitleSize = uint2(128, 1024);
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;

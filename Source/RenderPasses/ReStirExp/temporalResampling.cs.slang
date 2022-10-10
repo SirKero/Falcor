@@ -59,6 +59,8 @@ struct LightSample{
     //Enum type later ? 
 };
 
+static const float kRayEpsilon = 0.99f;
+
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
@@ -301,8 +303,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
         if (ps > 0)
         {
             SceneRayQuery < 0 > rayQuery;
-            distance *= 0.99;
-            const Ray ray = Ray(temporalSurface.posW, ls.dir, VIS_RAY_OFFSET, distance);
+            distance *= kRayEpsilon;
+            const Ray ray = Ray(temporalSurface.posW, ls.dir, 0.f, distance);
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             {
                 ps = 0;

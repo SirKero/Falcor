@@ -49,8 +49,6 @@ cbuffer Constant
     uint gMaxAge;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
-    float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
-    uint3 _pad;
 }
 
 struct LightSample{
@@ -62,6 +60,8 @@ struct PhotonLight{
     float4 pos;
     float4 flux;
 };
+
+static const float kRayEpsilon = 0.99f;
 
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
@@ -110,7 +110,6 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
     float cosTheta = dot(vpl.normal, -ls.dir);
-    if(cosTheta <= 0 || sampleDistance < gGeometryTermBand) return false;
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
     ls.Li = luminance(vpl.flux) / pdf;
@@ -282,8 +281,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
         if (ps > 0)
         {
             SceneRayQuery < 0 > rayQuery;
-            distance *= 0.99;
-            const Ray ray = Ray(temporalSurface.posW, ls.dir, VIS_RAY_OFFSET, distance);
+            distance *= kRayEpsilon;
+            const Ray ray = Ray(temporalSurface.posW, ls.dir, 0.f, distance);
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             {
                 ps = 0;

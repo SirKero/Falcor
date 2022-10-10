@@ -70,7 +70,7 @@ void main(uint2 dTid : SV_DispatchThreadID){
             linZ = distance(camPos, sd.posW); 
         }   
         
-        surface.posW = sd.posW;
+        surface.posW = sd.computeNewRayOrigin();
         surface.viewDepth = linZ;
         surface.normal = sd.N;
         surface.roughness = bsdfProperties.roughness;

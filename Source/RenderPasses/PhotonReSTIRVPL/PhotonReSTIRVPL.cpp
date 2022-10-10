@@ -315,10 +315,6 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
             widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
             changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
             widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
-            mReset |= widget.var("Visibility Ray TMin Offset", mVisibilityRayOffset, 0.00001f, 10.f, 0.00001f);
-            widget.tooltip("Changes offset for visibility ray. Triggers recompilation so typing in the value is advised");
-            changed |= widget.var("Geometry Term Band", mGeometryTermBand, 0.f, 1.f, 0.0000001f);
-            widget.tooltip("Discards samples with a very small distance. Adds a little bias but removes extremly bright spots at corners");
             mReset |= widget.checkbox("Diffuse Shading Only", mUseDiffuseOnlyShading);
             widget.tooltip("Uses only diffuse shading. Can be used if a Path traced V-Buffer is used. Triggers Recompilation of shaders");
         }
@@ -889,7 +885,6 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         Program::DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         defines.add("USE_PRESAMPLING", mUsePdfSampling ? "1" : "0");
         defines.add("USE_VISIBILITY_CHECK_INLINE", mUseVisibiltyRayInline ? "1" : "0");
         if(mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
@@ -982,12 +977,6 @@ void PhotonReSTIRVPL::candidatesVisibilityCheckPass(RenderContext* pRenderContex
     FALCOR_ASSERT(mVisibilityCheckPass.pVars);
     auto var = mVisibilityCheckPass.pVars->getRootVar();
 
-    // Set constants (uniforms).
-    // 
-    //PerFrame Constant Buffer
-    std::string nameBuf = "CB";
-    var[nameBuf]["gVisRayOffset"] = mVisibilityRayOffset;
-
     var["gVPLs"] = mpVPLBuffer;
     bindReservoirs(var, mFrameCount, false);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
@@ -1014,7 +1003,6 @@ void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const Re
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
-        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
@@ -1048,7 +1036,6 @@ void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const Re
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
-        var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
     }
 
     //Execute
@@ -1080,7 +1067,6 @@ void PhotonReSTIRVPL::spartialResampling(RenderContext* pRenderContext, const Re
         defines.add(mpSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
-        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
@@ -1142,7 +1128,6 @@ void PhotonReSTIRVPL::spartioTemporalResampling(RenderContext* pRenderContext, c
         defines.add(mpSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
-        defines.add("VIS_RAY_OFFSET", std::to_string(mVisibilityRayOffset));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 

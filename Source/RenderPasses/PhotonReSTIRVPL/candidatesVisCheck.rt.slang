@@ -10,12 +10,6 @@ import VPLs;
 //Define for valid texture channels
 #define is_valid(name) (is_valid_##name != 0)
 
-cbuffer CB
-{
-    float gVisRayOffset;     //Offset for visibility ray 
-    uint3 _pad;       
-}
-
 StructuredBuffer<PackedVPL> gVPLs;
 StructuredBuffer<PackedSurfaceData> gSurface;
 RWTexture2D<uint4> gReservoir;
@@ -34,6 +28,8 @@ struct SphereAttribs
 {
     uint hitIdx;
 };
+
+static const float kRayEpsilon = 0.99f;
 
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
@@ -93,8 +89,8 @@ void rayGen()
     RayDesc ray;
     ray.Origin = surface.posW;
     ray.Direction = toLight/dist;
-    ray.TMin = gVisRayOffset;
-    ray.TMax =  dist * 0.99f;
+    ray.TMin = 0.f;
+    ray.TMax =  dist * kRayEpsilon;
 
     uint rayFlags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
 
