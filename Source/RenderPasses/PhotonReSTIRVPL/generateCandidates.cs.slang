@@ -39,7 +39,6 @@ RWTexture2D<uint4> gReservoir;
 
 StructuredBuffer<uint2> gPresampledLights;
 StructuredBuffer<PackedVPL> gVPLs;
-Buffer<uint> gVPLCounter;
 Texture2D<float4> gView;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -106,7 +105,7 @@ bool generateSample(float rnd, const float3 surfacePosition,
         ls.lightIdx = presampleData.x;
 #else
         //Old random sample code 
-        const uint lightCount = min(gVPLCounter[0], gNumLights.x);
+        const uint lightCount = gNumLights.x;
         if(lightCount == 0) return false;
         //get random light
         const uint rndLightIndex = min(uint(lightCount * rnd), lightCount-1);
@@ -115,12 +114,15 @@ bool generateSample(float rnd, const float3 surfacePosition,
 #endif   //USE_PDF_SAMPLING   
     
     vpl = VPL(gVPLs[ls.lightIdx]);
+    if(!vpl.valid)
+        return false;
+    
     float3 toLight = vpl.posW - surfacePosition;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
     float cosTheta = dot(vpl.normal, -ls.dir);
-    if(cosTheta <= gCosineCutoff || sampleDistance < gRadius * 2 || vpl.valid == 0) return false;
+    if(cosTheta <= gCosineCutoff || sampleDistance < gRadius) return false;
     
     float pdf = distSqr / max(FLT_MIN,cosTheta);
     float Le = luminance(vpl.flux);

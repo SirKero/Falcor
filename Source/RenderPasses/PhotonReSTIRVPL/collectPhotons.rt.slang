@@ -28,7 +28,6 @@ cbuffer CB
 };
 
 // Inputs
-Buffer<uint> gVPLCounter;
 Buffer<uint> gPhotonCounter;
 RWTexture2D<PackedHitInfo> gVplSurface;
 StructuredBuffer<uint4> gPackedPhotonData;
@@ -147,14 +146,14 @@ void rayGen()
     uint index = launchIndex.x + launchDim.x * launchIndex.y;
 
     // Return for invalid vpl indices
-    uint numberVPL = min(gVPLCounter[0], gMaxVPLs);
+    uint numberVPL = gMaxVPLs;
     if(index >= numberVPL)
         return;
     
     //Get current VPL
     VPL vpl = VPL(gVPLs[index]);
     HitInfo hitInfo = HitInfo(gVplSurface[ReSTIR_LinearIndexToZCurve(index)]);
-    if(!hitInfo.isValid())
+    if(!hitInfo.isValid() || !vpl.valid)
         return;
 
     let lod = ExplicitLodTextureSampler(0.f);

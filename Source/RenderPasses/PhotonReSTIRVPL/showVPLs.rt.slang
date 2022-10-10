@@ -166,7 +166,8 @@ void rayGen()
         
         //Get flux
         VPL vpl = VPL(gVPLs[rayData.hitIndex]);
-        gColor[launchIndex] = float4(vpl.flux * gScalar,1);
+        gColor[launchIndex] = float4(0,1,0,1);
+        //gColor[launchIndex] = float4(vpl.flux * gScalar,1);
         //gColor[launchIndex] = float4(float3(gScalar),1);  //TODO: Currently flux is 0 so use Scalar value instead
     }
 }

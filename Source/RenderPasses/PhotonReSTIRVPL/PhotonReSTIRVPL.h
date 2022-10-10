@@ -164,6 +164,10 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Marks vpls that can be replaced
+    */
+    void vplFeedbackPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Pass for showing the VPLs 
     */
     void showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -236,7 +240,8 @@ private:
     bool mUsePdfSampling = false;
     bool mUseVisibiltyRayInline = true;         //If true, inline ray tracing is used for the visibility check
     bool mUseDiffuseOnlyShading = false;                //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
-    
+    uint mVplMaxReplace = 3072;                 //Maximum number of vpls that can be replaced per frame
+
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
@@ -278,11 +283,12 @@ private:
     ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
     ComputePass::SharedPtr mpShowVPLsCalcAABBsPass;             //Calcs the AABB buffer for showing the vpls
+    ComputePass::SharedPtr mpVplFeedbackPass;               //Determines VPLs that can be replaced
 
     //Buffer
     Buffer::SharedPtr mpVPLBuffer;              //Buffer for the VPLs
     Texture::SharedPtr mpVPLSurface;            //Surface of a vpl. Used to collect the photons and determine the flux
-    Buffer::SharedPtr mpVPLBufferCounter;       //Counter for the VPL buffer
+    Texture::SharedPtr mpVPLUsageBuffer;        //Buffer indicates when the VPL was lastly used
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets

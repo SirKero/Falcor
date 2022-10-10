@@ -56,6 +56,7 @@ namespace {
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIRVPL/finalShading.cs.slang";
     const char kShaderShowAABBVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLsAABBcalc.cs.slang";
     const char kShaderShowVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLs.rt.slang";
+    const char kShaderVplFeedback[] = "RenderPasses/PhotonReSTIRVPL/vplFeedback.cs.slang";
     const char kShaderDebugPhotonCollect[] = "RenderPasses/PhotonReSTIRVPL/debugPhotonCollect.rt.slang";    //TODO: Remove
 
     // Ray tracing settings that affect the traversal stack size.
@@ -75,7 +76,6 @@ namespace {
 
     //Outputs
     const ChannelDesc kOutColorDesc = { "color" ,"gColor" , "Indirect illumination of the scene" ,false,  ResourceFormat::RGBA16Float };
-    const ChannelDesc kOutDebugDesc = { "debug" ,"gDebug" , "For Debug Purposes" ,false,  ResourceFormat::RGBA32Float };     //TODO: Remove if not needed
     const ChannelList kOutputChannels =
     {
         kOutColorDesc,
@@ -83,7 +83,6 @@ namespace {
         {"diffuseReflectance",      "gDiffuseReflectance",      "Diffuse Reflectance",                      true,   ResourceFormat::RGBA16Float},
         {"specularIllumination",    "gSpecularIllumination",    "Specular illumination and hit distance",   true,   ResourceFormat::RGBA16Float},
         {"specularReflectance",     "gSpecularReflectance",     "Specular reflectance",                     true,   ResourceFormat::RGBA16Float},
-        kOutDebugDesc,
     };
 
     const Gui::DropdownList kResamplingModeList{
@@ -144,9 +143,9 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     prepareBuffers(pRenderContext, renderData);
 
     //Distribute the vpls
-    if (mFrameCount == 0 || mResetVPLs) {
-        distributeVPLsPass(pRenderContext, renderData);
-    }
+    if (mFrameCount == 0) mResetVPLs = true;
+    distributeVPLsPass(pRenderContext, renderData);
+    
     //Generate Photons
     generatePhotonsPass(pRenderContext, renderData);
 
@@ -194,7 +193,7 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
 
     //Shade the pixel
     finalShadingPass(pRenderContext, renderData);
-    
+
     //Show the vpls as spheres for debug purposes (functions return if deactivated)
     showVPLDebugPass(pRenderContext, renderData);
 
@@ -519,12 +518,7 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
                                                Buffer::CpuAccess::None, nullptr, false);
         mpVPLBuffer->setName("PhotonReStir::VPLBuffer");
     }
-    if (!mpVPLBufferCounter) {
-        uint counterInit = 0;
-        mpVPLBufferCounter = Buffer::create(sizeof(uint), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                                            Buffer::CpuAccess::None, &counterInit);
-        mpVPLBufferCounter->setName("PhotonReStir::VPLBufferCounter");
-    }
+ 
     if (!mpVPLSurface) {
         //Reuse same size as a pdf texture would use
         uint width, height, mip;
@@ -532,6 +526,16 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
         mpVPLSurface = Texture::create2D(width, height, HitInfo::kDefaultFormat, 1u, 1u, nullptr,
                                          ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
         mpVPLSurface->setName("PhotonReSTIRVPL::VplSurface");
+    }
+
+    //Usage buffer recording the last 8 Frames if the VPL was used
+    if (!mpVPLUsageBuffer) {
+        //Reuse same size as a pdf texture would use
+        uint width, height, mip;
+        computePdfTextureSize(mNumberVPL, width, height, mip);
+        mpVPLUsageBuffer = Texture::create2D(width, height, ResourceFormat::R8Uint, 1u, 1u, nullptr,
+                                         ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpVPLUsageBuffer->setName("PhotonReSTIRVPL::VplUsageBuffer");
     }
 
     //Create pdf texture
@@ -623,8 +627,7 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
 
     if (mResetVPLs) {
         pRenderContext->clearUAV(mpVPLBuffer->getUAV().get(), uint4(0));
-        pRenderContext->clearUAV(mpVPLBufferCounter->getUAV().get(), uint4(0));
-        pRenderContext->clearTexture(renderData[kOutDebugDesc.name]->asTexture().get());
+        pRenderContext->clearUAV(mpVPLUsageBuffer->getUAV().get(), uint4(0));
         mResetVPLs = false;
     }
 
@@ -649,30 +652,27 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
 
     auto var = mDistributeVPlsPass.pVars->getRootVar();
     // Set constants (uniforms).
-   // 
-   //PerFrame Constant Buffer
+    // 
+    //PerFrame Constant Buffer
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
 
     //Upload constant buffer only if options changed
     if (mReuploadBuffers) {
         nameBuf = "CB";
-        var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
-        var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
+        var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;            //TODO make this its own variable
         var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[nameBuf]["gMaxNumberVPL"] = mNumberVPL;
     }
 
+    var["gVplUsageBuffer"] = mpVPLUsageBuffer;
     var["gVplSurface"] = mpVPLSurface;
     var["gVPLs"] = mpVPLBuffer;
-    var["gVPLCounter"] = mpVPLBufferCounter;
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    var["gDebug"] = renderData[kOutDebugDesc.name]->asTexture();
 
-    uint2 targetDim = uint2(div_round_up(uint(mNumberVPL * 1.5f), 1024u), 1024u);
-    //uint2 targetDim = renderData.getDefaultTextureDims();
-    //Trace the photons
+    uint2 targetDim = uint2(div_round_up(uint(mNumberVPL), 1024u), 1024u);
+
     mpScene->raytrace(pRenderContext, mDistributeVPlsPass.pProgram.get(), mDistributeVPlsPass.pVars, uint3(targetDim, 1));
 
     pRenderContext->uavBarrier(mpVPLBuffer.get());
@@ -797,7 +797,6 @@ void PhotonReSTIRVPL::collectPhotonsPass(RenderContext* pRenderContext, const Re
     var["gPackedPhotonData"] = mpPhotonData;
     var["gPhotonCounter"] = mpPhotonCounter;
     var["gVPLs"] = mpVPLBuffer;
-    var["gVPLCounter"] = mpVPLBufferCounter;
     if (mUsePdfSampling) var["gLightPdf"] = mpLightPdfTex;
     
     /*
@@ -917,7 +916,6 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
     bindReservoirs(var, mFrameCount, false);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    var["gVPLCounter"] = mpVPLBufferCounter;
     var["gVPLs"] = mpVPLBuffer;
     if(mUsePdfSampling) var["gPresampledLights"] = mpPresampledLights;
 
@@ -932,7 +930,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
         var[uniformName]["gCosineCutoff"] = 0.001f;
         var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize : uint2(mNumberVPL,0);
-        var[uniformName]["gRadius"] = mVPLCollectionRadius;
+        var[uniformName]["gRadius"] = mVPLCollectionRadius * 1.8f;  //TODO add constant as UI Variable
     }
 
     //Execute
@@ -1244,6 +1242,7 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
     //var["gPhotonCounter"] = mpPhotonCounter;
     //var["gPhotonLights"] = mpPhotonLights;
     for (auto& out : kOutputChannels) bindAsTex(out);
+    var["gVplUsageBuffer"] = mpVPLUsageBuffer;
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -1315,7 +1314,6 @@ void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const Rend
         auto var = mpShowVPLsCalcAABBsPass->getRootVar();
 
         var["gVPLs"] = mpVPLBuffer;
-        var["gVPLCounter"] = mpVPLBufferCounter;
         var["gAABBs"] = mpShowVPLsAABBsBuffer;
 
         uint2 targetDim = uint2(1024u, div_round_up(uint(mNumberVPL), 1024u));

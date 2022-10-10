@@ -19,6 +19,7 @@ import VPLs;
 Texture2D<uint4> gReservoir;
 
 StructuredBuffer<PackedVPL> gVPLs;
+RWTexture2D<uint> gVplUsageBuffer;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
@@ -119,6 +120,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
     getEmissiveLight(r.lightIdx,sd.posW ,distance , toLight, Li);
     Li = max(0.f, Li * r.weightSum);
 
+    ///Get vpl feedbackbuffer
+    uint vplFeedback = gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(r.lightIdx)];
+    
     //Check light visibility with a shadow ray
     if (valid && gEnableVisRay)
     {
@@ -131,6 +135,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
             valid = false;
         }
     }
+
+    //If valid write feedback back
+    if(valid)
+        gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(r.lightIdx)] = vplFeedback | 1;
     
     float3 diffuse = {};
     float3 specular = {};
@@ -177,4 +185,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if (is_valid(gSpecularIllumination)) gSpecularIllumination[dTid] = float4(specularIllumination, distance);
         
     gColor[dTid] = float4(outColor, 1.0f);
+   
 }

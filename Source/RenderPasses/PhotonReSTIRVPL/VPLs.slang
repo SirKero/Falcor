@@ -38,9 +38,9 @@ struct VPL{
         set { packedNormal = encodeNormal2x16(newValue); }
     }
 
-    property uint valid{
-        get { return (extraData & 0x1); }
-        set { extraData = newValue > 0 ? extraData | 0x1 : extraData & (~(0x1)); }
+    property bool valid{
+        get { return (extraData & 0x1) != 0; }
+        set { extraData = newValue ? extraData | 0x1 : extraData & (~(0x1)); }
     }
 
     property uint age{

@@ -24,26 +24,20 @@ import VPLs;
 cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
-    uint3 _pad1;
 }
 
 cbuffer CB
 {
-    bool gUseAlphaTest; //Max photon recursion depths
-    bool gAdjustShadingNormals;
-    uint2 gFrameDim;
-    uint _pad1;
+    bool gUseAlphaTest;         //Alpha test
+    uint2 gFrameDim;            //Size of the V-Buffer
     uint gMaxNumberVPL; //max number of vpls
-    uint _pad2;
 };
 
 RWTexture2D<PackedHitInfo> gVplSurface;
 RWStructuredBuffer<PackedVPL> gVPLs;
-RWBuffer<uint> gVPLCounter;
+RWTexture2D<uint> gVplUsageBuffer;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
-
-RWTexture2D<float4> gDebug;
 
 /** Payload for scatter ray (48sB).
 */
@@ -90,14 +84,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, incomingRayDir, lod);
-
-    //Adjust shading normals if desired
-    
-    if (gAdjustShadingNormals)
-    {
-        adjustShadingNormal(sd, v);
-    }
-    
+        
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
@@ -161,23 +148,12 @@ void fromLocalToWorld(in float3 lightDirW, inout float3 dir)
     dir = dir.x * tangent + dir.y * bitangent + dir.z * lightDirW;
 }
 
-[shader("raygeneration")]
-void rayGen()
-{
-    uint2 launchIndex = DispatchRaysIndex().xy;
-    uint2 launchDim = DispatchRaysDimensions().xy;
-  
-    RayData rd = RayData::create();
-    rd.sg = SampleGenerator(launchIndex, gFrameCount + 0 * 13);    //TODO add seed offset
-
+//Trace a ray and write vpl if valid
+void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
     //Get random shading data
     uint2 randomIndex = min(uint2(sampleNext2D(rd.sg) * float2(gFrameDim)),gFrameDim - 1);
-    //uint2 randomIndex = launchIndex;
-    gDebug[randomIndex] = float4(1,0,0,1);
-    
     PackedHitInfo packedHitInfo = gVBuffer[randomIndex];
-    HitInfo hitInfo = HitInfo(packedHitInfo);
-          
+    HitInfo hitInfo = HitInfo(packedHitInfo);    
     let lod = ExplicitLodTextureSampler(0.f);
 
     //Get view dir
@@ -235,21 +211,65 @@ void rayGen()
         vpl.posW = ray.Origin + ray.Direction * rd.distance;
         vpl.packedNormal = rd.packedNormal;
         vpl.flux = float3(0);
-        vpl.valid = 1;
+        vpl.valid = true;
         vpl.age = 0;
-
-        uint vplIndex = 0;
-        InterlockedAdd(gVPLCounter[0], 1u, vplIndex);
-
-        /* IF full randomly choose an intervall
-        if(vplIndex < gMaxNumberVPL){
-          vplIndex = min(uint(sampleNext1D(rd.sg) * float(vplIndex)), vplIndex-1);  
-        }
-        */
-        
-        if(vplIndex < gMaxNumberVPL){
-            gVPLs[vplIndex] = vpl.pack();
-            gVplSurface[ReSTIR_LinearIndexToZCurve(vplIndex)] = rd.packedHitInfo;
-        }
+              
+        gVPLs[vplIndex] = vpl.pack();
+        gVplSurface[ReSTIR_LinearIndexToZCurve(vplIndex)] = rd.packedHitInfo;
     }
+}
+
+static const uint kEliminationAge = 15;
+static const float kEliminationAgePercantage = 0.3;
+
+[shader("raygeneration")]
+void rayGen()
+{
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 launchDim = DispatchRaysDimensions().xy;
+
+    uint vplIndex = launchIndex.x + launchDim.x * launchIndex.y;
+
+    if(vplIndex >= gMaxNumberVPL) return;   //Out of index
+
+    //Random number generator
+    RayData rd = RayData::create();
+    rd.sg = SampleGenerator(launchIndex, gFrameCount + 0 * 13);    //TODO add seed offset
+
+    //
+    //VPL Feedback
+    //
+    
+    //Get vpl infos
+    VPL vpl = VPL(gVPLs[vplIndex]);
+    const uint vplUsage = gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(vplIndex)];
+
+    //Get how often the vpl was used in the last 8 frames
+    uint wasUsed = 0;
+    uint vplUsageCopy = vplUsage;
+    const uint checkedFrames = 4;
+    for(uint i=0; i<checkedFrames; i++){
+        wasUsed += vplUsageCopy & 1;
+        vplUsageCopy >> 1;
+    }
+    //Different elemination strategies could be used. Random elimination based on not used percentage? Fixed eliminaton for not used
+    bool replaceVPL = false;
+
+    //is invalid or was not used
+    if(!vpl.valid|| wasUsed == 0)
+        replaceVPL = true;
+    
+    //Check if the vpl is too old
+    /*
+    if(vpl.age > kEliminationAge){
+        if(sampleNext1D(rd.sg) < kEliminationAgePercantage)
+            replaceVPL = true;
+    }
+*/
+    //Write back usage shifted one to the left
+    gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(vplIndex)]  = (vplUsage << 1) & 0xFE;
+
+    //Trace a new VPL if it should be replaced
+    if(replaceVPL)
+        traceNewVPL(rd, launchIndex, vplIndex);
 }
