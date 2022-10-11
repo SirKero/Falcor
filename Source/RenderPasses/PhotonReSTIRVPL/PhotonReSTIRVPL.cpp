@@ -97,6 +97,13 @@ namespace {
         {PhotonReSTIRVPL::BiasCorrectionMode::Basic , "Basic"},
         {PhotonReSTIRVPL::BiasCorrectionMode::RayTraced , "RayTraced"},
     };
+
+    const Gui::DropdownList kVplEliminateModes{
+        {PhotonReSTIRVPL::VplEliminationMode::Fixed , "Fixed"},
+        {PhotonReSTIRVPL::VplEliminationMode::Linear , "Linear"},
+        {PhotonReSTIRVPL::VplEliminationMode::Power , "Power"},
+        {PhotonReSTIRVPL::VplEliminationMode::Root , "Root"},
+    };
 }
 
 PhotonReSTIRVPL::SharedPtr PhotonReSTIRVPL::create(RenderContext* pRenderContext, const Dictionary& dict)
@@ -236,13 +243,47 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("VPL")) {
 
+        if (auto groupInline = widget.group("Elimination")) {
+            changed |= widget.var("Max Age", mVplAgeCapCollect, 1u, (1u<<14)-1u);
+            widget.tooltip("The Maximum age a vpl is allowed to reach.");
+            changed |= widget.var("Elimination Age", mVplEliminationAge, 1u, mVplAgeCapCollect);
+            widget.tooltip("Elimination start at this vpl age");
+            changed |= widget.dropdown("Mode", kVplEliminateModes, mVplEliminationMode);
+            widget.tooltip("Mode for elimination");
+            //Switch UI for different modes
+            switch (mVplEliminationMode) {
+            case VplEliminationMode::Fixed:
+                if (mVplEliminationVar1 > 1.f) mVplEliminationVar1 = 0.3f;
+                changed |= widget.var("Fixed Elimination probability", mVplEliminationVar1, 0.f, 1.f);
+                widget.tooltip("Fixed probability a vpl is marked for replacement if Elimination age is reached");
+                break;
+            case VplEliminationMode::Power:
+                if (mVplEliminationVar1 < 1.f) mVplEliminationVar1 = 2.f;
+                changed |= widget.var("Power", mVplEliminationVar1, 1.f, FLT_MAX, 1.f);
+                widget.tooltip("Probability x = age/maxAge, Power y. x^y");
+                break;
+            case VplEliminationMode::Root:
+                if (mVplEliminationVar1 < 1.f) mVplEliminationVar1 = 2.f;
+                changed |= widget.var("Root", mVplEliminationVar1, 1.f, FLT_MAX, 1.f);
+                widget.tooltip("Probability x = age/maxAge, Root y. x^(1/y)");
+                break;
+            }
+           
+        }
         changed |= widget.var("Radius", mVPLCollectionRadius);
         widget.tooltip("Collection Radius for the VPLs");
         changed |= widget.checkbox("Use BSDF sampled distribution", mDistributeVplUseBsdfSampling);
         widget.tooltip("If enabled use bsdf sampling for distribution. If disabled cosine distribution (diffuse) is used");
         changed |= widget.checkbox("Show VPLs", mShowVPLs);
         if (mShowVPLs) {
-            widget.var("Debug Scalar", mShowVPLsScalar);
+            changed |= widget.checkbox("Debug VPL Flat shading", mShowVPLsUseFlatShading);
+            widget.tooltip("Enables flat shading. Else shading based on vpl flux is used.");
+            if (mShowVPLsUseFlatShading) {
+                widget.rgbColor("Flat Shading Color", mShowVPLsUseFlatShadingColor);
+            }
+            else {
+                widget.var("Debug Scalar", mShowVPLsScalar);
+            }
         }
         mResetVPLs = widget.button("Redistribute VPLs");
         changed |= mResetVPLs;
@@ -659,6 +700,10 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;            //TODO make this its own variable
         var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[nameBuf]["gMaxNumberVPL"] = mNumberVPL;
+        var[nameBuf]["gVplEliminationAge"] = mVplEliminationAge;
+        var[nameBuf]["gMaxVplAge"] = mVplAgeCapCollect;
+        var[nameBuf]["gVplAgeRemovalMode"] = mVplEliminationMode;
+        var[nameBuf]["gEliVar1"] = mVplEliminationVar1;
     }
 
     var["gVplUsageBuffer"] = mpVPLUsageBuffer;
@@ -786,6 +831,7 @@ void PhotonReSTIRVPL::collectPhotonsPass(RenderContext* pRenderContext, const Re
         nameBuf = "CB";
         var[nameBuf]["gPhotonRadius"] = mVPLCollectionRadius;
         var[nameBuf]["gMaxVPLs"] = mNumberVPL;
+        var[nameBuf]["gVplAgeCap"] = mVplAgeCapCollect;
     }
 
     var["gVplSurface"] = mpVPLSurface;
@@ -1248,7 +1294,6 @@ void PhotonReSTIRVPL::finalShadingPass(RenderContext* pRenderContext, const Rend
 
 void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    //TODO delete needed data here if pass becomes invalid
     if (!mShowVPLs) {
         //Reset all data if the buffer is active
         if (mpShowVPLsAABBsBuffer) {
@@ -1274,8 +1319,8 @@ void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const Rend
     //Convert Buffer pos to vpls
 
     //Put a write barrier for the output here to be sure that the final shading shader finished writing
-    //auto outTexture = renderData[kOutColorDesc.name]->asTexture();
-    //pRenderContext->uavBarrier(outTexture.get());
+    auto outTexture = renderData[kOutColorDesc.name]->asTexture();
+    pRenderContext->uavBarrier(outTexture.get());
 
     //AABB create pass
     {
@@ -1358,6 +1403,8 @@ void PhotonReSTIRVPL::showVPLDebugPass(RenderContext* pRenderContext, const Rend
         var[nameBuf]["gVplRadius"] = mVPLCollectionRadius;
         var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[nameBuf]["gScalar"] = mShowVPLsScalar;
+        var[nameBuf]["gUseFlatShading"] = mShowVPLsUseFlatShading;
+        var[nameBuf]["gFlatShadingColor"] = mShowVPLsUseFlatShadingColor;
         
         var["gVPLs"] = mpVPLBuffer;
         var["gAABBs"] = mpShowVPLsAABBsBuffer;

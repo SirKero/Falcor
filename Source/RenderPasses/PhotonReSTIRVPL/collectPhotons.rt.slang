@@ -24,7 +24,8 @@ cbuffer CB
 {
     float gPhotonRadius; // Scale for the emissive part
     uint gMaxVPLs;
-    uint2 _pad;
+    uint gVplAgeCap;   // Maximum age the vpl is caped
+    uint _pad;
 };
 
 // Inputs
@@ -187,16 +188,20 @@ void rayGen()
     float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
     //float specProb = luminance(specularReflectance);
 
-    //TODO Per channel diffuse prob? 
     float3 diffFactor = (bsdfProperties.diffuseReflectionAlbedo + specularReflectance) / bsdfProperties.diffuseReflectionAlbedo;
     radiance *= diffFactor;
     radiance *= M_1_4PI;        //TODO Why is this factor needed ???
     
-    if (vpl.age > 0 )
+    if (vpl.age > 0)
     {
-        vpl.flux = vpl.flux * vpl.age;
+        vpl.flux *= vpl.age;
     }
-    vpl.age = max(vpl.age + 1,20);
+    //Reset the replaced flag automatically at age 1
+    if(vpl.age == 1){
+        vpl.replaced = false;    
+    }
+    
+    vpl.age = min(vpl.age + 1, gVplAgeCap);
     vpl.flux += radiance;
     vpl.flux /= vpl.age;
     

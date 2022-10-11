@@ -40,12 +40,17 @@ struct VPL{
 
     property bool valid{
         get { return (extraData & 0x1) != 0; }
-        set { extraData = newValue ? extraData | 0x1 : extraData & (~(0x1)); }
+        set { extraData = newValue ? extraData | 0x1 : extraData & (0xFFFE); }//0xFFFE = 0b11111110
+    }
+
+    property bool replaced{
+        get { return (extraData & 0x2) != 0; }
+        set { extraData = newValue ? extraData | 0x2 : extraData & (0xFFFD); }  //0xFFFD = 0b11111101
     }
 
     property uint age{
-        get { return (extraData >> 1); }
-        set { extraData = (extraData & 0x1) | (newValue << 1); }
+        get { return (extraData >> 2); }
+        set { extraData = (extraData & 0x3) | (newValue << 2); }
     }
 
     PackedVPL pack(){

@@ -249,11 +249,18 @@ void main(uint2 dTid : SV_DispatchThreadID)
         Reservoir prev = Reservoir(gReservoirPrev[idx]);
         prev.M = min(prev.M, historyLimit);
         previousM = prev.M;
-        
+
+        bool vplValid = true;
         VPL vpl = VPL(gVPLs[prev.lightIdx]);
-        //Get new target pdf if valid
+        //Kill the reservoir if the vpl is no longer valid or was replaced
+        if(!vpl.valid | vpl.replaced){
+            prev.weightSum = 0;
+            vplValid = false;
+        }
+
+        //Get new target pdf if reservoir and vpl are valid
         float targetPdf = 0;
-        if(prev.M > 0){
+        if(prev.M > 0 && vplValid){
             LightSample ls = { };
             float dis = 0;
             bool validLS = getLightSample(vpl, currentSurface.posW, ls, dis);

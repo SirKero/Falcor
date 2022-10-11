@@ -24,6 +24,8 @@ cbuffer CB
     float gVplRadius;       //Radius for the VPLs
     uint2 gFrameDim;
     float gScalar;          //Scalar for the flux
+    bool gUseFlatShading;           //Enable flat shading as output color
+    float3 gFlatShadingColor;    //Output color for flat shading
 }
 
 StructuredBuffer<PackedVPL> gVPLs;
@@ -143,9 +145,7 @@ void rayGen()
     Ray cameraRay = gScene.camera.computeRayPinhole(launchIndex, gFrameDim);
     //Get Material properties
     ShadingData sd = loadShadingData(hitInfo, cameraRay.dir, lod);
-
-    const float radius = gVplRadius * 5.f; //Add a little offset to the radius
-
+    
     RayData rayData = {};
     rayData.hit = true;
     float3 dir = normalize(sd.V);
@@ -166,8 +166,12 @@ void rayGen()
         
         //Get flux
         VPL vpl = VPL(gVPLs[rayData.hitIndex]);
-        gColor[launchIndex] = float4(0,1,0,1);
-        //gColor[launchIndex] = float4(vpl.flux * gScalar,1);
-        //gColor[launchIndex] = float4(float3(gScalar),1);  //TODO: Currently flux is 0 so use Scalar value instead
+        //Output color is either flat shaded or based on flux
+        if(gUseFlatShading)
+            gColor[launchIndex] = float4(gFlatShadingColor,1);
+        else{
+            gColor[launchIndex] = float4(vpl.flux * gScalar,1);
+        }
+            
     }
 }

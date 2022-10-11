@@ -221,6 +221,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //If neighbor has passed the tests get reservoir and compair them
         Reservoir neigh = Reservoir(gReservoir[idx]);
         VPL vpl = VPL(gVPLs[neigh.lightIdx]);
+        if(!vpl.valid)
+            continue;
         
         cachedResults |= (1u << i);
         //Get neightbor light target PDF for current surface

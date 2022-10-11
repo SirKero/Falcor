@@ -31,6 +31,10 @@ cbuffer CB
     bool gUseAlphaTest;         //Alpha test
     uint2 gFrameDim;            //Size of the V-Buffer
     uint gMaxNumberVPL; //max number of vpls
+    uint gVplEliminationAge;        //Start to remove vpls at this age
+    uint gMaxVplAge;                //Max age a vpl is allowed to reach
+    uint gVplAgeRemovalMode;        //Removal mode: 0 - fixed, 1 - linear, 2- pow, 3- sqrt, 
+    float gEliVar1;                 //Extra variable 1
 };
 
 RWTexture2D<PackedHitInfo> gVplSurface;
@@ -212,6 +216,7 @@ void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
         vpl.packedNormal = rd.packedNormal;
         vpl.flux = float3(0);
         vpl.valid = true;
+        vpl.replaced = true;
         vpl.age = 0;
               
         gVPLs[vplIndex] = vpl.pack();
@@ -247,11 +252,15 @@ void rayGen()
     //Get how often the vpl was used in the last 8 frames
     uint wasUsed = 0;
     uint vplUsageCopy = vplUsage;
-    const uint checkedFrames = 4;
+    const uint checkedFrames = min(vpl.age, 8);
     for(uint i=0; i<checkedFrames; i++){
         wasUsed += vplUsageCopy & 1;
         vplUsageCopy >> 1;
     }
+    //Don't eliminate vpls that are younger than the checked frames
+    if(vpl.age < checkedFrames)
+        wasUsed = 1;   
+    
     //Different elemination strategies could be used. Random elimination based on not used percentage? Fixed eliminaton for not used
     bool replaceVPL = false;
 
@@ -259,13 +268,36 @@ void rayGen()
     if(!vpl.valid|| wasUsed == 0)
         replaceVPL = true;
     
-    //Check if the vpl is too old
-    /*
-    if(vpl.age > kEliminationAge){
-        if(sampleNext1D(rd.sg) < kEliminationAgePercantage)
-            replaceVPL = true;
+    //Only eliminate after reaching the starting elimination age
+    float pEliminate = (vpl.age - gVplEliminationAge)/(gMaxVplAge - gVplEliminationAge);
+    if (vpl.age > gVplEliminationAge)
+    {
+        //Different strategies for replacing vpls
+        switch (gVplAgeRemovalMode)
+        {
+            //Fixed
+            case 0:
+                if (sampleNext1D(rd.sg) < gEliVar1)    //Var1 = fixed probability
+                    replaceVPL = true;
+                break;
+            //Linear increase
+            case 1:
+                if (sampleNext1D(rd.sg) < pEliminate)
+                    replaceVPL = true;
+            break;
+            //Pow increase
+            case 2:
+                if (sampleNext1D(rd.sg) < pow(pEliminate,gEliVar1))
+                    replaceVPL = true;
+            break;
+            //Root increase
+            case 3:
+                if (sampleNext1D(rd.sg) < pow(pEliminate,1.f/gEliVar1) )
+                    replaceVPL = true;
+            break;
+        }
     }
-*/
+       
     //Write back usage shifted one to the left
     gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(vplIndex)]  = (vplUsage << 1) & 0xFE;
 

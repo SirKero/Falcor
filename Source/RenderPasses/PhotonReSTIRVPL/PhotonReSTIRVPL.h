@@ -71,6 +71,13 @@ public:
         Basic = 1u,
         RayTraced = 2u
     };
+
+    enum VplEliminationMode {
+        Fixed = 0,
+        Linear = 1u,
+        Power = 2u,
+        Root = 3u
+    };
 private:
     //Acceleration Structure helpers Structs
     struct BLASData {
@@ -252,9 +259,15 @@ private:
     uint mNumberVPL = 28000;                //Number of VPL lights
     float mVPLCollectionRadius = 0.05f;
     bool mShowVPLs = true;
+    bool mShowVPLsUseFlatShading = true;                    //Enable a flat shading for debug vpls 
+    float3 mShowVPLsUseFlatShadingColor = float3(0, 1, 0);  //Flat shading color for debug vpl (green is standard)
     float mShowVPLsScalar = 1.f;
     bool mResetVPLs = false;
     bool mDistributeVplUseBsdfSampling = false; //Use Bsdf or cosine sampling for vpl distribution
+    uint mVplAgeCapCollect = 60;
+    uint mVplEliminationAge = 25;
+    uint mVplEliminationMode = VplEliminationMode::Power;
+    float mVplEliminationVar1 = 2.f;
 
     //Runtime
     bool mReset = true;
