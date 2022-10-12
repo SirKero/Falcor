@@ -35,6 +35,7 @@ cbuffer CB
     uint gMaxVplAge;                //Max age a vpl is allowed to reach
     uint gVplAgeRemovalMode;        //Removal mode: 0 - fixed, 1 - linear, 2- pow, 3- sqrt, 
     float gEliVar1;                 //Extra variable 1
+    uint gUsageCheckedFrames;       // The frames that are checked for usage
 };
 
 RWTexture2D<PackedHitInfo> gVplSurface;
@@ -252,13 +253,13 @@ void rayGen()
     //Get how often the vpl was used in the last 8 frames
     uint wasUsed = 0;
     uint vplUsageCopy = vplUsage;
-    const uint checkedFrames = min(vpl.age, 8);
+    const uint checkedFrames = min(vpl.age, gUsageCheckedFrames);
     for(uint i=0; i<checkedFrames; i++){
         wasUsed += vplUsageCopy & 1;
         vplUsageCopy >> 1;
     }
     //Don't eliminate vpls that are younger than the checked frames
-    if(vpl.age < checkedFrames)
+    if(vpl.age < checkedFrames || gUsageCheckedFrames == 0)
         wasUsed = 1;   
     
     //Different elemination strategies could be used. Random elimination based on not used percentage? Fixed eliminaton for not used

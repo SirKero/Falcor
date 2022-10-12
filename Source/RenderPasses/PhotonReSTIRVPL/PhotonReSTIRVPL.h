@@ -266,8 +266,9 @@ private:
     bool mDistributeVplUseBsdfSampling = false; //Use Bsdf or cosine sampling for vpl distribution
     uint mVplAgeCapCollect = 60;
     uint mVplEliminationAge = 25;
-    uint mVplEliminationMode = VplEliminationMode::Power;
-    float mVplEliminationVar1 = 2.f;
+    uint mVplEliminationMode = VplEliminationMode::Fixed;
+    float mVplEliminationVar1 = 0.2f;
+    uint mVplUsageFramesUsed = 8;       //Frames used for usage elimination
 
     //Runtime
     bool mReset = true;

@@ -5,12 +5,20 @@ import Utils.Math.FormatConversion;
   * Reduces the amount of data and calculation that is needed in generation and resampling step. Especially if bias correction is enabled
   * Register presure is reduced through the packed fields in the Surface struct
 */
+/*
 struct PackedSurfaceData{
     uint3 pos;
     uint linZ;
     uint normal;
     uint weights;
     uint2 _pad;
+};
+*/
+
+struct PackedSurfaceData{
+    uint2 data0;
+    uint2 data1;
+    uint2 data2;
 };
 
 struct Surface{
@@ -69,20 +77,22 @@ struct Surface{
 
     //Initialize with packedData and a viewDir
     __init(const PackedSurfaceData packed, const float3 viewDir){
-        posW = asfloat(packed.pos);
-        viewDepth = asfloat(packed.linZ);
-        packedNormal = packed.normal;
-        packedWeights = packed.weights;
+        posW.xy = asfloat(packed.data0);
+        posW.z = asfloat(packed.data1.x);
+        viewDepth = asfloat(packed.data1.y);
+        packedNormal = packed.data2.x;
+        packedWeights = packed.data2.y;
         this.viewDir = viewDir;
      }
 
     //Packs the surface data
     PackedSurfaceData pack(){
         PackedSurfaceData packed = {};
-        packed.pos = asuint(posW);
-        packed.linZ = asuint(viewDepth);
-        packed.normal = packedNormal;
-        packed.weights = packedWeights;
+        packed.data0 = asuint(posW.xy);
+        packed.data1.x = asuint(posW.z);
+        packed.data1.y = asuint(viewDepth);
+        packed.data2.x = packedNormal;
+        packed.data2.y = packedWeights;
 
         return packed;
     }

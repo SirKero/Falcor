@@ -268,7 +268,8 @@ void PhotonReSTIRVPL::renderUI(Gui::Widgets& widget)
                 widget.tooltip("Probability x = age/maxAge, Root y. x^(1/y)");
                 break;
             }
-           
+            changed |= widget.var("Usage Elimination Frames", mVplUsageFramesUsed, 0u, 8u, 1u);
+            widget.tooltip("Number of frames used for usage elimination. 0 disables usage elimination");
         }
         changed |= widget.var("Radius", mVPLCollectionRadius);
         widget.tooltip("Collection Radius for the VPLs");
@@ -532,9 +533,9 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
     if (!mpSurfaceBuffer[0] || !mpSurfaceBuffer[1]) {
         uint2 texDim = renderData.getDefaultTextureDims();
         uint bufferSize = texDim.x * texDim.y;
-        mpSurfaceBuffer[0] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
+        mpSurfaceBuffer[0] = Buffer::createStructured(sizeof(uint) * 6, bufferSize);
         mpSurfaceBuffer[0]->setName("PhotonReStir::SurfaceBuffer1");
-        mpSurfaceBuffer[1] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
+        mpSurfaceBuffer[1] = Buffer::createStructured(sizeof(uint) * 6, bufferSize);
         mpSurfaceBuffer[1]->setName("PhotonReStir::SurfaceBuffer2");
     }
 
@@ -703,7 +704,8 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
         var[nameBuf]["gVplEliminationAge"] = mVplEliminationAge;
         var[nameBuf]["gMaxVplAge"] = mVplAgeCapCollect;
         var[nameBuf]["gVplAgeRemovalMode"] = mVplEliminationMode;
-        var[nameBuf]["gEliVar1"] = mVplEliminationVar1;
+        var[nameBuf]["gEliVar1"] = mVplEliminationVar1; 
+        var[nameBuf]["gUsageCheckedFrames"] = mVplUsageFramesUsed;
     }
 
     var["gVplUsageBuffer"] = mpVPLUsageBuffer;
