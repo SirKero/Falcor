@@ -307,20 +307,17 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //If neighbor surface has passed the tests get reservoir and compair them
         Reservoir sampledReservoir = Reservoir(gReservoirPrev[idx]);
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
-
-        bool vplValid = true;
+        
         VPL vpl = VPL(gVPLs[sampledReservoir.lightIdx]);
-        if(!vpl.valid | vpl.replaced){
-            sampledReservoir.weightSum = 0;
-            vplValid = false;
+        if(!vpl.valid || vpl.replaced){
+            continue;
         }
-        
-        cachedResults |= (1u << i);
-        
+                
         //Get neightbor light target PDF for current surface
         float sampleTargetPdf = 0.f;
-        if (sampledReservoir.M > 0 && vplValid)
+        if (sampledReservoir.M > 0)
         {
+            cachedResults |= (1u << i);
             LightSample ls = { };
             float dis;
             bool valid = getLightSample(vpl, currentSurface.posW, ls, dis);

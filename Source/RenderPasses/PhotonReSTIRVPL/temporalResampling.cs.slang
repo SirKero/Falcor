@@ -255,6 +255,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //Kill the reservoir if the vpl is no longer valid or was replaced
         if(!vpl.valid | vpl.replaced){
             prev.weightSum = 0;
+            prev.M = 0;
             vplValid = false;
         }
 
