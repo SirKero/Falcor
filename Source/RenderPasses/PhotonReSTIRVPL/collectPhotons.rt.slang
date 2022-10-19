@@ -204,10 +204,19 @@ void rayGen()
     vpl.age = min(vpl.age + 1, gVplAgeCap);
     vpl.flux += radiance;
     vpl.flux /= vpl.age;
+
+    float flux = luminance(vpl.flux);
+    if (isnan(flux) || isinf(flux))
+    {
+        flux = 0.f;
+        vpl.valid = false;
+    }
     
     
     //Write vpl back
     gVPLs[index] = vpl.pack();
-    if(kUsePdfSampling)
-        gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = luminance(vpl.flux) * M_2PI * (M_PI * gPhotonRadius * gPhotonRadius);    //Le to flux (Le * area * solid angle) TODO: (M_PI * area instead of M_2PI * area)?
+    if(kUsePdfSampling){
+        gLightPdf[ReSTIR_LinearIndexToZCurve(index)] = flux * M_PI;    //Le to flux (Le * area * solid angle) TODO: (M_PI * area instead of M_2PI * area)?
+    }
+        
 }
