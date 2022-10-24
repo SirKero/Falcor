@@ -73,10 +73,11 @@ void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float
     distance = sqrt(distSqr);
     toLight = toLight/ distance;    //normalize
      
-    float cosTheta = dot(vpl.normal, -toLight);
-    float area = M_PI * gRadius * gRadius;
-    float pdf = distSqr / max(FLT_MIN,cosTheta);
-    Li = vpl.flux / pdf;
+    float cosTheta = max(FLT_MIN, dot(vpl.normal, -toLight));
+    //float area = M_PI * gRadius * gRadius;
+    //float pdf = distSqr / max(FLT_MIN,cosTheta);
+    float attenuation = vplAttenuation(distance, gRadius);
+    Li = vpl.flux * cosTheta * attenuation;
 }
 
 [numthreads(16, 16, 1)]

@@ -54,6 +54,7 @@ cbuffer Constant{
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
     uint gDisocclusionBoostSamples; //Number of spartial samples if no temporal surface was found
+    float gVplRadius;               //Vpl radius
 }
 
 struct LightSample{
@@ -123,10 +124,10 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    float cosTheta = dot(vpl.normal, -ls.dir);
-    
-    float pdf = distSqr / max(FLT_MIN, cosTheta);
-    ls.Li = luminance(vpl.flux) / pdf;
+    float cosTheta = max(FLT_MIN, dot(vpl.normal, -ls.dir));
+    float attenuation = vplAttenuation(sampleDistance, gVplRadius);
+    float Le = luminance(vpl.flux);
+    ls.Li = Le * cosTheta * attenuation;   
 
     return true;
 }

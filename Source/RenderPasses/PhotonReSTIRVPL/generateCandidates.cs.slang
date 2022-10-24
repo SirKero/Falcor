@@ -121,14 +121,15 @@ bool generateSample(float rnd, const float3 surfacePosition,
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
-    float cosTheta = dot(vpl.normal, -ls.dir);
+    float cosTheta = max(FLT_MIN, dot(vpl.normal, -ls.dir));
     if(cosTheta <= gCosineCutoff || sampleDistance < gRadius) return false;
     
-    float pdf = distSqr / max(FLT_MIN,cosTheta);
+    //float pdf = distSqr / max(FLT_MIN,cosTheta);
+    float attenuation = vplAttenuation(sampleDistance, gRadius);
     float Le = luminance(vpl.flux);
     
-    ls.Li = Le / pdf;
-        
+    //ls.Li = Le / pdf;
+    ls.Li = Le * cosTheta * attenuation;   
     return (ls.Li > 0.f);    //return true if valid sample
 }
 

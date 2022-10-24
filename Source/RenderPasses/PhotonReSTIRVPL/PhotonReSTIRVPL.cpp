@@ -973,7 +973,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
         var[uniformName]["gCosineCutoff"] = 0.001f;
         var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize : uint2(mNumberVPL,0);
-        var[uniformName]["gRadius"] = mVPLCollectionRadius * 1.8f;  //TODO add constant as UI Variable
+        var[uniformName]["gRadius"] = mVPLCollectionRadius;
     }
 
     //Execute
@@ -1084,6 +1084,7 @@ void PhotonReSTIRVPL::temporalResampling(RenderContext* pRenderContext, const Re
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gVplRadius"] = mVPLCollectionRadius;
     }
 
     //Execute
@@ -1148,6 +1149,7 @@ void PhotonReSTIRVPL::spartialResampling(RenderContext* pRenderContext, const Re
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gVplRadius"] = mVPLCollectionRadius;
     }
 
     //Execute
@@ -1213,6 +1215,7 @@ void PhotonReSTIRVPL::spartioTemporalResampling(RenderContext* pRenderContext, c
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gDisocclusionBoostSamples"] = mDisocclusionBoostSamples;
+        var[uniformName]["gVplRadius"] = mVPLCollectionRadius;
     }
 
     //Execute
