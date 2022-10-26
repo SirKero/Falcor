@@ -193,9 +193,10 @@ void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
     float pdf;
 #if USE_BSDF_SAMPLING
     BSDFSample bsdfSample;
-    sd.mtl.setActiveLobes((uint)LobeType::Reflection);
+    sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
     bool valid = bsdf.sample(sd, rd.sg, bsdfSample, true);   
     float3 dir = bsdfSample.wo;
+    pdf = bsdf.evalPdf(sd, dir,true);
 #else
     //Consine Sampling
     float3 dir = sample_cosine_hemisphere_polar(sampleNext2D(rd.sg), pdf);

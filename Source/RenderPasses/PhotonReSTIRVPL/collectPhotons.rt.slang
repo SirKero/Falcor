@@ -94,8 +94,8 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     //Get Photon data
     PhotonData pd = PhotonData(gPackedPhotonData[primIndex]);
     //Evaluate diffuse BRDF
-    //float weight = 1 - (attribs.distance * attribs.distance / (gPhotonRadius * gPhotonRadius));   //TODO:Weight total is needed in this case
-    float weight = 1.f;
+    float weight = 1 - (attribs.distance * attribs.distance / (gPhotonRadius * gPhotonRadius));   //TODO:Weight total is needed in this case
+    //float weight = 1.f;
     if(dot(pd.normal, normal) < 0.6){
         weight = 0;
     }
@@ -103,7 +103,7 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     const float3 diffuseBrdf =  rayData.diffuseReflectance *NdotL * M_1_PI;
    
     rayData.weightSum += weight;
-    rayData.radiance += weight * diffuseBrdf * pd.flux;
+    rayData.radiance += weight * pd.flux * diffuseBrdf;
 }
 
 //Checks if the ray start point is inside the sphere.
@@ -132,7 +132,7 @@ void intersection()
 
     //Attribs are needed by the api. Because we have no need for additional attributes it is empty
     SphereAttribs attribs;
-    attribs.distance = distance(photonAABB.center(), origin)/gPhotonRadius;
+    attribs.distance = distance(photonAABB.center(), origin);
 
     //Report the hit if the point is in the sphere
     if (tHit)
@@ -183,9 +183,8 @@ void rayGen()
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-    //float3 radiance = rayData.weightSum > 0 ? rayData.radiance/ rayData.weightSum : 0;  //Normalize the weight
-    float3 radiance = rayData.radiance;
-    radiance /= (M_PI * gPhotonRadius * gPhotonRadius);//Le from normal. Solid angle is 1/(2PI) [hemisphere]
+    float3 radiance = rayData.weightSum > 0 ? rayData.radiance/ rayData.weightSum : 0;  //Normalize the weight
+    radiance /= (M_PI * gPhotonRadius * gPhotonRadius);
     radiance *= vplPdf;
     //Get diffuse probability as we ignore all specular parts
     //float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
