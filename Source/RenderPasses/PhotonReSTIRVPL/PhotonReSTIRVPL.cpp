@@ -57,7 +57,7 @@ namespace {
     const char kShaderShowAABBVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLsAABBcalc.cs.slang";
     const char kShaderShowVPLs[] = "RenderPasses/PhotonReSTIRVPL/showVPLs.rt.slang";
     const char kShaderVplFeedback[] = "RenderPasses/PhotonReSTIRVPL/vplFeedback.cs.slang";
-    const char kShaderDebugPhotonCollect[] = "RenderPasses/PhotonReSTIRVPL/debugPhotonCollect.rt.slang";    //TODO: Remove
+    const char kShaderDebugPhotonCollect[] = "RenderPasses/PhotonReSTIRVPL/debugPhotonCollect2.rt.slang";    //TODO: Remove
 
     // Ray tracing settings that affect the traversal stack size.
     const uint32_t kMaxPayloadSizeBytesVPL = 48u;
@@ -159,10 +159,11 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     collectPhotonsPass(pRenderContext, renderData);
 
     //Presample generated photon lights
-    presamplePhotonLightsPass(pRenderContext, renderData);
+    //presamplePhotonLightsPass(pRenderContext, renderData);
 
     //Copy the counter for UI
     copyPhotonCounter(pRenderContext);
+
     
     //Prepare the surface buffer
     prepareSurfaceBufferPass(pRenderContext, renderData);
@@ -200,7 +201,7 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
 
     //Shade the pixel
     finalShadingPass(pRenderContext, renderData);
-
+    
     //Show the vpls as spheres for debug purposes (functions return if deactivated)
     showVPLDebugPass(pRenderContext, renderData);
 
@@ -418,11 +419,14 @@ void PhotonReSTIRVPL::setScene(RenderContext* pRenderContext, const Scene::Share
             desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
 
             //Scene geometry count is needed as the scene acceleration struture bound with the scene defines
+            //mCollectPhotonsPass.pBindingTable = RtBindingTable::create(2, 2, mpScene->getGeometryCount());
             mCollectPhotonsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
             auto& sbt = mCollectPhotonsPass.pBindingTable;
             sbt->setRayGen(desc.addRayGen("rayGen"));
             sbt->setMiss(0, desc.addMiss("miss"));
             sbt->setHitGroup(0, 0, desc.addHitGroup("", "anyHit", "intersection"));
+            //sbt->setMiss(1, desc.addMiss("missDebug"));
+            //sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHitDebug"));
             
             mCollectPhotonsPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
         }
@@ -565,6 +569,16 @@ void PhotonReSTIRVPL::prepareBuffers(RenderContext* pRenderContext, const Render
                                          ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
         mpVPLSurface->setName("PhotonReSTIRVPL::VplSurface");
     }
+
+    if (!mpVplPdfBuffer) {
+        //Reuse same size as a pdf texture would use
+        uint width, height, mip;
+        computePdfTextureSize(mNumberVPL, width, height, mip);
+        mpVplPdfBuffer = Texture::create2D(width, height, ResourceFormat::R32Float, 1u, 1u, nullptr,
+                                         ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpVplPdfBuffer->setName("PhotonReSTIRVPL::VplPdf");
+    }
+
 
     //Usage buffer recording the last 8 Frames if the VPL was used
     if (!mpVPLUsageBuffer) {
@@ -710,6 +724,7 @@ void PhotonReSTIRVPL::distributeVPLsPass(RenderContext* pRenderContext, const Re
 
     var["gVplUsageBuffer"] = mpVPLUsageBuffer;
     var["gVplSurface"] = mpVPLSurface;
+    var["gVplPdf"] = mpVplPdfBuffer;
     var["gVPLs"] = mpVPLBuffer;
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
@@ -824,6 +839,7 @@ void PhotonReSTIRVPL::collectPhotonsPass(RenderContext* pRenderContext, const Re
     // Set constants (uniforms).
     // 
     //PerFrame Constant Buffer
+
     
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
@@ -837,14 +853,15 @@ void PhotonReSTIRVPL::collectPhotonsPass(RenderContext* pRenderContext, const Re
     }
 
     var["gVplSurface"] = mpVPLSurface;
+    var["gVplPdf"] = mpVplPdfBuffer;
     var["gPhotonAABB"] = mpPhotonAABB;
     var["gPackedPhotonData"] = mpPhotonData;
     var["gPhotonCounter"] = mpPhotonCounter;
     var["gVPLs"] = mpVPLBuffer;
     if (mUsePdfSampling) var["gLightPdf"] = mpLightPdfTex;
     
-    /*
     //TODO Debug stuff remove if done
+    /*
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
 

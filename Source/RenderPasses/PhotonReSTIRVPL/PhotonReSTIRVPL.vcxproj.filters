@@ -72,5 +72,8 @@
     <ShaderSource Include="debugPhotonCollect.rt.slang">
       <Filter>Shader\PhotonVPLS</Filter>
     </ShaderSource>
+    <ShaderSource Include="debugPhotonCollect2.rt.slang">
+      <Filter>Shader\PhotonVPLS</Filter>
+    </ShaderSource>
   </ItemGroup>
 </Project>

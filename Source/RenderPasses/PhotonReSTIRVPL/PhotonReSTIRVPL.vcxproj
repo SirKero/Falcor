@@ -39,6 +39,7 @@
     <ShaderSource Include="candidatesVisCheck.rt.slang" />
     <ShaderSource Include="collectPhotons.rt.slang" />
     <ShaderSource Include="debugPhotonCollect.rt.slang" />
+    <ShaderSource Include="debugPhotonCollect2.rt.slang" />
     <ShaderSource Include="distributeVPLs.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />

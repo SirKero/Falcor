@@ -30,7 +30,8 @@ cbuffer CB
 
 // Inputs
 Buffer<uint> gPhotonCounter;
-RWTexture2D<PackedHitInfo> gVplSurface;
+Texture2D<PackedHitInfo> gVplSurface;
+Texture2D<float> gVplPdf;
 StructuredBuffer<uint4> gPackedPhotonData;
 StructuredBuffer<AABB> gPhotonAABB;
 
@@ -50,12 +51,13 @@ static const bool kUsePdfSampling = USE_PDF_SAMPLING;
 struct RayData
 {
     float3 radiance;                ///< Accumulated outgoing radiance from path.
-    uint _pad;                      ///< packed normal
+    float weightSum;                      ///< packed normal
     float3 diffuseReflectance;       //<Diffuse reflectance of the vpl
     uint _pad2;
       
     __init(){
         radiance = float3(0);
+        weightSum = 0.f;
         diffuseReflectance = float3(0);
     }
 };
@@ -92,14 +94,15 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     //Get Photon data
     PhotonData pd = PhotonData(gPackedPhotonData[primIndex]);
     //Evaluate diffuse BRDF
-    float weight = 1 - attribs.distance * attribs.distance;
+    //float weight = 1 - (attribs.distance * attribs.distance / (gPhotonRadius * gPhotonRadius));   //TODO:Weight total is needed in this case
+    float weight = 1.f;
     if(dot(pd.normal, normal) < 0.6){
         weight = 0;
     }
     const float NdotL = saturate(dot(normal, pd.dir));
     const float3 diffuseBrdf =  rayData.diffuseReflectance *NdotL * M_1_PI;
    
-    //weight = 1.f;
+    rayData.weightSum += weight;
     rayData.radiance += weight * diffuseBrdf * pd.flux;
 }
 
@@ -157,6 +160,8 @@ void rayGen()
     if(!hitInfo.isValid() || !vpl.valid)
         return;
 
+    float vplPdf = gVplPdf[ReSTIR_LinearIndexToZCurve(index)];
+    
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = loadShadingData(hitInfo, -vpl.normal, lod);
     let bsdf = gScene.materials.getBSDF(sd, lod);
@@ -178,9 +183,10 @@ void rayGen()
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-    float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius * M_2PI);    //Le from normal. Solid angle is 1/(2PI) [hemisphere]
-    //float3 radiance = rayData.radiance;
-    
+    //float3 radiance = rayData.weightSum > 0 ? rayData.radiance/ rayData.weightSum : 0;  //Normalize the weight
+    float3 radiance = rayData.radiance;
+    radiance /= (M_PI * gPhotonRadius * gPhotonRadius);//Le from normal. Solid angle is 1/(2PI) [hemisphere]
+    radiance *= vplPdf;
     //Get diffuse probability as we ignore all specular parts
     //float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
     float NdotV = saturate(dot(sd.N, sd.V));
@@ -190,7 +196,6 @@ void rayGen()
 
     float3 diffFactor = (bsdfProperties.diffuseReflectionAlbedo + specularReflectance) / bsdfProperties.diffuseReflectionAlbedo;
     radiance *= diffFactor;
-    radiance *= M_1_4PI;        //TODO Why is this factor needed ???
     
     if (vpl.age > 0)
     {

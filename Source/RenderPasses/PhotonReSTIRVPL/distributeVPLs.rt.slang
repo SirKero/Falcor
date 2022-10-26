@@ -39,6 +39,7 @@ cbuffer CB
 };
 
 RWTexture2D<PackedHitInfo> gVplSurface;
+RWTexture2D<float> gVplPdf;
 RWStructuredBuffer<PackedVPL> gVPLs;
 RWTexture2D<uint> gVplUsageBuffer;
 Texture2D<PackedHitInfo> gVBuffer;
@@ -188,7 +189,8 @@ void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
     if(rnd > pReflection) return;
     
     //BSDF sampling
-    
+
+    float pdf;
 #if USE_BSDF_SAMPLING
     BSDFSample bsdfSample;
     sd.mtl.setActiveLobes((uint)LobeType::Reflection);
@@ -196,9 +198,11 @@ void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
     float3 dir = bsdfSample.wo;
 #else
     //Consine Sampling
-    float3 dir = sample_cosine_hemisphere_polar(sampleNext2D(rd.sg));
-    fromLocalToWorld(sd.faceN,dir);
+    float3 dir = sample_cosine_hemisphere_polar(sampleNext2D(rd.sg), pdf);
+    fromLocalToWorld(sd.N,dir);
 #endif  
+    pdf *= pReflection;
+    pdf /= (gFrameDim.x * gFrameDim.y)/ gMaxNumberVPL; //Select pdf
     
     RayDesc ray;
     ray.Origin =  sd.computeNewRayOrigin(); //false is for transmissions
@@ -222,6 +226,7 @@ void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
               
         gVPLs[vplIndex] = vpl.pack();
         gVplSurface[ReSTIR_LinearIndexToZCurve(vplIndex)] = rd.packedHitInfo;
+        gVplPdf[ReSTIR_LinearIndexToZCurve(vplIndex)] = pdf;
     }
 }
 

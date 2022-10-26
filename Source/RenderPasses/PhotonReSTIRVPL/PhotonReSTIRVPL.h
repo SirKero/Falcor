@@ -297,6 +297,7 @@ private:
     //Buffer
     Buffer::SharedPtr mpVPLBuffer;              //Buffer for the VPLs
     Texture::SharedPtr mpVPLSurface;            //Surface of a vpl. Used to collect the photons and determine the flux
+    Texture::SharedPtr mpVplPdfBuffer;          //Pdf for the pdf
     Texture::SharedPtr mpVPLUsageBuffer;        //Buffer indicates when the VPL was lastly used
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
