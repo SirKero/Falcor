@@ -1,0 +1,99 @@
+import Utils.Math.PackedFormats;
+import Utils.Math.FormatConversion;
+
+/** Structs for the surface data. After the same principle of RTXDI Surface data
+  * Reduces the amount of data and calculation that is needed in generation and resampling step. Especially if bias correction is enabled
+  * Register presure is reduced through the packed fields in the Surface struct
+*/
+/*
+struct PackedSurfaceData{
+    uint3 pos;
+    uint linZ;
+    uint normal;
+    uint weights;
+    uint2 _pad;
+};
+*/
+
+struct PackedSurfaceData{
+    uint2 data0;
+    uint2 data1;
+    uint2 data2;
+};
+
+struct Surface{
+    float3 posW;       //< World position of the hit point     
+    float viewDepth;    //< View Depth from camera to hit point. Negative values indicate an invalid Surface
+    uint packedNormal;  //< Packed Normal
+    uint packedWeights; //< packed weight format:  diffuseProb|roughness|specular|diffuse
+
+    //Not in packed needs to be provided on init
+    float3 viewDir;
+
+    // True if data is valid
+    property bool valid{
+        get {return viewDepth >= 0.f;}
+    }
+
+    //Shading world normal
+    property float3 normal{
+        get { return decodeNormal2x16(packedNormal); }
+        set { packedNormal = encodeNormal2x16(newValue); }
+    }
+
+     // Diffuse reflectance.
+    property float diffuse
+    {
+        get { return unpackUnorm8(packedWeights); }
+        set { packedWeights = (packedWeights & ~0xff) | packUnorm8(newValue); }
+    }
+
+    // Specular reflectance.
+    property float specular
+    {
+        get { return unpackUnorm8(packedWeights >> 8); }
+        set { packedWeights = (packedWeights & ~0xff00) | (packUnorm8(newValue) << 8); }
+    }
+
+    // Specular roughness.
+    property float roughness
+    {
+        get { return unpackUnorm8(packedWeights >> 16); }
+        set { packedWeights = (packedWeights & ~0xff0000) | (packUnorm8(newValue) << 16); }
+    }
+
+    // Diffuse lobe probability.
+    property float diffuseProb
+    {
+        get { return unpackUnorm8(packedWeights >> 24); }
+        set { packedWeights = (packedWeights & ~0xff000000) | (packUnorm8(newValue) << 24); }
+    }
+
+    //Empty init
+    __init(){
+        this = {};
+        viewDepth = -1.f;
+    }
+
+    //Initialize with packedData and a viewDir
+    __init(const PackedSurfaceData packed, const float3 viewDir){
+        posW.xy = asfloat(packed.data0);
+        posW.z = asfloat(packed.data1.x);
+        viewDepth = asfloat(packed.data1.y);
+        packedNormal = packed.data2.x;
+        packedWeights = packed.data2.y;
+        this.viewDir = viewDir;
+     }
+
+    //Packs the surface data
+    PackedSurfaceData pack(){
+        PackedSurfaceData packed = {};
+        packed.data0 = asuint(posW.xy);
+        packed.data1.x = asuint(posW.z);
+        packed.data1.y = asuint(viewDepth);
+        packed.data2.x = packedNormal;
+        packed.data2.y = packedWeights;
+
+        return packed;
+    }
+};
