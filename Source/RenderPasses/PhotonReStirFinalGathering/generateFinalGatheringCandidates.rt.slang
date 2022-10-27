@@ -16,6 +16,7 @@ import Utils.Color.ColorHelpers;
 
 import Reservoir;
 import VPLs;
+import SurfaceData;
 
 cbuffer PerFrame
 {
@@ -33,9 +34,11 @@ cbuffer CB
 // Inputs
 RWTexture2D<uint4> gReservoir;
 RWStructuredBuffer<PackedVPL> gPhotonLights;
+RWStructuredBuffer<PackedSurfaceData> gSurfaceData;
 Buffer<uint> gPhotonCounter;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
+Texture2D <float>gLinZ;
 StructuredBuffer<uint4> gPackedPhotonData;
 StructuredBuffer<AABB> gPhotonAABB;
 
@@ -237,7 +240,7 @@ void intersection()
     }
 }
 
-float3 evalWeight(in ShadingData sd, float3 diffuse, float3 pSpec, float surfaceRoughness,float3 toLight){
+float evalWeight(in ShadingData sd, float pDiffuse, float specular, float surfaceRoughness,float3 toLight){
     const float3 N = sd.N;
     const float3 H = normalize(sd.V + toLight);
     const float NdotV = saturate(dot(N, sd.V));
@@ -250,20 +253,55 @@ float3 evalWeight(in ShadingData sd, float3 diffuse, float3 pSpec, float surface
     float D = evalNdfGGX(roughness * roughness, NdotH);
     float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
 
-    float3 specular = pSpec;
-    float3 F = specular < 1e-8f ? float3(0.f) :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
     //float F = any(specular < 1e-8f) ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH)/specular; //Not "right" but less noisier
 
     //eval brdf terms
     float diffuseBRDF = NdotL * M_1_PI;
-    float3 specularBRDF = D*G*F/(4.f * NdotV);
-
-    float3 pDiffuse =(diffuse + pSpec);
-    pDiffuse = pDiffuse < 1e-7f ? 1.0f : diffuse/pDiffuse;
+    float specularBRDF = D*G*F/(4.f * NdotV);
     
     //Mix diffuse and specular BRDF
-    float3 brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, pDiffuse));
+    float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, pDiffuse));
     return brdf; 
+}
+
+//gets the target pdf averaged to one channel
+float getSurfacePdf(in Surface surface, float3 toLight)
+{
+#ifndef DIFFUSE_SHADING_ONLY
+    const float3 N = surface.normal;
+    const float3 H = normalize(surface.viewDir + toLight);
+    const float NdotV = saturate(dot(N, surface.viewDir));
+    const float NdotL = saturate(dot(N, toLight));
+    const float NdotH = saturate(dot(N, H));
+    const float LdotH = saturate(dot(toLight, H));
+
+    //BRDF terms for target function (DGF Microfaset BRDF)
+    const float roughness = surface.roughness;
+    float D = evalNdfGGX(roughness * roughness, NdotH);
+    float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
+
+    float specular = surface.specular;
+    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+    //float F = specular < 1e-8f ? 0.f : evalFresnelSchlick(specular, 1.f, LdotH) / specular; //Not "right" but less noisier
+
+    //eval brdf terms
+    float diffuseBRDF = NdotL * M_1_PI;
+    float specularBRDF = D * G * F / (4.f * NdotV);
+
+    //Mix diffuse and specular BRDF
+    float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, surface.diffuseProb));
+    return brdf * NdotL;
+#else //Diffuse shading only
+    const float3 N = surface.normal;
+    const float NdotL = saturate(dot(N, ls.dir));
+
+    //Eval BSDF
+    float diffuseBRDF = NdotL * M_1_PI;
+    diffuseBRDF /= surface.diffuseProb;
+    
+    return diffuseBRDF * ls.Li; 
+#endif   
 }
 
 [shader("raygeneration")]
@@ -271,12 +309,13 @@ void rayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
-
+    
     HitInfo hitInfo = HitInfo(gVBuffer[launchIndex]);
     if(!hitInfo.isValid())
-        return;
+        gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = Surface().pack();
 
     float3 view = -gView[launchIndex].xyz;
+    float linZ = gLinZ[launchIndex];
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = loadShadingData(hitInfo, view, lod);
     let bsdf = gScene.materials.getBSDF(sd, lod);
@@ -287,14 +326,23 @@ void rayGen()
 
     BSDFSample bsdfSample;
     bool valid = bsdf.sample(sd, traceData.sg, bsdfSample, true);
-    float3 pdf = float3(1);
-    float targetPdf = luminance(bsdfSample.weight * bsdfSample.pdf);    //Take the pdf out of the weight
+
+    //Fill Surface Buffer used for calculating the target PDF
+    Surface surface = Surface::create(sd.computeNewRayOrigin(), sd.N, sd.V, linZ, bsdfProperties.roughness,
+                                      luminance(bsdfProperties.diffuseReflectionAlbedo), luminance(bsdfProperties.specularReflectance));
+
+
     
-    //pdf = evalWeight(sd, bsdfProperties.diffuseReflectionAlbedo , luminance(bsdfProperties.specularReflectionAlbedo), bsdfProperties.roughness, bsdfSample.wo);
+    float targetPdf = getSurfacePdf(surface, bsdfSample.wo);
+    
+    //float weight;
+    
+    //weight = evalWeight(sd, bsdfProperties.diffuseReflectionAlbedo, bsdfProperties.specularReflectionAlbedo, bsdfProperties.roughness, bsdfSample.wo);
     //const float NdotL = saturate(dot(sd.N, bsdfSample.wo));
     //pdf = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
-    //pdf *= saturate(dot(sd.N, bsdfSample.wo));
-
+    //weight *= saturate(dot(sd.N, bsdfSample.wo));
+    //weight /= bsdfSample.pdf;
+    
     //This needs to be done in final shading, except the pdf
     //pdf = bsdf.eval(sd, bsdfSample.wo, traceData.sg);
     //pdf /= bsdfSample.pdf;
@@ -355,16 +403,28 @@ void rayGen()
 
     Reservoir r = Reservoir();
 
-    updateReservoir(r, ls, targetPdf, sampleNext1D(traceData.sg));  //Add the candidate
-    finalizeSample(r, 1.f, 1.f);
+    if (valid)
+    {
+        updateReservoir(r, ls, targetPdf, sampleNext1D(traceData.sg)); //Add the candidate
+        finalizeSample(r, 1.f, 1.f);
+    }
+    
     //Create the light
     VPL photonLight = {};
-    photonLight.posW = sd.computeNewRayOrigin();
-    photonLight.normal = sd.N;
-    photonLight.flux = radiance;
+    if (valid)
+    {
+        bool vplValid = true;
+        if (any(isnan(radiance)) || any(isinf(radiance)) || any(radiance < 0))
+            vplValid = false;
+        photonLight.posW = sd.computeNewRayOrigin();
+        photonLight.normal = sd.N;
+        photonLight.flux = radiance;
+        photonLight.valid = vplValid;
+    }
     
     gReservoir[launchIndex] = r.pack();
     gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();
+    gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = surface.pack();
     if(gWriteColor){
         gColorOut[launchIndex] = float4(radiance * bsdfSample.weight, 1.0);
     }

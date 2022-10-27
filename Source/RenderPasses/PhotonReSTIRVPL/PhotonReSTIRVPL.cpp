@@ -159,7 +159,7 @@ void PhotonReSTIRVPL::execute(RenderContext* pRenderContext, const RenderData& r
     collectPhotonsPass(pRenderContext, renderData);
 
     //Presample generated photon lights
-    //presamplePhotonLightsPass(pRenderContext, renderData);
+    presamplePhotonLightsPass(pRenderContext, renderData);
 
     //Copy the counter for UI
     copyPhotonCounter(pRenderContext);

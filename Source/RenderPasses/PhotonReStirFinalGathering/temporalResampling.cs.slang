@@ -21,7 +21,8 @@ import VPLs;
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 
-StructuredBuffer<PackedVPL> gVPLs;
+RWStructuredBuffer<PackedVPL> gVPLs;
+StructuredBuffer<PackedVPL> gVplPrev;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -109,11 +110,8 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
-
-    float cosTheta = max(FLT_MIN, dot(vpl.normal, -ls.dir));
-    float attenuation = vplAttenuation(sampleDistance, gVplRadius);
-    float Le = luminance(vpl.flux);
-    ls.Li = Le * cosTheta * attenuation;   
+    
+    ls.Li = luminance(vpl.flux);
 
     return ls.Li > 0;   //true if sample is valid
 }
@@ -134,8 +132,8 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
     float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
 
     float specular = surface.specular;
-    //float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
-    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH)/specular; //Not "right" but less noisier
+    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+    //float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH)/specular; //Not "right" but less noisier
 
     //eval brdf terms
     float diffuseBRDF = NdotL * M_1_PI;
@@ -143,7 +141,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
 
     //Mix diffuse and specular BRDF
     float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, surface.diffuseProb));
-    return brdf * ls.Li; 
+    return brdf * NdotL * ls.Li;
 #else //Diffuse shading only
     const float3 N = surface.normal;
     const float NdotL = saturate(dot(N, ls.dir));
@@ -252,7 +250,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         previousM = prev.M;
 
         bool vplValid = true;
-        VPL vpl = VPL(gVPLs[prev.lightIdx]);
+        VPL vpl = VPL(gVplPrev[prev.lightIdx]);
         //Kill the reservoir if the vpl is no longer valid or was replaced
         if(!vpl.valid | vpl.replaced){
             prev.weightSum = 0;
@@ -309,4 +307,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif //BIAS_MODE_BASIC
         
     gReservoir[dTid] = r.pack();
+    gVPLs[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }

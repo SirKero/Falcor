@@ -165,15 +165,15 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
     //Copy the counter for UI
     copyPhotonCounter(pRenderContext);
 
-    /*
+    
     //Prepare the surface buffer
-    prepareSurfaceBufferPass(pRenderContext, renderData);
+    //prepareSurfaceBufferPass(pRenderContext, renderData);
 
     //Generate Candidates
-    generateCandidatesPass(pRenderContext, renderData);
+    //generateCandidatesPass(pRenderContext, renderData);
 
     //Check candidates visibility. Only performed when !mUseVisibilityRayInline
-    candidatesVisibilityCheckPass(pRenderContext, renderData);
+    //candidatesVisibilityCheckPass(pRenderContext, renderData);
 
     //Spartiotemporal Resampling
     switch (mResamplingMode) {
@@ -199,7 +199,7 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
         }
         break;
     }
-    */
+    
     //Shade the pixel
     if (!mDebugColor) {
         finalShadingPass(pRenderContext, renderData);
@@ -896,7 +896,8 @@ void PhotonReSTIRFinalGathering::collectPhotonsPass(RenderContext* pRenderContex
     var["gPackedPhotonData"] = mpPhotonData;
     var["gPhotonCounter"] = mpPhotonCounter;
     var["gColorOut"] = renderData[kOutColorDesc.name]->asTexture();
-    
+    var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
+    var[kInRayDistance.texname] = renderData[kInRayDistance.name]->asTexture();
 
     bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
     FALCOR_ASSERT(tlasValid);
@@ -1109,7 +1110,8 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gPrevView"] = mpPrevViewTex;
 
-    var["gVPLs"] = mpVPLBuffer;
+    var["gVPLs"] = mpPhotonLightBuffer[mFrameCount % 2];
+    var["gVplPrev"] = mpPhotonLightBuffer[(mFrameCount+1) % 2];
     var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform

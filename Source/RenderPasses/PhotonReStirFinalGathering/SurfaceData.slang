@@ -30,6 +30,7 @@ struct Surface{
     //Not in packed needs to be provided on init
     float3 viewDir;
 
+
     // True if data is valid
     property bool valid{
         get {return viewDepth >= 0.f;}
@@ -95,5 +96,21 @@ struct Surface{
         packed.data2.y = packedWeights;
 
         return packed;
+    }
+
+    static Surface create(float3 posW, float3 normal, float3 viewDir, float viewDepth, float roughness, float diffuse, float specular)
+    {
+        Surface s = { };
+        s.posW = posW;
+        s.viewDir = viewDir;
+        s.normal = normal;
+        s.viewDepth = viewDepth;
+        s.roughness = roughness;
+        s.diffuse = diffuse;
+        s.specular = specular;
+        float sumWeights = diffuse + specular;
+        s.diffuseProb = sumWeights < 1e-7f ? 1.0f : (diffuse / sumWeights);
+    
+        return s;
     }
 };
