@@ -41,7 +41,6 @@ RWBuffer<uint> gPhotonCounter;
 RWTexture2D<float> gPhotonPdfTexture;
 
 static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
-static const bool kUsePdfSampling = USE_PDF_SAMPLING;
 
 /** Payload for scatter ray (80B).
 */

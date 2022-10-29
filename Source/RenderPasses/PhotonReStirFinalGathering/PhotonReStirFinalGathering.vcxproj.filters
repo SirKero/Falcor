@@ -25,40 +25,16 @@
     <ShaderSource Include="spartialResampling.cs.slang">
       <Filter>Shader\Resampling</Filter>
     </ShaderSource>
-    <ShaderSource Include="presampleLights.cs.slang">
-      <Filter>Shader\Resampling</Filter>
-    </ShaderSource>
-    <ShaderSource Include="generateCandidates.cs.slang">
-      <Filter>Shader\Resampling</Filter>
-    </ShaderSource>
     <ShaderSource Include="fillSurfaceInfo.cs.slang">
-      <Filter>Shader\Resampling</Filter>
-    </ShaderSource>
-    <ShaderSource Include="candidatesVisCheck.rt.slang">
       <Filter>Shader\Resampling</Filter>
     </ShaderSource>
     <ShaderSource Include="finalShading.cs.slang">
       <Filter>Shader\Resampling</Filter>
     </ShaderSource>
-    <ShaderSource Include="collectPhotons.rt.slang">
-      <Filter>Shader\Photon</Filter>
-    </ShaderSource>
-    <ShaderSource Include="debugPhotonCollect.rt.slang">
-      <Filter>Shader\Photon</Filter>
-    </ShaderSource>
     <ShaderSource Include="generateFinalGatheringCandidates.rt.slang">
       <Filter>Shader\Photon</Filter>
     </ShaderSource>
-    <ShaderSource Include="distributeVPLs.rt.slang">
-      <Filter>Shader\Photon</Filter>
-    </ShaderSource>
     <ShaderSource Include="generatePhotons.rt.slang">
-      <Filter>Shader\Photon</Filter>
-    </ShaderSource>
-    <ShaderSource Include="showVPLs.rt.slang">
-      <Filter>Shader\Photon</Filter>
-    </ShaderSource>
-    <ShaderSource Include="showVPLsAABBcalc.cs.slang">
       <Filter>Shader\Photon</Filter>
     </ShaderSource>
   </ItemGroup>

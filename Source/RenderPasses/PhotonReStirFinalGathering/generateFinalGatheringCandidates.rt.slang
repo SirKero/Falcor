@@ -21,14 +21,11 @@ import SurfaceData;
 cbuffer PerFrame
 {
     uint gFrameCount;       // Frame count since scene was loaded.
-    bool gWriteColor;
 }
 
 cbuffer CB
 {
     float gPhotonRadius; // Scale for the emissive part
-    uint gMaxVPLs;
-    uint2 _pad;
 };
 
 // Inputs
@@ -44,13 +41,9 @@ StructuredBuffer<AABB> gPhotonAABB;
 
 RaytracingAccelerationStructure gPhotonAS;
 
-// Outputs
-RWTexture2D<float4> gColorOut;
-
 
 // Static configuration based on defines set from the host.
 static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
-static const bool kUsePdfSampling = USE_PDF_SAMPLING;
 
 /** Payload for ray (48B).
 */
@@ -425,7 +418,4 @@ void rayGen()
     gReservoir[launchIndex] = r.pack();
     gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();
     gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = surface.pack();
-    if(gWriteColor){
-        gColorOut[launchIndex] = float4(radiance * bsdfSample.weight, 1.0);
-    }
 }

@@ -36,19 +36,11 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="candidatesVisCheck.rt.slang" />
-    <ShaderSource Include="collectPhotons.rt.slang" />
-    <ShaderSource Include="debugPhotonCollect.rt.slang" />
     <ShaderSource Include="generateFinalGatheringCandidates.rt.slang" />
-    <ShaderSource Include="distributeVPLs.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />
-    <ShaderSource Include="generateCandidates.cs.slang" />
     <ShaderSource Include="generatePhotons.rt.slang" />
-    <ShaderSource Include="presampleLights.cs.slang" />
     <ShaderSource Include="Reservoir.slang" />
-    <ShaderSource Include="showVPLs.rt.slang" />
-    <ShaderSource Include="showVPLsAABBcalc.cs.slang" />
     <ShaderSource Include="spartialResampling.cs.slang" />
     <ShaderSource Include="spartioTemporalResampling.cs.slang" />
     <ShaderSource Include="SurfaceData.slang" />

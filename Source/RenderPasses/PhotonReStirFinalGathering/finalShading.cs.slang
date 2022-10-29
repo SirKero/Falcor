@@ -19,7 +19,6 @@ import VPLs;
 Texture2D<uint4> gReservoir;
 
 StructuredBuffer<PackedVPL> gVPLs;
-RWTexture2D<uint> gVplUsageBuffer;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
@@ -41,10 +40,8 @@ cbuffer PerFrame
 cbuffer Constant
 {
     uint2 gFrameDim;                //Frame Dimensions for camera dir
-    bool  gUseEmissiveTexture;      //Enables emissive texture for shading
     bool gEnableVisRay;             //Enables the final visibilty ray
     float gRadius;
-    uint3 _pad;
 }
 
 static const float kRayEpsilon = 0.99f;
@@ -117,9 +114,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
     getEmissiveLight(index2Dto1D(dTid, gFrameDim.x),sd.posW ,distance , toLight, Li);
     Li = max(0.f, Li * r.weightSum);
 
-    ///Get vpl feedbackbuffer
-    uint vplFeedback = gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(r.lightIdx)];
-    
     //Check light visibility with a shadow ray
     if (valid && gEnableVisRay)
     {
@@ -132,11 +126,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             valid = false;
         }
     }
-
-    //If valid write feedback back
-    if(valid)
-        gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(r.lightIdx)] = vplFeedback | 1;
-    
+        
     float3 diffuse = {};
     float3 specular = {};
     if(valid){

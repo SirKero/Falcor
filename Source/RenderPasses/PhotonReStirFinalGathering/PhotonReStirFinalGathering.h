@@ -127,18 +127,6 @@ private:
     */
     void prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData);
 
-    /** Prepares the surface info buffer
-   */
-    void prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData);
-
-    /** Distrubute VPLs
-    */
-    void distributeVPLsPass(RenderContext* pRenderContext, const RenderData& renderData);
-
-    /** Presample the photon lights
-    */
-    void presamplePhotonLightsPass(RenderContext* pRenderContext, const RenderData& renderData);
-
     /** Generate Photon lights
     */
     void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -146,14 +134,6 @@ private:
     /** Collects the photons in the vpls
     */
     void collectPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
-
-    /** Visibility check in raytracing shader instead of Compute shader
-    */
-    void candidatesVisibilityCheckPass(RenderContext* pRenderContext, const RenderData& renderData);
-
-    /** Generates the canidates for the pass and stores them inside the reservoir
-    */
-    void generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Uses temporal resampling to combine the reservoir with the reservoir of the previous frame
     */
@@ -224,25 +204,17 @@ private:
     //UI
     //
     //Resampling
-    uint mResamplingMode = ResamplingMode::NoResampling;        //TODO: Change light settings for other modes
-    uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
+    uint mResamplingMode = ResamplingMode::NoResampling;        //Resample Mode
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
     float mSamplingRadius = 20.f;           //Sampling radius in pixel
     float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
-    bool mUseEmissiveTexture = false;        //Use Emissive texture in final shading
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
-    float mGeometryTermBand = 0.0f;     //Rejects samples with a small distance due to infinetly large geometry term (Adds Bias)
-    uint2 mPresampledTitleSize = uint2(128, 1024);
-    uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
-    bool mPresampledTitleSizeChanged = true;
-    bool mUsePdfSampling = false;
-    bool mUseVisibiltyRayInline = true;         //If true, inline ray tracing is used for the visibility check
-    bool mUseDiffuseOnlyShading = false;                //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
-    uint mVplMaxReplace = 3072;                 //Maximum number of vpls that can be replaced per frame
+    bool mUseDiffuseOnlyShading = false;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
+    
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
@@ -253,24 +225,11 @@ private:
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
+    float mPhotonCollectRadius = 0.05f;     //Radius for collection
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
-    //VPL
-    uint mNumberVPL = 28000;                //Number of VPL lights
-    float mVPLCollectionRadius = 0.05f;
-    bool mShowVPLs = false;
-    bool mShowVPLsUseFlatShading = true;                    //Enable a flat shading for debug vpls 
-    float3 mShowVPLsUseFlatShadingColor = float3(0, 1, 0);  //Flat shading color for debug vpl (green is standard)
-    float mShowVPLsScalar = 1.f;
-    bool mResetVPLs = false;
-    bool mDistributeVplUseBsdfSampling = false; //Use Bsdf or cosine sampling for vpl distribution
-    uint mVplAgeCapCollect = 40;
-    uint mVplEliminationAge = 15;
-    uint mVplEliminationMode = VplEliminationMode::Fixed;
-    float mVplEliminationVar1 = 0.2f;
-    uint mVplUsageFramesUsed = 0;       //Frames used for usage elimination
-
-    bool mDebugColor = false;
+    
+  
 
     //Runtime
     bool mReset = true;
@@ -286,32 +245,20 @@ private:
     EmissiveLightSampler::SharedPtr mpEmissiveLightSampler;     //EmissiveLightSampler for Photon generation
 
     //Compute Passes
-    ComputePass::SharedPtr mpFillSurfaceInfoPass;               //Fills the surfaceInformation
-    ComputePass::SharedPtr mpPresamplePhotonLightsPass;     //Presample the photon lights
-    ComputePass::SharedPtr mpGenerateCandidates;            //Generate Candidates Pass
     ComputePass::SharedPtr mpTemporalResampling;            //Temporal Resampling Pass
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
     ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
-    ComputePass::SharedPtr mpShowVPLsCalcAABBsPass;             //Calcs the AABB buffer for showing the vpls
-    ComputePass::SharedPtr mpVplFeedbackPass;               //Determines VPLs that can be replaced
 
     //Buffer
-    Buffer::SharedPtr mpVPLBuffer;              //Buffer for the VPLs
     Buffer::SharedPtr mpPhotonLightBuffer[2];
-    Texture::SharedPtr mpVPLSurface;            //Surface of a vpl. Used to collect the photons and determine the flux
-    Texture::SharedPtr mpVplPdfBuffer;          //Pdf for the pdf
-    Texture::SharedPtr mpVPLUsageBuffer;        //Buffer indicates when the VPL was lastly used
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
     Buffer::SharedPtr mpPhotonAABB;              //Photon AABBs for Acceleration Structure building
     Buffer::SharedPtr mpPhotonData;              //Additional Photon data (flux, dir)
-    Texture::SharedPtr mpLightPdfTex;           //1 Channel luminance texture for power presampling
-    Buffer::SharedPtr mpPresampledLights; //Presampled Photon lights
     Buffer::SharedPtr mpPhotonCounter;     //Counter for the number of lights
     Buffer::SharedPtr mpPhotonCounterCPU;  //For showing the current number of photons in the UI
-    Buffer::SharedPtr mpShowVPLsAABBsBuffer;              //AABB buffer for showing the vpls
     Texture::SharedPtr mpPrevViewTex;                   //If view texture is used, we store the last frame here
 
     //
@@ -334,11 +281,7 @@ private:
     };
 
     RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass
-    RayTraceProgramHelper mDistributeVPlsPass;          ///<Description for the Distribute VPL Pass
     RayTraceProgramHelper mCollectPhotonsPass;          ///<Description for collecting the photons
-    RayTraceProgramHelper mVisibilityCheckPass;         ///< Description for the visibility check pass
-    RayTraceProgramHelper mVPLDebugPass;                ///<A pass to visualize the VPLs
 
     SphereAccelerationStructure mPhotonAS;
-    SphereAccelerationStructure mVPLDebugAS;
 };

@@ -43,23 +43,15 @@ extern "C" FALCOR_API_EXPORT void getPasses(Falcor::RenderPassLibrary& lib)
 
 namespace {
     //Shaders
-    const char kShaderDistributeVPLs[] = "RenderPasses/PhotonReSTIRFinalGathering/distributeVPLs.rt.slang";
     const char kShaderGeneratePhoton[] = "RenderPasses/PhotonReSTIRFinalGathering/generatePhotons.rt.slang";
-    const char kShaderCollectPhoton[] = "RenderPasses/PhotonReSTIRFinalGathering/collectPhotons.rt.slang";
-    const char kShaderPresampleLights[] = "RenderPasses/PhotonReSTIRFinalGathering/presampleLights.cs.slang";
-    const char kShaderFillSurfaceInformation[] = "RenderPasses/PhotonReSTIRFinalGathering/fillSurfaceInfo.cs.slang";
-    const char kShaderGenerateCandidates[] = "RenderPasses/PhotonReSTIRFinalGathering/generateCandidates.cs.slang";
-    const char kShaderCandidatesVisCheck[] = "RenderPasses/PhotonReSTIRFinalGathering/candidatesVisCheck.rt.slang";
     const char kShaderTemporalPass[] = "RenderPasses/PhotonReSTIRFinalGathering/temporalResampling.cs.slang";
     const char kShaderSpartialPass[] = "RenderPasses/PhotonReSTIRFinalGathering/spartialResampling.cs.slang";
     const char kShaderSpartioTemporalPass[] = "RenderPasses/PhotonReSTIRFinalGathering/spartioTemporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIRFinalGathering/finalShading.cs.slang";
     const char kShaderShowAABBVPLs[] = "RenderPasses/PhotonReSTIRFinalGathering/showVPLsAABBcalc.cs.slang";
     const char kShaderShowVPLs[] = "RenderPasses/PhotonReSTIRFinalGathering/showVPLs.rt.slang";
-    const char kShaderVplFeedback[] = "RenderPasses/PhotonReSTIRFinalGathering/vplFeedback.cs.slang";
     const char kShaderGenerateFinalGatheringCandidates[] = "RenderPasses/PhotonReSTIRFinalGathering/generateFinalGatheringCandidates.rt.slang";
-    const char kShaderDebugPhotonCollect[] = "RenderPasses/PhotonReSTIRFinalGathering/debugPhotonCollect2.rt.slang";    //TODO: Remove
-
+    
     // Ray tracing settings that affect the traversal stack size.
     const uint32_t kMaxPayloadSizeBytesVPL = 48u;
     const uint32_t kMaxPayloadSizeBytesCollect = 80u;
@@ -150,30 +142,13 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
 
     prepareBuffers(pRenderContext, renderData);
 
-    //Distribute the vpls
-    //if (mFrameCount == 0) mResetVPLs = true;
-    //distributeVPLsPass(pRenderContext, renderData);
-    
     //Generate Photons
     generatePhotonsPass(pRenderContext, renderData);
 
     collectPhotonsPass(pRenderContext, renderData);
 
-    //Presample generated photon lights
-    //presamplePhotonLightsPass(pRenderContext, renderData);
-
     //Copy the counter for UI
     copyPhotonCounter(pRenderContext);
-
-    
-    //Prepare the surface buffer
-    //prepareSurfaceBufferPass(pRenderContext, renderData);
-
-    //Generate Candidates
-    //generateCandidatesPass(pRenderContext, renderData);
-
-    //Check candidates visibility. Only performed when !mUseVisibilityRayInline
-    //candidatesVisibilityCheckPass(pRenderContext, renderData);
 
     //Spartiotemporal Resampling
     switch (mResamplingMode) {
@@ -201,14 +176,8 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
     }
     
     //Shade the pixel
-    if (!mDebugColor) {
-        finalShadingPass(pRenderContext, renderData);
-    }
-   
-    
-    //Show the vpls as spheres for debug purposes (functions return if deactivated)
-    showVPLDebugPass(pRenderContext, renderData);
-
+    finalShadingPass(pRenderContext, renderData);
+ 
     //Copy view buffer if it is used
     if (renderData[kInViewDesc.name] != nullptr) {
         pRenderContext->copyResource(mpPrevViewTex.get(), renderData[kInViewDesc.name]->asTexture().get());
@@ -224,8 +193,6 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
 void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
-
-    changed |= widget.checkbox("Debug", mDebugColor);
 
     if (auto group = widget.group("PhotonMapper")) {
         //Dispatched Photons
@@ -244,85 +211,16 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
         changed |= widget.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
 
+        changed |= widget.var("Collect Radius", mPhotonCollectRadius);
+        widget.tooltip("Collection Radius for final gathering");
+
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
     }
 
-    if (auto group = widget.group("VPL")) {
-
-        if (auto groupInline = widget.group("Elimination")) {
-            changed |= widget.var("Max Age", mVplAgeCapCollect, 1u, (1u<<14)-1u);
-            widget.tooltip("The Maximum age a vpl is allowed to reach.");
-            changed |= widget.var("Elimination Age", mVplEliminationAge, 1u, mVplAgeCapCollect);
-            widget.tooltip("Elimination start at this vpl age");
-            changed |= widget.dropdown("Mode", kVplEliminateModes, mVplEliminationMode);
-            widget.tooltip("Mode for elimination");
-            //Switch UI for different modes
-            switch (mVplEliminationMode) {
-            case VplEliminationMode::Fixed:
-                if (mVplEliminationVar1 > 1.f) mVplEliminationVar1 = 0.3f;
-                changed |= widget.var("Fixed Elimination probability", mVplEliminationVar1, 0.f, 1.f);
-                widget.tooltip("Fixed probability a vpl is marked for replacement if Elimination age is reached");
-                break;
-            case VplEliminationMode::Power:
-                if (mVplEliminationVar1 < 1.f) mVplEliminationVar1 = 2.f;
-                changed |= widget.var("Power", mVplEliminationVar1, 1.f, FLT_MAX, 1.f);
-                widget.tooltip("Probability x = age/maxAge, Power y. x^y");
-                break;
-            case VplEliminationMode::Root:
-                if (mVplEliminationVar1 < 1.f) mVplEliminationVar1 = 2.f;
-                changed |= widget.var("Root", mVplEliminationVar1, 1.f, FLT_MAX, 1.f);
-                widget.tooltip("Probability x = age/maxAge, Root y. x^(1/y)");
-                break;
-            }
-            changed |= widget.var("Usage Elimination Frames", mVplUsageFramesUsed, 0u, 8u, 1u);
-            widget.tooltip("Number of frames used for usage elimination. 0 disables usage elimination");
-        }
-        changed |= widget.var("Radius", mVPLCollectionRadius);
-        widget.tooltip("Collection Radius for the VPLs");
-        changed |= widget.checkbox("Use BSDF sampled distribution", mDistributeVplUseBsdfSampling);
-        widget.tooltip("If enabled use bsdf sampling for distribution. If disabled cosine distribution (diffuse) is used");
-        changed |= widget.checkbox("Show VPLs", mShowVPLs);
-        if (mShowVPLs) {
-            changed |= widget.checkbox("Debug VPL Flat shading", mShowVPLsUseFlatShading);
-            widget.tooltip("Enables flat shading. Else shading based on vpl flux is used.");
-            if (mShowVPLsUseFlatShading) {
-                widget.rgbColor("Flat Shading Color", mShowVPLsUseFlatShadingColor);
-            }
-            else {
-                widget.var("Debug Scalar", mShowVPLsScalar);
-            }
-        }
-        mResetVPLs = widget.button("Redistribute VPLs");
-        changed |= mResetVPLs;
-    }
-
     if (auto group = widget.group("ReSTIR")) {
         changed |= widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
-        //UI here
-        changed |= widget.var("Initial Emissive Candidates", mNumEmissiveCandidates, 0u, 4096u);
-        widget.tooltip("Number of emissive candidates generated per iteration");
-
-        if (auto group = widget.group("Light Sampling")) {
-            bool changeCheck = mUsePdfSampling;
-            changed |= widget.checkbox("Use PDF Sampling",mUsePdfSampling);
-            if (changeCheck != mUsePdfSampling) {
-                mpGenerateCandidates.reset();
-            }
-            widget.tooltip("If enabled use a pdf texture to generate the samples. If disabled the light is sampled uniformly");
-            if (mUsePdfSampling) {
-                widget.text("Presample texture size");
-                widget.var("Title Count", mPresampledTitleSizeUI.x, 1u, 1024u);
-                widget.var("Title Size", mPresampledTitleSizeUI.y, 256u, 8192u, 256.f);
-                mPresampledTitleSizeChanged |= widget.button("Apply");
-                if (mPresampledTitleSizeChanged) {
-                    mPresampledTitleSize = mPresampledTitleSizeUI;
-                    changed |= true;
-                }
-                    
-            }
-        }
-
+        
         if (mResamplingMode > 0) {
             if (auto group = widget.group("Resamling")) {
                 mBiasCorrectionChanged |= widget.dropdown("BiasCorrection", kBiasCorrectionModeList, mBiasCorrectionMode);
@@ -354,14 +252,6 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         }
 
         if (auto group = widget.group("Misc")) {
-            bool visChanged = widget.checkbox("Use Visbility Tracing Inline", mUseVisibiltyRayInline);
-            widget.tooltip("If enabled uses inline ray tracing for the visibility ray in Candidate Generate");
-            if (visChanged) {
-                mpGenerateCandidates.reset();   //Reset the pass (Recompile shader)
-                changed = true;
-            }
-            changed |= widget.checkbox("Use Emissive Texture", mUseEmissiveTexture);
-            widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
             changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
             widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
             mReset |= widget.checkbox("Diffuse Shading Only", mUseDiffuseOnlyShading);
@@ -381,9 +271,7 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
     mFrameCount = 0;
     //Recreate RayTracing Program on Scene reset
     mPhotonGeneratePass = RayTraceProgramHelper::create();
-    mDistributeVPlsPass = RayTraceProgramHelper::create();
     mCollectPhotonsPass = RayTraceProgramHelper::create();
-    mVisibilityCheckPass = RayTraceProgramHelper::create();
 
     mpScene = pScene;
 
@@ -413,7 +301,6 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
         };
 
         initStandardRTProgram(mPhotonGeneratePass, kShaderGeneratePhoton, kMaxPayloadSizeBytes);    //Generate Photons
-        initStandardRTProgram(mDistributeVPlsPass, kShaderDistributeVPLs, kMaxPayloadSizeBytesVPL);  //Distributre VPLs
 
         //Init the raytracing collection programm
         {
@@ -443,8 +330,6 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
 
 void PhotonReSTIRFinalGathering::resetPass(bool resetScene)
 {
-    mpFillSurfaceInfoPass.reset();
-    mpGenerateCandidates.reset();
     mpTemporalResampling.reset();
     mpSpartialResampling.reset();
     mpSpartioTemporalResampling.reset();
@@ -569,66 +454,7 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
             mpPhotonLightBuffer[i]->setName("PhotonReStir::PhotonLight" + std::to_string(i));
         }
     }
-
-    //Create buffer for VPLs
-    if (!mpVPLBuffer) {
-        mpVPLBuffer = Buffer::createStructured(sizeof(uint) * 6, mNumberVPL, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                                               Buffer::CpuAccess::None, nullptr, false);
-        mpVPLBuffer->setName("PhotonReStir::VPLBuffer");
-    }
  
-    if (!mpVPLSurface) {
-        //Reuse same size as a pdf texture would use
-        uint width, height, mip;
-        computePdfTextureSize(mNumberVPL, width, height, mip);
-        mpVPLSurface = Texture::create2D(width, height, HitInfo::kDefaultFormat, 1u, 1u, nullptr,
-                                         ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpVPLSurface->setName("PhotonReSTIRFinalGathering::VplSurface");
-    }
-
-    if (!mpVplPdfBuffer) {
-        //Reuse same size as a pdf texture would use
-        uint width, height, mip;
-        computePdfTextureSize(mNumberVPL, width, height, mip);
-        mpVplPdfBuffer = Texture::create2D(width, height, ResourceFormat::R32Float, 1u, 1u, nullptr,
-                                         ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpVplPdfBuffer->setName("PhotonReSTIRFinalGathering::VplPdf");
-    }
-
-
-    //Usage buffer recording the last 8 Frames if the VPL was used
-    if (!mpVPLUsageBuffer) {
-        //Reuse same size as a pdf texture would use
-        uint width, height, mip;
-        computePdfTextureSize(mNumberVPL, width, height, mip);
-        mpVPLUsageBuffer = Texture::create2D(width, height, ResourceFormat::R8Uint, 1u, 1u, nullptr,
-                                         ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpVPLUsageBuffer->setName("PhotonReSTIRFinalGathering::VplUsageBuffer");
-    }
-
-    //Create pdf texture
-    if (mUsePdfSampling) {
-        uint width, height, mip;
-        computePdfTextureSize(mNumberVPL, width, height, mip);
-        if (!mpLightPdfTex || mpLightPdfTex->getWidth() != width || mpLightPdfTex->getHeight() != height || mpLightPdfTex->getMipCount() != mip) {
-            mpLightPdfTex = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
-                                              ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
-            mpLightPdfTex->setName("PhotonReSTIRFinalGathering::PhotonLightPdfTex");
-        }
-
-        //Create Buffer for the presampled lights
-        if (!mpPresampledLights || mPresampledTitleSizeChanged) {
-            mpPresampledLights = Buffer::createStructured(sizeof(uint2), mPresampledTitleSize.x * mPresampledTitleSize.y);
-            mpPresampledLights->setName("PhotonReSTIRFinalGathering::PresampledPhotonLights");
-            mPresampledTitleSizeChanged = false;
-        }
-    }
-    //Reset buffers if they exist
-    else {
-        if (mpLightPdfTex)mpLightPdfTex.reset();
-        if (mpPresampledLights) mpPresampledLights.reset();
-    }
-
     //Create view tex for previous frame
     if (renderData[kInViewDesc.name] != nullptr && !mpPrevViewTex) {
         auto viewTex = renderData[kInViewDesc.name]->asTexture();
@@ -642,116 +468,6 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     }
 }
 
-void PhotonReSTIRFinalGathering::prepareSurfaceBufferPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    FALCOR_PROFILE("FillSurfaceBuffer");
-
-    //init
-    if (!mpFillSurfaceInfoPass) {
-        Program::Desc desc;
-        desc.addShaderLibrary(kShaderFillSurfaceInformation).csEntry("main").setShaderModel("6_5");
-        desc.addTypeConformances(mpScene->getTypeConformances());
-
-        Program::DefineList defines;
-        defines.add(mpScene->getSceneDefines());
-        defines.add(getValidResourceDefines(kInputChannels, renderData));
-        mpFillSurfaceInfoPass = ComputePass::create(desc, defines, true);
-    }
-    FALCOR_ASSERT(mpFillSurfaceInfoPass);
-
-    //Set variables
-    auto var = mpFillSurfaceInfoPass->getRootVar();
-
-    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
-    auto bindAsTex = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData[desc.name]->asTexture();
-        }
-    };
-    bindAsTex(kInVBufferDesc);
-    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
-    var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
-    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    var[kInRayDistance.texname] = renderData[kInRayDistance.name]->asTexture();
-
-    if (mReset || mReuploadBuffers) {
-        var["Constant"]["gFrameDim"] = renderData.getDefaultTextureDims();
-    }
-
-    //Execute
-    const uint2 targetDim = renderData.getDefaultTextureDims();
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-    mpFillSurfaceInfoPass->execute(pRenderContext, uint3(targetDim, 1));
-
-    // Barrier for written buffer
-    pRenderContext->uavBarrier(mpSurfaceBuffer[mFrameCount % 2].get());
-}
-
-void PhotonReSTIRFinalGathering::distributeVPLsPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    FALCOR_PROFILE("DistributeVPLs");
-
-    if (mResetVPLs) {
-        pRenderContext->clearUAV(mpVPLBuffer->getUAV().get(), uint4(0));
-        pRenderContext->clearUAV(mpVPLUsageBuffer->getUAV().get(), uint4(0));
-        mResetVPLs = false;
-    }
-
-    //Defines
-    mDistributeVPlsPass.pProgram->addDefine("USE_BSDF_SAMPLING", mDistributeVplUseBsdfSampling ? "1" : "0");
-    if (!mDistributeVPlsPass.pVars) {
-        FALCOR_ASSERT(mDistributeVPlsPass.pProgram);
-
-        // Configure program.
-        mDistributeVPlsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
-        mDistributeVPlsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
-        mDistributeVPlsPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
-        // Create program variables for the current program.
-        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-        mDistributeVPlsPass.pVars = RtProgramVars::create(mDistributeVPlsPass.pProgram, mDistributeVPlsPass.pBindingTable);
-
-        // Bind utility classes into shared data.
-        auto var = mDistributeVPlsPass.pVars->getRootVar();
-        mpSampleGenerator->setShaderData(var);
-    };
-    FALCOR_ASSERT(mDistributeVPlsPass.pVars);
-
-    auto var = mDistributeVPlsPass.pVars->getRootVar();
-    // Set constants (uniforms).
-    // 
-    //PerFrame Constant Buffer
-    std::string nameBuf = "PerFrame";
-    var[nameBuf]["gFrameCount"] = mFrameCount;
-
-    //Upload constant buffer only if options changed
-    if (mReuploadBuffers) {
-        nameBuf = "CB";
-        var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;            //TODO make this its own variable
-        var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[nameBuf]["gMaxNumberVPL"] = mNumberVPL;
-        var[nameBuf]["gVplEliminationAge"] = mVplEliminationAge;
-        var[nameBuf]["gMaxVplAge"] = mVplAgeCapCollect;
-        var[nameBuf]["gVplAgeRemovalMode"] = mVplEliminationMode;
-        var[nameBuf]["gEliVar1"] = mVplEliminationVar1; 
-        var[nameBuf]["gUsageCheckedFrames"] = mVplUsageFramesUsed;
-    }
-
-    var["gVplUsageBuffer"] = mpVPLUsageBuffer;
-    var["gVplSurface"] = mpVPLSurface;
-    var["gVplPdf"] = mpVplPdfBuffer;
-    var["gVPLs"] = mpVPLBuffer;
-    var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
-    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-
-    uint2 targetDim = uint2(div_round_up(uint(mNumberVPL), 1024u), 1024u);
-
-    mpScene->raytrace(pRenderContext, mDistributeVPlsPass.pProgram.get(), mDistributeVPlsPass.pVars, uint3(targetDim, 1));
-
-    pRenderContext->uavBarrier(mpVPLBuffer.get());
-}
-
 void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("GeneratePhotons");
@@ -761,7 +477,6 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
 
     //Defines
     mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
-    mPhotonGeneratePass.pProgram->addDefine("USE_PDF_SAMPLING", mUsePdfSampling ? "1": "0");
 
     if (!mPhotonGeneratePass.pVars) {
         FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
@@ -796,7 +511,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
         var[nameBuf]["gRejection"] = mPhotonRejection;
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
-        var[nameBuf]["gPhotonRadius"] = mVPLCollectionRadius;
+        var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
@@ -832,7 +547,6 @@ void PhotonReSTIRFinalGathering::collectPhotonsPass(RenderContext* pRenderContex
 
     //Defines
     mCollectPhotonsPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
-    mCollectPhotonsPass.pProgram->addDefine("USE_PDF_SAMPLING", mUsePdfSampling ? "1" : "0");
 
     if (!mCollectPhotonsPass.pVars) {
         FALCOR_ASSERT(mCollectPhotonsPass.pProgram);
@@ -852,41 +566,13 @@ void PhotonReSTIRFinalGathering::collectPhotonsPass(RenderContext* pRenderContex
 
     auto var = mCollectPhotonsPass.pVars->getRootVar();
 
-    // Set constants (uniforms).
-    // 
-    //PerFrame Constant Buffer
-
-    /*
+    //Set Constant Buffers
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
 
-    //Upload constant buffer only if options changed
-    
     if (mReuploadBuffers) {
         nameBuf = "CB";
-        var[nameBuf]["gPhotonRadius"] = mVPLCollectionRadius;
-        var[nameBuf]["gMaxVPLs"] = mNumberVPL;
-        var[nameBuf]["gVplAgeCap"] = mVplAgeCapCollect;
-    }
-
-    var["gVplSurface"] = mpVPLSurface;
-    var["gVplPdf"] = mpVplPdfBuffer;
-    var["gPhotonAABB"] = mpPhotonAABB;
-    var["gPackedPhotonData"] = mpPhotonData;
-    var["gPhotonCounter"] = mpPhotonCounter;
-    var["gVPLs"] = mpVPLBuffer;
-    if (mUsePdfSampling) var["gLightPdf"] = mpLightPdfTex;
-    */
-    //TODO Debug stuff remove if done
-    
-    std::string nameBuf = "PerFrame";
-    var[nameBuf]["gFrameCount"] = mFrameCount;
-    var[nameBuf]["gWriteColor"] = mDebugColor;
-
-    if (mReuploadBuffers) {
-        nameBuf = "CB";
-        var[nameBuf]["gPhotonRadius"] = mVPLCollectionRadius;
-        var[nameBuf]["gMaxVPLs"] = mNumberVPL;
+        var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
     }
     bindReservoirs(var, mFrameCount, false);
     var["gPhotonLights"] = mpPhotonLightBuffer[mFrameCount % 2];
@@ -895,7 +581,6 @@ void PhotonReSTIRFinalGathering::collectPhotonsPass(RenderContext* pRenderContex
     var["gPhotonAABB"] = mpPhotonAABB;
     var["gPackedPhotonData"] = mpPhotonData;
     var["gPhotonCounter"] = mpPhotonCounter;
-    var["gColorOut"] = renderData[kOutColorDesc.name]->asTexture();
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInRayDistance.texname] = renderData[kInRayDistance.name]->asTexture();
 
@@ -903,174 +588,11 @@ void PhotonReSTIRFinalGathering::collectPhotonsPass(RenderContext* pRenderContex
     FALCOR_ASSERT(tlasValid);
 
     //Create dimensions based on the number of VPLs
-    uint2 targetDim = uint2(div_round_up(uint(mNumberVPL), 1024u), 1024u);
-    targetDim = renderData.getDefaultTextureDims();
+    uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     //Trace the photons
     mpScene->raytrace(pRenderContext, mCollectPhotonsPass.pProgram.get(), mCollectPhotonsPass.pVars, uint3(targetDim, 1));
-
-    //Generate mip chain
-    if (mUsePdfSampling) mpLightPdfTex->generateMips(pRenderContext);
-}
-
-void PhotonReSTIRFinalGathering::presamplePhotonLightsPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    //Check if it is enabled
-    if (!mUsePdfSampling) {
-        //Reset buffer and passes if not used
-        if (mpPresamplePhotonLightsPass) mpPresamplePhotonLightsPass.reset();
-        return;
-    }
-
-    FALCOR_PROFILE("PresamplePhotonLight");
-    if (!mpPresamplePhotonLightsPass) {
-        Program::Desc desc;
-        desc.addShaderLibrary(kShaderPresampleLights).csEntry("main").setShaderModel("6_5");
-        desc.addTypeConformances(mpScene->getTypeConformances());
-
-        Program::DefineList defines;
-        defines.add(mpScene->getSceneDefines());
-        defines.add(mpSampleGenerator->getDefines());
-        mpPresamplePhotonLightsPass = ComputePass::create(desc, defines, true);
-    }
-    FALCOR_ASSERT(mpPresamplePhotonLightsPass);
-
-    //Set variables
-    auto var = mpPresamplePhotonLightsPass->getRootVar();
-
-    var["PerFrame"]["gFrameCount"] = mFrameCount;
-
-    if (mReset || mReuploadBuffers) {
-        var["Constant"]["gPdfTexSize"] = uint2(mpLightPdfTex->getWidth(), mpLightPdfTex->getHeight());
-        var["Constant"]["gTileSizes"] = mPresampledTitleSize;
-    }
-
-    var["gLightPdf"] = mpLightPdfTex;
-    var["gPresampledLights"] = mpPresampledLights;
-
-    uint2 targetDim = mPresampledTitleSize;
-    mpPresamplePhotonLightsPass->execute(pRenderContext, uint3(targetDim, 1));
-
-    pRenderContext->uavBarrier(mpPresampledLights.get());
-}
-
-void PhotonReSTIRFinalGathering::generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    FALCOR_PROFILE("GenerateCandidates");
-
-    //Clear current reservoir
-    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
-
-    //Create pass
-    if (!mpGenerateCandidates) {
-        Program::Desc desc;
-        desc.addShaderLibrary(kShaderGenerateCandidates).csEntry("main").setShaderModel("6_5");
-        desc.addTypeConformances(mpScene->getTypeConformances());
-
-        Program::DefineList defines;
-        defines.add(mpScene->getSceneDefines());
-        defines.add(mpSampleGenerator->getDefines());
-        defines.add("USE_PRESAMPLING", mUsePdfSampling ? "1" : "0");
-        defines.add("USE_VISIBILITY_CHECK_INLINE", mUseVisibiltyRayInline ? "1" : "0");
-        if(mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
-        defines.add(getValidResourceDefines(kInputChannels, renderData));
-
-        mpGenerateCandidates = ComputePass::create(desc, defines, true);
-    }
-    FALCOR_ASSERT(mpGenerateCandidates);
-
-    //Set variables
-    auto var = mpGenerateCandidates->getRootVar();
-
-    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
-    auto bindAsTex = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData[desc.name]->asTexture();
-        }
-    };
-
-    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
-    mpSampleGenerator->setShaderData(var);          //Sample generator
-    bindReservoirs(var, mFrameCount, false);
-    var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
-    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    var["gVPLs"] = mpVPLBuffer;
-    if(mUsePdfSampling) var["gPresampledLights"] = mpPresampledLights;
-
-    //Uniform
-    std::string uniformName = "PerFrame";
-
-    var[uniformName]["gFrameCount"] = mFrameCount;
-    if (mReset || mReuploadBuffers) {
-        uniformName = "Constant";
-        var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
-        var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
-        var[uniformName]["gCosineCutoff"] = 0.001f;
-        var[uniformName]["gNumLights"] = mUsePdfSampling ? mPresampledTitleSize : uint2(mNumberVPL,0);
-        var[uniformName]["gRadius"] = mVPLCollectionRadius;
-    }
-
-    //Execute
-    const uint2 targetDim = renderData.getDefaultTextureDims();
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-    mpGenerateCandidates->execute(pRenderContext, uint3(targetDim, 1));
-
-    //Barrier for written buffer
-    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
-}
-
-void PhotonReSTIRFinalGathering::candidatesVisibilityCheckPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    if (mUseVisibiltyRayInline) {
-        //Reset everything if it was set
-        if (mVisibilityCheckPass.pProgram) {
-            mVisibilityCheckPass = RayTraceProgramHelper::create();
-        }
-        return;
-    }
-
-    //Create the program
-    if (!mVisibilityCheckPass.pProgram) {
-        RtProgram::Desc desc;
-        desc.addShaderLibrary(kShaderCandidatesVisCheck);
-        desc.setMaxPayloadSize(8u);
-        desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
-        desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
-
-        mVisibilityCheckPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-        auto& sbt = mVisibilityCheckPass.pBindingTable;
-        sbt->setRayGen(desc.addRayGen("rayGen"));
-        sbt->setMiss(0, desc.addMiss("miss"));
-        sbt->setHitGroup(0, 0, desc.addHitGroup("closestHit"));
-
-        mVisibilityCheckPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
-    }
-
-    if (!mVisibilityCheckPass.pVars) {
-        FALCOR_ASSERT(mVisibilityCheckPass.pProgram);
-
-        // Configure program.
-        mVisibilityCheckPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
-        mVisibilityCheckPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
-        // Create program variables for the current program.
-        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-        mVisibilityCheckPass.pVars = RtProgramVars::create(mVisibilityCheckPass.pProgram, mVisibilityCheckPass.pBindingTable);
-    };
-    FALCOR_ASSERT(mVisibilityCheckPass.pVars);
-    auto var = mVisibilityCheckPass.pVars->getRootVar();
-
-    var["gVPLs"] = mpVPLBuffer;
-    bindReservoirs(var, mFrameCount, false);
-    var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
-    var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-
-    uint2 targetDim = renderData.getDefaultTextureDims();
-    //Trace the photons
-    mpScene->raytrace(pRenderContext, mVisibilityCheckPass.pProgram.get(), mVisibilityCheckPass.pVars, uint3(targetDim, 1));
 }
 
 void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1123,7 +645,7 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
-        var[uniformName]["gVplRadius"] = mVPLCollectionRadius;
+        var[uniformName]["gVplRadius"] = mPhotonCollectRadius;
     }
 
     //Execute
@@ -1189,7 +711,7 @@ void PhotonReSTIRFinalGathering::spartialResampling(RenderContext* pRenderContex
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
-        var[uniformName]["gVplRadius"] = mVPLCollectionRadius;
+        var[uniformName]["gVplRadius"] = mPhotonCollectRadius;
     }
 
     //Execute
@@ -1256,7 +778,7 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gDisocclusionBoostSamples"] = mDisocclusionBoostSamples;
-        var[uniformName]["gVplRadius"] = mVPLCollectionRadius;
+        var[uniformName]["gVplRadius"] = mPhotonCollectRadius;
     }
 
     //Execute
@@ -1313,13 +835,9 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
 
     var["gVPLs"] = mpPhotonLightBuffer[reservoirIndex];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    //for (auto& inp : kInputChannels) bindAsTex(inp);
     bindAsTex(kInVBufferDesc);
     bindAsTex(kInMVecDesc);
-    //var["gPhotonCounter"] = mpPhotonCounter;
-    //var["gPhotonLights"] = mpPhotonLights;
     for (auto& out : kOutputChannels) bindAsTex(out);
-    var["gVplUsageBuffer"] = mpVPLUsageBuffer;
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -1327,9 +845,8 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
     if (mReset || mReuploadBuffers) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[uniformName]["gUseEmissiveTexture"] = mUseEmissiveTexture;
         var[uniformName]["gEnableVisRay"] = mUseFinalVisibilityRay;
-        var[uniformName]["gRadius"] = mVPLCollectionRadius;
+        var[uniformName]["gRadius"] = mPhotonCollectRadius;
     }
 
     //Execute
@@ -1338,133 +855,6 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
     mpFinalShading->execute(pRenderContext, uint3(targetDim, 1));
 }
 
-void PhotonReSTIRFinalGathering::showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    if (!mShowVPLs) {
-        //Reset all data if the buffer is active
-        if (mpShowVPLsAABBsBuffer) {
-            mpShowVPLsAABBsBuffer.reset();
-            mpShowVPLsCalcAABBsPass.reset();
-            //Clear all acceleration structure data
-            for (uint i = 0; i < mVPLDebugAS.blas.size(); i++)
-                mVPLDebugAS.blas[i].reset();
-            mVPLDebugAS.blas.clear();
-            mVPLDebugAS.blasData.clear();
-            mVPLDebugAS.instanceDesc.clear();
-            mVPLDebugAS.tlasScratch.reset();
-            mVPLDebugAS.tlas.pInstanceDescs.reset();  mVPLDebugAS.tlas.pSrv = nullptr;  mVPLDebugAS.tlas.pTlas.reset();
-            mVPLDebugPass = RayTraceProgramHelper::create();
-        }
-
-        return;
-    }
-        
-
-    FALCOR_PROFILE("ShowVPL");
-
-    //Convert Buffer pos to vpls
-
-    //Put a write barrier for the output here to be sure that the final shading shader finished writing
-    auto outTexture = renderData[kOutColorDesc.name]->asTexture();
-    pRenderContext->uavBarrier(outTexture.get());
-
-    //AABB create pass
-    {
-        //Create AABB buffer
-        if (!mpShowVPLsAABBsBuffer) {
-            mpShowVPLsAABBsBuffer = Buffer::createStructured(sizeof(D3D12_RAYTRACING_AABB), mNumberVPL);
-            mpShowVPLsAABBsBuffer->setName("PhotonReStir::VPLaabbBuffer");
-        }
-        FALCOR_ASSERT(mpShowVPLsAABBsBuffer);
-        //Create pass
-        if (!mpShowVPLsCalcAABBsPass) {
-            Program::Desc desc;
-            desc.addShaderLibrary(kShaderShowAABBVPLs).csEntry("main").setShaderModel("6_5");
-
-            Program::DefineList defines;
-
-            mpShowVPLsCalcAABBsPass = ComputePass::create(desc, defines, true);
-        }
-        FALCOR_ASSERT(mpShowVPLsCalcAABBsPass);
-
-        auto var = mpShowVPLsCalcAABBsPass->getRootVar();
-
-        var["gVPLs"] = mpVPLBuffer;
-        var["gAABBs"] = mpShowVPLsAABBsBuffer;
-
-        uint2 targetDim = uint2(1024u, div_round_up(uint(mNumberVPL), 1024u));
-
-        var["Uniform"]["gRadius"] = mVPLCollectionRadius;
-        var["Uniform"]["gNumVPLs"] = mNumberVPL;
-        var["Uniform"]["gDimY"] = targetDim.y;
-
-        mpShowVPLsCalcAABBsPass->execute(pRenderContext, uint3(targetDim, 1));
-
-        pRenderContext->uavBarrier(mpShowVPLsAABBsBuffer.get());
-    }
-    //Create the AS
-    if (!mVPLDebugAS.tlas.pTlas) {
-        mVPLDebugAS.update = true;
-        createAccelerationStructure(pRenderContext, mVPLDebugAS, 1, { mNumberVPL }, { mpShowVPLsAABBsBuffer->getGpuAddress() });
-    }
-
-    buildAccelerationStructure(pRenderContext, mVPLDebugAS, { mNumberVPL });
-
-    // Sphere Ray Trace pass
-    {
-        //Create the pass if there is none
-        if (!mVPLDebugPass.pProgram) {
-            RtProgram::Desc desc;
-            desc.addShaderLibrary(kShaderShowVPLs);
-            desc.setMaxPayloadSize(16u);
-            desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
-            desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
-
-            mVPLDebugPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-            auto& sbt = mVPLDebugPass.pBindingTable;
-            sbt->setRayGen(desc.addRayGen("rayGen"));
-            sbt->setMiss(0, desc.addMiss("miss"));
-            sbt->setHitGroup(0, 0, desc.addHitGroup("closestHit", "", "intersection"));
-
-            mVPLDebugPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
-        }
-
-        if (!mVPLDebugPass.pVars) {
-            FALCOR_ASSERT(mVPLDebugPass.pProgram);
-
-            // Configure program.
-            mVPLDebugPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
-            // Create program variables for the current program.
-            // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-            mVPLDebugPass.pVars = RtProgramVars::create(mVPLDebugPass.pProgram, mVPLDebugPass.pBindingTable);
-        };
-        FALCOR_ASSERT(mVPLDebugPass.pVars);
-
-        auto var = mVPLDebugPass.pVars->getRootVar();
-
-        // Set constants (uniforms).
-        // 
-        //PerFrame Constant Buffer
-        std::string nameBuf = "CB";
-        var[nameBuf]["gVplRadius"] = mVPLCollectionRadius;
-        var[nameBuf]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[nameBuf]["gScalar"] = mShowVPLsScalar;
-        var[nameBuf]["gUseFlatShading"] = mShowVPLsUseFlatShading;
-        var[nameBuf]["gFlatShadingColor"] = mShowVPLsUseFlatShadingColor;
-        
-        var["gVPLs"] = mpVPLBuffer;
-        var["gAABBs"] = mpShowVPLsAABBsBuffer;
-        var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
-        var["gColor"] = renderData[kOutColorDesc.name]->asTexture();
-        bool tlasValid = var["gVplAS"].setSrv(mVPLDebugAS.tlas.pSrv);
-
-        FALCOR_ASSERT(tlasValid);
-
-        uint2 targetDim = renderData.getDefaultTextureDims();
-        //Trace the photons
-        mpScene->raytrace(pRenderContext, mVPLDebugPass.pProgram.get(), mVPLDebugPass.pVars, uint3(targetDim, 1));
-    }
-}
 
 void PhotonReSTIRFinalGathering::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
 {
