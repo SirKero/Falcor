@@ -1174,7 +1174,8 @@ void PhotonReSTIRFinalGathering::spartialResampling(RenderContext* pRenderContex
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    var["gVPLs"] = mpVPLBuffer;
+    var["gVPLs"] = mpPhotonLightBuffer[mFrameCount % 2];
+    var["gVplPrev"] = mpPhotonLightBuffer[(mFrameCount + 1) % 2];
 
     var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
@@ -1239,7 +1240,8 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
     var["gPrevView"] = mpPrevViewTex;
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
-    var["gVPLs"] = mpVPLBuffer;
+    var["gVPLs"] = mpPhotonLightBuffer[mFrameCount % 2];
+    var["gVplPrev"] = mpPhotonLightBuffer[(mFrameCount + 1) % 2];
     var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
@@ -1309,7 +1311,7 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
 
     bindReservoirs(var, reservoirIndex ,false);
 
-    var["gVPLs"] = mpPhotonLightBuffer[mFrameCount % 2];
+    var["gVPLs"] = mpPhotonLightBuffer[reservoirIndex];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     //for (auto& inp : kInputChannels) bindAsTex(inp);
     bindAsTex(kInVBufferDesc);

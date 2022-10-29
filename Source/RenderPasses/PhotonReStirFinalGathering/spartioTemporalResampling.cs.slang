@@ -21,7 +21,8 @@ import VPLs;
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 
-StructuredBuffer<PackedVPL> gVPLs;
+RWStructuredBuffer<PackedVPL> gVPLs;
+StructuredBuffer<PackedVPL> gVplPrev;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -117,19 +118,17 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
 
 bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float sampleDistance){
     //Get light position
+
     if(any(vpl.flux < 0)) return false;
     
     ls.dir = vpl.posW - worldPos;
     float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
+    
+    ls.Li = luminance(vpl.flux);
 
-    float cosTheta = max(FLT_MIN, dot(vpl.normal, -ls.dir));
-    float attenuation = vplAttenuation(sampleDistance, gVplRadius);
-    float Le = luminance(vpl.flux);
-    ls.Li = Le * cosTheta * attenuation;   
-
-    return true;
+    return ls.Li > 0;   //true if sample is valid
 }
 
 //gets the target pdf averaged to one channel
@@ -148,8 +147,8 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
     float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
 
     float specular = surface.specular;
-    //float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
-    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH)/specular; //Not "right" but less noisier
+    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+    //float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH)/specular; //Not "right" but less noisier
 
     //eval brdf terms
     float diffuseBRDF = NdotL * M_1_PI;
@@ -157,7 +156,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
 
     //Mix diffuse and specular BRDF
     float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, surface.diffuseProb));
-    return brdf * ls.Li; 
+    return brdf * NdotL * ls.Li;
 #else //Diffuse shading only
     const float3 N = surface.normal;
     const float NdotL = saturate(dot(N, ls.dir));
@@ -166,7 +165,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
     float diffuseBRDF = NdotL * M_1_PI;
     diffuseBRDF /= surface.diffuseProb;
     
-    return diffuseBRDF * ls.Li; 
+    return diffuseBRDF * NdotL ls.Li; 
 #endif   
 }
 bool combineReservoir(inout Reservoir r, in Reservoir prev,float targetPDF, float rnd){
@@ -211,7 +210,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current =  Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
-        selectedVPL = VPL(gVPLs[current.lightIdx]);
+        selectedVPL = VPL(gVPLs[index2Dto1D(dTid, gFrameDim.x)]);
     }
     
     uint historyLimit = uint(gMaxAge * current.M);
@@ -308,15 +307,18 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //If neighbor surface has passed the tests get reservoir and compair them
         Reservoir sampledReservoir = Reservoir(gReservoirPrev[idx]);
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
-        
-        VPL vpl = VPL(gVPLs[sampledReservoir.lightIdx]);
+
+        bool vplValid = true;
+        VPL vpl = VPL(gVplPrev[index2Dto1D(idx,gFrameDim.x)]);
         if(!vpl.valid || vpl.replaced){
-            continue;
+            sampledReservoir.weightSum = 0;
+            sampledReservoir.M = 0;
+            vplValid = false;
         }
                 
         //Get neightbor light target PDF for current surface
         float sampleTargetPdf = 0.f;
-        if (sampledReservoir.M > 0)
+        if (sampledReservoir.M > 0 && vplValid)
         {
             cachedResults |= (1u << i);
             LightSample ls = { };
@@ -394,4 +396,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif //BIAS MODE BASIC
     
     gReservoir[dTid] = r.pack();
+    gVPLs[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }

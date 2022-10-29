@@ -114,7 +114,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float distance = 0;
     float3 toLight = { };
     float3 Li = { };
-    getEmissiveLight(r.lightIdx,sd.posW ,distance , toLight, Li);
+    getEmissiveLight(index2Dto1D(dTid, gFrameDim.x),sd.posW ,distance , toLight, Li);
     Li = max(0.f, Li * r.weightSum);
 
     ///Get vpl feedbackbuffer

@@ -150,7 +150,7 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
     float diffuseBRDF = NdotL * M_1_PI;
     diffuseBRDF /= surface.diffuseProb;
     
-    return diffuseBRDF * ls.Li; 
+    return diffuseBRDF * NdotL ls.Li; 
 #endif   
 }
 
@@ -195,7 +195,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current = Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
-        selectedVPL = VPL(gVPLs[current.lightIdx]);
+        selectedVPL = VPL(gVPLs[index2Dto1D(dTid, gFrameDim.x)]);
     }
 
     uint historyLimit = gMaxAge * current.M;
@@ -250,7 +250,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         previousM = prev.M;
 
         bool vplValid = true;
-        VPL vpl = VPL(gVplPrev[prev.lightIdx]);
+        VPL vpl = VPL(gVplPrev[index2Dto1D(idx,gFrameDim.x)]);
         //Kill the reservoir if the vpl is no longer valid or was replaced
         if(!vpl.valid | vpl.replaced){
             prev.weightSum = 0;
