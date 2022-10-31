@@ -36,10 +36,12 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ShaderSource Include="collectFinalGatherPhotons.rt.slang" />
     <ShaderSource Include="generateFinalGatheringCandidates.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="generatePhotons.rt.slang" />
+    <ShaderSource Include="getFinalGatherHits.rt.slang" />
     <ShaderSource Include="Reservoir.slang" />
     <ShaderSource Include="spartialResampling.cs.slang" />
     <ShaderSource Include="spartioTemporalResampling.cs.slang" />

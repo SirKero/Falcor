@@ -127,11 +127,19 @@ private:
     */
     void prepareBuffers(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Trace Scene for final gather hit
+    */
+    void getFinalGatherHitPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Generate Photon lights
     */
     void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    /** Collects the photons in the vpls
+    /** Collect Photons at the final gather hit
+    */
+    void collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData);
+
+    /** Trace scene for final gather hit and collect the photons
     */
     void collectPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -150,10 +158,6 @@ private:
     /** Uses the reservoir to shade the pixel
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
-
-    /** Pass for showing the VPLs 
-    */
-    void showVPLDebugPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     /* Fills the neighbor offset buffer with psyeudo random numbers
     */
@@ -259,7 +263,9 @@ private:
     Buffer::SharedPtr mpPhotonData;              //Additional Photon data (flux, dir)
     Buffer::SharedPtr mpPhotonCounter;     //Counter for the number of lights
     Buffer::SharedPtr mpPhotonCounterCPU;  //For showing the current number of photons in the UI
-    Texture::SharedPtr mpPrevViewTex;                   //If view texture is used, we store the last frame here
+    Texture::SharedPtr mpPrevViewTex;      //If view texture is used, we store the last frame here
+    Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
+    Texture::SharedPtr mpFinalGatherExtraInfo;    //Incoming Direction for the final gather hit
 
     //
     //Ray tracing programms and helper
@@ -282,6 +288,8 @@ private:
 
     RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass
     RayTraceProgramHelper mCollectPhotonsPass;          ///<Description for collecting the photons
+    RayTraceProgramHelper mGetFinalGatherHitPass;     ///<Description for getting the first diffuse hit
+    RayTraceProgramHelper mGeneratePMCandidatesPass;    ///<Description for the 1 SPP Photon Mapper used in ReSTIR
 
     SphereAccelerationStructure mPhotonAS;
 };

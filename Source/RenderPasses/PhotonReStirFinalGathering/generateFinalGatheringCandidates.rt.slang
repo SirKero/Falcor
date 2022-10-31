@@ -63,7 +63,7 @@ struct RayData
 struct TraceData{
     PackedHitInfo packedHitInfo;  //< Reflection albedo of the current hit point
     uint   packedNormal;   ///< Face normal encoded in 16 bit polar coordinates
-    bool diffuseHit;
+    float pDiffuseRef;
     float  distance;            ///< 
     uint _pad;
 
@@ -78,7 +78,7 @@ struct TraceData{
         d.packedHitInfo = {};
         d.packedNormal = 0;
         d.distance = -1;
-        d.diffuseHit = false;
+        d.pDiffuseRef = 0.f;
         return d;
     }
 }
@@ -153,7 +153,7 @@ void closestHitDebug(inout TraceData rayData : SV_RayPayload, BuiltInTriangleInt
     if(diffuseHit){
         rayData.distance = RayTCurrent();
         rayData.packedNormal = encodeNormal2x16(sd.N);
-        rayData.diffuseHit = diffuseHit;
+        rayData.pDiffuseRef = pDiffuseRef;
         rayData.packedHitInfo = HitInfo(triangleHit).getData();
     }else{
         rayData.distance = -1.f;
@@ -168,15 +168,14 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     //Get Photon data
     PhotonData pd = PhotonData(gPackedPhotonData[primIndex]);
     //Evaluate diffuse BRDF
-    float weight = 1 - attribs.distance * attribs.distance;
     if(dot(pd.normal, normal) < 0.6){
-        weight = 0;
+        return;
     }
     const float NdotL = saturate(dot(normal, pd.dir));
     const float3 diffuseBrdf =  rayData.diffuseReflectance * NdotL * M_1_PI;
    
     //weight = 1.f;
-    rayData.radiance += weight * diffuseBrdf * pd.flux;
+    rayData.radiance += diffuseBrdf * pd.flux;
 }
 
 //Checks if the ray start point is inside the sphere.
@@ -317,21 +316,12 @@ void rayGen()
     
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
     float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius);    //Get new flux
-    //Get diffuse probability as we ignore all specular parts
-    float diffProb = luminance(pmbsdfProperties.diffuseReflectionAlbedo);
-    float NdotV = saturate(dot(sd.N, sd.V));
-    float ggxAlpha = pmbsdfProperties.roughness * pmbsdfProperties.roughness;
-    float3 specularReflectance = approxSpecularIntegralGGX(pmbsdfProperties.specularReflectance, ggxAlpha, NdotV);
-    float specProb = luminance(specularReflectance);
-
-    float diffFactor = (diffProb + specProb) / diffProb;
-    radiance *= diffFactor;
-
+  
     //ReSTIR Candidate
     LightSample ls = {};
     ls.lightIdx = index2Dto1D(launchIndex, launchDim.x);
     ls.Li = luminance(radiance);
-    ls.invSelectPdf = 1.f/bsdfSample.pdf;
+    ls.invSelectPdf = 1.f/(bsdfSample.pdf * traceData.pDiffuseRef);
 
     targetPdf *= ls.Li;
 
@@ -339,7 +329,7 @@ void rayGen()
 
     if (valid)
     {
-        r.updateReservoir(ls.lightIdx, ls.invSelectPdf, targetPdf, sampleNext1D(traceData.sg)); //Add the candidate
+        r.updateReservoir(ls.lightIdx, ls.invSelectPdf, targetPdf, 0.5f /*random*/); //Add the candidate
         r.finalizeSample(1.f, 1.f);
     }
     
