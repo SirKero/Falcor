@@ -101,25 +101,6 @@ uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
 }
 
-bool updateReservoir(inout Reservoir r, in LightSample ls,float targetPdf, float rnd){
-    float risWeight = targetPdf * ls.invSelectPdf;
-    r.weightSum += risWeight;
-    r.M += 1;
-    bool selectSample = (rnd * r.weightSum < risWeight);
-    
-    if(selectSample){
-        r.lightIdx = ls.lightIdx;
-        r.targetPdf = targetPdf;
-    }
-    return selectSample;
-}
-
-void finalizeSample(inout Reservoir r, float normalizationNumerator, float normalizationDenominator){
-    float denominator = r.targetPdf * normalizationDenominator;
-
-    r.weightSum = denominator > 0 ? (r.weightSum * normalizationNumerator) / denominator : 0.f;
-}
-
 //Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
@@ -258,44 +239,6 @@ float evalWeight(in ShadingData sd, float pDiffuse, float specular, float surfac
     return brdf; 
 }
 
-//gets the target pdf averaged to one channel
-float getSurfacePdf(in Surface surface, float3 toLight)
-{
-#ifndef DIFFUSE_SHADING_ONLY
-    const float3 N = surface.normal;
-    const float3 H = normalize(surface.viewDir + toLight);
-    const float NdotV = saturate(dot(N, surface.viewDir));
-    const float NdotL = saturate(dot(N, toLight));
-    const float NdotH = saturate(dot(N, H));
-    const float LdotH = saturate(dot(toLight, H));
-
-    //BRDF terms for target function (DGF Microfaset BRDF)
-    const float roughness = surface.roughness;
-    float D = evalNdfGGX(roughness * roughness, NdotH);
-    float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
-
-    float specular = surface.specular;
-    float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
-    //float F = specular < 1e-8f ? 0.f : evalFresnelSchlick(specular, 1.f, LdotH) / specular; //Not "right" but less noisier
-
-    //eval brdf terms
-    float diffuseBRDF = NdotL * M_1_PI;
-    float specularBRDF = D * G * F / (4.f * NdotV);
-
-    //Mix diffuse and specular BRDF
-    float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, surface.diffuseProb));
-    return brdf * NdotL;
-#else //Diffuse shading only
-    const float3 N = surface.normal;
-    const float NdotL = saturate(dot(N, ls.dir));
-
-    //Eval BSDF
-    float diffuseBRDF = NdotL * M_1_PI;
-    diffuseBRDF /= surface.diffuseProb;
-    
-    return diffuseBRDF * ls.Li; 
-#endif   
-}
 
 [shader("raygeneration")]
 void rayGen()
@@ -325,8 +268,7 @@ void rayGen()
                                       luminance(bsdfProperties.diffuseReflectionAlbedo), luminance(bsdfProperties.specularReflectance));
 
 
-    
-    float targetPdf = getSurfacePdf(surface, bsdfSample.wo);
+    float targetPdf = surface.getPdf(bsdfSample.wo);
     
     //float weight;
     
@@ -375,7 +317,6 @@ void rayGen()
     
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
     float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius);    //Get new flux
-    //radiance *= 0.008;   //TODO: Remove this factor
     //Get diffuse probability as we ignore all specular parts
     float diffProb = luminance(pmbsdfProperties.diffuseReflectionAlbedo);
     float NdotV = saturate(dot(sd.N, sd.V));
@@ -398,8 +339,8 @@ void rayGen()
 
     if (valid)
     {
-        updateReservoir(r, ls, targetPdf, sampleNext1D(traceData.sg)); //Add the candidate
-        finalizeSample(r, 1.f, 1.f);
+        r.updateReservoir(ls.lightIdx, ls.invSelectPdf, targetPdf, sampleNext1D(traceData.sg)); //Add the candidate
+        r.finalizeSample(1.f, 1.f);
     }
     
     //Create the light
