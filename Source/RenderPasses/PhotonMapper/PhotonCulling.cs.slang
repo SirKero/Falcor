@@ -26,7 +26,7 @@ RWTexture2D<uint> gHashBuffer;
 void getArrayOfCells(float3 position, out int3 outCells[8]){
     float3 cell = (position.xyz * gHashScaleFactor);
     float3 cellFloor = floor(cell);
-    cell = cell - cellFloor;
+    cell = abs(cell - cellFloor);
     //Get offset direction
     int3 offsetCell;
     offsetCell.x = cell.x < 0.5 ? -1 : 1;
