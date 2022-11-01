@@ -113,7 +113,7 @@ uint ReSTIR_IntegerExplode(uint x)
 }
 
 // Reverse of ReSTIR_IntegerExplode, i.e. takes every other bit in the integer and compresses
-// those bits into a dense bit firld. Takes 32-bit inputs, produces 16-bit outputs.
+// those bits into a dense bit field. Takes 32-bit inputs, produces 16-bit outputs.
 //    For example, 0b'abcdefgh' -> 0b'0000bdfh'
 uint ReSTIR_IntegerCompact(uint x)
 {

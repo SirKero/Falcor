@@ -139,9 +139,9 @@ private:
     */
     void collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData);
 
-    /** Trace scene for final gather hit and collect the photons
+    /** Distributes and collects photons for the final gather hit in one pass
     */
-    void collectPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void distributeAndCollectFinalGatherPhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Uses temporal resampling to combine the reservoir with the reservoir of the previous frame
     */
@@ -232,7 +232,10 @@ private:
     float mPhotonCollectRadius = 0.05f;     //Radius for collection
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
-    
+    //Photon Culling
+    bool mUsePhotonCulling = true;
+    uint mCullingHashBufferSizeBits = 20;   //Determines the size of the buffer 2^x.
+    bool mPhotonCullingRebuildBuffer = false;   //Rebuilds buffer if size was changed
   
 
     //Runtime
@@ -266,6 +269,7 @@ private:
     Texture::SharedPtr mpPrevViewTex;      //If view texture is used, we store the last frame here
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpFinalGatherExtraInfo;    //Incoming Direction for the final gather hit
+    Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
 
     //
     //Ray tracing programms and helper
@@ -287,7 +291,7 @@ private:
     };
 
     RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass
-    RayTraceProgramHelper mCollectPhotonsPass;          ///<Description for collecting the photons
+    RayTraceProgramHelper mDistributeAndCollectFinalGatherPointsPass;          ///<Distribution and collection of the final gather points in one pass
     RayTraceProgramHelper mGetFinalGatherHitPass;     ///<Description for getting the first diffuse hit
     RayTraceProgramHelper mGeneratePMCandidatesPass;    ///<Description for the 1 SPP Photon Mapper used in ReSTIR
 

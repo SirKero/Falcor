@@ -43,6 +43,9 @@
     <ShaderSource Include="collectFinalGatherPhotons.rt.slang">
       <Filter>Shader\Photon</Filter>
     </ShaderSource>
+    <ShaderSource Include="Hash.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shader">

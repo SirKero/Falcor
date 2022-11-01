@@ -42,6 +42,7 @@
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="generatePhotons.rt.slang" />
     <ShaderSource Include="getFinalGatherHits.rt.slang" />
+    <ShaderSource Include="Hash.slang" />
     <ShaderSource Include="Reservoir.slang" />
     <ShaderSource Include="spartialResampling.cs.slang" />
     <ShaderSource Include="spartioTemporalResampling.cs.slang" />

@@ -150,7 +150,7 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
     //Generate the first candidate with Final Gather photon mapping
     collectFinalGatherHitPhotons(pRenderContext, renderData);
 
-    //collectPhotonsPass(pRenderContext, renderData);
+    //distributeAndCollectFinalGatherPhotonPass(pRenderContext, renderData);
 
     //Copy the counter for UI
     copyPhotonCounter(pRenderContext);
@@ -219,6 +219,14 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         changed |= widget.var("Collect Radius", mPhotonCollectRadius);
         widget.tooltip("Collection Radius for final gathering");
 
+        changed |= widget.checkbox("Use Photon Culling", mUsePhotonCulling);
+        widget.tooltip("Enabled culling of photon based on a hash grid. Photons are only stored on cells that are collected");
+        if (mUsePhotonCulling) {
+            mPhotonCullingRebuildBuffer = widget.var("Culling Size Bytes", mCullingHashBufferSizeBits, 10u, 27u);
+            widget.tooltip("Size of the culling buffer (2^x) and effective hash bytes used");
+            changed |= mPhotonCullingRebuildBuffer;
+        } 
+
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
     }
@@ -276,7 +284,7 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
     mFrameCount = 0;
     //Recreate RayTracing Program on Scene reset
     mPhotonGeneratePass = RayTraceProgramHelper::create();
-    mCollectPhotonsPass = RayTraceProgramHelper::create();
+    mDistributeAndCollectFinalGatherPointsPass = RayTraceProgramHelper::create();
 
     mpScene = pScene;
 
@@ -337,16 +345,16 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
             desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
 
             //Scene geometry count is needed as the scene acceleration struture bound with the scene defines
-            mCollectPhotonsPass.pBindingTable = RtBindingTable::create(2, 2, mpScene->getGeometryCount());
-            //mCollectPhotonsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-            auto& sbt = mCollectPhotonsPass.pBindingTable;
+            mDistributeAndCollectFinalGatherPointsPass.pBindingTable = RtBindingTable::create(2, 2, mpScene->getGeometryCount());
+            //mDistributeAndCollectFinalGatherPointsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+            auto& sbt = mDistributeAndCollectFinalGatherPointsPass.pBindingTable;
             sbt->setRayGen(desc.addRayGen("rayGen"));
             sbt->setMiss(0, desc.addMiss("miss"));
             sbt->setHitGroup(0, 0, desc.addHitGroup("", "anyHit", "intersection"));
             sbt->setMiss(1, desc.addMiss("missDebug"));
             sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHitDebug"));
             
-            mCollectPhotonsPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+            mDistributeAndCollectFinalGatherPointsPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
         }
     }
 
@@ -506,13 +514,34 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     if (!mpSampleGenerator) {
         mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
     }
+
+    //Photon Culling
+    if (mUsePhotonCulling && (!mpPhotonCullingMask || mPhotonCullingRebuildBuffer)) {
+        uint sizeCullingBuffer = 1 << mCullingHashBufferSizeBits;
+        uint width, height, mipLevel;
+        computePdfTextureSize(sizeCullingBuffer, width, height, mipLevel);
+        mpPhotonCullingMask = Texture::create2D(width, height, ResourceFormat::R8Uint, 1, 1,
+                                                nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpPhotonCullingMask->setName("PhotonReStir::PhotonCullingMask");
+    }
+
+    //Destroy culling buffer if photon culling is disabled
+    if (!mUsePhotonCulling && mpPhotonCullingMask)
+        mpPhotonCullingMask.reset();
+
 }
 
 void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("GetFinalGatheringHit");
 
+    //Clear the buffer if photon culling is used
+    if (mUsePhotonCulling) {
+        pRenderContext->clearUAV(mpPhotonCullingMask->getUAV().get(), uint4(0));
+    }
+
     //Defines
+    mGetFinalGatherHitPass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
 
     if (!mGetFinalGatherHitPass.pVars) {
         FALCOR_ASSERT(mGetFinalGatherHitPass.pProgram);
@@ -536,6 +565,10 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
 
+    nameBuf = "Constant";
+    var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius);
+    var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
+
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();
     var["gLinZ"] = renderData[kInRayDistance.name]->asTexture();
@@ -543,6 +576,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gFinalGatherExtraInfo"] = mpFinalGatherExtraInfo;
+    var["gPhotonCullingMask"] = mpPhotonCullingMask;
 
     //Create dimensions based on the number of VPLs
     uint2 targetDim = renderData.getDefaultTextureDims();
@@ -561,6 +595,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
 
     //Defines
     mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mPhotonGeneratePass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
 
     if (!mPhotonGeneratePass.pVars) {
         FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
@@ -596,6 +631,8 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
         var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
+        var[nameBuf]["gHashScaleFactor"] = 1.f/(2 * mPhotonCollectRadius);  //Hash scale factor. 1/diameter
+        var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
@@ -603,6 +640,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     var["gPhotonAABB"] = mpPhotonAABB;
     var["gPackedPhotonData"] = mpPhotonData;
     var["gPhotonCounter"] = mpPhotonCounter;
+    var["gPhotonCullingMask"] = mpPhotonCullingMask;
 
     // Get dimensions of ray dispatch.
     const uint2 targetDim = uint2(mNumDispatchedPhotons/mPhotonYExtent, mPhotonYExtent);
@@ -680,30 +718,30 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }
 
-void PhotonReSTIRFinalGathering::collectPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
+void PhotonReSTIRFinalGathering::distributeAndCollectFinalGatherPhotonPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("CollectPhotons");
 
     //Defines
-    mCollectPhotonsPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mDistributeAndCollectFinalGatherPointsPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
 
-    if (!mCollectPhotonsPass.pVars) {
-        FALCOR_ASSERT(mCollectPhotonsPass.pProgram);
+    if (!mDistributeAndCollectFinalGatherPointsPass.pVars) {
+        FALCOR_ASSERT(mDistributeAndCollectFinalGatherPointsPass.pProgram);
 
         // Configure program.
-        mCollectPhotonsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
-        mCollectPhotonsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        mDistributeAndCollectFinalGatherPointsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
+        mDistributeAndCollectFinalGatherPointsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
         // Create program variables for the current program.
         // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-        mCollectPhotonsPass.pVars = RtProgramVars::create(mCollectPhotonsPass.pProgram, mCollectPhotonsPass.pBindingTable);
+        mDistributeAndCollectFinalGatherPointsPass.pVars = RtProgramVars::create(mDistributeAndCollectFinalGatherPointsPass.pProgram, mDistributeAndCollectFinalGatherPointsPass.pBindingTable);
 
         // Bind utility classes into shared data.
-        auto var = mCollectPhotonsPass.pVars->getRootVar();
+        auto var = mDistributeAndCollectFinalGatherPointsPass.pVars->getRootVar();
         mpSampleGenerator->setShaderData(var);
     };
-    FALCOR_ASSERT(mCollectPhotonsPass.pVars);
+    FALCOR_ASSERT(mDistributeAndCollectFinalGatherPointsPass.pVars);
 
-    auto var = mCollectPhotonsPass.pVars->getRootVar();
+    auto var = mDistributeAndCollectFinalGatherPointsPass.pVars->getRootVar();
 
     //Set Constant Buffers
     std::string nameBuf = "PerFrame";
@@ -731,7 +769,7 @@ void PhotonReSTIRFinalGathering::collectPhotonsPass(RenderContext* pRenderContex
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     //Trace the photons
-    mpScene->raytrace(pRenderContext, mCollectPhotonsPass.pProgram.get(), mCollectPhotonsPass.pVars, uint3(targetDim, 1));
+    mpScene->raytrace(pRenderContext, mDistributeAndCollectFinalGatherPointsPass.pProgram.get(), mDistributeAndCollectFinalGatherPointsPass.pVars, uint3(targetDim, 1));
 
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());

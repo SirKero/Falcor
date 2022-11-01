@@ -17,12 +17,17 @@ import Utils.Color.ColorHelpers;
 import Reservoir;
 import VPLs;
 import SurfaceData;
+import Hash;
 
 cbuffer PerFrame
 {
     uint gFrameCount;       // Frame count since scene was loaded.
 }
 
+cbuffer Constant{
+    float gHashScaleFactor; //Hash scale factor. 1/diameter
+    uint gHashSize;     //Size is always 2^x
+}
 
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
@@ -33,6 +38,9 @@ Texture2D <float>gLinZ;
 RWStructuredBuffer<PackedSurfaceData> gSurfaceData;
 RWTexture2D<PackedHitInfo> gFinalGatherHit;
 RWTexture2D<uint2> gFinalGatherExtraInfo;
+RWTexture2D<uint> gPhotonCullingMask;
+
+static const bool kUsePhotonCulling = USE_PHOTON_CULLING;
 
 struct TraceData{
     PackedHitInfo packedHitInfo;  //< Reflection albedo of the current hit point
@@ -85,6 +93,40 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     adjustShadingNormal(sd, v);
     
     return sd;
+}
+
+void cullingGetArrayOfCells(float3 position, out int3 outCells[8]){
+    float3 cell = (position.xyz * gHashScaleFactor);
+    float3 cellFloor = floor(cell);
+    cell = abs(cell - cellFloor);
+    //Get offset direction
+    int3 offsetCell;
+    offsetCell.x = cell.x < 0.5 ? -1 : 1;
+    offsetCell.y = cell.y < 0.5 ? -1 : 1;
+    offsetCell.z = cell.z < 0.5 ? -1 : 1;
+
+    //Fill the cell array
+    outCells[0] = int3(cellFloor);
+    outCells[1] = outCells[0] + int3(offsetCell.x, 0 ,0);
+    outCells[2] = outCells[0] + int3(offsetCell.x, offsetCell.y ,0);
+    outCells[3] = outCells[0] + int3(offsetCell.x, offsetCell.y ,offsetCell.z);
+    outCells[4] = outCells[0] + int3(offsetCell.x, 0 ,offsetCell.z);
+    outCells[5] = outCells[0] + int3(0, offsetCell.y ,0);
+    outCells[6] = outCells[0] + int3(0, offsetCell.y ,offsetCell.z);
+    outCells[7] = outCells[0] + int3(0, 0 ,offsetCell.z);
+}
+
+void photonCulling(float3 hitPos){
+    //Get the 7 nearest neighbors (photon can still be in it)
+    int3 cells[8];
+    cullingGetArrayOfCells(hitPos, cells);
+
+    //Insert them into the hash buffer
+    [unroll]
+    for(uint i=0; i<8; i++){
+        uint h = hash(cells[i]) & (gHashSize - 1);    //calculateHash TODO: Test other hashes
+        gPhotonCullingMask[ReSTIR_LinearIndexToZCurve(h)] = 1;
+    }
 }
 
 [shader("miss")]
@@ -188,7 +230,12 @@ void rayGen()
     float selectPdf = bsdfSample.pdf * traceData.pDiffuseRef;
 
     uint2 extraInfoPacked = uint2((f32tof16(targetPdf) << 16) | f32tof16(selectPdf), encodeNormal2x16(bsdfSample.wo));
-    
+
+    if(kUsePhotonCulling){
+        float3 cullingPos = tRay.Origin + tRay.Direction * traceData.distance;
+        photonCulling(cullingPos);
+    }
+        
     //Store data in buffers
     gFinalGatherHit[launchIndex] = traceData.packedHitInfo;
     gFinalGatherExtraInfo[launchIndex] = extraInfoPacked;
