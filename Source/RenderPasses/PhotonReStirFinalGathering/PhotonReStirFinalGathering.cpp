@@ -566,6 +566,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var[nameBuf]["gFrameCount"] = mFrameCount;
 
     nameBuf = "Constant";
+    var[nameBuf]["gCollectionRadius"] = mPhotonCollectRadius;
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius);
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
 
@@ -666,6 +667,8 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
 void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("CollectPhotons");
+    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
 
     //Defines
     mGeneratePMCandidatesPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));

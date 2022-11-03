@@ -25,6 +25,7 @@ cbuffer PerFrame
 }
 
 cbuffer Constant{
+    float gCollectionRadius;
     float gHashScaleFactor; //Hash scale factor. 1/diameter
     uint gHashSize;     //Size is always 2^x
 }
@@ -232,10 +233,10 @@ void rayGen()
     uint2 extraInfoPacked = uint2((f32tof16(targetPdf) << 16) | f32tof16(selectPdf), encodeNormal2x16(bsdfSample.wo));
 
     if(kUsePhotonCulling){
-        float3 cullingPos = tRay.Origin + tRay.Direction * traceData.distance;
-        photonCulling(cullingPos);
+        float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
+        photonCulling(hitPos);
     }
-        
+         
     //Store data in buffers
     gFinalGatherHit[launchIndex] = traceData.packedHitInfo;
     gFinalGatherExtraInfo[launchIndex] = extraInfoPacked;
