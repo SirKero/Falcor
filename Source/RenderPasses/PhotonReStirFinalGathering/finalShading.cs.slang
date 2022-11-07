@@ -18,7 +18,7 @@ import VPLs;
 
 Texture2D<uint4> gReservoir;
 
-StructuredBuffer<PackedVPL> gVPLs;
+StructuredBuffer<PackedVPL> gVpls;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
@@ -63,7 +63,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 
 void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
     //Get light position
-    VPL vpl = VPL(gVPLs[idx]);
+    VPL vpl = VPL(gVpls[idx]);
     
     toLight = vpl.posW - worldPos;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below

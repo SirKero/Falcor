@@ -110,6 +110,14 @@ private:
         TLASData tlas;
     };
 
+    enum class CurrentPass {
+        GenerateAdditional,
+        Resampling,
+        SpartialResampling,
+        FinalShading,
+        FinalShadingNoResampling
+    };
+
     PhotonReSTIRFinalGathering() : RenderPass(kInfo) {}
 
     /** Resets the pass
@@ -143,6 +151,10 @@ private:
     */
     void distributeAndCollectFinalGatherPhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Uses sampled points to genererate additional candidates
+    */
+    void generateAdditionalCandidates(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Uses temporal resampling to combine the reservoir with the reservoir of the previous frame
     */
     void temporalResampling(RenderContext* pRenderContext, const RenderData& renderData);
@@ -170,6 +182,10 @@ private:
     /** Binds all the reservoirs
     */
     void bindReservoirs(ShaderVar& var, uint index , bool bindPrev = true);
+
+    /** Bindes the vpls depending on the pass
+    */
+    void bindVpls(ShaderVar& var, uint index, CurrentPass pass);
 
     /** Gets PDF texture size.
     */
@@ -209,6 +225,7 @@ private:
     //
     //Resampling
     uint mResamplingMode = ResamplingMode::NoResampling;        //Resample Mode
+    uint mInitialCandidates = 1;            // Number of initial candidates per pixel
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
@@ -252,13 +269,14 @@ private:
     EmissiveLightSampler::SharedPtr mpEmissiveLightSampler;     //EmissiveLightSampler for Photon generation
 
     //Compute Passes
+    ComputePass::SharedPtr mpGenerateAdditionalCandidates;  //Generates additional candidates
     ComputePass::SharedPtr mpTemporalResampling;            //Temporal Resampling Pass
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
     ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
 
     //Buffer
-    Buffer::SharedPtr mpPhotonLightBuffer[2];
+    Buffer::SharedPtr mpPhotonLightBuffer[3];
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets

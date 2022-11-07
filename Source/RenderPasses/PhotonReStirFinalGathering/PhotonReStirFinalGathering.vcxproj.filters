@@ -46,6 +46,9 @@
     <ShaderSource Include="Hash.slang">
       <Filter>Shader\Structs</Filter>
     </ShaderSource>
+    <ShaderSource Include="generateAdditionalCandidates.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shader">

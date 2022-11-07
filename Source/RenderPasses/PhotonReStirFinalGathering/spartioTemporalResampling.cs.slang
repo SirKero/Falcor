@@ -21,7 +21,8 @@ import VPLs;
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 
-RWStructuredBuffer<PackedVPL> gVPLs;
+StructuredBuffer<PackedVPL> gVpls;
+RWStructuredBuffer<PackedVPL> gVplsWrite;
 StructuredBuffer<PackedVPL> gVplPrev;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
@@ -147,7 +148,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current =  Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
-        selectedVPL = VPL(gVPLs[index2Dto1D(dTid, gFrameDim.x)]);
+        selectedVPL = VPL(gVpls[index2Dto1D(dTid, gFrameDim.x)]);
     }
     
     uint historyLimit = uint(gMaxAge * current.M);
@@ -341,5 +342,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif //BIAS MODE BASIC
     
     gReservoir[dTid] = r.pack();
-    gVPLs[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
+    gVplsWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }
