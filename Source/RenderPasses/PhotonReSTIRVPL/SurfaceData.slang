@@ -1,5 +1,9 @@
 import Utils.Math.PackedFormats;
 import Utils.Math.FormatConversion;
+import Rendering.Materials.Microfacet;
+import Rendering.Materials.Fresnel;
+
+#include "Utils/Math/MathConstants.slangh"
 
 /** Structs for the surface data. After the same principle of RTXDI Surface data
   * Reduces the amount of data and calculation that is needed in generation and resampling step. Especially if bias correction is enabled
@@ -95,5 +99,42 @@ struct Surface{
         packed.data2.y = packedWeights;
 
         return packed;
+    }
+
+    //Gets the one channel average target pdf for Resampling
+    float getPdf(const float3 toLight, const float Li = 1.f){
+        const float3 N = normal;
+        const float3 H = normalize(viewDir + toLight);
+        const float NdotV = saturate(dot(N, viewDir));
+        const float NdotL = saturate(dot(N, toLight));
+        const float NdotH = saturate(dot(N, H));
+        const float LdotH = saturate(dot(toLight, H));
+
+        //BRDF terms for target function (DGF Microfaset BRDF)
+        float D = evalNdfGGX(roughness * roughness, NdotH);
+        float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
+
+        float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+        //float F = specular < 1e-8f ? 0.f : evalFresnelSchlick(specular, 1.f, LdotH) / specular; //Not "right" but less noisier
+
+        //eval brdf terms
+        float diffuseBRDF = NdotL * M_1_PI;
+        float specularBRDF = D * G * F / (4.f * NdotV);
+
+        //Mix diffuse and specular BRDF
+        float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, diffuseProb));
+        return brdf * NdotL * Li;
+    }
+
+    //Gets the one channel average diffuse target pdf for Resampling
+    float getDiffusePdf(const float3 toLight, const float Li = 1.f){
+        const float3 N = normal;
+        const float NdotL = saturate(dot(N, toLight));
+
+        //Eval BSDF
+        float diffuseBRDF = NdotL * M_1_PI;
+        diffuseBRDF /= diffuseProb;
+    
+        return diffuseBRDF * NdotL * Li; 
     }
 };

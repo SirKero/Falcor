@@ -256,7 +256,7 @@ private:
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
     //VPL
-    uint mNumberVPL = 28000;                //Number of VPL lights
+    uint mNumberVPL = 28000;                //Number of VPL lights 28000
     float mVPLCollectionRadius = 0.05f;
     bool mShowVPLs = true;
     bool mShowVPLsUseFlatShading = true;                    //Enable a flat shading for debug vpls 

@@ -977,6 +977,7 @@ void PhotonReSTIRVPL::generateCandidatesPass(RenderContext* pRenderContext, cons
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gVPLs"] = mpVPLBuffer;
+    var["gVplPdf"] = mpVplPdfBuffer;
     if(mUsePdfSampling) var["gPresampledLights"] = mpPresampledLights;
 
     //Uniform

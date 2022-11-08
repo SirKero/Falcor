@@ -97,13 +97,13 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     float weight = 1 - (attribs.distance * attribs.distance / (gPhotonRadius * gPhotonRadius));   //TODO:Weight total is needed in this case
     //float weight = 1.f;
     if(dot(pd.normal, normal) < 0.6){
-        weight = 0;
+        return;
     }
     const float NdotL = saturate(dot(normal, pd.dir));
     const float3 diffuseBrdf =  rayData.diffuseReflectance *NdotL * M_1_PI;
    
     rayData.weightSum += weight;
-    rayData.radiance += weight * pd.flux * diffuseBrdf;
+    rayData.radiance += pd.flux * diffuseBrdf;
 }
 
 //Checks if the ray start point is inside the sphere.
@@ -183,9 +183,10 @@ void rayGen()
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     
     TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-    float3 radiance = rayData.weightSum > 0 ? rayData.radiance/ rayData.weightSum : 0;  //Normalize the weight
+    //float3 radiance = rayData.weightSum > 0 ? rayData.radiance/ rayData.weightSum : 0;  //Normalize the weight
+    float3 radiance = rayData.radiance;
     radiance /= (M_PI * gPhotonRadius * gPhotonRadius);
-    radiance *= vplPdf;
+    //radiance *= vplPdf;
     //Get diffuse probability as we ignore all specular parts
     //float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
     float NdotV = saturate(dot(sd.N, sd.V));

@@ -181,16 +181,23 @@ void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
     //Only distribute on Reflections
     
     //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
-    float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
+    //float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
 
-    float pReflection = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo)/luminance(norm);
+    //float pReflection = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo)/luminance(norm);
 
-    float rnd = sampleNext1D(rd.sg);
-    if(rnd > pReflection) return;
+    //float rnd = sampleNext1D(rd.sg);
+    //if(rnd > pReflection) return;
     
     //BSDF sampling
 
     float pdf;
+    BSDFSample bsdfSample;
+    //sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
+    bool valid = bsdf.sample(sd, rd.sg, bsdfSample, true);
+    float3 dir = bsdfSample.wo;
+    if(!valid)
+        return;
+    /*
 #if USE_BSDF_SAMPLING
     BSDFSample bsdfSample;
     sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
@@ -201,9 +208,11 @@ void traceNewVPL(in RayData rd,const uint2 launchIndex,const uint vplIndex){
     //Consine Sampling
     float3 dir = sample_cosine_hemisphere_polar(sampleNext2D(rd.sg), pdf);
     fromLocalToWorld(sd.N,dir);
-#endif  
-    pdf *= pReflection;
-    pdf /= (gFrameDim.x * gFrameDim.y)/ gMaxNumberVPL; //Select pdf
+#endif
+    */
+    pdf = bsdfSample.pdf;
+    //pdf *= pReflection;
+    //pdf *= 1.f/(gFrameDim.x * gFrameDim.y); //Select pdf
     
     RayDesc ray;
     ray.Origin =  sd.computeNewRayOrigin(); //false is for transmissions
@@ -309,6 +318,7 @@ void rayGen()
     gVplUsageBuffer[ReSTIR_LinearIndexToZCurve(vplIndex)]  = (vplUsage << 1) & 0xFE;
 
     //Trace a new VPL if it should be replaced
+    replaceVPL =true;
     if(replaceVPL)
         traceNewVPL(rd, launchIndex, vplIndex);
 }

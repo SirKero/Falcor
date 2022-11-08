@@ -39,6 +39,7 @@ RWTexture2D<uint4> gReservoir;
 
 StructuredBuffer<uint2> gPresampledLights;
 StructuredBuffer<PackedVPL> gVPLs;
+Texture2D<float> gVplPdf;
 Texture2D<float4> gView;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -116,6 +117,8 @@ bool generateSample(float rnd, const float3 surfacePosition,
     vpl = VPL(gVPLs[ls.lightIdx]);
     if(!vpl.valid)
         return false;
+    float vplSelectPdf = gVplPdf[ReSTIR_LinearIndexToZCurve(ls.lightIdx)];
+    ls.invSelectPdf = 20000/vplSelectPdf;
     
     float3 toLight = vpl.posW - surfacePosition;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
@@ -128,8 +131,8 @@ bool generateSample(float rnd, const float3 surfacePosition,
     float attenuation = vplAttenuation(sampleDistance, gRadius);
     float Le = luminance(vpl.flux);
     
-    //ls.Li = Le / pdf;
-    ls.Li = Le * cosTheta * attenuation;   
+    ls.Li = Le;
+    //ls.Li = Le * cosTheta * attenuation;   
     return (ls.Li > 0.f);    //return true if valid sample
 }
 
@@ -225,7 +228,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
                                     ls, vpl, sampleDistance);
 
         if(!valid) continue;
-        float targetPdf = getSurfacePdf(surface, ls);
+        //float targetPdf = getSurfacePdf(surface, ls);
+        float targetPdf = surface.getPdf(ls.dir, ls.Li);
         if(updateReservoir(r,ls, targetPdf, sampleNext1D(sg))){
             selectedDistance = sampleDistance;
             selectedDirection = ls.dir;
