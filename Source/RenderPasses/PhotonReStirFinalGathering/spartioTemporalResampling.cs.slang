@@ -246,19 +246,20 @@ void main(uint2 dTid : SV_DispatchThreadID)
         Reservoir sampledReservoir = Reservoir(gReservoirPrev[idx]);
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
 
-        bool vplValid = true;
         VPL vpl = VPL(gVplPrev[index2Dto1D(idx,gFrameDim.x)]);
+        //Kill the reservoir
+        bool vplValid = true;
         if(!vpl.valid || vpl.replaced){
             sampledReservoir.weightSum = 0;
-            sampledReservoir.M = 0;
             vplValid = false;
         }
-                
+        
+        cachedResults |= (1u << i);     
         //Get neightbor light target PDF for current surface
         float sampleTargetPdf = 0.f;
         if (sampledReservoir.M > 0 && vplValid)
         {
-            cachedResults |= (1u << i);
+            
             LightSample ls = { };
             float dis;
             bool valid = getLightSample(vpl, currentSurface.posW, ls, dis);

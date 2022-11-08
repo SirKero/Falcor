@@ -210,6 +210,10 @@ void rayGen()
         r.updateReservoir(lightIdx, invSelectPdf, targetPdf, 0.5 /*random var*/); //Add the candidate
         r.finalizeSample(1.f, 1.f);
     }
+
+    //Set the vpl to false if no radiance was collected
+    if(luminance(photonLight.flux) <= 0)
+        photonLight.valid = false;
     
     gReservoir[launchIndex] = r.pack();
     gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();
