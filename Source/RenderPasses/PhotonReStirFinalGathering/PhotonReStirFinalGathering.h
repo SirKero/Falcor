@@ -179,9 +179,9 @@ private:
     */
     void copyPhotonCounter(RenderContext* pRenderContext);
 
-    /** Binds all the reservoirs
+    /** Binds all the reservoirs. useAdditionAsInput is used if the spartial pass is used before the spartiotemporal
     */
-    void bindReservoirs(ShaderVar& var, uint index , bool bindPrev = true);
+    void bindReservoirs(ShaderVar& var, uint index , bool bindPrev = true, bool useAdditionalAsInput = false);
 
     /** Bindes the vpls depending on the pass
     */
@@ -277,7 +277,7 @@ private:
 
     //Buffer
     Buffer::SharedPtr mpPhotonLightBuffer[3];
-    Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
+    Texture::SharedPtr mpReservoirBuffer[3];    //Buffers for the reservoir
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
     Buffer::SharedPtr mpPhotonAABB;              //Photon AABBs for Acceleration Structure building

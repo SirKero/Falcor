@@ -247,6 +247,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
 
         VPL vpl = VPL(gVplPrev[index2Dto1D(idx,gFrameDim.x)]);
+
         //Kill the reservoir
         bool vplValid = true;
         if(!vpl.valid || vpl.replaced){

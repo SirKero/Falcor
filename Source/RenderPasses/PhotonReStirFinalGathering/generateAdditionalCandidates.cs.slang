@@ -1,7 +1,6 @@
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
-
 import Utils.Math.PackedFormats;
 import Utils.Math.FormatConversion;
 
@@ -19,19 +18,24 @@ import Reservoir;
 import SurfaceData;
 import VPLs;
 
-
-//Define for valid texture channels
-#define is_valid(name) (is_valid_##name != 0)
-
-RWTexture2D<uint4> gReservoir;
+Texture2D<uint4> gReservoir;
+RWTexture2D<uint4> gReservoirWrite;
 
 StructuredBuffer<PackedVPL> gVpls;
 RWStructuredBuffer<PackedVPL> gVplsWrite;
-
-
 StructuredBuffer<PackedSurfaceData>gSurface;
-Texture2D gVBuffer;
+Texture2D<float2> gMVec;
 Texture2D<float4> gView;
+
+#define BIAS_MODE_BASIC 1
+#define BIAS_MODE_RAYTRACE 2
+//This is for syntax highlightig
+#ifndef BIAS_CORRECTION_MODE
+    #define BIAS_CORRECTION_MODE 2
+#endif
+
+//Define for valid texture channels
+#define is_valid(name) (is_valid_##name != 0)
 
 cbuffer PerFrame
 {
@@ -40,37 +44,28 @@ cbuffer PerFrame
 
 cbuffer Constant
 {
-    uint gNumCandidates;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
-    uint gNumLights;                //Light Buffer Size. If Presampling enabled, x = Title Count, y= Title Size. If !Presampling, then x = Size LightBuffer 
+    uint gSpartialSamples;
+    float gSamplingRadius;
+    float gDepthThreshold;          //Relative depth offset
+    float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
+    float gVplRadius;               //Vpl radius
 }
 
-
 struct LightSample{
-    uint lightIdx;
     float3 dir;
     float Li;
-    float invSelectPdf;
-    float2 uv;
-    //Enum type later ? 
+};
+
+struct PhotonLight{
+    float4 pos;
+    float4 flux;
 };
 
 static const float kRayEpsilon = 0.99f;
 
 uint index2Dto1D(uint2 idx, uint width){
     return idx.x + width * idx.y;
-}
-
-//Load in shading data from hit and direction
-ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
-{
-    const TriangleHit triangleHit = hit.getTriangleHit();
-    VertexData v = gScene.getVertexData(triangleHit);
-    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
-    adjustShadingNormal(sd, v);
-    
-    return sd;
 }
 
 Surface getSurface(uint2 idx)
@@ -89,90 +84,163 @@ Surface getSurface(uint2 idx)
     return Surface(surfaceData, viewDir);
 }
 
+bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
+    float normalCheck = dot(currNormal, neighNormal);
+    float minLinZDiff = currLinZ * gDepthThreshold;
+    float linZDiff = abs(currLinZ - neighLinZ);
+    return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
+}
+
+bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float sampleDistance){
+    //Get light position
+
+    if(any(vpl.flux < 0)) return false;
+    
+    ls.dir = vpl.posW - worldPos;
+    float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
+    sampleDistance = sqrt(distSqr);
+    ls.dir = ls.dir/ sampleDistance;    //normalize
+    
+    ls.Li = luminance(vpl.flux);
+
+    return ls.Li > 0;   //true if sample is valid
+}
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 3 * 13);
+    SampleGenerator sg = SampleGenerator(dTid, gFrameCount + 4 * 13);
     Reservoir r = Reservoir();
-    //Get current reservoir
+
+    //Check if surface is valid
+    Surface currentSurface = getSurface(dTid);
+    if (!currentSurface.valid)
+        return;
+    
+    //Load reservoir from current iteration
     VPL selectedVPL = VPL();
     Reservoir current = Reservoir(gReservoir[dTid]);
-    if (current.weightSum > 0)
-    {
+    if(current.weightSum > 0){
         selectedVPL = VPL(gVpls[index2Dto1D(dTid, gFrameDim.x)]);
     }
     
     r.combineReservoir(current, current.targetPdf, 0.5 /* random */);
-
-    //Get shading data
-    Surface surface = getSurface(dTid);
-    if (!surface.valid)
-    {
-        return;
-    }
-    //Get Vbuffer for ShadingData
-    HitInfo hitInfo = HitInfo(gVBuffer[dTid]);
-    float3 view = -gView[dTid].xyz;
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = loadShadingData(hitInfo, view, lod);
-    let bsdf = gScene.materials.getBSDF(sd, lod);
-
-    float selectedDistance = 0;
-    float3 selectedDirection = float3(0, 1, 0);
     
-    for (uint i = 1; i < gNumCandidates; i++)
-    {
-        float sampleDistance;
-        bool valid = true;
-        //Generate sample
-        uint rndLightIdx = min(uint(float(gNumLights) * sampleNext1D(sg)), gNumLights - 1);
-        //Get light
-        VPL vpl = VPL(gVpls[index2Dto1D(rndLightIdx, gFrameDim.x)]);
-        valid |= vpl.valid;
-        float3 toLight = vpl.posW - sd.posW;
-        sampleDistance = sqrt(max(FLT_MIN, dot(toLight, toLight))); // Clamp to avoid NaNs below
-        toLight /= sampleDistance; //normalize
-        float selectPdf = bsdf.evalPdf(sd, toLight, true);
-        if (selectPdf < 0.f)
-            valid = false;
+    int2 currentIndex = dTid;
+    uint numSpartialSamples = min(gSpartialSamples,8); //Cap at 8 samples for the later bias correction
+    uint cachedIndices[8]; //Store all indeces. 32 Bits per 2D index (16 per element)
+    int selectedSample = -1;  //Index of the selected sample (-1 is the current one)
 
-        //valid = false;
-        
-        float targetPdf = surface.getPdf(toLight, luminance(vpl.flux));
-        if (targetPdf <= 0)
-            valid = false;
+    //Go through all neighbors
+    for(uint i=0 ; i<numSpartialSamples; i++){
+        cachedIndices[i] = 0xFFFFFFFF;  //Set to max int
+        //Get random sample from sampling mask
+        float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
+        int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
+        int2 idx = currentIndex + spartialOffset;
 
-        if (!valid)
+        //Check if index is valid
+        if(idx.x < 0 && idx.y < 0 && idx.x >= gFrameDim.x && idx.y >= gFrameDim.y)
             continue;
-        if (r.updateReservoir(rndLightIdx, selectPdf, targetPdf, sampleNext1D(sg)))
+
+        //Get surface and check if valid
+        Surface neighSurface = getSurface(idx);
+        if (!neighSurface.valid)
+            continue;
+        
+        if(!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, neighSurface.normal, neighSurface.viewDepth))
+            continue;
+
+        //If neighbor has passed the tests the sample is valid. Combine the reservoirs
+        Reservoir neigh = Reservoir(gReservoir[idx]);
+        VPL vpl = VPL(gVpls[index2Dto1D(idx, gFrameDim.x)]);
+
+        bool vplValid = true;
+        //If the light sample is invalid or 0, still add the 0 contribution
+        if(!vpl.valid){
+            neigh.weightSum = 0;
+            vplValid = false;
+        }
+        
+        cachedIndices[i] = (idx.x & 0xFFFF) << 16 | (idx.y & 0xFFFF);
+        //Get neightbor light target PDF for current surface
+        float targetPdf = 0;
+        if(neigh.M > 0 && vplValid){
+            LightSample ls = { };
+            float distance = 0;
+            bool valid = getLightSample(vpl, currentSurface.posW, ls, distance);
+        #ifndef DIFFUSE_SHADING_ONLY
+            targetPdf = valid ?  currentSurface.getPdf(ls.dir, ls.Li): 0.f;
+        #else
+            targetPdf = valid ?  currentSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+        #endif
+        }
+        
+        if (r.combineReservoir(neigh, targetPdf, sampleNext1D(sg)))
         {
-            selectedDistance = sampleDistance;
-            selectedDirection = toLight;
+            selectedSample = i;
             selectedVPL = vpl;
         }
+
     }
 
-    //Finalize sample
-    //r.M = 1;    //Every reservoir has the same amount of initial samples
-    r.finalizeSample(1.f, r.M);
+    //Bias Correction
+#if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
 
-    bool validSample = r.weightSum > 0 && !isnan(r.weightSum) && !isinf(r.weightSum);
+    float pi = r.targetPdf;
+    float piSum = r.targetPdf * current.M;
 
-    //Test visibility and shoot a shadow ray from the surface to the selected light
-    if (validSample)
+    //go through all neighbors again
+    for (int i = 0; i < numSpartialSamples; i++)
     {
-        
-        selectedDistance *= kRayEpsilon;
-        // Ray Query for shadow test; <0> means disabled alpha testing; TODO: Add static const for alpha test
-        SceneRayQuery < 0 > rayQuery;
-        const Ray ray = Ray(surface.posW, selectedDirection, 0.f, selectedDistance);
-        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
-        {
-            r.weightSum = 0.f; //Set weight to zero if light is not visible
-        }
-    }
+        //Skip if we skipped in last loop
+        if ((cachedIndices[i]) == 0xFFFFFFFF)
+            continue;
 
-    gReservoir[dTid] = r.pack();
+        //Get index
+        uint2 idx = uint2(cachedIndices[i]>>16, (cachedIndices[i] & 0xFFFF));
+
+        //Get Surface
+        Surface biasSurface = getSurface(idx);
+        if (!biasSurface.valid)
+            continue;
+
+        //Get light pdf
+        LightSample ls = { };
+        float distance = 0;
+        bool valid = getLightSample(selectedVPL, biasSurface.posW, ls, distance);
+    #ifndef DIFFUSE_SHADING_ONLY
+        float ps = valid ?  biasSurface.getPdf(ls.dir, ls.Li): 0.f;
+    #else
+        float ps = valid ?  biasSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+    #endif
+
+        //Trace ray
+        #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
+        if (ps > 0)
+        {
+            SceneRayQuery < 0 > rayQuery;
+            distance *= kRayEpsilon;
+            const Ray ray = Ray(biasSurface.posW, ls.dir, 0.f, distance);
+            if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+            {
+                ps = 0;
+            }
+        }
+        #endif // BIAS MODE RAYTRACE
+        
+        //getReservoir
+        Reservoir biasRes = Reservoir(gReservoir[idx]);
+        
+        pi = selectedSample == i ? ps : pi;
+        piSum += ps * biasRes.M;
+    }
+    r.finalizeSample(pi, piSum);
+    
+#else
+    r.finalizeSample(1.0f, r.M);
+#endif
+        
+    gReservoirWrite[dTid] = r.pack();
     gVplsWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }
