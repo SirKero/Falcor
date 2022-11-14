@@ -175,9 +175,10 @@ private:
     */
     void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
 
-    /** Copies the photon counter to a uint to show the number in UI
+    /** Copies the photon counter to a uint to show the number in UI.
+    * If dynamic photon dispatch count is active, the dispatch value is changed here
     */
-    void copyPhotonCounter(RenderContext* pRenderContext);
+    void handelPhotonCounter(RenderContext* pRenderContext);
 
     /** Binds all the reservoirs. useAdditionAsInput is used if the spartial pass is used before the spartiotemporal
     */
@@ -219,6 +220,7 @@ private:
 
     //Constants
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
+    const uint kDynamicPhotonDispatchInitValue = 500224;    //Start with 500 thousand photons
 
     //
     //UI
@@ -241,7 +243,9 @@ private:
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint mNumMaxPhotons = 300000;               //Max number of photon lights per iteration
     uint mNumMaxPhotonsUI = mNumMaxPhotons;
-    uint mCurrentPhotonLightsCount = 0;             //Gets data from GPU buffer
+    bool mUseDynamicePhotonDispatchCount = true;    //Dynamically change the number of photons to fit the max photon number
+    uint mPhotonDynamicDispatchMax = 2000000;       //Max value for dynamically dispatched photons
+    uint mCurrentPhotonCount = 0;             //Gets data from GPU buffer
     uint mNumDispatchedPhotons = 700000;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
