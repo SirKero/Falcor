@@ -28,6 +28,7 @@ cbuffer Constant{
     float gCollectionRadius;
     float gHashScaleFactor; //Hash scale factor. 1/diameter
     uint gHashSize;     //Size is always 2^x
+    bool gUseAlphaTest; //Alpha test
 }
 
 // Inputs
@@ -42,6 +43,7 @@ RWTexture2D<uint2> gFinalGatherExtraInfo;
 RWTexture2D<uint> gPhotonCullingMask;
 
 static const bool kUsePhotonCulling = USE_PHOTON_CULLING;
+static const bool kAllowHitsInRadius = ALLOW_HITS_IN_RADIUS;    //Enables or disables hits inside of the collection radius
 
 struct TraceData{
     PackedHitInfo packedHitInfo;  //< Reflection albedo of the current hit point
@@ -141,7 +143,6 @@ void miss(inout TraceData rayData : SV_RayPayload)
 [shader("anyhit")]
 void anyHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
 {
-    /*
     if (gUseAlphaTest)
     {
         // Alpha test for non-opaque geometry.
@@ -151,7 +152,6 @@ void anyHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersection
         if (gScene.materials.alphaTest(v, materialID, 0.f))
             IgnoreHit();
     }
-    */
 }
 
 [shader("closesthit")]
@@ -232,9 +232,22 @@ void rayGen()
 
     uint2 extraInfoPacked = uint2((f32tof16(targetPdf) << 16) | f32tof16(selectPdf), encodeNormal2x16(bsdfSample.wo));
 
+    float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
+    
     if(kUsePhotonCulling){
-        float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
         photonCulling(hitPos);
+    }
+
+    //Reject hit points that are inside the collection radius
+    if (!kAllowHitsInRadius)
+    {
+        float distDiff = distance(hitPos, sd.posW);
+        //Invalidate hit data
+        if (distDiff <= gCollectionRadius)
+        {
+            traceData.packedHitInfo = {};
+            surface.viewDepth = -1.f;   //Set to invalid depth
+        }
     }
          
     //Store data in buffers

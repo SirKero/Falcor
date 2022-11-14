@@ -233,6 +233,8 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
+        changed |= widget.checkbox("Final Gather Radius Rejection", mAllowFinalGatherPointsInRadius);
+        widget.tooltip("Allow generated Final Gather hit points in the distance of the collection radius");
     }
 
     if (auto group = widget.group("ReSTIR")) {
@@ -549,6 +551,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 
     //Defines
     mGetFinalGatherHitPass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
+    mGetFinalGatherHitPass.pProgram->addDefine("ALLOW_HITS_IN_RADIUS", mAllowFinalGatherPointsInRadius ? "1" : "0");
 
     if (!mGetFinalGatherHitPass.pVars) {
         FALCOR_ASSERT(mGetFinalGatherHitPass.pProgram);
@@ -576,6 +579,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var[nameBuf]["gCollectionRadius"] = mPhotonCollectRadius;
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius);
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
+    var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
 
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();

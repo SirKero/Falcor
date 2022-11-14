@@ -224,8 +224,8 @@ private:
     //UI
     //
     //Resampling
-    uint mResamplingMode = ResamplingMode::NoResampling;        //Resample Mode
-    uint mInitialCandidates = 1;            // Number of initial candidates per pixel
+    uint mResamplingMode = ResamplingMode::SpartioTemporal;        //Resample Mode
+    uint mInitialCandidates = 0;            // Number of initial candidates per pixel
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
@@ -239,16 +239,17 @@ private:
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint mNumMaxPhotons = 500000;               //Max number of photon lights per iteration
+    uint mNumMaxPhotons = 300000;               //Max number of photon lights per iteration
     uint mNumMaxPhotonsUI = mNumMaxPhotons;
     uint mCurrentPhotonLightsCount = 0;             //Gets data from GPU buffer
-    uint mNumDispatchedPhotons = 262144;        //Number of dispatched photons 
+    uint mNumDispatchedPhotons = 700000;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
     float mPhotonCollectRadius = 0.05f;     //Radius for collection
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
+    bool mAllowFinalGatherPointsInRadius = true;
     //Photon Culling
     bool mUsePhotonCulling = true;
     uint mCullingHashBufferSizeBits = 20;   //Determines the size of the buffer 2^x.
