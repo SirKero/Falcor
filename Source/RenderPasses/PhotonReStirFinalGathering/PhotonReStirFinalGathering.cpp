@@ -210,7 +210,7 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         if (disPhotonChanged)
             mNumDispatchedPhotons = (uint)(dispatchedPhotons / mPhotonYExtent) * mPhotonYExtent;
         //Buffer size
-        widget.text("Photon Lights: " + std::to_string(mCurrentPhotonLightsCount) + " / " + std::to_string(mNumMaxPhotons));
+        widget.text("Photon Lights: " + std::to_string(mCurrentPhotonCount) + " / " + std::to_string(mNumMaxPhotons));
         widget.var("Photon Light Buffer Size", mNumMaxPhotonsUI, 100u, 100000000u, 100);
         mChangePhotonLightBufferSize = widget.button("Apply", true);
         if (mChangePhotonLightBufferSize) mNumMaxPhotons = mNumMaxPhotonsUI;
@@ -1139,14 +1139,33 @@ void PhotonReSTIRFinalGathering::fillNeighborOffsetBuffer(std::vector<int8_t>& b
     }
 }
 
-void PhotonReSTIRFinalGathering::copyPhotonCounter(RenderContext* pRenderContext)
+void PhotonReSTIRFinalGathering::handelPhotonCounter(RenderContext* pRenderContext)
 {
     //Copy the photonConter to a CPU Buffer
     pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint32_t));
 
     void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
-    std::memcpy(&mCurrentPhotonLightsCount, data, sizeof(uint));
+    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint));
     mpPhotonCounterCPU->unmap();
+
+    //Change Photon dispatch count dynamically.
+    if (mUseDynamicePhotonDispatchCount) {
+        //If counter is invalid, reset
+        if (mCurrentPhotonCount == 0) {
+            mNumDispatchedPhotons = kDynamicPhotonDispatchInitValue;
+        }
+        uint bufferSizeCompValue = mNumMaxPhotons * 0.95f;
+        //TODO: Complete
+
+        //If smaller, increase dispatch size
+        if(mCurrentPhotonCount < bufferSizeCompValue){
+
+        }
+        //If bigger, decrease dispatch size
+        else {
+
+        }
+    }
 }
 
 void PhotonReSTIRFinalGathering::bindReservoirs(ShaderVar& var, uint index , bool bindPrev , bool useAdditionalAsInput)
