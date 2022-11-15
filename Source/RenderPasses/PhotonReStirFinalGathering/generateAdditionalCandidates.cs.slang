@@ -26,6 +26,7 @@ RWStructuredBuffer<PackedVPL> gVplsWrite;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
 Texture2D<float4> gView;
+Texture2D <float> gNeighborMask;
 
 #define BIAS_MODE_BASIC 1
 #define BIAS_MODE_RAYTRACE 2
@@ -50,6 +51,7 @@ cbuffer Constant
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
     float gVplRadius;               //Vpl radius
+    uint gMaskMipLevel;
 }
 
 struct LightSample{
@@ -106,6 +108,68 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     return ls.Li > 0;   //true if sample is valid
 }
 
+//Get a valid neighbor sample
+bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 position)
+{
+    int lastMipLevel = max(0, gMaskMipLevel - 1);
+    //TODO: calc pos
+    float2 dimF = float2(gFrameDim-1);
+    float2 relPos = float2(currentPixel.x / dimF.x, currentPixel.y / dimF.y);
+    dimF /= 1 << lastMipLevel;  //Convert to Mip level dim (div pow(2,MIPLevel))
+    relPos *= dimF;     //Get MIP pixel
+    relPos -= float2(0.5f); //Shift top left top pixel
+    relPos = clamp(relPos, float2(0), float2(gFrameDim - 1));   //Clamp at edge
+    position = uint2(floor(relPos));    //convert to pixel
+    
+    for (int mipLevel = lastMipLevel; mipLevel >= 0; mipLevel--)
+    {
+        position *= 2;
+
+        float4 samples;
+        samples.x = max(0.f, float(gNeighborMask.Load(int3(position.x + 0, position.y + 0, mipLevel))) );
+        samples.y = max(0.f, float(gNeighborMask.Load(int3(position.x + 0, position.y + 1, mipLevel))));
+        samples.z = max(0.f, float(gNeighborMask.Load(int3(position.x + 1, position.y + 0, mipLevel))));
+        samples.w = max(0.f, float(gNeighborMask.Load(int3(position.x + 1, position.y + 1, mipLevel))));
+
+        float weightSum = samples.x + samples.y + samples.z + samples.w;
+        //Return if invalid
+        if (weightSum <= 0)
+        {
+            return false;
+        }
+        samples /= weightSum; //Normalize Samples
+
+        float rnd = sampleNext1D(sg);
+
+        //Choose one of 4 samples
+        if (rnd < samples.x)
+        {
+            position += int2(0, 0);
+        }
+        else
+        {
+            rnd -= samples.x;
+            if (rnd < samples.y)
+            {
+                position += int2(0, 1);
+            }
+            else
+            {
+                rnd -= samples.y;
+                if (rnd < samples.z)
+                {
+                    position += int2(1, 0);
+                }
+                else
+                {
+                    position += int2(1, 1);
+                }
+            }
+        }
+    }
+    return true;
+}
+
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
@@ -127,7 +191,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     r.combineReservoir(current, current.targetPdf, 0.5 /* random */);
     
     int2 currentIndex = dTid;
-    uint numSpartialSamples = min(gSpartialSamples,8); //Cap at 8 samples for the later bias correction
+    uint numSpartialSamples = min(gSpartialSamples,8); //Cap at 8 samples for the later bias correction TODO: Set max sample as constant
     uint cachedIndices[8]; //Store all indeces. 32 Bits per 2D index (16 per element)
     int selectedSample = -1;  //Index of the selected sample (-1 is the current one)
 
@@ -135,10 +199,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
     for(uint i=0 ; i<numSpartialSamples; i++){
         cachedIndices[i] = 0xFFFFFFFF;  //Set to max int
         //Get random sample from sampling mask
-        float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
-        int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
-        int2 idx = currentIndex + spartialOffset;
-
+        //float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
+        //int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
+        //int2 idx = currentIndex + spartialOffset;
+        int2 idx;
+        if (!sampleMaskMIP(sg, currentIndex, idx))
+            continue;
+        
         //Check if index is valid
         if(idx.x < 0 && idx.y < 0 && idx.x >= gFrameDim.x && idx.y >= gFrameDim.y)
             continue;

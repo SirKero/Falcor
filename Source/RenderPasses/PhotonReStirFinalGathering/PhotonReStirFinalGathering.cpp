@@ -512,6 +512,17 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
         }
     }
 
+    //Create Valid Neighbor mask
+    if (!mpValidNeighborMask && mInitialCandidates > 0) {
+        mpValidNeighborMask = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::R8Unorm,
+                                                1, mValidNeighborMaskMipLevel, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
+        mpValidNeighborMask->setName("PhotonReStir::ValidNeighborMask");
+    }
+    //Reset texture if not used
+    else if (mpValidNeighborMask && mInitialCandidates == 0) {
+        mpValidNeighborMask.reset();
+    }
+
     if (!mpFinalGatherHit) {
         mpFinalGatherHit = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
                                              HitInfo::kDefaultFormat, 1u, 1u, nullptr,
@@ -697,6 +708,7 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
 
     //Defines
     mGeneratePMCandidatesPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mGeneratePMCandidatesPass.pProgram->addDefine("FILL_MASK", mInitialCandidates > 0 ? "1" : "0");
 
     if (!mGeneratePMCandidatesPass.pVars) {
         FALCOR_ASSERT(mGeneratePMCandidatesPass.pProgram);
@@ -730,6 +742,7 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     var["gPackedPhotonData"] = mpPhotonData;
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gFinalGatherExtraInfo"] = mpFinalGatherExtraInfo;
+    var["gValidNeighborsMask"] = mpValidNeighborMask;
 
     bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
     FALCOR_ASSERT(tlasValid);
@@ -742,6 +755,8 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     mpScene->raytrace(pRenderContext, mGeneratePMCandidatesPass.pProgram.get(), mGeneratePMCandidatesPass.pVars, uint3(targetDim, 1));
 
     //Barrier for written buffer
+    if (mpValidNeighborMask)
+        mpValidNeighborMask->generateMips(pRenderContext);
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }
@@ -850,6 +865,7 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gMaskMipLevel"] = mValidNeighborMaskMipLevel;
     }
 
 

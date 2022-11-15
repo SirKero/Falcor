@@ -227,7 +227,8 @@ private:
     //
     //Resampling
     uint mResamplingMode = ResamplingMode::SpartioTemporal;        //Resample Mode
-    uint mInitialCandidates = 0;            // Number of initial candidates per pixel
+    uint mInitialCandidates = 1;            // Number of initial candidates per pixel
+    uint mValidNeighborMaskMipLevel = 4;    //The mip leve for the valid neighbor mask
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
@@ -285,6 +286,7 @@ private:
     //Buffer
     Buffer::SharedPtr mpPhotonLightBuffer[3];
     Texture::SharedPtr mpReservoirBuffer[3];    //Buffers for the reservoir
+    Texture::SharedPtr mpValidNeighborMask;     //Mask for searching valid neightbors. Only used if currentFrame spartial sampling is used (mInitialCandidates > 0)
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
     Buffer::SharedPtr mpPhotonAABB;              //Photon AABBs for Acceleration Structure building

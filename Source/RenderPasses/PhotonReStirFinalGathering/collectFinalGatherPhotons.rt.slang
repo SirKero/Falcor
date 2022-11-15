@@ -33,6 +33,7 @@ StructuredBuffer<uint4> gPackedPhotonData;
 StructuredBuffer<AABB> gPhotonAABB;
 Texture2D<PackedHitInfo> gFinalGatherHit;
 Texture2D<uint2> gFinalGatherExtraInfo;
+RWTexture2D<float> gValidNeighborsMask;
 
 RaytracingAccelerationStructure gPhotonAS;
 
@@ -43,6 +44,7 @@ RWStructuredBuffer<PackedVPL> gPhotonLights;
 
 // Static configuration based on defines set from the host.
 static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
+static const bool kFillMask = FILL_MASK;
 
 /** Payload for ray (48B).
 */
@@ -213,4 +215,10 @@ void rayGen()
     
     gReservoir[launchIndex] = r.pack();
     gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();
+    if (kFillMask)
+    {
+        float maskVal = photonLight.valid ? 1.f : 0.f;
+        gValidNeighborsMask[launchIndex] = maskVal;
+    }
+        
 }
