@@ -205,13 +205,27 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("PhotonMapper")) {
         //Dispatched Photons
-        uint dispatchedPhotons = mNumDispatchedPhotons;
-        bool disPhotonChanged = widget.var("Dispatched Photons", dispatchedPhotons, mPhotonYExtent, 9984000u, (float)mPhotonYExtent);
-        if (disPhotonChanged)
-            mNumDispatchedPhotons = (uint)(dispatchedPhotons / mPhotonYExtent) * mPhotonYExtent;
+        changed |= widget.checkbox("Enable dynamic photon dispatch", mUseDynamicePhotonDispatchCount);
+        widget.tooltip("Changed the number of dispatched photons dynamically. Tries to fill the photon buffer");
+        if (mUseDynamicePhotonDispatchCount) {
+            changed |= widget.var("Max dispatched", mPhotonDynamicDispatchMax, mPhotonYExtent, 4000000u);
+            widget.tooltip("Maximum number the dispatch can be increased to");
+            changed |= widget.var("Guard Percentage", mPhotonDynamicGuardPercentage, 0.0f, 1.f, 0.001f);
+            widget.tooltip("If current fill rate is under PhotonBufferSize * (1-pGuard), the values are accepted. Reduces the changes every frame");
+            changed |= widget.var("Percentage Change", mPhotonDynamicChangePercentage, 0.01f, 10.f, 0.01f);
+            widget.tooltip("Increase/Decrease percentage from the Buffer Size. With current value a increase/decrease of :" +std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons) + "is expected");
+            widget.text("Dispatched Photons: " + std::to_string(mNumDispatchedPhotons));
+        }
+        else{
+            uint dispatchedPhotons = mNumDispatchedPhotons;
+            bool disPhotonChanged = widget.var("Dispatched Photons", dispatchedPhotons, mPhotonYExtent, 9984000u, (float)mPhotonYExtent);
+            if (disPhotonChanged)
+                mNumDispatchedPhotons = (uint)(dispatchedPhotons / mPhotonYExtent) * mPhotonYExtent;
+        }
+        
         //Buffer size
-        widget.text("Photon Lights: " + std::to_string(mCurrentPhotonCount) + " / " + std::to_string(mNumMaxPhotons));
-        widget.var("Photon Light Buffer Size", mNumMaxPhotonsUI, 100u, 100000000u, 100);
+        widget.text("Photons: " + std::to_string(mCurrentPhotonCount) + " / " + std::to_string(mNumMaxPhotons));
+        widget.var("Photon Buffer Size", mNumMaxPhotonsUI, 100u, 100000000u, 100);
         mChangePhotonLightBufferSize = widget.button("Apply", true);
         if (mChangePhotonLightBufferSize) mNumMaxPhotons = mNumMaxPhotonsUI;
 
@@ -1141,7 +1155,7 @@ void PhotonReSTIRFinalGathering::fillNeighborOffsetBuffer(std::vector<int8_t>& b
 
 void PhotonReSTIRFinalGathering::handelPhotonCounter(RenderContext* pRenderContext)
 {
-    //Copy the photonConter to a CPU Buffer
+    //Copy the photonCounter to a CPU Buffer
     pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint32_t));
 
     void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
@@ -1154,17 +1168,19 @@ void PhotonReSTIRFinalGathering::handelPhotonCounter(RenderContext* pRenderConte
         if (mCurrentPhotonCount == 0) {
             mNumDispatchedPhotons = kDynamicPhotonDispatchInitValue;
         }
-        uint bufferSizeCompValue = mNumMaxPhotons * 0.95f;
-        //TODO: Complete
+        uint bufferSizeCompValue =(uint)(mNumMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
+        uint changeSize = (uint)(mNumMaxPhotons * mPhotonDynamicChangePercentage);
 
         //If smaller, increase dispatch size
         if(mCurrentPhotonCount < bufferSizeCompValue){
-
+            uint newDispatched = (uint)((mNumDispatchedPhotons + changeSize) / mPhotonYExtent) * mPhotonYExtent;    //mod YExtend == 0
+            mNumDispatchedPhotons = std::min(newDispatched, mPhotonDynamicDispatchMax);
         }
         //If bigger, decrease dispatch size
-        else {
-
-        }
+        else if(mCurrentPhotonCount >= mNumMaxPhotons) {
+            uint newDispatched = (uint)((mNumDispatchedPhotons - changeSize) / mPhotonYExtent) * mPhotonYExtent;    //mod YExtend == 0
+            mNumDispatchedPhotons = std::max(newDispatched, mPhotonYExtent);
+        }        
     }
 }
 
