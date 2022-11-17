@@ -27,7 +27,6 @@ StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
 Texture2D<float4> gView;
 Texture2D <float> gNeighborMask;
-RWTexture2D<int4> gDebug;
 
 #define BIAS_MODE_BASIC 1
 #define BIAS_MODE_RAYTRACE 2
@@ -110,7 +109,7 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
 }
 
 //Get a valid neighbor sample
-bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 position)
+bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 position, out float pdf)
 {
     int lastMipLevel = max(0, gMaskMipLevel);
     //TODO: calc pos
@@ -118,9 +117,9 @@ bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 posit
     float2 relPos = float2(currentPixel.x / dimF.x, currentPixel.y / dimF.y);
     dimF /= 1 << lastMipLevel;  //Convert to Mip level dim (div pow(2,MIPLevel))
     relPos *= dimF;     //Get MIP pixel
-    //relPos -= float2(0.5f); //Shift top left top pixel
     relPos = clamp(relPos, float2(0), float2(gFrameDim - 1));   //Clamp at edge
     position = int2(floor(relPos));    //convert to pixel
+    pdf = 1.f;
     
     for (int mipLevel = lastMipLevel - 1; mipLevel >= 0; mipLevel--)
     {
@@ -136,6 +135,7 @@ bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 posit
         //Return if invalid
         if (weightSum <= 0)
         {
+            pdf = 0;
             return false;
         }
         samples /= weightSum; //Normalize Samples
@@ -145,7 +145,7 @@ bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 posit
         //Choose one of 4 samples
         if (rnd < samples.x)
         {
-            position += int2(0, 0);
+            pdf *= samples.x;
         }
         else
         {
@@ -153,6 +153,7 @@ bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 posit
             if (rnd < samples.y)
             {
                 position += int2(0, 1);
+                pdf *= samples.y;
             }
             else
             {
@@ -160,10 +161,12 @@ bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 posit
                 if (rnd < samples.z)
                 {
                     position += int2(1, 0);
+                    pdf *= samples.z;
                 }
                 else
                 {
                     position += int2(1, 1);
+                    pdf *= samples.w;
                 }
             }
         }
@@ -200,11 +203,15 @@ void main(uint2 dTid : SV_DispatchThreadID)
     for(uint i=0 ; i<numSpartialSamples; i++){
         cachedIndices[i] = 0xFFFFFFFF;  //Set to max int
         //Get random sample from sampling mask
-        //float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
-        //int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
-        //int2 idx = currentIndex + spartialOffset;
+        /*
+        float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
+        int2 spartialOffset = int2(round(randSamp * 4.f));
+        int2 idx = currentIndex + spartialOffset;
+        */
         //int2 idx;
-        bool validMIPSample = sampleMaskMIP(sg, currentIndex, idx);
+        
+        float selectPdf = 1.f; 
+        bool validMIPSample = sampleMaskMIP(sg, currentIndex, idx, selectPdf);
         //gDebug[dTid] = int4(idx,initPos);
         if (!validMIPSample)
             continue;
@@ -223,6 +230,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //If neighbor has passed the tests the sample is valid. Combine the reservoirs
         Reservoir neigh = Reservoir(gReservoir[idx]);
+        //Reservoir neigh = Reservoir();
         VPL vpl = VPL(gVpls[index2Dto1D(idx, gFrameDim.x)]);
 
         bool vplValid = true;
@@ -245,7 +253,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             targetPdf = valid ?  currentSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
         #endif
         }
-        
+                 
         if (r.combineReservoir(neigh, targetPdf, sampleNext1D(sg)))
         {
             selectedSample = i;

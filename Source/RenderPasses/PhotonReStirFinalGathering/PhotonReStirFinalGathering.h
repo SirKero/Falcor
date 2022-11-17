@@ -228,7 +228,7 @@ private:
     //Resampling
     uint mResamplingMode = ResamplingMode::NoResampling;        //Resample Mode
     uint mInitialCandidates = 1;            // Number of initial candidates per pixel
-    uint mValidNeighborMaskMipLevel = 4;    //The mip leve for the valid neighbor mask
+    uint mValidNeighborMaskMipLevel = 2;    //The mip leve for the valid neighbor mask
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
@@ -297,7 +297,6 @@ private:
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpFinalGatherExtraInfo;    //Incoming Direction for the final gather hit
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
-    Texture::SharedPtr mpDebugTex; 
 
     //
     //Ray tracing programms and helper

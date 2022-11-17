@@ -210,9 +210,11 @@ void rayGen()
     }
 
     //Set the vpl to false if no radiance was collected
+    /*
     if(luminance(photonLight.flux) <= 0)
         photonLight.valid = false;
-    
+    */
+
     gReservoir[launchIndex] = r.pack();
     gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();
     if (kFillMask)

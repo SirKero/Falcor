@@ -563,13 +563,6 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     if (!mUsePhotonCulling && mpPhotonCullingMask)
         mpPhotonCullingMask.reset();
 
-    //Debug tex
-    if (!mpDebugTex) {
-        mpDebugTex = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
-                                       ResourceFormat::RGBA32Int, 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
-        mpDebugTex->setName("DebugTex");
-    }
-
 }
 
 void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -862,7 +855,6 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     bindVpls(var, mFrameCount, CurrentPass::GenerateAdditional);
     var["gNeighborMask"] = mpValidNeighborMask;
-    var["gDebug"] = mpDebugTex;
 
     //Uniform
     std::string uniformName = "PerFrame";

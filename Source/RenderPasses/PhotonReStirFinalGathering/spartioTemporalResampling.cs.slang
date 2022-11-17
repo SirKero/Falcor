@@ -277,7 +277,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         }
     }
 
-//Bias correction TODO: Possible reweighing error; a bit too bright; needs checking
+//Bias correction
 #if BIAS_CORRECTION_MODE >= BIAS_MODE_BASIC
         
     float pi = r.targetPdf;
