@@ -27,6 +27,7 @@ StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
 Texture2D<float4> gView;
 Texture2D <float> gNeighborMask;
+RWTexture2D<int4> gDebug;
 
 #define BIAS_MODE_BASIC 1
 #define BIAS_MODE_RAYTRACE 2
@@ -111,17 +112,17 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
 //Get a valid neighbor sample
 bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 position)
 {
-    int lastMipLevel = max(0, gMaskMipLevel - 1);
+    int lastMipLevel = max(0, gMaskMipLevel);
     //TODO: calc pos
     float2 dimF = float2(gFrameDim-1);
     float2 relPos = float2(currentPixel.x / dimF.x, currentPixel.y / dimF.y);
     dimF /= 1 << lastMipLevel;  //Convert to Mip level dim (div pow(2,MIPLevel))
     relPos *= dimF;     //Get MIP pixel
-    relPos -= float2(0.5f); //Shift top left top pixel
+    //relPos -= float2(0.5f); //Shift top left top pixel
     relPos = clamp(relPos, float2(0), float2(gFrameDim - 1));   //Clamp at edge
-    position = uint2(floor(relPos));    //convert to pixel
+    position = int2(floor(relPos));    //convert to pixel
     
-    for (int mipLevel = lastMipLevel; mipLevel >= 0; mipLevel--)
+    for (int mipLevel = lastMipLevel - 1; mipLevel >= 0; mipLevel--)
     {
         position *= 2;
 
@@ -191,10 +192,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
     r.combineReservoir(current, current.targetPdf, 0.5 /* random */);
     
     int2 currentIndex = dTid;
-    uint numSpartialSamples = min(gSpartialSamples,8); //Cap at 8 samples for the later bias correction TODO: Set max sample as constant
+    uint numSpartialSamples = min(gSpartialSamples,1); //Cap at 8 samples for the later bias correction TODO: Set max sample as constant
     uint cachedIndices[8]; //Store all indeces. 32 Bits per 2D index (16 per element)
     int selectedSample = -1;  //Index of the selected sample (-1 is the current one)
-
+    int2 idx = int2(-1,-1);
     //Go through all neighbors
     for(uint i=0 ; i<numSpartialSamples; i++){
         cachedIndices[i] = 0xFFFFFFFF;  //Set to max int
@@ -202,8 +203,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
         //int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
         //int2 idx = currentIndex + spartialOffset;
-        int2 idx;
-        if (!sampleMaskMIP(sg, currentIndex, idx))
+        //int2 idx;
+        bool validMIPSample = sampleMaskMIP(sg, currentIndex, idx);
+        //gDebug[dTid] = int4(idx,initPos);
+        if (!validMIPSample)
             continue;
         
         //Check if index is valid

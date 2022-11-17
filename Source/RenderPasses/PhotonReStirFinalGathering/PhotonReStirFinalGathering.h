@@ -226,7 +226,7 @@ private:
     //UI
     //
     //Resampling
-    uint mResamplingMode = ResamplingMode::SpartioTemporal;        //Resample Mode
+    uint mResamplingMode = ResamplingMode::NoResampling;        //Resample Mode
     uint mInitialCandidates = 1;            // Number of initial candidates per pixel
     uint mValidNeighborMaskMipLevel = 4;    //The mip leve for the valid neighbor mask
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
@@ -242,7 +242,7 @@ private:
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint mNumMaxPhotons = 300000;               //Max number of photon lights per iteration
+    uint mNumMaxPhotons = 200000;               //Size of the photon buffer
     uint mNumMaxPhotonsUI = mNumMaxPhotons;
     bool mUseDynamicePhotonDispatchCount = true;    //Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 2000000;       //Max value for dynamically dispatched photons
@@ -297,6 +297,7 @@ private:
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpFinalGatherExtraInfo;    //Incoming Direction for the final gather hit
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
+    Texture::SharedPtr mpDebugTex; 
 
     //
     //Ray tracing programms and helper

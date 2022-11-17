@@ -563,6 +563,13 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     if (!mUsePhotonCulling && mpPhotonCullingMask)
         mpPhotonCullingMask.reset();
 
+    //Debug tex
+    if (!mpDebugTex) {
+        mpDebugTex = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
+                                       ResourceFormat::RGBA32Int, 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpDebugTex->setName("DebugTex");
+    }
+
 }
 
 void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -756,7 +763,7 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
 
     //Barrier for written buffer
     if (mpValidNeighborMask)
-        mpValidNeighborMask->generateMips(pRenderContext);
+        mpValidNeighborMask->generateMips(pRenderContext,true);
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }
@@ -815,7 +822,7 @@ void PhotonReSTIRFinalGathering::distributeAndCollectFinalGatherPhotonPass(Rende
     mpScene->raytrace(pRenderContext, mDistributeAndCollectFinalGatherPointsPass.pProgram.get(), mDistributeAndCollectFinalGatherPointsPass.pVars, uint3(targetDim, 1));
 
     //Barrier for written buffer
-    pRenderContext->copyResource(mpReservoirBuffer[mFrameCount % 2].get(), mpReservoirBuffer[2].get()); //TODO solve that over index
+    //pRenderContext->copyResource(mpReservoirBuffer[mFrameCount % 2].get(), mpReservoirBuffer[2].get()); //TODO solve that over index
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }
 
@@ -854,6 +861,8 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     bindVpls(var, mFrameCount, CurrentPass::GenerateAdditional);
+    var["gNeighborMask"] = mpValidNeighborMask;
+    var["gDebug"] = mpDebugTex;
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -875,7 +884,8 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     mpGenerateAdditionalCandidates->execute(pRenderContext, uint3(targetDim, 1));
 
     //Barrier for written buffer
-    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+    //pRenderContext->uavBarrier(mpReservoirBuffer[2].get());
+    pRenderContext->copyResource(mpReservoirBuffer[mFrameCount % 2].get(), mpReservoirBuffer[2].get()); //TODO solve that over index
     pRenderContext->uavBarrier(mpPhotonLightBuffer[2].get());
 }
 
