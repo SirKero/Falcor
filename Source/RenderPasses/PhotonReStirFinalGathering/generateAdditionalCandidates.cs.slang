@@ -197,33 +197,36 @@ void main(uint2 dTid : SV_DispatchThreadID)
     r.combineReservoir(current, current.targetPdf, 0.5 /* random */);
     
     int2 currentIndex = dTid;
-    uint numSpartialSamples = min(gSpartialSamples,1); //Cap at 8 samples for the later bias correction TODO: Set max sample as constant
+    uint numSpartialSamples = min(gSpartialSamples,8); //Cap at 8 samples for the later bias correction TODO: Set max sample as constant
     uint cachedIndices[8]; //Store all indeces. 32 Bits per 2D index (16 per element)
+    uint cachedM[4];
     int selectedSample = -1;  //Index of the selected sample (-1 is the current one)
     int2 idx = int2(-1,-1);
     //Go through all neighbors
     for(uint i=0 ; i<numSpartialSamples; i++){
         cachedIndices[i] = 0xFFFFFFFF;  //Set to max int
+        if (i % 2 == 0)
+            cachedM[i / 2] = 0;
         //Get random sample from sampling mask
-        
+        //TODO: Make Toggable
+        /*
         float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
         int2 spartialOffset = int2(round(randSamp * 4.f));
         idx = currentIndex + spartialOffset;
-        
+        */
 
-        /*
+        
         float selectPdf = 1.f; 
         bool validMIPSample = sampleMaskMIP(sg, currentIndex, idx, selectPdf);
         
         if (!validMIPSample)
             continue;
-        */
 
-        //Check if index is valid
+        //Check if index is valid TODO obsolete with MIP sample 
         if(idx.x < 0 && idx.y < 0 && idx.x >= gFrameDim.x && idx.y >= gFrameDim.y)
             continue;
 
-        //Get surface and check if valid
+        //Get surface and check if valid TODO: Valid test obsolete with MIP sample
         Surface neighSurface = getSurface(idx);
         if (!neighSurface.valid)
             continue;
@@ -244,6 +247,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
         }
         
         cachedIndices[i] = (idx.x & 0xFFFF) << 16 | (idx.y & 0xFFFF);
+        uint M = 0xFFFF & neigh.M;
+        if(i % 2 != 0)
+            M = M << 16;
+        cachedM[i / 2] |= M;
         //Get neightbor light target PDF for current surface
         float targetPdf = 0;
         if(neigh.M > 0 && vplValid){
@@ -309,12 +316,15 @@ void main(uint2 dTid : SV_DispatchThreadID)
             }
         }
         #endif // BIAS MODE RAYTRACE
-        
-        //getReservoir
-        Reservoir biasRes = Reservoir(gReservoir[idx]);
-        
+
+        uint M = cachedM[i / 2];
+        if (i % 2 == 0)
+            M =  M & 0xFFFF;
+        else
+            M = M >> 16;
+                
         pi = selectedSample == i ? ps : pi;
-        piSum += ps * biasRes.M;
+        piSum += ps * M;
     }
     r.finalizeSample(pi, piSum);
     

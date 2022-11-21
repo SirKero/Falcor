@@ -630,7 +630,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 
     //Generate mips for mask
     if (mpValidNeighborMask)
-        mpValidNeighborMask->generateMips(pRenderContext, true);
+        mpValidNeighborMask->generateMips(pRenderContext);
 }
 
 void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
