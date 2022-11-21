@@ -111,19 +111,18 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
 //Get a valid neighbor sample
 bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 position, out float pdf)
 {
-    int lastMipLevel = max(0, gMaskMipLevel);
-    //TODO: calc pos
+    int lastMipLevel = max(0, gMaskMipLevel -1);
     float2 dimF = float2(gFrameDim-1);
     float2 relPos = float2(currentPixel.x / dimF.x, currentPixel.y / dimF.y);
     dimF /= 1 << lastMipLevel;  //Convert to Mip level dim (div pow(2,MIPLevel))
     relPos *= dimF;     //Get MIP pixel
     relPos = clamp(relPos, float2(0), float2(gFrameDim - 1));   //Clamp at edge
+    relPos -= 0.5f;
     position = int2(floor(relPos));    //convert to pixel
     pdf = 1.f;
     
-    for (int mipLevel = lastMipLevel - 1; mipLevel >= 0; mipLevel--)
+    for (int mipLevel = lastMipLevel; mipLevel >= 0; mipLevel--)
     {
-        position *= 2;
 
         float4 samples;
         samples.x = max(0.f, float(gNeighborMask.Load(int3(position.x + 0, position.y + 0, mipLevel))) );
@@ -170,6 +169,9 @@ bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 posit
                 }
             }
         }
+
+        if(mipLevel != 0)
+            position *= 2;
     }
     return true;
 }
@@ -203,19 +205,20 @@ void main(uint2 dTid : SV_DispatchThreadID)
     for(uint i=0 ; i<numSpartialSamples; i++){
         cachedIndices[i] = 0xFFFFFFFF;  //Set to max int
         //Get random sample from sampling mask
-        /*
+        
         float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
         int2 spartialOffset = int2(round(randSamp * 4.f));
-        int2 idx = currentIndex + spartialOffset;
-        */
-        //int2 idx;
+        idx = currentIndex + spartialOffset;
         
+
+        /*
         float selectPdf = 1.f; 
         bool validMIPSample = sampleMaskMIP(sg, currentIndex, idx, selectPdf);
-        //gDebug[dTid] = int4(idx,initPos);
+        
         if (!validMIPSample)
             continue;
-        
+        */
+
         //Check if index is valid
         if(idx.x < 0 && idx.y < 0 && idx.x >= gFrameDim.x && idx.y >= gFrameDim.y)
             continue;

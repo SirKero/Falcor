@@ -41,9 +41,11 @@ RWStructuredBuffer<PackedSurfaceData> gSurfaceData;
 RWTexture2D<PackedHitInfo> gFinalGatherHit;
 RWTexture2D<uint2> gFinalGatherExtraInfo;
 RWTexture2D<uint> gPhotonCullingMask;
+RWTexture2D<float> gValidNeighborsMask;
 
 static const bool kUsePhotonCulling = USE_PHOTON_CULLING;
 static const bool kAllowHitsInRadius = ALLOW_HITS_IN_RADIUS;    //Enables or disables hits inside of the collection radius
+static const bool kFillMask = FILL_MASK;
 
 struct TraceData{
     PackedHitInfo packedHitInfo;  //< Reflection albedo of the current hit point
@@ -196,8 +198,13 @@ void rayGen()
     uint2 launchDim = DispatchRaysDimensions().xy;
     
     HitInfo hitInfo = HitInfo(gVBuffer[launchIndex]);
-    if(!hitInfo.isValid())
+    if (!hitInfo.isValid())
+    {
         gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = Surface().pack();
+        if(kFillMask)
+            gValidNeighborsMask[launchIndex] = 0.f;
+    }
+        
 
     float3 view = -gView[launchIndex].xyz;
     float linZ = gLinZ[launchIndex];

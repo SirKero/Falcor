@@ -569,6 +569,10 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 {
     FALCOR_PROFILE("GetFinalGatheringHit");
 
+    if (mpValidNeighborMask) {
+        pRenderContext->clearTexture(mpValidNeighborMask.get(), float4(1, 1, 1, 1));
+    }
+
     //Clear the buffer if photon culling is used
     if (mUsePhotonCulling) {
         pRenderContext->clearUAV(mpPhotonCullingMask->getUAV().get(), uint4(0));
@@ -577,6 +581,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     //Defines
     mGetFinalGatherHitPass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
     mGetFinalGatherHitPass.pProgram->addDefine("ALLOW_HITS_IN_RADIUS", mAllowFinalGatherPointsInRadius ? "1" : "0");
+    mGetFinalGatherHitPass.pProgram->addDefine("FILL_MASK", mpValidNeighborMask ? "1" : "0");
 
     if (!mGetFinalGatherHitPass.pVars) {
         FALCOR_ASSERT(mGetFinalGatherHitPass.pProgram);
@@ -614,6 +619,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gFinalGatherExtraInfo"] = mpFinalGatherExtraInfo;
     var["gPhotonCullingMask"] = mpPhotonCullingMask;
+    var["gValidNeighborsMask"] = mpValidNeighborMask;
 
     //Create dimensions based on the number of VPLs
     uint2 targetDim = renderData.getDefaultTextureDims();
@@ -621,6 +627,10 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 
     //Trace the photons
     mpScene->raytrace(pRenderContext, mGetFinalGatherHitPass.pProgram.get(), mGetFinalGatherHitPass.pVars, uint3(targetDim, 1));
+
+    //Generate mips for mask
+    if (mpValidNeighborMask)
+        mpValidNeighborMask->generateMips(pRenderContext, true);
 }
 
 void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -708,7 +718,6 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
 
     //Defines
     mGeneratePMCandidatesPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
-    mGeneratePMCandidatesPass.pProgram->addDefine("FILL_MASK", mInitialCandidates > 0 ? "1" : "0");
 
     if (!mGeneratePMCandidatesPass.pVars) {
         FALCOR_ASSERT(mGeneratePMCandidatesPass.pProgram);
@@ -742,7 +751,6 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     var["gPackedPhotonData"] = mpPhotonData;
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gFinalGatherExtraInfo"] = mpFinalGatherExtraInfo;
-    var["gValidNeighborsMask"] = mpValidNeighborMask;
 
     bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
     FALCOR_ASSERT(tlasValid);
@@ -755,8 +763,6 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     mpScene->raytrace(pRenderContext, mGeneratePMCandidatesPass.pProgram.get(), mGeneratePMCandidatesPass.pVars, uint3(targetDim, 1));
 
     //Barrier for written buffer
-    if (mpValidNeighborMask)
-        mpValidNeighborMask->generateMips(pRenderContext,true);
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }

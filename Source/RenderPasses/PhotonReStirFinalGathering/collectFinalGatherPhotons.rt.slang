@@ -33,7 +33,6 @@ StructuredBuffer<uint4> gPackedPhotonData;
 StructuredBuffer<AABB> gPhotonAABB;
 Texture2D<PackedHitInfo> gFinalGatherHit;
 Texture2D<uint2> gFinalGatherExtraInfo;
-RWTexture2D<float> gValidNeighborsMask;
 
 RaytracingAccelerationStructure gPhotonAS;
 
@@ -44,7 +43,6 @@ RWStructuredBuffer<PackedVPL> gPhotonLights;
 
 // Static configuration based on defines set from the host.
 static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
-static const bool kFillMask = FILL_MASK;
 
 /** Payload for ray (48B).
 */
@@ -151,7 +149,6 @@ void rayGen()
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
     
-    bool valid = true;
     HitInfo hitInfo = HitInfo(gFinalGatherHit[launchIndex]);
     if(!hitInfo.isValid())
         return;                     //TODO write invalid reservoir? 
@@ -209,18 +206,6 @@ void rayGen()
         r.finalizeSample(1.f, 1.f);
     }
 
-    //Set the vpl to false if no radiance was collected
-    /*
-    if(luminance(photonLight.flux) <= 0)
-        photonLight.valid = false;
-    */
-
     gReservoir[launchIndex] = r.pack();
-    gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();
-    if (kFillMask)
-    {
-        float maskVal = photonLight.valid ? 1.f : 0.f;
-        gValidNeighborsMask[launchIndex] = maskVal;
-    }
-        
+    gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();        
 }
