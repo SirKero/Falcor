@@ -296,7 +296,7 @@ void VBufferPM::renderUI(Gui::Widgets& widget)
     widget.tooltip("Maximum path length for Photon Bounces");
 
     mOptionsChanged |= widget.var("SpecRoughCutoff", mSpecRoughCutoff, 0.0f, 1.0f, 0.01f);
-    widget.tooltip("The cutoff for Specular Materials. All Reflections above this threshold are considered Diffuse");
+    widget.tooltip("The cutoff for Diffuse amd Specular Materials. All Reflections above this threshold are considered diffuse, does not apply to transmissive materials.\n 0 - always take first hit (except for transmissive materials). \n 1 - Only use bsdf lobes");
 
     // Sample pattern controls.
     bool updatePattern = widget.dropdown("Sample pattern", kSamplePatternList, (uint32_t&)mSamplePattern);
