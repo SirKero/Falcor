@@ -290,6 +290,9 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             mReset |= widget.checkbox("Diffuse Shading Only", mUseDiffuseOnlyShading);
             widget.tooltip("Uses only diffuse shading. Can be used if a Path traced V-Buffer is used. Triggers Recompilation of shaders");
         }
+
+        mReset |= widget.checkbox("Use reduced Reservoir format", mUseReducedReservoirFormat);
+        widget.tooltip("If enabled uses RG32_UINT instead of RGBA32_UINT. In reduced format the targetPDF and M only have 16 bits while the weight still has full precision");
     }
    
 
@@ -386,6 +389,7 @@ void PhotonReSTIRFinalGathering::resetPass(bool resetScene)
     mpSpartialResampling.reset();
     mpSpartioTemporalResampling.reset();
     mpFinalShading.reset();
+    mpGenerateAdditionalCandidates.reset();
 
     if (resetScene) {
         mpEmissiveLightSampler.reset();
@@ -474,7 +478,8 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
 
     if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1] || !mpReservoirBuffer[2]) {
         for (uint i = 0; i < 3; i++) {
-            mpReservoirBuffer[i] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
+            mpReservoirBuffer[i] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
+                                                     mUseReducedReservoirFormat ? ResourceFormat::RG32Uint : ResourceFormat::RGBA32Uint,
                                                      1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
             mpReservoirBuffer[i]->setName("PhotonReStir::ReservoirBuf" + std::to_string(i));
         }
@@ -718,6 +723,7 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
 
     //Defines
     mGeneratePMCandidatesPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mGeneratePMCandidatesPass.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
 
     if (!mGeneratePMCandidatesPass.pVars) {
         FALCOR_ASSERT(mGeneratePMCandidatesPass.pProgram);
@@ -844,6 +850,7 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add(getValidResourceDefines(kInputChannels, renderData));
+        if (mUseReducedReservoirFormat) defines.add("USE_REDUCED_RESERVOIR_FORMAT");
 
         mpGenerateAdditionalCandidates = ComputePass::create(desc, defines, true);
     }
@@ -905,6 +912,7 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
+        if (mUseReducedReservoirFormat) defines.add("USE_REDUCED_RESERVOIR_FORMAT");
 
         mpTemporalResampling = ComputePass::create(desc, defines, true);
     }
@@ -972,6 +980,7 @@ void PhotonReSTIRFinalGathering::spartialResampling(RenderContext* pRenderContex
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
+        if (mUseReducedReservoirFormat) defines.add("USE_REDUCED_RESERVOIR_FORMAT");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpSpartialResampling = ComputePass::create(desc, defines, true);
@@ -1035,6 +1044,7 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
         defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
+        if (mUseReducedReservoirFormat) defines.add("USE_REDUCED_RESERVOIR_FORMAT");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpSpartioTemporalResampling = ComputePass::create(desc, defines, true);
@@ -1100,6 +1110,7 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
         defines.add(getValidResourceDefines(kOutputChannels, renderData));
         defines.add(getValidResourceDefines(kInputChannels, renderData));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
+        if (mUseReducedReservoirFormat) defines.add("USE_REDUCED_RESERVOIR_FORMAT");
 
         mpFinalShading = ComputePass::create(desc, defines, true);
     }

@@ -18,8 +18,13 @@ import Reservoir;
 import SurfaceData;
 import VPLs;
 
+#ifdef USE_REDUCED_RESERVOIR_FORMAT
+RWTexture2D<uint2> gReservoir;
+Texture2D<uint2> gReservoirPrev;
+#else
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
+#endif
 
 StructuredBuffer<PackedVPL> gVpls;
 RWStructuredBuffer<PackedVPL> gVplsWrite;
@@ -342,7 +347,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else //BIAS MODE BASIC
     r.finalizeSample(1.0f, r.M);
 #endif //BIAS MODE BASIC
-    
+
+#ifdef USE_REDUCED_RESERVOIR_FORMAT
+    gReservoir[dTid] = r.packReduced();
+#else
     gReservoir[dTid] = r.pack();
+#endif
     gVplsWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }

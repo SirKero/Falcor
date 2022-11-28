@@ -1,9 +1,9 @@
 struct Reservoir{
 
-    uint lightIdx;      // Light index of the sample
     uint M;             // Number of samples. Real number equals generatedSamples * M
+    float targetPdf; // Target Pdf of current sample
     float weightSum;    // Weight of the reservoir after finalizing (W in paper). Used as weightSum internaly
-    float targetPdf;    // Target Pdf of current sample
+    uint pad;           // Pad for fitting
     
     //Empty init
     __init(){
@@ -12,12 +12,23 @@ struct Reservoir{
         weightSum = 0.f;
     }
 
-    //Init for analytic light types
+    //Init with full precision
     __init(const uint4 packed){
-        lightIdx = packed.x;
-        M = packed.y;
+        M = packed.x;
+        targetPdf = asfloat(packed.y);
         weightSum = asfloat(packed.z);
-        targetPdf = asfloat(packed.w);
+        //Invalidate if nan or inf is present
+        if(isinf(weightSum) || isnan(weightSum)){
+            weightSum = 0;
+            M = 0;
+        }
+    }
+
+    //Init with reduced targedPDF precision
+    __init(const uint2 packed){
+        M = packed.x & 0xFFFF;
+        targetPdf = f16tof32(packed.x >> 16);
+        weightSum = asfloat(packed.y);
         //Invalidate if nan or inf is present
         if(isinf(weightSum) || isnan(weightSum)){
             weightSum = 0;
@@ -26,25 +37,24 @@ struct Reservoir{
     }
 
     //Pack for uint texture
-    uint4 pack(){
-        uint4 packed;
-        packed.x = lightIdx;
-        packed.y = M;
-        packed.z = asuint(weightSum);
-        packed.w = asuint(targetPdf);
-
-        return packed;
+    uint4 pack(){        
+        return uint4(M, asuint(targetPdf), asuint(weightSum), 0);
     }
 
+    uint2 packReduced()
+    {
+        return uint2((M & 0xFFFF) | (f32tof16(targetPdf) << 16), asuint(weightSum));
+    }
+    
+
     //Updates reservoir with new light sample. Returns true if the light sample was selected
-    [mutating] bool updateReservoir(const uint lightSampleIndex, const float invSelectPdf,const float lsTargetPdf, const float rnd){
+    [mutating] bool updateReservoir(const float invSelectPdf,const float lsTargetPdf, const float rnd){
         float risWeight = lsTargetPdf * invSelectPdf;
         weightSum += risWeight;
         M += 1;
         bool selectSample = (rnd * weightSum < risWeight);
     
         if(selectSample){
-            lightIdx = lightSampleIndex;
             targetPdf = lsTargetPdf;
         }
         return selectSample;
@@ -63,7 +73,6 @@ struct Reservoir{
         bool selectSample = (rnd * weightSum < risWeight);
     
         if(selectSample){
-            lightIdx = other.lightIdx;
             targetPdf = otherTargetPDF;
         }
 

@@ -37,7 +37,11 @@ Texture2D<uint2> gFinalGatherExtraInfo;
 RaytracingAccelerationStructure gPhotonAS;
 
 //Outputs
-RWTexture2D<uint4> gReservoir;
+#if USE_REDUCED_RESERVOIR_FORMAT
+    RWTexture2D<uint2> gReservoir;
+#else
+    RWTexture2D<uint4> gReservoir;
+#endif
 RWStructuredBuffer<PackedVPL> gPhotonLights;
 
 
@@ -202,10 +206,14 @@ void rayGen()
     
     if (vplValid)
     {
-        r.updateReservoir(lightIdx, invSelectPdf, targetPdf, 0.5 /*random var*/); //Add the candidate
+        r.updateReservoir(invSelectPdf, targetPdf, 0.5 /*random var*/); //Add the candidate
         r.finalizeSample(1.f, 1.f);
     }
 
+#if USE_REDUCED_RESERVOIR_FORMAT
+    gReservoir[launchIndex] = r.packReduced();
+#else
     gReservoir[launchIndex] = r.pack();
+#endif
     gPhotonLights[index2Dto1D(launchIndex, launchDim.x)] = photonLight.pack();        
 }

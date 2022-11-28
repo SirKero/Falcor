@@ -16,7 +16,12 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import VPLs;
 
-Texture2D<uint4> gReservoir;
+#ifdef USE_REDUCED_RESERVOIR_FORMAT
+    Texture2D<uint2> gReservoir;
+#else
+    Texture2D<uint4> gReservoir;
+#endif
+
 
 StructuredBuffer<PackedVPL> gVpls;
 

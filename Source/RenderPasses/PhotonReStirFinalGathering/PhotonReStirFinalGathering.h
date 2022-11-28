@@ -238,7 +238,7 @@ private:
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     bool mUseDiffuseOnlyShading = false;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
-    
+    bool mUseReducedReservoirFormat = false;    // Full precision = RGBA32_UINT, Reduced = RG32UINT. TargetPdf and M only uses 16 bits in reduced
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
