@@ -140,7 +140,7 @@ struct Surface{
 
         //Mix diffuse and specular BRDF
         float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, diffuseProb));
-        return max(0.f, brdf * NdotL * Li);
+        return max(0.f, brdf * Li);
     }
 
     //Gets the one channel average diffuse target pdf for Resampling
