@@ -143,7 +143,7 @@ private:
     //
     //UI
     //
-    uint mResamplingMode = ResamplingMode::SpartioTemporal;
+    uint mResamplingMode = ResamplingMode::NoResampling;
     uint mNumEmissiveCandidates = 32;  //Number of emissive light samples
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
@@ -161,10 +161,10 @@ private:
     bool mUseDiffuseShadingOnly = false;    //Use only diffuse shading for ReSTIR. Can be used if VBuffer is traced until diffuse hit
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint mNumMaxPhotons = 100000;               //Max number of photon lights per iteration
+    uint mNumMaxPhotons = 400000;               //Max number of photon lights per iteration
     uint mNumMaxPhotonsUI = mNumMaxPhotons;
     uint mCurrentPhotonLightsCount = 0;             //Gets data from GPU buffer
-    uint mNumDispatchedPhotons = 262144;        //Number of dispatched photons 
+    uint mNumDispatchedPhotons = 524288;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
@@ -206,6 +206,7 @@ private:
     Buffer::SharedPtr mpPhotonLightCounter;     //Counter for the number of lights
     Buffer::SharedPtr mpPhotonLightCounterCPU;  //For showing the current number of photons in the UI
     Texture::SharedPtr mpPhotonReservoirPos[2];    //Encoded Photon reservoir. One reservoir is two textures
+    Texture::SharedPtr mpPhotonReservoirNormal[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPrevViewTex;               //If view buffer is set, this texture is used for view of the frame before
 

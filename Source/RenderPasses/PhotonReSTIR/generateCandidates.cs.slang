@@ -18,6 +18,7 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
+import PhotonLight;
 
 #ifndef USE_PRESAMPLING
 #define USE_PRESAMPLING 1
@@ -33,24 +34,12 @@ import SurfaceData;
 
 RWTexture2D<uint4> gReservoir;
 
-struct PhotonLight{
-    float3 posW;
-    uint packedNormal;
-    float3 flux;
-    uint valid;
-
-    //Shading world normal
-    property float3 normal{
-        get { return decodeNormal2x16(packedNormal); }
-        set { packedNormal = encodeNormal2x16(newValue); }
-    }
-};
-
 StructuredBuffer<uint2> gPresampledPhotonLights;
 StructuredBuffer<PhotonLight> gPhotonLights;
 Buffer<uint> gPhotonCounter;
 
 RWTexture2D<float4> gPhotonReservoirPos;
+RWTexture2D<float4> gPhotonReservoirNormal;
 RWTexture2D<float4> gPhotonReservoirFlux;
 
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -130,7 +119,7 @@ bool generateSample(float rnd, const float3 surfacePosition,
      
     
     pl = gPhotonLights[ls.lightIdx];
-    float3 toLight = pl.posW - surfacePosition;
+    float3 toLight = pl.posW.xyz - surfacePosition;
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
@@ -266,6 +255,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
         
     gReservoir[dTid] = r.pack();
-    gPhotonReservoirPos[dTid] = float4(selectedPhotonLight.posW, asfloat(selectedPhotonLight.packedNormal));
+    gPhotonReservoirPos[dTid] = selectedPhotonLight.posW;
+    gPhotonReservoirNormal[dTid] = float4(selectedPhotonLight.normal, 1);
     gPhotonReservoirFlux[dTid] = float4(selectedPhotonLight.flux,1);
 }

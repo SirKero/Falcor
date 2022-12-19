@@ -40,6 +40,9 @@
     <ShaderSource Include="presamplePhotonLights.cs.slang">
       <Filter>Shader</Filter>
     </ShaderSource>
+    <ShaderSource Include="PhotonLight.slang">
+      <Filter>Shader\StructsAndFunctions</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shader">

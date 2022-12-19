@@ -373,6 +373,7 @@ void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const Rend
     {
         for (size_t i = 0; i <= 1; i++) {
             mpPhotonReservoirPos[i].reset();
+            mpPhotonReservoirNormal[i].reset();
             mpPhotonReservoirFlux[i].reset();
         }
     }
@@ -393,7 +394,7 @@ void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const Rend
     }
     if (!mpPhotonLights) {
         //Calculate real photon max size
-        mpPhotonLights = Buffer::createStructured(sizeof(float) * 8, mNumMaxPhotons);
+        mpPhotonLights = Buffer::createStructured(sizeof(float) * 12, mNumMaxPhotons);
         mpPhotonLights->setName("PhotonReSTIR::PhotonLights");
     }
     //Create pdf texture
@@ -425,6 +426,8 @@ void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const Rend
         for (uint i = 0; i < 2; i++) {
             mpPhotonReservoirPos[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA32Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
             mpPhotonReservoirPos[i]->setName("PhotonReSTIR::PhotonReservoirPos" + std::to_string(i));
+            mpPhotonReservoirNormal[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+            mpPhotonReservoirNormal[i]->setName("PhotonReSTIR::PhotonReservoirNormal" + std::to_string(i));
             mpPhotonReservoirFlux[i] = Texture::create2D(texDim.x, texDim.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
             mpPhotonReservoirFlux[i]->setName("PhotonReSTIR::PhotonReservoirFlux" + std::to_string(i));
         }
@@ -648,6 +651,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
     //Clear current reservoir
     pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2].get()->getUAV().get(), uint4(0));
     pRenderContext->clearTexture(mpPhotonReservoirPos[mFrameCount % 2].get() , float4(0));
+    pRenderContext->clearTexture(mpPhotonReservoirNormal[mFrameCount % 2].get(), float4(0));
     pRenderContext->clearTexture(mpPhotonReservoirFlux[mFrameCount % 2].get(), float4(0));
 
     //Create pass
@@ -709,6 +713,7 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonReservoirPos[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpPhotonReservoirNormal[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonReservoirFlux[mFrameCount % 2].get());
 }
 
@@ -1005,10 +1010,12 @@ void PhotonReSTIR::bindReservoirs(ShaderVar& var, uint index , bool bindPrev)
 {
     var["gReservoir"] = mpReservoirBuffer[index % 2];
     var["gPhotonReservoirPos"] = mpPhotonReservoirPos[index % 2];
+    var["gPhotonReservoirNormal"] = mpPhotonReservoirNormal[index % 2];
     var["gPhotonReservoirFlux"] = mpPhotonReservoirFlux[index % 2];
     if (bindPrev) {
         var["gReservoirPrev"] = mpReservoirBuffer[(index +1) % 2];
         var["gPhotonReservoirPosPrev"] = mpPhotonReservoirPos[(index +1) % 2];
+        var["gPhotonReservoirNormalPrev"] = mpPhotonReservoirNormal[(index + 1) % 2];
         var["gPhotonReservoirFluxPrev"] = mpPhotonReservoirFlux[(index +1) % 2];
     }
 }

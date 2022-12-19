@@ -13,6 +13,7 @@ import Utils.Color.ColorHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import PhotonReStirFunctions;
+import PhotonLight;
 
 cbuffer PerFrame
 {
@@ -32,18 +33,6 @@ cbuffer Light{
     EmissiveLightSampler gEmissiveSampler;
 }
 
-struct PhotonLight{
-    float3 posW;
-    uint packedNormal;
-    float3 flux;
-    uint valid;
-
-    //Shading world normal
-    property float3 normal{
-        get { return decodeNormal2x16(packedNormal); }
-        set { packedNormal = encodeNormal2x16(newValue); }
-    }
-};
 
 RWStructuredBuffer<PhotonLight> gPhotonLights;
 RWBuffer<uint> gPhotonCounter;
@@ -64,6 +53,8 @@ struct RayData
     bool    diffuseHit;     ///< saves if the his is diffuse
     float3 diffuseScalar;
     uint _pad;
+    float3 normal;
+    uint _pad2;
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
 
@@ -74,6 +65,7 @@ struct RayData
         RayData d;
         d.terminated = false;
         d.packedNormal = 0;
+        d.normal = float3(0,1,0);
         d.thp = float3(1);
         d.diffuseScalar = float3(1);
         d.origin = float3(0);
@@ -181,6 +173,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.origin = rayOrigin;
     rayData.thp *= valid ? bsdfSample.weight : float3(0);
     rayData.packedNormal = encodeNormal2x16(sd.faceN);
+    rayData.normal = sd.N;
     rayData.direction = bsdfSample.wo;
     rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 
@@ -192,7 +185,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         //Faster same result
         float3 diffProb = (bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectance) / bsdfProperties.diffuseReflectionAlbedo;
         const float NdotL = saturate(dot(sd.N, incomingRayDir));
-        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI * diffProb;
+        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
         
     }
     //if throughput is 0, return
@@ -281,18 +274,18 @@ void rayGen()
             photonIndex = min(photonIndex, kPhotonLightBufferSize); //TODO set as uniform
 
             PhotonLight pl = {};
-            pl.posW = photonPos;
-            pl.packedNormal = rayData.packedNormal;
+            pl.posW = float4(photonPos,1);
+            pl.normal = rayData.normal;
             pl.flux = photon.flux;
             pl.valid = 1;
             
             gPhotonLights[photonIndex] = pl;
             if(kUsePdfSampling) gPhotonPdfTexture[ReSTIR_LinearIndexToZCurve(photonIndex)] = luminance(photon.flux);
-            break;  //Stop here to not sample points multiple times
+            //break;  //Stop here to not sample points multiple times
         }
    
         //Russian Roulette
-        if(reflectedDiffuse) rayData.thp * invInvRejection; //Scale global photon up if it was not stored
+        //if(reflectedDiffuse) rayData.thp * invInvRejection; //Scale global photon up if it was not stored
         const float rrVal = luminance(rayData.thp);
         const float prob = max(0.f, 1.f - rrVal);
         float rnd = sampleNext1D(rayData.sg);

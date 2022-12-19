@@ -40,6 +40,7 @@
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="generateCandidates.cs.slang" />
     <ShaderSource Include="generatePhotons.rt.slang" />
+    <ShaderSource Include="PhotonLight.slang" />
     <ShaderSource Include="PhotonReStirFunctions.slang" />
     <ShaderSource Include="presamplePhotonLights.cs.slang" />
     <ShaderSource Include="Reservoir.slang" />

@@ -18,6 +18,7 @@ import Reservoir;
 Texture2D<uint4> gReservoir;
 
 Texture2D<float4> gPhotonReservoirPos;
+Texture2D<float4> gPhotonReservoirNormal;
 Texture2D<float4> gPhotonReservoirFlux;
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -73,7 +74,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 void getEmissiveLight(uint2 idx,in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
     //Get light position
     float4 photonPos = gPhotonReservoirPos[idx];
-    float3 photonNormal = decodeNormal2x16(asuint(photonPos.z));
+    float3 photonNormal = gPhotonReservoirNormal[idx].xyz;
     float3 photonFlux = gPhotonReservoirFlux[idx].xyz;
     
     toLight = photonPos.xyz - worldPos;

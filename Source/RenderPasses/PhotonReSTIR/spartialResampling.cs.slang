@@ -16,13 +16,16 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
+import PhotonLight;
 
 Texture2D<uint4> gReservoir;
 RWTexture2D<uint4> gReservoirPrev;
 
 Texture2D<float4> gPhotonReservoirPos;
+Texture2D<float4> gPhotonReservoirNormal;
 Texture2D<float4> gPhotonReservoirFlux;
 RWTexture2D<float4> gPhotonReservoirPosPrev;
+RWTexture2D<float4> gPhotonReservoirNormalPrev;
 RWTexture2D<float4> gPhotonReservoirFluxPrev;
 
 Texture1D<snorm float2> gNeighOffsetBuffer;
@@ -61,11 +64,6 @@ struct LightSample{
     float Li;
 };
 
-struct PhotonLight{
-    float4 pos;
-    float4 flux;
-};
-
 static const float kRayEpsilon = 0.99f;
 
 uint index2Dto1D(uint2 idx, uint width){
@@ -102,11 +100,13 @@ Surface getSurface(uint2 idx)
 PhotonLight getPhotonLight(int2 idx, bool prev){
     PhotonLight pl;
     if(prev){
-        pl.pos = gPhotonReservoirPosPrev[idx];
-        pl.flux = gPhotonReservoirFluxPrev[idx];
+        pl.posW = gPhotonReservoirPosPrev[idx];
+        pl.normal = gPhotonReservoirNormalPrev[idx].xyz;
+        pl.flux = gPhotonReservoirFluxPrev[idx].xyz;
     }else{
-        pl.pos = gPhotonReservoirPos[idx];
-        pl.flux = gPhotonReservoirFlux[idx];
+        pl.posW = gPhotonReservoirPos[idx];
+        pl.normal =gPhotonReservoirNormal[idx].xyz;
+        pl.flux = gPhotonReservoirFlux[idx].xyz;
     }
     return pl;
 }
@@ -119,23 +119,22 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
 }
 
 bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
-    //Get light position
-    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.w));
-
     if(any(pl.flux.xyz <= 0)) return false;
     
-    ls.dir = pl.pos.xyz - worldPos;
+    ls.dir = pl.posW.xyz - worldPos;
     float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    float cosTheta = dot(photonNormal, -ls.dir);
+    float cosTheta = dot(pl.normal, -ls.dir);
+    if(cosTheta <= 0) return false;
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
     ls.Li = luminance(pl.flux.xyz) / pdf;
 
-    return true;
+    return ls.Li > 0;   //true if sample is valid
 }
+
 
 //gets the target pdf averaged to one channel
 float getSurfacePdf(in Surface surface, in LightSample ls){
@@ -325,6 +324,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         
     gReservoirPrev[dTid] = r.pack();
     
-    gPhotonReservoirPosPrev[dTid] = selectedPL.pos;
-    gPhotonReservoirFluxPrev[dTid] = selectedPL.flux;
+    gPhotonReservoirPosPrev[dTid] = selectedPL.posW;
+    gPhotonReservoirNormalPrev[dTid] = float4(selectedPL.normal,0);
+    gPhotonReservoirFluxPrev[dTid] = float4(selectedPL.flux,1);
 }

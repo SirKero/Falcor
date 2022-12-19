@@ -16,13 +16,16 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
 import SurfaceData;
+import PhotonLight;
 
 RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 
 RWTexture2D<float4> gPhotonReservoirPos;
+RWTexture2D<float4> gPhotonReservoirNormal;
 RWTexture2D<float4> gPhotonReservoirFlux;
 Texture2D<float4> gPhotonReservoirPosPrev;
+Texture2D<float4> gPhotonReservoirNormalPrev;
 Texture2D<float4> gPhotonReservoirFluxPrev;
 
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
@@ -61,10 +64,6 @@ struct LightSample{
     float Li;
 };
 
-struct PhotonLight{
-    float4 pos;
-    float4 flux;
-};
 
 static const float kRayEpsilon = 0.99f;
 
@@ -122,27 +121,26 @@ bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, floa
 PhotonLight getPhotonLight(int2 idx, bool prev){
     PhotonLight pl;
     if(prev){
-        pl.pos = gPhotonReservoirPosPrev[idx];
-        pl.flux = gPhotonReservoirFluxPrev[idx];
+        pl.posW = gPhotonReservoirPosPrev[idx];
+        pl.normal = gPhotonReservoirNormalPrev[idx].xyz;
+        pl.flux = gPhotonReservoirFluxPrev[idx].xyz;
     }else{
-        pl.pos = gPhotonReservoirPos[idx];
-        pl.flux = gPhotonReservoirFlux[idx];
+        pl.posW = gPhotonReservoirPos[idx];
+        pl.normal =gPhotonReservoirNormal[idx].xyz;
+        pl.flux = gPhotonReservoirFlux[idx].xyz;
     }
     return pl;
 }
 
 bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, out float sampleDistance){
-    //Get light position
-    float3 photonNormal = decodeNormal2x16(asuint(pl.pos.w));
-
     if(any(pl.flux.xyz <= 0)) return false;
     
-    ls.dir = pl.pos.xyz - worldPos;
+    ls.dir = pl.posW.xyz - worldPos;
     float distSqr= max(FLT_MIN, dot(ls.dir, ls.dir)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    float cosTheta = dot(photonNormal, -ls.dir);
+    float cosTheta = dot(pl.normal, -ls.dir);
     if(cosTheta <= 0 || sampleDistance < gGeometryTermBand) return false;
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
@@ -335,6 +333,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif //BIAS_MODE_BASIC
         
     gReservoir[dTid] = r.pack();
-    gPhotonReservoirPos[dTid] = selectPL.pos;
-    gPhotonReservoirFlux[dTid] = selectPL.flux;
+    gPhotonReservoirPos[dTid] = selectPL.posW;
+    gPhotonReservoirNormal[dTid] = float4(selectPL.normal,0);
+    gPhotonReservoirFlux[dTid] = float4(selectPL.flux,1);
 }
