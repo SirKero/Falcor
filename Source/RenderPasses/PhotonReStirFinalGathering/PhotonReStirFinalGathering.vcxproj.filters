@@ -31,7 +31,7 @@
     <ShaderSource Include="finalShading.cs.slang">
       <Filter>Shader\Resampling</Filter>
     </ShaderSource>
-    <ShaderSource Include="generateFinalGatheringCandidates.rt.slang">
+    <ShaderSource Include="%28unused%29generateFinalGatheringCandidates.rt.slang">
       <Filter>Shader\Photon</Filter>
     </ShaderSource>
     <ShaderSource Include="generatePhotons.rt.slang">

@@ -149,7 +149,7 @@ private:
 
     /** Distributes and collects photons for the final gather hit in one pass
     */
-    void distributeAndCollectFinalGatherPhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
+    //void distributeAndCollectFinalGatherPhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Uses sampled points to genererate additional candidates
     */
@@ -242,18 +242,18 @@ private:
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint mNumMaxPhotons = 200000;               //Size of the photon buffer
-    uint mNumMaxPhotonsUI = mNumMaxPhotons;
+    uint2 mNumMaxPhotons = uint2(200000,50000);               //Size of the photon buffer
+    uint2 mNumMaxPhotonsUI = mNumMaxPhotons;
     bool mUseDynamicePhotonDispatchCount = true;    //Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 2000000;       //Max value for dynamically dispatched photons
     float mPhotonDynamicGuardPercentage = 0.08f;    //Determines how much space of the buffer is used to guard against buffer overflows 
     float mPhotonDynamicChangePercentage = 0.05f;    //The percentage the buffer is increased/decreased per frame
-    uint mCurrentPhotonCount = 0;             //Gets data from GPU buffer
+    uint2 mCurrentPhotonCount = uint2(0,0);             //Gets data from GPU buffer
     uint mNumDispatchedPhotons = 700000;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
-    float mPhotonCollectRadius = 0.05f;     //Radius for collection
+    float2 mPhotonCollectRadius = float2(0.05f, 0.02f);     //Radius for collection
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
     bool mAllowFinalGatherPointsInRadius = true;
@@ -289,8 +289,8 @@ private:
     Texture::SharedPtr mpValidNeighborMask;     //Mask for searching valid neightbors. Only used if currentFrame spartial sampling is used (mInitialCandidates > 0)
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
-    Buffer::SharedPtr mpPhotonAABB;              //Photon AABBs for Acceleration Structure building
-    Buffer::SharedPtr mpPhotonData;              //Additional Photon data (flux, dir)
+    Buffer::SharedPtr mpPhotonAABB[2];              //Photon AABBs for Acceleration Structure building
+    Buffer::SharedPtr mpPhotonData[2];              //Additional Photon data (flux, dir)
     Buffer::SharedPtr mpPhotonCounter;     //Counter for the number of lights
     Buffer::SharedPtr mpPhotonCounterCPU;  //For showing the current number of photons in the UI
     Texture::SharedPtr mpPrevViewTex;      //If view texture is used, we store the last frame here

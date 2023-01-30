@@ -27,7 +27,7 @@ cbuffer CB
     float gRejection; //Probability that a photon is stored as a light
     bool gUseAlphaTest;
     bool gAdjustShadingNormals;
-    float gPhotonRadius;        //Radius for the vpl collection
+    float2 gPhotonRadius;        //Radius for the vpl collection
     float gHashScaleFactor; //Hash scale factor. 1/Radius
     uint gHashSize;     //Size is always 2^x
     uint _pad;
@@ -37,13 +37,13 @@ cbuffer Light{
     EmissiveLightSampler gEmissiveSampler;
 }
 
-RWStructuredBuffer<AABB> gPhotonAABB;
-RWStructuredBuffer<uint4> gPackedPhotonData;
+RWStructuredBuffer<AABB> gPhotonAABB[2];
+RWStructuredBuffer<uint4> gPackedPhotonData[2];
 RWBuffer<uint> gPhotonCounter;
 RWTexture2D<float> gPhotonPdfTexture;
 Texture2D<uint>gPhotonCullingMask;
 
-static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
+static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const uint kUsePhotonCulling = USE_PHOTON_CULLING;
 
 /** Payload for scatter ray (80B).
@@ -288,23 +288,25 @@ void rayGen()
         //store photon light
         if (reflectedDiffuse && roulette)
         {
+            uint photonType = 0;    //Global = 0 or caustic = 1
             bool storePhoton = true;
-            if(kUsePhotonCulling)
+            if(kUsePhotonCulling && photonType == 0)
                 storePhoton = cullingTest(photonPos);
             if(storePhoton){
-               uint photonIndex = 0;
-                photon.flux *= invRejection;
-                InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
+                uint photonIndex = 0;
+                if(photonType == 0)
+                    photon.flux *= invRejection;
+                InterlockedAdd(gPhotonCounter[photonType], 1u, photonIndex);
                 //Only store photon if the buffer space allows it
-                if(photonIndex <= kPhotonBufferSize){
-                    AABB photonAABB = AABB(photonPos - gPhotonRadius, photonPos + gPhotonRadius);
-                    gPhotonAABB[photonIndex] = photonAABB;
+                if(photonIndex <= kPhotonBufferSize[photonType]){
+                    AABB photonAABB = AABB(photonPos - gPhotonRadius[photonType], photonPos + gPhotonRadius[photonType]);
+                    gPhotonAABB[photonType][photonIndex] = photonAABB;
                     PhotonData pd = PhotonData();
                     pd.flux = photon.flux;
                     pd.dir = -photon.dir;
                     pd.packedNormal = rayData.packedNormal;
                 
-                    gPackedPhotonData[photonIndex] = pd.pack();
+                    gPackedPhotonData[photonType][photonIndex] = pd.pack();
                 } 
             }
         }

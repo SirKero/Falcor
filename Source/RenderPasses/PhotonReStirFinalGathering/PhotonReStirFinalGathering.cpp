@@ -46,7 +46,7 @@ namespace {
     const char kShaderGetFinalGatherHit[] = "RenderPasses/PhotonReSTIRFinalGathering/getFinalGatherHits.rt.slang";
     const char kShaderGeneratePhoton[] = "RenderPasses/PhotonReSTIRFinalGathering/generatePhotons.rt.slang";
     const char kShaderCollectFinalGatherPhotons[] = "RenderPasses/PhotonReSTIRFinalGathering/collectFinalGatherPhotons.rt.slang";
-    const char kShaderGenerateFinalGatheringCandidates[] = "RenderPasses/PhotonReSTIRFinalGathering/generateFinalGatheringCandidates.rt.slang";
+    //const char kShaderGenerateFinalGatheringCandidates[] = "RenderPasses/PhotonReSTIRFinalGathering/generateFinalGatheringCandidates.rt.slang";
     const char kShaderGenerateAdditionalCandidates[] = "RenderPasses/PhotonReSTIRFinalGathering/generateAdditionalCandidates.cs.slang";
     const char kShaderTemporalPass[] = "RenderPasses/PhotonReSTIRFinalGathering/temporalResampling.cs.slang";
     const char kShaderSpartialPass[] = "RenderPasses/PhotonReSTIRFinalGathering/spartialResampling.cs.slang";
@@ -213,7 +213,7 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             changed |= widget.var("Guard Percentage", mPhotonDynamicGuardPercentage, 0.0f, 1.f, 0.001f);
             widget.tooltip("If current fill rate is under PhotonBufferSize * (1-pGuard), the values are accepted. Reduces the changes every frame");
             changed |= widget.var("Percentage Change", mPhotonDynamicChangePercentage, 0.01f, 10.f, 0.01f);
-            widget.tooltip("Increase/Decrease percentage from the Buffer Size. With current value a increase/decrease of :" +std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons) + "is expected");
+            widget.tooltip("Increase/Decrease percentage from the Buffer Size. With current value a increase/decrease of :" +std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons[0]) + "is expected");
             widget.text("Dispatched Photons: " + std::to_string(mNumDispatchedPhotons));
         }
         else{
@@ -224,9 +224,11 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         }
         
         //Buffer size
-        widget.text("Photons: " + std::to_string(mCurrentPhotonCount) + " / " + std::to_string(mNumMaxPhotons));
+        widget.text("Photons: " + std::to_string(mCurrentPhotonCount[0]) + " / " + std::to_string(mNumMaxPhotons[0]));
+        widget.text("Caustic photons: " + std::to_string(mCurrentPhotonCount[1]) + " / " + std::to_string(mNumMaxPhotons[1]));
         widget.var("Photon Buffer Size", mNumMaxPhotonsUI, 100u, 100000000u, 100);
         mChangePhotonLightBufferSize = widget.button("Apply", true);
+        widget.tooltip("First -> Global, Second -> Caustic");
         if (mChangePhotonLightBufferSize) mNumMaxPhotons = mNumMaxPhotonsUI;
 
         changed |= widget.var("Light Store Probability", mPhotonRejection, 0.f, 1.f, 0.0001f);
@@ -235,7 +237,7 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         changed |= widget.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
 
         changed |= widget.var("Collect Radius", mPhotonCollectRadius);
-        widget.tooltip("Collection Radius for final gathering");
+        widget.tooltip("Photon Radii for final gather and caustic collecton. First->Global, Second->Caustic");
 
         changed |= widget.checkbox("Use Photon Culling", mUsePhotonCulling);
         widget.tooltip("Enabled culling of photon based on a hash grid. Photons are only stored on cells that are collected");
@@ -358,6 +360,7 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
         }
 
         //Init the raytracing collection programm TODO maybe remove
+        /*
         {
             RtProgram::Desc desc;
             //desc.addShaderLibrary(kShaderCollectPhoton);
@@ -379,6 +382,7 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
             
             mDistributeAndCollectFinalGatherPointsPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
         }
+        */
     }
 
 }
@@ -432,28 +436,34 @@ void PhotonReSTIRFinalGathering::preparePhotonBuffers(RenderContext* pRenderCont
 {
         
     if (mChangePhotonLightBufferSize) {
-        mpPhotonAABB.reset();
-        mpPhotonData.reset();
+        for (uint i = 0; i < 2; i++) {
+            mpPhotonAABB[i].reset();
+            mpPhotonData[i].reset();
+        }
+        
         mPhotonAS.tlas.pTlas.reset();       //This triggers photon as recreation
         mChangePhotonLightBufferSize = false;
     }
     
     if (!mpPhotonCounter) {
-        mpPhotonCounter = Buffer::create(sizeof(uint));
+        mpPhotonCounter = Buffer::create(sizeof(uint) * 2);
         mpPhotonCounter->setName("PhotonReSTIRFinalGathering::PhotonCounterGPU");
     }
     if (!mpPhotonCounterCPU) {
-        mpPhotonCounterCPU = Buffer::create(sizeof(uint),ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonCounterCPU = Buffer::create(sizeof(uint) * 2,ResourceBindFlags::None, Buffer::CpuAccess::Read);
         mpPhotonCounterCPU->setName("PhotonReSTIRFinalGathering::PhotonCounterCPU");
     }
-    if (!mpPhotonAABB) {
-        mpPhotonAABB = Buffer::createStructured(sizeof(D3D12_RAYTRACING_AABB), mNumMaxPhotons);
-        mpPhotonAABB->setName("PhotonReStir::PhotonAABB");
+    for (uint i = 0; i < 2; i++) {
+        if (!mpPhotonAABB[i]) {
+            mpPhotonAABB[i] = Buffer::createStructured(sizeof(D3D12_RAYTRACING_AABB), mNumMaxPhotons[i]);
+            mpPhotonAABB[i]->setName("PhotonReStir::PhotonAABB" + (i+1));
+        }
+        if (!mpPhotonData[i]) {
+            mpPhotonData[i] = Buffer::createStructured(sizeof(uint) * 4, mNumMaxPhotons[i]);
+            mpPhotonData[i]->setName("PhotonReStir::PhotonData" + (i + 1));
+        }
     }
-    if (!mpPhotonData) {
-        mpPhotonData = Buffer::createStructured(sizeof(uint) * 4, mNumMaxPhotons);
-        mpPhotonData->setName("PhotonReStir::PhotonData");
-    }
+    
 
 }
 
@@ -612,7 +622,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 
     nameBuf = "Constant";
     var[nameBuf]["gCollectionRadius"] = mPhotonCollectRadius;
-    var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius);
+    var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]); //Take Global
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
     var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
 
@@ -643,10 +653,12 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     FALCOR_PROFILE("GeneratePhotons");
     //Clear Counter
     pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
-    pRenderContext->clearUAV(mpPhotonAABB->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpPhotonAABB[0]->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpPhotonAABB[1]->getUAV().get(), uint4(0));
 
     //Defines
-    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
+    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mPhotonGeneratePass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
 
     if (!mPhotonGeneratePass.pVars) {
@@ -683,14 +695,17 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
         var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
-        var[nameBuf]["gHashScaleFactor"] = 1.f/(2 * mPhotonCollectRadius);  //Hash scale factor. 1/diameter
+        var[nameBuf]["gHashScaleFactor"] = 1.f/(2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
         var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
-    var["gPhotonAABB"] = mpPhotonAABB;
-    var["gPackedPhotonData"] = mpPhotonData;
+    //Set the photon buffers
+    for (uint32_t i = 0; i < 2; i++) {
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPackedPhotonData"][i] = mpPhotonData[i];
+    }
     var["gPhotonCounter"] = mpPhotonCounter;
     var["gPhotonCullingMask"] = mpPhotonCullingMask;
 
@@ -702,17 +717,19 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     mpScene->raytrace(pRenderContext, mPhotonGeneratePass.pProgram.get(), mPhotonGeneratePass.pVars, uint3(targetDim, 1));
 
     pRenderContext->uavBarrier(mpPhotonCounter.get());
-    pRenderContext->uavBarrier(mpPhotonAABB.get());
-    pRenderContext->uavBarrier(mpPhotonData.get());
+    pRenderContext->uavBarrier(mpPhotonAABB[0].get());
+    pRenderContext->uavBarrier(mpPhotonData[0].get());
+    pRenderContext->uavBarrier(mpPhotonAABB[1].get());
+    pRenderContext->uavBarrier(mpPhotonData[1].get());
 
     //Build Acceleration Structure
     //Create as if not valid
     if (!mPhotonAS.tlas.pTlas) {
         mPhotonAS.update = false;
-        createAccelerationStructure(pRenderContext, mPhotonAS, 1, { mNumMaxPhotons }, { mpPhotonAABB->getGpuAddress() });
+        createAccelerationStructure(pRenderContext, mPhotonAS, 1, { mNumMaxPhotons[0] , mNumMaxPhotons[1]}, {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()});
     }
 
-    buildAccelerationStructure(pRenderContext, mPhotonAS, { mNumMaxPhotons });
+    buildAccelerationStructure(pRenderContext, mPhotonAS, { mNumMaxPhotons[0], mNumMaxPhotons[1]});
 }
 
 void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData)
@@ -722,7 +739,6 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
 
     //Defines
-    mGeneratePMCandidatesPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
     mGeneratePMCandidatesPass.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
 
     if (!mGeneratePMCandidatesPass.pVars) {
@@ -753,8 +769,8 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     }
     bindReservoirs(var, mFrameCount, false);
     var["gPhotonLights"] = mpPhotonLightBuffer[mFrameCount % 2];
-    var["gPhotonAABB"] = mpPhotonAABB;
-    var["gPackedPhotonData"] = mpPhotonData;
+    var["gPhotonAABB"] = mpPhotonAABB[0];
+    var["gPackedPhotonData"] = mpPhotonData[0];
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gFinalGatherExtraInfo"] = mpFinalGatherExtraInfo;
 
@@ -773,12 +789,10 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }
 
+/*
 void PhotonReSTIRFinalGathering::distributeAndCollectFinalGatherPhotonPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("CollectPhotons");
-
-    //Defines
-    mDistributeAndCollectFinalGatherPointsPass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
 
     if (!mDistributeAndCollectFinalGatherPointsPass.pVars) {
         FALCOR_ASSERT(mDistributeAndCollectFinalGatherPointsPass.pProgram);
@@ -830,7 +844,7 @@ void PhotonReSTIRFinalGathering::distributeAndCollectFinalGatherPhotonPass(Rende
     //pRenderContext->copyResource(mpReservoirBuffer[mFrameCount % 2].get(), mpReservoirBuffer[2].get()); //TODO solve that over index
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }
-
+*/
 void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRenderContext, const RenderData& renderData)
 {
     if (mInitialCandidates == 0) return;   //Only execute pass if more than 1 candidate is requested
@@ -1191,28 +1205,33 @@ void PhotonReSTIRFinalGathering::fillNeighborOffsetBuffer(std::vector<int8_t>& b
 void PhotonReSTIRFinalGathering::handelPhotonCounter(RenderContext* pRenderContext)
 {
     //Copy the photonCounter to a CPU Buffer
-    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint32_t));
+    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint32_t) * 2);
 
     void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
-    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint));
+    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint) * 2);
     mpPhotonCounterCPU->unmap();
+
 
     //Change Photon dispatch count dynamically.
     if (mUseDynamicePhotonDispatchCount) {
+
+        //Only use global photons for the dynamic dispatch count
+        uint globalPhotonCount = mCurrentPhotonCount[0];
+        uint globalMaxPhotons = mNumMaxPhotons[0];
         //If counter is invalid, reset
-        if (mCurrentPhotonCount == 0) {
+        if (globalPhotonCount == 0) {
             mNumDispatchedPhotons = kDynamicPhotonDispatchInitValue;
         }
-        uint bufferSizeCompValue =(uint)(mNumMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
-        uint changeSize = (uint)(mNumMaxPhotons * mPhotonDynamicChangePercentage);
+        uint bufferSizeCompValue =(uint)(globalMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
+        uint changeSize = (uint)(globalMaxPhotons * mPhotonDynamicChangePercentage);
 
         //If smaller, increase dispatch size
-        if(mCurrentPhotonCount < bufferSizeCompValue){
+        if(globalPhotonCount < bufferSizeCompValue){
             uint newDispatched = (uint)((mNumDispatchedPhotons + changeSize) / mPhotonYExtent) * mPhotonYExtent;    //mod YExtend == 0
             mNumDispatchedPhotons = std::min(newDispatched, mPhotonDynamicDispatchMax);
         }
         //If bigger, decrease dispatch size
-        else if(mCurrentPhotonCount >= mNumMaxPhotons) {
+        else if(globalPhotonCount >= globalMaxPhotons) {
             uint newDispatched = (uint)((mNumDispatchedPhotons - changeSize) / mPhotonYExtent) * mPhotonYExtent;    //mod YExtend == 0
             mNumDispatchedPhotons = std::max(newDispatched, mPhotonYExtent);
         }        

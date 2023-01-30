@@ -42,9 +42,6 @@ StructuredBuffer<AABB> gPhotonAABB;
 RaytracingAccelerationStructure gPhotonAS;
 
 
-// Static configuration based on defines set from the host.
-static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
-
 /** Payload for ray (48B).
 */
 struct RayData

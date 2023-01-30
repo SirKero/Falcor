@@ -38,7 +38,7 @@
   <ItemGroup>
     <ShaderSource Include="collectFinalGatherPhotons.rt.slang" />
     <ShaderSource Include="generateAdditionalCandidates.cs.slang" />
-    <ShaderSource Include="generateFinalGatheringCandidates.rt.slang" />
+    <ShaderSource Include="%28unused%29generateFinalGatheringCandidates.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />
     <ShaderSource Include="generatePhotons.rt.slang" />

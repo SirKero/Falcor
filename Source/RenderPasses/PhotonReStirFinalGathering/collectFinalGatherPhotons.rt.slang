@@ -44,10 +44,6 @@ RaytracingAccelerationStructure gPhotonAS;
 #endif
 RWStructuredBuffer<PackedVPL> gPhotonLights;
 
-
-// Static configuration based on defines set from the host.
-static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE;
-
 /** Payload for ray (48B).
 */
 struct RayData
@@ -182,7 +178,7 @@ void rayGen()
     //Closest hit shader can be skipped
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     
-    TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
+    TraceRay(gPhotonAS, rayFlags, 1 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
     float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius);    //Get new flux
   
     //ReSTIR Candidate
