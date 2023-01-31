@@ -286,9 +286,9 @@ void rayGen()
         bool roulette = rndRoulette <= gRejection;
               
         //store photon light
-        if (reflectedDiffuse && roulette)
+        if (reflectedDiffuse && (roulette || wasReflectedSpecular))
         {
-            uint photonType = 0;    //Global = 0 or caustic = 1
+            uint photonType = wasReflectedSpecular ? 1 : 0;    //Global = 0 or caustic = 1
             bool storePhoton = true;
             if(kUsePhotonCulling && photonType == 0)
                 storePhoton = cullingTest(photonPos);

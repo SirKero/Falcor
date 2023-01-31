@@ -147,6 +147,10 @@ private:
     */
     void collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Collect the caustic photons on the first diffuse hit point
+    */
+    void collectCausticPhotons(RenderContext* pRenderContext, const RenderData& renderData);
+
     /** Distributes and collects photons for the final gather hit in one pass
     */
     //void distributeAndCollectFinalGatherPhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -297,6 +301,7 @@ private:
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpFinalGatherExtraInfo;    //Incoming Direction for the final gather hit
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
+    Texture::SharedPtr mpCausticPhotonsFlux;    //Flux onsurfaces for caustic photons
 
     //
     //Ray tracing programms and helper
@@ -321,6 +326,7 @@ private:
     RayTraceProgramHelper mDistributeAndCollectFinalGatherPointsPass;          ///<Distribution and collection of the final gather points in one pass
     RayTraceProgramHelper mGetFinalGatherHitPass;     ///<Description for getting the first diffuse hit
     RayTraceProgramHelper mGeneratePMCandidatesPass;    ///<Description for the 1 SPP Photon Mapper used in ReSTIR
+    RayTraceProgramHelper mCollectCausticPhotonsPass;   ///< Collect the caustic photons directly
 
     SphereAccelerationStructure mPhotonAS;
 };

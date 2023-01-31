@@ -36,6 +36,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ShaderSource Include="collectCausticPhotons.rt.slang" />
     <ShaderSource Include="collectFinalGatherPhotons.rt.slang" />
     <ShaderSource Include="generateAdditionalCandidates.cs.slang" />
     <ShaderSource Include="%28unused%29generateFinalGatheringCandidates.rt.slang" />

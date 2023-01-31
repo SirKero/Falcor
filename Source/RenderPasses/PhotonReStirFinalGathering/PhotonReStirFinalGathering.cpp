@@ -52,6 +52,7 @@ namespace {
     const char kShaderSpartialPass[] = "RenderPasses/PhotonReSTIRFinalGathering/spartialResampling.cs.slang";
     const char kShaderSpartioTemporalPass[] = "RenderPasses/PhotonReSTIRFinalGathering/spartioTemporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIRFinalGathering/finalShading.cs.slang";
+    const char kShaderCollectCausticPhotons[] = "RenderPasses/PhotonReSTIRFinalGathering/collectCausticPhotons.rt.slang";
     // Ray tracing settings that affect the traversal stack size.
     const uint32_t kMaxPayloadSizeBytesVPL = 48u;
     const uint32_t kMaxPayloadSizeBytesCollect = 80u;
@@ -154,6 +155,9 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
     generateAdditionalCandidates(pRenderContext, renderData);
     //distributeAndCollectFinalGatherPhotonPass(pRenderContext, renderData);
 
+    //Collect the caustic photons
+    collectCausticPhotons(pRenderContext, renderData);
+
     //Copy the counter for UI
     handelPhotonCounter(pRenderContext);
 
@@ -181,7 +185,8 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
         }
         break;
     }
-    
+
+
     //Shade the pixel
     finalShadingPass(pRenderContext, renderData);
  
@@ -359,6 +364,24 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
             mGeneratePMCandidatesPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
         }
 
+        //Collect Caustic Photons
+        {
+            RtProgram::Desc desc;
+            desc.addShaderLibrary(kShaderCollectCausticPhotons);
+            desc.setMaxPayloadSize(kMaxPayloadSizeBytesCollect);
+            desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
+            desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+            //Scene geometry count is needed as the scene acceleration struture bound with the scene defines
+            mCollectCausticPhotonsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());  //Scene geometry count is needed for scene construct to work
+            auto& sbt = mCollectCausticPhotonsPass.pBindingTable;
+            sbt->setRayGen(desc.addRayGen("rayGen"));
+            sbt->setMiss(0, desc.addMiss("miss"));
+            sbt->setHitGroup(0, 0, desc.addHitGroup("", "anyHit", "intersection"));
+
+            mCollectCausticPhotonsPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+        }
+
         //Init the raytracing collection programm TODO maybe remove
         /*
         {
@@ -463,7 +486,6 @@ void PhotonReSTIRFinalGathering::preparePhotonBuffers(RenderContext* pRenderCont
             mpPhotonData[i]->setName("PhotonReStir::PhotonData" + (i + 1));
         }
     }
-    
 
 }
 
@@ -577,6 +599,11 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     //Destroy culling buffer if photon culling is disabled
     if (!mUsePhotonCulling && mpPhotonCullingMask)
         mpPhotonCullingMask.reset();
+
+    if (!mpCausticPhotonsFlux) {
+        mpCausticPhotonsFlux = Texture::create2D(mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpCausticPhotonsFlux->setName("PhotonReStir::CausticPhotonTex");
+    }
 
 }
 
@@ -726,7 +753,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     //Create as if not valid
     if (!mPhotonAS.tlas.pTlas) {
         mPhotonAS.update = false;
-        createAccelerationStructure(pRenderContext, mPhotonAS, 1, { mNumMaxPhotons[0] , mNumMaxPhotons[1]}, {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()});
+        createAccelerationStructure(pRenderContext, mPhotonAS, 2, { mNumMaxPhotons[0] , mNumMaxPhotons[1]}, {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()});
     }
 
     buildAccelerationStructure(pRenderContext, mPhotonAS, { mNumMaxPhotons[0], mNumMaxPhotons[1]});
@@ -734,7 +761,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
 
 void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE("CollectPhotons");
+    FALCOR_PROFILE("CollectPhotonsAndGenerateReservoir");
     pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
     pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
 
@@ -765,7 +792,7 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
 
     if (mReuploadBuffers) {
         nameBuf = "CB";
-        var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
+        var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.x;
     }
     bindReservoirs(var, mFrameCount, false);
     var["gPhotonLights"] = mpPhotonLightBuffer[mFrameCount % 2];
@@ -787,6 +814,62 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     //Barrier for written buffer
     pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
+}
+
+void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("CollectCausticPhotons");
+    pRenderContext->clearTexture(mpCausticPhotonsFlux.get());   //clear for now
+
+
+    if (!mCollectCausticPhotonsPass.pVars) {
+        FALCOR_ASSERT(mCollectCausticPhotonsPass.pProgram);
+
+        // Configure program.
+        mCollectCausticPhotonsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
+        mCollectCausticPhotonsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        // Create program variables for the current program.
+        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+        mCollectCausticPhotonsPass.pVars = RtProgramVars::create(mCollectCausticPhotonsPass.pProgram, mCollectCausticPhotonsPass.pBindingTable);
+
+        // Bind utility classes into shared data.
+        auto var = mCollectCausticPhotonsPass.pVars->getRootVar();
+        mpSampleGenerator->setShaderData(var);
+    };
+    FALCOR_ASSERT(mCollectCausticPhotonsPass.pVars);
+
+    auto var = mCollectCausticPhotonsPass.pVars->getRootVar();
+
+    //Set Constant Buffers
+    std::string nameBuf = "PerFrame";
+    var[nameBuf]["gFrameCount"] = mFrameCount;
+    var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.y;
+
+    //Bind caustic photon data (index -> 1)
+    var["gPhotonAABB"] = mpPhotonAABB[1];
+    var["gPackedPhotonData"] = mpPhotonData[1];
+
+    //First diffuse hit data
+    var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
+    var["gView"] = renderData[kInViewDesc.name]->asTexture();
+
+    //Output flux
+    var["gCausticImage"] = mpCausticPhotonsFlux;
+
+
+    //Bind Acceleration structure
+    bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
+    FALCOR_ASSERT(tlasValid);
+
+    //Create dimensions based on the number of VPLs
+    uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    //Trace the photons
+    mpScene->raytrace(pRenderContext, mCollectCausticPhotonsPass.pProgram.get(), mCollectCausticPhotonsPass.pVars, uint3(targetDim, 1));
+
+    //Barrier for written buffer
+    pRenderContext->uavBarrier(mpCausticPhotonsFlux.get());
 }
 
 /*
@@ -1158,6 +1241,8 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
     bindAsTex(kInMVecDesc);
     for (auto& out : kOutputChannels) bindAsTex(out);
 
+    var["gCausticPhotons"] = mpCausticPhotonsFlux;
+
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
@@ -1411,8 +1496,8 @@ void PhotonReSTIRFinalGathering::createBottomLevelAS(RenderContext* pContext, Sp
     accel.blasScratch->setName("PhotonReStir::BlasScratch");
 
     for (uint i = 0; i < accel.numberBlas; i++) {
-        accel.blas[0] = Buffer::create(accel.blasData[i].blasByteSize, Buffer::BindFlags::AccelerationStructure);
-        accel.blas[0]->setName("PhotonReStir::BlasBuffer" + std::to_string(i));
+        accel.blas[i] = Buffer::create(accel.blasData[i].blasByteSize, Buffer::BindFlags::AccelerationStructure);
+        accel.blas[i]->setName("PhotonReStir::BlasBuffer" + std::to_string(i));
     }
 }
 

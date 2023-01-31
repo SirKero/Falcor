@@ -28,6 +28,7 @@ StructuredBuffer<PackedVPL> gVpls;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
 Texture2D<float4> gView;
+Texture2D<float4> gCausticPhotons;
 RWTexture2D<float4> gColor;
 RWTexture2D<float4> gDiffuseIllumination;
 RWTexture2D<float4> gDiffuseReflectance;
@@ -153,8 +154,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
         diffuse *= diffFactor;
 #endif
     }
-    
-    float3 outColor = diffuse;
+
+    float3 colorCaustics = gCausticPhotons[dTid].xyz;
+    float3 outColor = diffuse + specular + colorCaustics;
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;
