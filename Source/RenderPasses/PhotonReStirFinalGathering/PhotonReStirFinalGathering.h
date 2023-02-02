@@ -230,8 +230,8 @@ private:
     //UI
     //
     //Resampling
-    uint mResamplingMode = ResamplingMode::NoResampling;        //Resample Mode
-    uint mInitialCandidates = 0;            // Number of initial candidates per pixel
+    uint mResamplingMode = ResamplingMode::SpartioTemporal;        //Resample Mode
+    uint mInitialCandidates = 1;            // Number of initial candidates per pixel
     uint mValidNeighborMaskMipLevel = 3;    //The mip leve for the valid neighbor mask
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
@@ -246,7 +246,7 @@ private:
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint2 mNumMaxPhotons = uint2(200000,50000);               //Size of the photon buffer
+    uint2 mNumMaxPhotons = uint2(300000,50000);               //Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;
     bool mUseDynamicePhotonDispatchCount = true;    //Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 2000000;       //Max value for dynamically dispatched photons
@@ -257,10 +257,12 @@ private:
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
-    float2 mPhotonCollectRadius = float2(0.05f, 0.02f);     //Radius for collection
+    float2 mPhotonCollectRadius = float2(0.03f, 0.005f);     //Radius for collection
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
     bool mAllowFinalGatherPointsInRadius = true;
+    bool mCausticUseTemporalFilter = true;
+    uint mCausticTemporalFilterMaxHistory = 60;
     bool mEnableCausticPhotonCollection = true;
     int mMaxCausticBounces = 0; 
     //Photon Culling
@@ -305,7 +307,7 @@ private:
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpFinalGatherExtraInfo;    //Incoming Direction for the final gather hit
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
-    Texture::SharedPtr mpCausticPhotonsFlux;    //Flux onsurfaces for caustic photons
+    Texture::SharedPtr mpCausticPhotonsFlux[2];    //Flux onsurfaces for caustic photons
 
     //
     //Ray tracing programms and helper

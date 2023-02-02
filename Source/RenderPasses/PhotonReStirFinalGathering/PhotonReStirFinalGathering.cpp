@@ -241,7 +241,7 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
         changed |= widget.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
 
-        changed |= widget.var("Collect Radius", mPhotonCollectRadius);
+        changed |= widget.var("Collect Radius", mPhotonCollectRadius, 0.000001f, 1000.f,0.000001f);
         widget.tooltip("Photon Radii for final gather and caustic collecton. First->Global, Second->Caustic");
 
         if (auto group = widget.group("Caustic Options")) {
@@ -249,6 +249,9 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             widget.tooltip("Enables caustics. Else they are treated as global photons");
             changed |= widget.var("Max Diffuse Bounces", mMaxCausticBounces, -1, 1000);
             widget.tooltip("Max diffuse bounces after that a specular hit is still counted as an caustic.\n -1 -> Always, 0 -> Only direct caustics (LSD paths), 1-> L(D)SD paths ...");
+            widget.checkbox("Use Temporal Filter", mCausticUseTemporalFilter);
+            widget.var("Temporal History Limit", mCausticTemporalFilterMaxHistory, 0u, MAXUINT32);
+            widget.tooltip("Determines the max median over caustic iterations");
         }
 
         changed |= widget.checkbox("Use Photon Culling", mUsePhotonCulling);
@@ -609,9 +612,11 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     if (!mUsePhotonCulling && mpPhotonCullingMask)
         mpPhotonCullingMask.reset();
 
-    if (!mpCausticPhotonsFlux) {
-        mpCausticPhotonsFlux = Texture::create2D(mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
-        mpCausticPhotonsFlux->setName("PhotonReStir::CausticPhotonTex");
+    if (!mpCausticPhotonsFlux[0] || !mpCausticPhotonsFlux[1]) {
+        for (uint i = 0; i < 2; i++) {
+            mpCausticPhotonsFlux[i] = Texture::create2D(mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+            mpCausticPhotonsFlux[i]->setName("PhotonReStir::CausticPhotonTex" + std::to_string(i));
+        }
     }
 
     if (mInitialCandidates > 0) {
@@ -860,7 +865,7 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     //Return if pass is disabled
     if (!mEnableCausticPhotonCollection) return;
     FALCOR_PROFILE("CollectCausticPhotons");
-    pRenderContext->clearTexture(mpCausticPhotonsFlux.get());   //clear for now
+    pRenderContext->clearTexture(mpCausticPhotonsFlux[mFrameCount % 2].get());   //clear for now
 
 
     if (!mCollectCausticPhotonsPass.pVars) {
@@ -885,6 +890,8 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
     var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.y;
+    var[nameBuf]["gEnableTemporalFilter"] = mCausticUseTemporalFilter;
+    var[nameBuf]["gTemporalFilterHistoryLimit"] = mCausticTemporalFilterMaxHistory;
 
     //Bind caustic photon data (index -> 1)
     var["gPhotonAABB"] = mpPhotonAABB[1];
@@ -893,10 +900,11 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     //First diffuse hit data
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();
+    var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();
 
     //Output flux
-    var["gCausticImage"] = mpCausticPhotonsFlux;
-
+    var["gCausticImage"] = mpCausticPhotonsFlux[mFrameCount % 2];
+    var["gCausticImagePrev"] = mpCausticPhotonsFlux[(mFrameCount + 1)% 2];
 
     //Bind Acceleration structure
     bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
@@ -910,7 +918,7 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     mpScene->raytrace(pRenderContext, mCollectCausticPhotonsPass.pProgram.get(), mCollectCausticPhotonsPass.pVars, uint3(targetDim, 1));
 
     //Barrier for written buffer
-    pRenderContext->uavBarrier(mpCausticPhotonsFlux.get());
+    pRenderContext->uavBarrier(mpCausticPhotonsFlux[mFrameCount % 2].get());
 }
 
 /*
@@ -1281,7 +1289,7 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
     bindAsTex(kInMVecDesc);
     for (auto& out : kOutputChannels) bindAsTex(out);
 
-    var["gCausticPhotons"] = mpCausticPhotonsFlux;
+    var["gCausticPhotons"] = mpCausticPhotonsFlux[mFrameCount % 2];
 
     //Uniform
     std::string uniformName = "PerFrame";

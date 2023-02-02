@@ -16,12 +16,16 @@ cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
     float gPhotonRadius; // Radius for the caustic photons
+    bool gEnableTemporalFilter;         //Use the temporal filter
+    uint gTemporalFilterHistoryLimit;   //Limit for pixel median
 }
 
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
+Texture2D<float2> gMVec;
 
+Texture2D<float4> gCausticImagePrev;
 // Outputs
 RWTexture2D<float4> gCausticImage;
 
@@ -170,6 +174,26 @@ void rayGen()
         float w = 1 / (M_PI * gPhotonRadius * gPhotonRadius);
         radiance += w * rayData.radiance;
     }
+
+    uint history = 1;
     
-    gCausticImage[launchIndex] = float4(radiance, 1);
+    if (gEnableTemporalFilter)
+    {
+        float2 motionOffset = gMVec[launchIndex] * float2(launchDim);
+        float2 prevIdxF = motionOffset + float2(launchIndex);
+        float2 rndOffset = sampleNext2D(rayData.sg) - 0.5f;
+        prevIdxF += rndOffset;
+        if (prevIdxF.x > 0 && prevIdxF.y > 0 && prevIdxF.x < launchDim.x && prevIdxF.y < launchDim.y)
+        {
+            uint2 tempIndex = uint2(round(prevIdxF));
+                
+            float4 prev = gCausticImagePrev[tempIndex];
+            history = max(gTemporalFilterHistoryLimit, asuint(prev.w) + 1);
+            prev.xyz *= (history - 1);
+            radiance += prev.xyz;
+            radiance /= history;
+        }
+    }
+    
+    gCausticImage[launchIndex] = float4(radiance, asfloat(history));
 }
