@@ -259,6 +259,6 @@ void rayGen()
          
     //Store data in buffers
     gFinalGatherHit[launchIndex] = traceData.packedHitInfo;
-    gFinalGatherExtraInfo[launchIndex] = extraInfoPacked;
+    gFinalGatherExtraInfo[launchIndex] = extraInfoPacked;       //TODO: Optimize this. Reservoir could be used!
     gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = surface.pack();
 }

@@ -501,15 +501,17 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
             mpSurfaceBuffer[i].reset();
             mpPrevViewTex.reset();
         }
-        for (size_t i = 0; i < 3; i++) {
+        for (size_t i = 0; i < 2; i++) {
             mpReservoirBuffer[i].reset();
             mpPhotonLightBuffer[i].reset();
         }
+        mpReservoirBoostBuffer.reset();
+        mpPhotonLightBoostBuffer.reset();
         mReuploadBuffers = true;
     }
 
-    if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1] || !mpReservoirBuffer[2]) {
-        for (uint i = 0; i < 3; i++) {
+    if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1]) {
+        for (uint i = 0; i < 2; i++) {
             mpReservoirBuffer[i] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
                                                      mUseReducedReservoirFormat ? ResourceFormat::RG32Uint : ResourceFormat::RGBA32Uint,
                                                      1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
@@ -542,7 +544,7 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     //Photon buffer
     if (!mpPhotonLightBuffer[0] || !mpPhotonLightBuffer[1]) {
         uint bufferSize = renderData.getDefaultTextureDims().x * renderData.getDefaultTextureDims().y;
-        for (uint i = 0; i < 3; i++) {
+        for (uint i = 0; i < 2; i++) {
             mpPhotonLightBuffer[i] = Buffer::createStructured(sizeof(uint) * 6, bufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                                                    Buffer::CpuAccess::None, nullptr, false);
             mpPhotonLightBuffer[i]->setName("PhotonReStir::PhotonLight" + std::to_string(i));
@@ -605,6 +607,26 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
         mpCausticPhotonsFlux->setName("PhotonReStir::CausticPhotonTex");
     }
 
+    if (mInitialCandidates > 0) {
+        if (!mpReservoirBoostBuffer) {
+            mpReservoirBoostBuffer = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
+                mUseReducedReservoirFormat ? ResourceFormat::RG32Uint : ResourceFormat::RGBA32Uint,
+                1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+            mpReservoirBoostBuffer->setName("PhotonReStir::ReservoirBoostBuf");
+        }
+        if (!mpPhotonLightBoostBuffer) {
+            uint bufferSize = renderData.getDefaultTextureDims().x * renderData.getDefaultTextureDims().y;
+            mpPhotonLightBoostBuffer = Buffer::createStructured(sizeof(uint) * 6, bufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false);
+            mpPhotonLightBoostBuffer->setName("PhotonReStir::PhotonLightBoost");
+        }
+    }
+    else {
+        if (mpReservoirBoostBuffer || mpPhotonLightBoostBuffer) {
+            mpReservoirBoostBuffer.reset();
+            mpPhotonLightBoostBuffer.reset();
+        }
+    }
 }
 
 void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -764,6 +786,12 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     FALCOR_PROFILE("CollectPhotonsAndGenerateReservoir");
     pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
     pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
+    //Also clear the initial candidates buffer
+    if (mInitialCandidates > 0) {
+        pRenderContext->clearUAV(mpReservoirBoostBuffer->getUAV().get(), uint4(0));
+        pRenderContext->clearUAV(mpPhotonLightBoostBuffer->getUAV().get(), uint4(0));
+    }
+    
 
     //Defines
     mGeneratePMCandidatesPass.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
@@ -794,8 +822,10 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
         nameBuf = "CB";
         var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.x;
     }
-    bindReservoirs(var, mFrameCount, false);
-    var["gPhotonLights"] = mpPhotonLightBuffer[mFrameCount % 2];
+
+    //Bind reservoir and light buffer depending on the boost buffer
+    var["gReservoir"] = mInitialCandidates > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
+    var["gPhotonLights"] = mInitialCandidates > 0 ? mpPhotonLightBoostBuffer : mpPhotonLightBuffer[mFrameCount % 2];
     var["gPhotonAABB"] = mpPhotonAABB[0];
     var["gPackedPhotonData"] = mpPhotonData[0];
     var["gFinalGatherHit"] = mpFinalGatherHit;
@@ -811,9 +841,9 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     //Trace the photons
     mpScene->raytrace(pRenderContext, mGeneratePMCandidatesPass.pProgram.get(), mGeneratePMCandidatesPass.pVars, uint3(targetDim, 1));
 
-    //Barrier for written buffer
-    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
-    pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
+    //Barrier for written buffer depending if boosting is enabled
+    pRenderContext->uavBarrier(mInitialCandidates > 0 ? mpReservoirBoostBuffer.get() : mpReservoirBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mInitialCandidates > 0 ? mpPhotonLightBoostBuffer.get() : mpPhotonLightBuffer[mFrameCount % 2].get());
 }
 
 void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderContext, const RenderData& renderData)
@@ -959,11 +989,13 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpSampleGenerator->setShaderData(var);          //Sample generator
 
-    bindReservoirs(var, mFrameCount, false); //Use "Previous" as output
-    var["gReservoirWrite"] = mpReservoirBuffer[2];
+    var["gReservoir"] = mpReservoirBoostBuffer;
+    var["gReservoirWrite"] = mpReservoirBuffer[mFrameCount % 2];
+    var["gPhotonLight"] = mpPhotonLightBoostBuffer;
+    var["gPhotonLightWrite"] = mpPhotonLightBuffer[mFrameCount % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    bindVpls(var, mFrameCount, CurrentPass::GenerateAdditional);
+    
     var["gNeighborMask"] = mpValidNeighborMask;
 
     //Uniform
@@ -986,9 +1018,8 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     mpGenerateAdditionalCandidates->execute(pRenderContext, uint3(targetDim, 1));
 
     //Barrier for written buffer
-    //pRenderContext->uavBarrier(mpReservoirBuffer[2].get());
-    pRenderContext->copyResource(mpReservoirBuffer[mFrameCount % 2].get(), mpReservoirBuffer[2].get()); //TODO solve that over index
-    pRenderContext->uavBarrier(mpPhotonLightBuffer[2].get());
+    pRenderContext->uavBarrier(mpReservoirBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpPhotonLightBuffer[mFrameCount % 2].get());
 }
 
 void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1015,7 +1046,7 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
     }
     FALCOR_ASSERT(mpTemporalResampling);
 
-    if (mReset) return; //Scip the rest on the first frame as the temporal buffer is invalid anyway
+    if (mReset) return; //Skip the rest on the first frame as the temporal buffer is invalid anyway
 
     //Set variables
     auto var = mpTemporalResampling->getRootVar();
@@ -1024,14 +1055,12 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
     mpSampleGenerator->setShaderData(var);          //Sample generator
 
     bindReservoirs(var, mFrameCount, true);
+    bindPhotonLight(var, mFrameCount, true);
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gPrevView"] = mpPrevViewTex;
 
-    bindVpls(var, mFrameCount, CurrentPass::Resampling);
-    //var["gVPLs"] = mpPhotonLightBuffer[mFrameCount % 2];
-    //var["gVplPrev"] = mpPhotonLightBuffer[(mFrameCount+1) % 2];
     var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
@@ -1092,11 +1121,11 @@ void PhotonReSTIRFinalGathering::spartialResampling(RenderContext* pRenderContex
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpSampleGenerator->setShaderData(var);          //Sample generator
 
-    bindReservoirs(var, mFrameCount, true); //Use "Previous" as output 
+    bindReservoirs(var, mFrameCount, true); //Use "Previous" as output
+    bindPhotonLight(var, mFrameCount, true);
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    bindVpls(var, mFrameCount, CurrentPass::SpartialResampling);
 
     var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
@@ -1156,14 +1185,14 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
     mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
     mpSampleGenerator->setShaderData(var);          //Sample generator
 
-    bindReservoirs(var, mFrameCount, true); //Use "Previous" as output 
+    bindReservoirs(var, mFrameCount, true); //Use "Previous" as output
+    bindPhotonLight(var, mFrameCount, true);
     var["gSurfacePrev"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gPrevView"] = mpPrevViewTex;
     var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
-    bindVpls(var, mFrameCount, CurrentPass::Resampling);
     var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 
     //Uniform
@@ -1233,9 +1262,9 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
 
     uint reservoirIndex = mResamplingMode == ResamplingMode::Spartial ? (mFrameCount + 1) % 2 : mFrameCount % 2;
 
-    bindReservoirs(var, reservoirIndex ,false , mResamplingMode == ResamplingMode::NoResampling && mInitialCandidates != 0);
+    bindReservoirs(var, reservoirIndex ,false);
 
-    bindVpls(var, reservoirIndex, mResamplingMode == ResamplingMode::NoResampling ? CurrentPass::FinalShadingNoResampling : CurrentPass::FinalShading);
+    bindPhotonLight(var, reservoirIndex, false);
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     bindAsTex(kInVBufferDesc);
     bindAsTex(kInMVecDesc);
@@ -1323,15 +1352,20 @@ void PhotonReSTIRFinalGathering::handelPhotonCounter(RenderContext* pRenderConte
     }
 }
 
-void PhotonReSTIRFinalGathering::bindReservoirs(ShaderVar& var, uint index , bool bindPrev , bool useAdditionalAsInput)
+void PhotonReSTIRFinalGathering::bindReservoirs(ShaderVar& var, uint index , bool bindPrev)
 {
-    var["gReservoir"] = useAdditionalAsInput ? mpReservoirBuffer[2] : mpReservoirBuffer[index % 2];
+    var["gReservoir"] = mpReservoirBuffer[index % 2];
     if (bindPrev) {
         var["gReservoirPrev"] = mpReservoirBuffer[(index +1) % 2];
     }
 }
 
-void PhotonReSTIRFinalGathering::bindVpls(ShaderVar& var, uint index, CurrentPass pass ) {
+void PhotonReSTIRFinalGathering::bindPhotonLight(ShaderVar& var, uint index, bool bindPrev) {
+    var["gPhotonLight"] = mpPhotonLightBuffer[index % 2];
+    if (bindPrev) {
+        var["gPhotonLightPrev"] = mpPhotonLightBuffer[(index + 1) % 2];
+    }
+    /*
     switch (pass)
     {
     case CurrentPass::GenerateAdditional:
@@ -1370,7 +1404,8 @@ void PhotonReSTIRFinalGathering::bindVpls(ShaderVar& var, uint index, CurrentPas
             var["gVpls"] = mpPhotonLightBuffer[index % 2];
         }
         break;
-    }   
+    }
+    */
 }
 
 void PhotonReSTIRFinalGathering::computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels)

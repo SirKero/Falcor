@@ -28,8 +28,8 @@ import VPLs;
 #endif
 
 
-StructuredBuffer<PackedVPL> gVpls;
-RWStructuredBuffer<PackedVPL> gVplsWrite;
+StructuredBuffer<PackedVPL> gPhotonLight;
+RWStructuredBuffer<PackedVPL> gPhotonLightPrev;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -130,7 +130,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current = Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
-        selectedVPL = VPL(gVpls[index2Dto1D(dTid, gFrameDim.x)]);
+        selectedVPL = VPL(gPhotonLight[index2Dto1D(dTid, gFrameDim.x)]);
     }
     
     r.combineReservoir(current, current.targetPdf, 0.5 /* random */);
@@ -163,7 +163,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //If neighbor has passed the tests get reservoir and compair them
         Reservoir neigh = Reservoir(gReservoir[idx]);
-        VPL vpl = VPL(gVpls[index2Dto1D(idx, gFrameDim.x)]);
+        VPL vpl = VPL(gPhotonLight[index2Dto1D(idx, gFrameDim.x)]);
         if(!vpl.valid)
             continue;
         
@@ -254,5 +254,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else
     gReservoirPrev[dTid] = r.pack();
 #endif
-    gVplsWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
+    gPhotonLightPrev[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }

@@ -26,8 +26,8 @@ import VPLs;
     RWTexture2D<uint4> gReservoirWrite;
 #endif
 
-StructuredBuffer<PackedVPL> gVpls;
-RWStructuredBuffer<PackedVPL> gVplsWrite;
+StructuredBuffer<PackedVPL> gPhotonLight;
+RWStructuredBuffer<PackedVPL> gPhotonLightWrite;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
 Texture2D<float4> gView;
@@ -196,7 +196,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current = Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
-        selectedVPL = VPL(gVpls[index2Dto1D(dTid, gFrameDim.x)]);
+        selectedVPL = VPL(gPhotonLight[index2Dto1D(dTid, gFrameDim.x)]);
     }
     
     r.combineReservoir(current, current.targetPdf, 0.5 /* random */);
@@ -242,7 +242,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         //If neighbor has passed the tests the sample is valid. Combine the reservoirs
         Reservoir neigh = Reservoir(gReservoir[idx]);
         //Reservoir neigh = Reservoir();
-        VPL vpl = VPL(gVpls[index2Dto1D(idx, gFrameDim.x)]);
+        VPL vpl = VPL(gPhotonLight[index2Dto1D(idx, gFrameDim.x)]);
 
         bool vplValid = true;
         //If the light sample is invalid or 0, still add the 0 contribution
@@ -343,5 +343,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
     gReservoirWrite[dTid] = r.pack();
 #endif
     
-    gVplsWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
+    gPhotonLightWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }

@@ -26,9 +26,8 @@ RWTexture2D<uint4> gReservoir;
 Texture2D<uint4> gReservoirPrev;
 #endif
 
-StructuredBuffer<PackedVPL> gVpls;
-RWStructuredBuffer<PackedVPL> gVplsWrite;
-StructuredBuffer<PackedVPL> gVplPrev;
+RWStructuredBuffer<PackedVPL> gPhotonLight;
+StructuredBuffer<PackedVPL> gPhotonLightPrev;
 Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
@@ -153,7 +152,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current =  Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
-        selectedVPL = VPL(gVpls[index2Dto1D(dTid, gFrameDim.x)]);
+        selectedVPL = VPL(gPhotonLight[index2Dto1D(dTid, gFrameDim.x)]);
     }
     
     uint historyLimit = uint(gMaxAge * current.M);
@@ -251,7 +250,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         Reservoir sampledReservoir = Reservoir(gReservoirPrev[idx]);
         sampledReservoir.M = min(sampledReservoir.M, historyLimit);
 
-        VPL vpl = VPL(gVplPrev[index2Dto1D(idx,gFrameDim.x)]);
+        VPL vpl = VPL(gPhotonLightPrev[index2Dto1D(idx, gFrameDim.x)]);
 
         //Kill the reservoir
         bool vplValid = true;
@@ -353,5 +352,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else
     gReservoir[dTid] = r.pack();
 #endif
-    gVplsWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
+    gPhotonLight[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }

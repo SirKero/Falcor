@@ -26,9 +26,8 @@ import VPLs;
     Texture2D<uint4> gReservoirPrev;
 #endif
 
-StructuredBuffer<PackedVPL> gVpls;
-RWStructuredBuffer<PackedVPL> gVplsWrite;
-StructuredBuffer<PackedVPL> gVplPrev;
+RWStructuredBuffer<PackedVPL> gPhotonLight;
+StructuredBuffer<PackedVPL> gPhotonLightPrev;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -37,7 +36,7 @@ Texture2D<float4> gPrevView;
 
 #define BIAS_MODE_BASIC 1
 #define BIAS_MODE_RAYTRACE 2
-//This is for syntax highlightig
+//This is for syntax highlighting
 #ifndef BIAS_CORRECTION_MODE
     #define BIAS_CORRECTION_MODE 2
 #endif
@@ -137,7 +136,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     VPL selectedVPL = VPL();
     Reservoir current = Reservoir(gReservoir[dTid]);
     if(current.weightSum > 0){
-        selectedVPL = VPL(gVpls[index2Dto1D(dTid, gFrameDim.x)]);
+        selectedVPL = VPL(gPhotonLight[index2Dto1D(dTid, gFrameDim.x)]);
     }
 
     uint historyLimit = gMaxAge * current.M;
@@ -192,7 +191,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         previousM = prev.M;
 
         bool vplValid = true;
-        VPL vpl = VPL(gVplPrev[index2Dto1D(idx,gFrameDim.x)]);
+        VPL vpl = VPL(gPhotonLightPrev[index2Dto1D(idx, gFrameDim.x)]);
         //Kill the reservoir if the vpl is no longer valid or was replaced
         if(!vpl.valid | vpl.replaced){
             prev.weightSum = 0;
@@ -261,5 +260,5 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #else
     gReservoir[dTid] = r.pack();
 #endif
-    gVplsWrite[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
+    gPhotonLight[index2Dto1D(dTid, gFrameDim.x)] = selectedVPL.pack();
 }

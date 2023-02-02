@@ -186,11 +186,11 @@ private:
 
     /** Binds all the reservoirs. useAdditionAsInput is used if the spartial pass is used before the spartiotemporal
     */
-    void bindReservoirs(ShaderVar& var, uint index , bool bindPrev = true, bool useAdditionalAsInput = false);
+    void bindReservoirs(ShaderVar& var, uint index , bool bindPrev = true);
 
     /** Bindes the vpls depending on the pass
     */
-    void bindVpls(ShaderVar& var, uint index, CurrentPass pass);
+    void bindPhotonLight(ShaderVar& var, uint index, bool bindPrev = true);
 
     /** Gets PDF texture size.
     */
@@ -231,7 +231,7 @@ private:
     //
     //Resampling
     uint mResamplingMode = ResamplingMode::NoResampling;        //Resample Mode
-    uint mInitialCandidates = 1;            // Number of initial candidates per pixel
+    uint mInitialCandidates = 0;            // Number of initial candidates per pixel
     uint mValidNeighborMaskMipLevel = 3;    //The mip leve for the valid neighbor mask
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir
     uint mSpartialSamples = 1;              // Number of spartial samples
@@ -288,8 +288,10 @@ private:
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
 
     //Buffer
-    Buffer::SharedPtr mpPhotonLightBuffer[3];
-    Texture::SharedPtr mpReservoirBuffer[3];    //Buffers for the reservoir
+    Buffer::SharedPtr mpPhotonLightBuffer[2];
+    Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
+    Texture::SharedPtr mpReservoirBoostBuffer;   //Buffer for current iteration spatial boosting
+    Buffer::SharedPtr mpPhotonLightBoostBuffer; //Photon light buffer for spatial boosting
     Texture::SharedPtr mpValidNeighborMask;     //Mask for searching valid neightbors. Only used if currentFrame spartial sampling is used (mInitialCandidates > 0)
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
