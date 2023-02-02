@@ -20,7 +20,7 @@ cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
     float2 gPhotonRadius; //Radius for the vpl collection
-    uint _pad;
+    float gHashScaleFactor; //Hash scale factor. 1/Radius
 }
 
 cbuffer CB
@@ -29,10 +29,10 @@ cbuffer CB
     float gRejection; //Probability that a photon is stored as a light
     bool gUseAlphaTest;
     bool gAdjustShadingNormals;
-    float gHashScaleFactor; //Hash scale factor. 1/Radius
     uint gHashSize;     //Size is always 2^x
     bool gEnableCaustics;    //Enable caustic photons
     int gCausticsBounces;    //Number of diffuse bounces allowed for caustic photons
+    uint _pad;
 };
 
 cbuffer Light{

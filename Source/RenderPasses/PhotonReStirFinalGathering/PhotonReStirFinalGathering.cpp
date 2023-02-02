@@ -195,6 +195,21 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
         pRenderContext->copyResource(mpPrevViewTex.get(), renderData[kInViewDesc.name]->asTexture().get());
     }
 
+    //Reduce radius if desired with formula by Knaus & Zwicker (2011)
+    //Is only done as long as the camera did not move
+    if (mUseStatisticProgressivePM) {
+        if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::CameraMoved)) {
+            mFramesCameraStill = 0;
+            mPhotonCollectRadius = mPhotonCollectionRadiusStart;
+        }
+            
+        float itF = static_cast<float>(mFramesCameraStill);
+        mPhotonCollectRadius *= sqrt((itF + mPPM_Alpha) / (itF + 1.0f));
+
+        mFramesCameraStill++;
+    }
+
+
     //Reset the reset vars
     mReuploadBuffers = mReset ? true : false;
     mBiasCorrectionChanged = false;
@@ -241,8 +256,21 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
         changed |= widget.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
 
-        changed |= widget.var("Collect Radius", mPhotonCollectRadius, 0.000001f, 1000.f,0.000001f);
+        bool radiusChanged = widget.var("Collect Radius", mPhotonCollectionRadiusStart, 0.00001f, 1000.f,0.00001f);
         widget.tooltip("Photon Radii for final gather and caustic collecton. First->Global, Second->Caustic");
+        if (radiusChanged) {
+            mPhotonCollectRadius = mPhotonCollectionRadiusStart;
+            mFramesCameraStill = 0;
+        }
+
+        widget.checkbox("Use SPPM when Camera is still", mUseStatisticProgressivePM);
+        widget.tooltip("Uses Statistic Progressive photon mapping to reduce the radius when the camera stays still");
+        if (mUseStatisticProgressivePM) {
+            widget.text("Current Radius: " + std::to_string(mPhotonCollectRadius.x) + " ; " + std::to_string(mPhotonCollectRadius.y));
+            widget.var("SPPM Alpha", mPPM_Alpha, 0.f, 1.f, 0.001f);
+            widget.tooltip("Alpha value for radius reduction after Knaus and Zwicker (2011).");
+        }
+
 
         if (auto group = widget.group("Caustic Options")) {
             changed |= widget.checkbox("Enable Caustics", mEnableCausticPhotonCollection);
@@ -250,8 +278,10 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             changed |= widget.var("Max Diffuse Bounces", mMaxCausticBounces, -1, 1000);
             widget.tooltip("Max diffuse bounces after that a specular hit is still counted as an caustic.\n -1 -> Always, 0 -> Only direct caustics (LSD paths), 1-> L(D)SD paths ...");
             widget.checkbox("Use Temporal Filter", mCausticUseTemporalFilter);
-            widget.var("Temporal History Limit", mCausticTemporalFilterMaxHistory, 0u, MAXUINT32);
-            widget.tooltip("Determines the max median over caustic iterations");
+            if (mCausticUseTemporalFilter) {
+                widget.var("Temporal History Limit", mCausticTemporalFilterMaxHistory, 0u, MAXUINT32);
+                widget.tooltip("Determines the max median over caustic iterations");
+            }
         }
 
         changed |= widget.checkbox("Use Photon Culling", mUsePhotonCulling);
@@ -680,10 +710,10 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     //Set Constant Buffers
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
-
-    nameBuf = "Constant";
     var[nameBuf]["gCollectionRadius"] = mPhotonCollectRadius;
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]); //Take Global
+
+    nameBuf = "Constant";
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
     var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
 
@@ -748,6 +778,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
     var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
+    var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
 
     //Upload constant buffer only if options changed
     if (mReuploadBuffers) {
@@ -756,7 +787,6 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
         var[nameBuf]["gRejection"] = mPhotonRejection;
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
-        var[nameBuf]["gHashScaleFactor"] = 1.f/(2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
         var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
         var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
         var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
@@ -831,11 +861,7 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     //Set Constant Buffers
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
-
-    if (mReuploadBuffers) {
-        nameBuf = "CB";
-        var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.x;
-    }
+    var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.x;
 
     //Bind reservoir and light buffer depending on the boost buffer
     var["gReservoir"] = mInitialCandidates > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
@@ -1091,7 +1117,6 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
-        var[uniformName]["gVplRadius"] = mPhotonCollectRadius;
     }
 
     //Execute

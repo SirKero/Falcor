@@ -55,7 +55,6 @@ cbuffer Constant
     uint gMaxAge;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
-    float gVplRadius;               //Vpl radius
 }
 
 struct LightSample{

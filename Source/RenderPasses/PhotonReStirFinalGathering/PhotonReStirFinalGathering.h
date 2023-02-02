@@ -257,14 +257,19 @@ private:
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
-    float2 mPhotonCollectRadius = float2(0.03f, 0.005f);     //Radius for collection
+    float2 mPhotonCollectionRadiusStart = float2(0.03f, 0.005f);
+    float2 mPhotonCollectRadius = mPhotonCollectionRadiusStart;     //Radius for collection
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
     bool mAllowFinalGatherPointsInRadius = true;
     bool mCausticUseTemporalFilter = true;
     uint mCausticTemporalFilterMaxHistory = 60;
     bool mEnableCausticPhotonCollection = true;
-    int mMaxCausticBounces = 0; 
+    int mMaxCausticBounces = 0;
+    bool mUseStatisticProgressivePM = true;
+    float mPPM_Alpha = 0.66f;
+    uint mFramesCameraStill = 0;
+
     //Photon Culling
     bool mUsePhotonCulling = true;
     uint mCullingHashBufferSizeBits = 20;   //Determines the size of the buffer 2^x.

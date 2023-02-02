@@ -21,12 +21,8 @@ import SurfaceData;
 cbuffer PerFrame
 {
     uint gFrameCount;       // Frame count since scene was loaded.
-}
-
-cbuffer CB
-{
     float gPhotonRadius; // Scale for the emissive part
-};
+}
 
 // Inputs
 StructuredBuffer<uint4> gPackedPhotonData;

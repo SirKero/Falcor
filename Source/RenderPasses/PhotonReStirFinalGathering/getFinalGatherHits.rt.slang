@@ -22,11 +22,11 @@ import Hash;
 cbuffer PerFrame
 {
     uint gFrameCount;       // Frame count since scene was loaded.
+    float gCollectionRadius;
+    float gHashScaleFactor; //Hash scale factor. 1/diameter
 }
 
 cbuffer Constant{
-    float gCollectionRadius;
-    float gHashScaleFactor; //Hash scale factor. 1/diameter
     uint gHashSize;     //Size is always 2^x
     bool gUseAlphaTest; //Alpha test
 }
