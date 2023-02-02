@@ -47,7 +47,7 @@ cbuffer Constant
 {
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gEnableVisRay;             //Enables the final visibilty ray
-    float gRadius;
+    bool gEnableCaustics;
 }
 
 static const float kRayEpsilon = 0.99f;
@@ -155,7 +155,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif
     }
 
-    float3 colorCaustics = gCausticPhotons[dTid].xyz;
+    float3 colorCaustics = float3(0);
+    if(gEnableCaustics)
+        colorCaustics = gCausticPhotons[dTid].xyz;
+    
     float3 outColor = diffuse + specular + colorCaustics;
 
     //Debug

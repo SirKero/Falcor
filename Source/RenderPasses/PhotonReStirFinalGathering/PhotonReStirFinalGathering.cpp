@@ -244,6 +244,13 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         changed |= widget.var("Collect Radius", mPhotonCollectRadius);
         widget.tooltip("Photon Radii for final gather and caustic collecton. First->Global, Second->Caustic");
 
+        if (auto group = widget.group("Caustic Options")) {
+            changed |= widget.checkbox("Enable Caustics", mEnableCausticPhotonCollection);
+            widget.tooltip("Enables caustics. Else they are treated as global photons");
+            changed |= widget.var("Max Diffuse Bounces", mMaxCausticBounces, -1, 1000);
+            widget.tooltip("Max diffuse bounces after that a specular hit is still counted as an caustic.\n -1 -> Always, 0 -> Only direct caustics (LSD paths), 1-> L(D)SD paths ...");
+        }
+
         changed |= widget.checkbox("Use Photon Culling", mUsePhotonCulling);
         widget.tooltip("Enabled culling of photon based on a hash grid. Photons are only stored on cells that are collected");
         if (mUsePhotonCulling) {
@@ -735,6 +742,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     //PerFrame Constant Buffer
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
+    var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
 
     //Upload constant buffer only if options changed
     if (mReuploadBuffers) {
@@ -743,9 +751,10 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
         var[nameBuf]["gRejection"] = mPhotonRejection;
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
-        var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
         var[nameBuf]["gHashScaleFactor"] = 1.f/(2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
         var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
+        var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
+        var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
@@ -848,6 +857,8 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
 
 void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    //Return if pass is disabled
+    if (!mEnableCausticPhotonCollection) return;
     FALCOR_PROFILE("CollectCausticPhotons");
     pRenderContext->clearTexture(mpCausticPhotonsFlux.get());   //clear for now
 
@@ -1279,7 +1290,7 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gEnableVisRay"] = mUseFinalVisibilityRay;
-        var[uniformName]["gRadius"] = mPhotonCollectRadius;
+        var[uniformName]["gEnableCaustics"] = mEnableCausticPhotonCollection;
     }
 
     //Execute

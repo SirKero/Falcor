@@ -261,6 +261,8 @@ private:
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
     bool mAllowFinalGatherPointsInRadius = true;
+    bool mEnableCausticPhotonCollection = true;
+    int mMaxCausticBounces = 0; 
     //Photon Culling
     bool mUsePhotonCulling = true;
     uint mCullingHashBufferSizeBits = 20;   //Determines the size of the buffer 2^x.

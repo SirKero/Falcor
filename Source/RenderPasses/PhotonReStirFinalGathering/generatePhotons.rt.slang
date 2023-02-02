@@ -19,6 +19,8 @@ import Hash;
 cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
+    float2 gPhotonRadius; //Radius for the vpl collection
+    uint _pad;
 }
 
 cbuffer CB
@@ -27,10 +29,10 @@ cbuffer CB
     float gRejection; //Probability that a photon is stored as a light
     bool gUseAlphaTest;
     bool gAdjustShadingNormals;
-    float2 gPhotonRadius;        //Radius for the vpl collection
     float gHashScaleFactor; //Hash scale factor. 1/Radius
     uint gHashSize;     //Size is always 2^x
-    uint _pad;
+    bool gEnableCaustics;    //Enable caustic photons
+    int gCausticsBounces;    //Number of diffuse bounces allowed for caustic photons
 };
 
 cbuffer Light{
@@ -265,7 +267,9 @@ void rayGen()
     
     uint rayFlags = 0;
 
-    bool wasReflectedSpecular = false;
+    const uint maxCausticBounces = gCausticsBounces >= 0 ? gCausticsBounces : gMaxRecursion;
+    uint currentCausticBounces = 0;
+    bool storeAsCaustic = false;
     bool reflectedDiffuse = false;
         
     //recursion where the photons are shot
@@ -286,9 +290,9 @@ void rayGen()
         bool roulette = rndRoulette <= gRejection;
               
         //store photon light
-        if (reflectedDiffuse && (roulette || wasReflectedSpecular))
+        if (reflectedDiffuse && (roulette || storeAsCaustic))
         {
-            uint photonType = wasReflectedSpecular ? 1 : 0;    //Global = 0 or caustic = 1
+            uint photonType = storeAsCaustic ? 1 : 0; //Global = 0 or caustic = 1
             bool storePhoton = true;
             if(kUsePhotonCulling && photonType == 0)
                 storePhoton = cullingTest(photonPos);
@@ -324,7 +328,15 @@ void rayGen()
             rayData.thp /= (1.f - prob);
         }
 
-        wasReflectedSpecular = !reflectedDiffuse;
+        if (gEnableCaustics)
+        {
+            storeAsCaustic = !reflectedDiffuse;
+            if(currentCausticBounces > maxCausticBounces)
+                storeAsCaustic = false;
+            if(reflectedDiffuse)
+                currentCausticBounces++;
+        }
+        
                 
         //update ray for next iteration
         ray.Origin = rayData.origin;
