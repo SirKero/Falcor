@@ -149,8 +149,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
         float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
         float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
         float specProb = luminance(specularReflectance);
-
-        float diffFactor = (diffProb + specProb) / diffProb;
+        float diffFactor = 0.f;
+        if(diffProb > 0.f)
+            diffFactor = (diffProb + specProb) / diffProb;
         diffuse *= diffFactor;
 #endif
     }

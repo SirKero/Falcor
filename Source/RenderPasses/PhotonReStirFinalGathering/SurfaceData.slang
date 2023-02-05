@@ -150,7 +150,10 @@ struct Surface{
 
         //Eval BSDF
         float diffuseBRDF = NdotL * M_1_PI;
-        diffuseBRDF /= diffuseProb;
+        if(diffuseProb > 0)
+            diffuseBRDF /= diffuseProb;
+        else
+            diffuseBRDF = 0.f;
     
         return max(0.f, diffuseBRDF * Li); 
     }

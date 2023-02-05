@@ -176,7 +176,7 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
     //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
     float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
 
-    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
+    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo) / luminance(norm);
     
     float rnd = sampleNext1D(rayData.sg);
     bool diffuseHit = rnd <= pDiffuseRef; //Check if diffuse
@@ -218,46 +218,54 @@ void rayGen()
     traceData.sg = SampleGenerator(launchIndex, gFrameCount + 15 * 13);    //TODO add seed offset
 
     BSDFSample bsdfSample;
+    //sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
     bool valid = bsdf.sample(sd, traceData.sg, bsdfSample, true);
-
+    
     //Fill Surface Buffer used for calculating the target PDF
     Surface surface = Surface::create(sd.computeNewRayOrigin(), sd.N, sd.V, linZ, bsdfProperties.roughness,
                                       luminance(bsdfProperties.diffuseReflectionAlbedo), luminance(bsdfProperties.specularReflectance));
 
 
     float targetPdf = surface.getPdf(bsdfSample.wo);
-    
-    RayDesc tRay;
-    tRay.Origin = sd.computeNewRayOrigin();
-    tRay.TMin = 0.0;
-    tRay.TMax = 1000.f;
-    tRay.Direction = bsdfSample.wo;    //Use as Normal
+    float selectPdf = 1.f;
+    uint2 extraInfoPacked = uint2(0);
 
-    TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
-
-    
-    float selectPdf = bsdfSample.pdf * traceData.pDiffuseRef;
-
-    uint2 extraInfoPacked = uint2((f32tof16(targetPdf) << 16) | f32tof16(selectPdf), encodeNormal2x16(bsdfSample.wo));
-
-    float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
-    
-    if(kUsePhotonCulling){
-        photonCulling(hitPos);
-    }
-
-    //Reject hit points that are inside the collection radius
-    if (!kAllowHitsInRadius)
+    if (valid)
     {
-        float distDiff = distance(hitPos, sd.posW);
-        //Invalidate hit data
-        if (distDiff <= gCollectionRadius)
+        RayDesc tRay;
+        tRay.Origin = sd.computeNewRayOrigin();
+        tRay.TMin = 0.0;
+        tRay.TMax = 1000.f;
+        tRay.Direction = bsdfSample.wo; //Use as Normal
+
+        TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
+
+        selectPdf = bsdfSample.pdf * traceData.pDiffuseRef;
+
+        extraInfoPacked = uint2((f32tof16(targetPdf) << 16) | f32tof16(selectPdf), encodeNormal2x16(bsdfSample.wo));
+
+        float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
+    
+        if (kUsePhotonCulling)
         {
-            traceData.packedHitInfo = {};
-            surface.viewDepth = -1.f;   //Set to invalid depth
+            photonCulling(hitPos);
+        }
+
+        //Reject hit points that are inside the collection radius
+        if (!kAllowHitsInRadius)
+        {
+            float distDiff = distance(hitPos, sd.posW);
+            //Invalidate hit data
+            valid = distDiff > gCollectionRadius;
         }
     }
-         
+    
+    if (!valid)
+    {
+        traceData.packedHitInfo = { };
+        surface.viewDepth = -1.f; //Set to invalid depth
+    }
+   
     //Store data in buffers
     gFinalGatherHit[launchIndex] = traceData.packedHitInfo;
     gFinalGatherExtraInfo[launchIndex] = extraInfoPacked;       //TODO: Optimize this. Reservoir could be used!

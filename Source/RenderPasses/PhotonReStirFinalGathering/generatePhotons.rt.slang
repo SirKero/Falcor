@@ -278,8 +278,7 @@ void rayGen()
         photon.flux = pls.flux * rayData.thp;
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
-        if(rayData.terminated)
-            break;
+        
 
         photonPos = rayData.origin;
         photon.dir = ray.Direction;
@@ -314,7 +313,11 @@ void rayGen()
                 } 
             }
         }
-   
+
+        //If next sampled ray is invalid return here
+        if (rayData.terminated)
+            break;
+        
         //Russian Roulette
         const float rrVal = luminance(rayData.thp);
         const float prob = max(0.f, 1.f - rrVal);
@@ -328,6 +331,7 @@ void rayGen()
             rayData.thp /= (1.f - prob);
         }
 
+        //Caustics handling
         if (gEnableCaustics)
         {
             storeAsCaustic = !reflectedDiffuse;
@@ -336,8 +340,7 @@ void rayGen()
             if(reflectedDiffuse)
                 currentCausticBounces++;
         }
-        
-                
+                        
         //update ray for next iteration
         ray.Origin = rayData.origin;
         ray.Direction = rayData.direction;

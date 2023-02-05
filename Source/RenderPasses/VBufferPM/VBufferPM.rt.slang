@@ -9,6 +9,7 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Geometry.GeometryHelpers;
 import Scene.Material.ShadingUtils;
 import Rendering.Lights.LightHelpers;
+import Utils.Color.ColorHelpers;
 
 
 
@@ -204,23 +205,32 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
         
-    if (!generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData))
-    {
-        rayData.distance = -1.f;
+    //get material properties
+    let bsdfProperties = bsdf.getProperties(sd);
+
+    //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
+    float norm = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo);
+    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo) / norm;
+    float pReflection = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / norm;
+    
+    float rnd = sampleNext1D(rayData.sg);
+    bool isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
+
+    isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
+       
+    //store hit if lobe is diffuse
+    //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
+    if(isDiffuse)
+    {        
+        writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission, HitInfo(triangleHit), rayData.distance);
+        
         rayData.terminated = true;
         return;
     }
 
-    //get material properties
-    let bsdfProperties = bsdf.getProperties(sd);
-
-    bool isDiffuse = bsdfProperties.roughness > gSpecularRougnessCutoff;
-       
-    //store hit if lobe is diffuse
-    if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
-    {        
-        writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission * bsdfSample.weight, HitInfo(triangleHit), rayData.distance);
-        
+    if (!generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData))
+    {
+        rayData.distance = -1.f;
         rayData.terminated = true;
     }
 }
