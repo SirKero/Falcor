@@ -152,6 +152,6 @@ struct Surface{
         float diffuseBRDF = NdotL * M_1_PI;
         diffuseBRDF /= diffuseProb;
     
-        return max(0.f, diffuseBRDF * NdotL * Li); 
+        return max(0.f, diffuseBRDF * Li); 
     }
 };

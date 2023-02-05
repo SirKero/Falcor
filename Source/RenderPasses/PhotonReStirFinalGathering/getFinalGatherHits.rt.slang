@@ -172,15 +172,16 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
-
+    
     //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
     float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
 
-    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo)/luminance(norm);
+    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
     
     float rnd = sampleNext1D(rayData.sg);
     bool diffuseHit = rnd <= pDiffuseRef; //Check if diffuse
-
+    
+    
     if(diffuseHit){
         rayData.distance = RayTCurrent();
         rayData.packedNormal = encodeNormal2x16(sd.N);

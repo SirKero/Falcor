@@ -137,11 +137,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float3 specular = {};
     if(valid){
         //Seperate in diffuse and specular
-        //sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
+        sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
         diffuse = bsdf.eval(sd, toLight, sg) * Li;
         
 #ifndef DIFFUSE_SHADING_ONLY
-        sd.mtl.setActiveLobes((uint)LobeType::SpecularReflection);
+        sd.mtl.setActiveLobes((uint) LobeType::Specular);
         specular = bsdf.eval(sd, toLight, sg) * Li;
 #else   //Scale up by diffuse probability
         float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
@@ -159,7 +159,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if(gEnableCaustics)
         colorCaustics = gCausticPhotons[dTid].xyz;
     
-    float3 outColor = diffuse + specular + colorCaustics;
+    float3 outColor = diffuse+ specular + colorCaustics;
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;

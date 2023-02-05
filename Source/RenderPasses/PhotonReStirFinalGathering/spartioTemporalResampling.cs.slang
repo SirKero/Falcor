@@ -271,7 +271,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         #ifndef DIFFUSE_SHADING_ONLY
             sampleTargetPdf = valid ?  currentSurface.getPdf(ls.dir, ls.Li): 0.f;
         #else
-            sampleTargetPdf = valid ?  currentSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+            sampleTargetPdf = valid ?  currentSurface.getDiffusePdf(ls.dir, ls.Li): 0.f;
         #endif
         }
         //Combine Reservoirs
@@ -320,7 +320,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         #ifndef DIFFUSE_SHADING_ONLY
             ps = valid ?  biasSurface.getPdf(ls.dir, ls.Li): 0.f;
         #else
-            ps = valid ?  biasSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+            ps = valid ?  biasSurface.getDiffusePdf(ls.dir, ls.Li): 0.f;
         #endif
 
         bool rayHit = false;

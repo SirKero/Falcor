@@ -162,6 +162,12 @@ void rayGen()
     //Prepare payload
     RayData rayData = RayData();
     rayData.diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;          //Diffuse reflectance is stored in flux before collection
+    float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
+    float NdotV = saturate(dot(sd.N, sd.V));
+    float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
+    float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
+    float specProb = luminance(specularReflectance);
+    rayData.diffuseReflectance *= (diffProb + specProb) / diffProb; //Diffuse reflectance is stored in flux before collection
     rayData.radiance = float3(0.f);
     
     //Ray description 
