@@ -188,12 +188,12 @@ void rayGen()
             uint2 tempIndex = uint2(round(prevIdxF));
                 
             float4 prev = gCausticImagePrev[tempIndex];
-            history = max(gTemporalFilterHistoryLimit, asuint(prev.w) + 1);
+            history = min(gTemporalFilterHistoryLimit, uint(round(prev.w)) + 1);
             prev.xyz *= (history - 1);
             radiance += prev.xyz;
             radiance /= history;
         }
     }
     
-    gCausticImage[launchIndex] = float4(radiance, asfloat(history));
+    gCausticImage[launchIndex] = float4(radiance, float(history));
 }
