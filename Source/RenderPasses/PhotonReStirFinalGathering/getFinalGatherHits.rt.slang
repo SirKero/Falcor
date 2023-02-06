@@ -176,7 +176,10 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
     //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
     float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
 
-    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo) / luminance(norm);
+    //Accept all hits but reject if the surface is only specular
+    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
+    if (luminance(bsdfProperties.diffuseReflectionAlbedo) <= 0)
+        pDiffuseRef = 0;
     
     float rnd = sampleNext1D(rayData.sg);
     bool diffuseHit = rnd <= pDiffuseRef; //Check if diffuse
@@ -218,7 +221,8 @@ void rayGen()
     traceData.sg = SampleGenerator(launchIndex, gFrameCount + 15 * 13);    //TODO add seed offset
 
     BSDFSample bsdfSample;
-    //sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
+    //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
+    sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
     bool valid = bsdf.sample(sd, traceData.sg, bsdfSample, true);
     
     //Fill Surface Buffer used for calculating the target PDF

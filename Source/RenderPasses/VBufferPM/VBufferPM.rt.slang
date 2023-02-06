@@ -215,8 +215,8 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     float rnd = sampleNext1D(rayData.sg);
     bool isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
-
-    isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
+    
+    isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff) && pDiffuseRef > 0;
        
     //store hit if lobe is diffuse
     //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))

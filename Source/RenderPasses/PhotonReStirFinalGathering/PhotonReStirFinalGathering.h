@@ -237,16 +237,16 @@ private:
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
     float mSamplingRadius = 20.f;           //Sampling radius in pixel
-    float mRelativeDepthThreshold = 0.1f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
+    float mRelativeDepthThreshold = 0.05f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
-    uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
+    uint mBiasCorrectionMode = BiasCorrectionMode::Off;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
-    bool mUseDiffuseOnlyShading = false;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
-    bool mUseReducedReservoirFormat = false;    // Full precision = RGBA32_UINT, Reduced = RG32UINT. TargetPdf and M only uses 16 bits in reduced
+    bool mUseDiffuseOnlyShading = true;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
+    bool mUseReducedReservoirFormat = true;    // Full precision = RGBA32_UINT, Reduced = RG32UINT. TargetPdf and M only uses 16 bits in reduced
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint2 mNumMaxPhotons = uint2(300000,50000);               //Size of the photon buffer
+    uint2 mNumMaxPhotons = uint2(500000,50000);               //Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;
     bool mUseDynamicePhotonDispatchCount = true;    //Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 2000000;       //Max value for dynamically dispatched photons
@@ -257,7 +257,7 @@ private:
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
-    float2 mPhotonCollectionRadiusStart = float2(0.03f, 0.005f);
+    float2 mPhotonCollectionRadiusStart = float2(0.025f, 0.005f);
     float2 mPhotonCollectRadius = mPhotonCollectionRadiusStart;     //Radius for collection
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
