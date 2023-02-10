@@ -204,7 +204,11 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
         }
             
         float itF = static_cast<float>(mFramesCameraStill);
-        mPhotonCollectRadius *= sqrt((itF + mPPM_Alpha) / (itF + 1.0f));
+        //Use for both or only caustics
+        if(mUseStatisticProgressivePMGlobal)
+            mPhotonCollectRadius *= sqrt((itF + mPPM_Alpha) / (itF + 1.0f));
+        else
+            mPhotonCollectRadius.y *= sqrt((itF + mPPM_Alpha) / (itF + 1.0f));
 
         mFramesCameraStill++;
     }
@@ -266,9 +270,12 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         widget.checkbox("Use SPPM when Camera is still", mUseStatisticProgressivePM);
         widget.tooltip("Uses Statistic Progressive photon mapping to reduce the radius when the camera stays still");
         if (mUseStatisticProgressivePM) {
+            widget.checkbox("SPPM for Global Photons?", mUseStatisticProgressivePMGlobal);
             widget.text("Current Radius: " + std::to_string(mPhotonCollectRadius.x) + " ; " + std::to_string(mPhotonCollectRadius.y));
             widget.var("SPPM Alpha", mPPM_Alpha, 0.f, 1.f, 0.001f);
             widget.tooltip("Alpha value for radius reduction after Knaus and Zwicker (2011).");
+            if (widget.button("Reset Radius Reduction"))
+                mFramesCameraStill = 0;
         }
 
 
@@ -320,7 +327,7 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         }
         if ((mResamplingMode & ResamplingMode::Spartial) > 0) {
             if (auto group = widget.group("Spartial Options")) {
-                changed |= widget.var("Spartial Samples", mSpartialSamples, 0u, 32u);
+                changed |= widget.var("Spartial Samples", mSpartialSamples, 0u, mResamplingMode & ResamplingMode::SpartioTemporal ? 8u : 32u);
                 widget.tooltip("Number of spartial samples");
 
                 changed |= widget.var("Disocclusion Sample Boost", mDisocclusionBoostSamples, 0u, 32u);
@@ -355,6 +362,9 @@ void PhotonReSTIRFinalGathering::setScene(RenderContext* pRenderContext, const S
     //Recreate RayTracing Program on Scene reset
     mPhotonGeneratePass = RayTraceProgramHelper::create();
     mDistributeAndCollectFinalGatherPointsPass = RayTraceProgramHelper::create();
+    mGetFinalGatherHitPass = RayTraceProgramHelper::create();
+    mCollectCausticPhotonsPass = RayTraceProgramHelper::create();
+    mGeneratePMCandidatesPass = RayTraceProgramHelper::create();
 
     mpScene = pScene;
 
@@ -460,6 +470,7 @@ void PhotonReSTIRFinalGathering::resetPass(bool resetScene)
 
     if (resetScene) {
         mpEmissiveLightSampler.reset();
+        mpSampleGenerator.reset();
     }
 
     mReuploadBuffers = true;
@@ -821,8 +832,9 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
         mPhotonAS.update = false;
         createAccelerationStructure(pRenderContext, mPhotonAS, 2, { mNumMaxPhotons[0] , mNumMaxPhotons[1]}, {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()});
     }
-
-    buildAccelerationStructure(pRenderContext, mPhotonAS, { mNumMaxPhotons[0], mNumMaxPhotons[1]});
+    uint2 currentPhotons = mFrameCount > 0 ? uint2(float2(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
+    uint2 photonBuildSize = uint2(std::min(mNumMaxPhotons[0], currentPhotons[0]), std::min(mNumMaxPhotons[1], currentPhotons[1]));
+    buildAccelerationStructure(pRenderContext, mPhotonAS, { photonBuildSize[0],photonBuildSize[1]});
 }
 
 void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1198,7 +1210,7 @@ void PhotonReSTIRFinalGathering::spartialResampling(RenderContext* pRenderContex
 
 void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE("SpartioTemporalResampling");
+    FALCOR_PROFILE("SpatioTemporalResampling");
 
     if (mBiasCorrectionChanged) mpSpartioTemporalResampling.reset();
 
@@ -1235,7 +1247,6 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
     var["gPrevView"] = mpPrevViewTex;
-    var["gNeighOffsetBuffer"] = mpNeighborOffsetBuffer;
 
     var[kInMVecDesc.texname] = renderData[kInMVecDesc.name]->asTexture();    //BindMvec
 

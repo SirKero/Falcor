@@ -28,7 +28,6 @@ Texture2D<uint4> gReservoirPrev;
 
 RWStructuredBuffer<PackedVPL> gPhotonLight;
 StructuredBuffer<PackedVPL> gPhotonLightPrev;
-Texture1D<snorm float2> gNeighOffsetBuffer;
 StructuredBuffer<PackedSurfaceData>gSurfacePrev;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
@@ -44,7 +43,6 @@ Texture2D<float4> gPrevView;
 
 //Define for valid texture channels
 #define is_valid(name) (is_valid_##name != 0)
-static const uint kNeighOffsetMask = OFFSET_BUFFER_SIZE;
 
 cbuffer PerFrame
 {
@@ -207,19 +205,21 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //Spartio Temporal Resampling
     //
     
-    uint numSamples = clamp(gSpartialSamples + 1,1,32); //Cap at 32 samples for the later bias correction
-    const uint maxNeighStartIndex = kNeighOffsetMask - (numSamples + 1);
-    const uint neighOffsetStartIdx = min(uint(sampleNext1D(sg) * float(maxNeighStartIndex)), maxNeighStartIndex);
-    uint cachedResults = 0; //Remember which sample was valid
+    uint numSamples = clamp(gSpartialSamples + 1,1,8); //Cap at 8 samples for the later bias correction
+    uint cachedIndices[8]; //Store all indeces. 32 Bits per 2D index (16 per element)
+    uint cachedM[4];
     
     if(!foundTemporalSurface)
-        numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,32);
+        numSamples = clamp(max(numSamples, gDisocclusionBoostSamples),1,8);
 
     int selectedSample = -1;
     bool validSample = true;
     
     //Go through all neighbors
     for(uint i=0 ; i<numSamples; i++){
+        cachedIndices[i] = 0xFFFFFFFF; //Set to max int
+        if (i % 2 == 0)
+            cachedM[i / 2] = 0;
         int2 idx = int2(0);
 
         //Take temporal sample or generate a new neighbor sample
@@ -228,9 +228,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
         }
         else{
             //Get sample from sampling mask
-            uint neighBufferIdx = neighOffsetStartIdx + i;
-            float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
-            int2 spartialOffset = int2(randSamp * gSamplingRadius);
+            float2 randSamp = (sampleNext2D(sg) * 2.f) - 1.f; //random sample in [-1,1]
+            int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
             idx = prevIdx + spartialOffset;
 
             //Check if index is valid
@@ -259,12 +258,15 @@ void main(uint2 dTid : SV_DispatchThreadID)
             vplValid = false;
         }
         
-        cachedResults |= (1u << i);     
+        cachedIndices[i] = (idx.x & 0xFFFF) << 16 | (idx.y & 0xFFFF);
+        uint M = 0xFFFF & sampledReservoir.M;
+        if (i % 2 != 0)
+            M = M << 16;
+        cachedM[i / 2] |= M;
         //Get neightbor light target PDF for current surface
         float sampleTargetPdf = 0.f;
         if (sampledReservoir.M > 0 && vplValid)
         {
-            
             LightSample ls = { };
             float dis;
             bool valid = getLightSample(vpl, currentSurface.posW, ls, dis);
@@ -290,26 +292,14 @@ void main(uint2 dTid : SV_DispatchThreadID)
     //go through all neighbors again
     for (int i = 0; i < numSamples; i++){
         //Skip if we skipped in last loop
-        if ((cachedResults & (1u << i)) == 0)
+        if ((cachedIndices[i]) == 0xFFFFFFFF)
             continue;
         //Get Index
-        int2 offset = int2(0);
-        if (i == 0 && foundTemporalSurface)
-            offset = temporalOffset;
-        else
-        {
-            uint neighBufferIdx = neighOffsetStartIdx + i;
-            float2 randSamp = float2(gNeighOffsetBuffer[neighBufferIdx]);
-            offset = int2(randSamp * gSamplingRadius);
-        }
-        int2 idx = prevIdx + offset;
-
+        uint2 idx = uint2(cachedIndices[i] >> 16, (cachedIndices[i] & 0xFFFF));
         //Get Surface
         Surface biasSurface = getSurface(idx, true);
-            
-        //getReservoir
-        Reservoir biasRes = Reservoir(gReservoirPrev[idx]);
-        biasRes.M = min(biasRes.M, historyLimit); //cap M
+        if (!biasSurface.valid)
+            continue;
         
         //Get light pdf
         float ps = 0.0f;
@@ -322,24 +312,28 @@ void main(uint2 dTid : SV_DispatchThreadID)
         #else
             ps = valid ?  biasSurface.getDiffusePdf(ls.dir, ls.Li): 0.f;
         #endif
-
-        bool rayHit = false;
+        
         //Trace ray
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
-        if (ps > 0.0 && valid)
+        if (ps > 0.0)
         {
             SceneRayQuery < 0 > rayQuery;
             dist *= kRayEpsilon;
-            const Ray ray = Ray(biasSurface.posW, normalize(ls.dir), 0.f, dist);
+            const Ray ray = Ray(biasSurface.posW, ls.dir, 0.001f, dist);
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
             {
-                ps = 0;
+                ps = 0.0f;
             }
         }
         #endif // BIAS MODE RAYTRACE
+        uint M = cachedM[i / 2];
+        if (i % 2 == 0)
+            M = M & 0xFFFF;
+        else
+            M = M >> 16;
         
         pi = selectedSample == i ? ps : pi;
-        piSum += ps * biasRes.M;
+        piSum += ps * M; 
     }
     r.finalizeSample(pi, piSum);
         

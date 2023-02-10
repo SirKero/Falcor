@@ -186,7 +186,7 @@ void rayGen()
         if (prevIdxF.x > 0 && prevIdxF.y > 0 && prevIdxF.x < launchDim.x && prevIdxF.y < launchDim.y)
         {
             uint2 tempIndex = uint2(round(prevIdxF));
-                
+            //Because the caustic image is RGBA16F, we need to store the history as float. As values are in a low range this should not introduce any errors
             float4 prev = gCausticImagePrev[tempIndex];
             history = min(gTemporalFilterHistoryLimit, uint(round(prev.w)) + 1);
             prev.xyz *= (history - 1);

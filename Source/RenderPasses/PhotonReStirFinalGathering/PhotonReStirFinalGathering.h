@@ -237,22 +237,23 @@ private:
     uint mSpartialSamples = 1;              // Number of spartial samples
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
     float mSamplingRadius = 20.f;           //Sampling radius in pixel
-    float mRelativeDepthThreshold = 0.05f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
+    float mRelativeDepthThreshold = 0.15f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
-    uint mBiasCorrectionMode = BiasCorrectionMode::Off;   //Bias Correction Mode
+    uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     bool mUseDiffuseOnlyShading = true;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
     bool mUseReducedReservoirFormat = true;    // Full precision = RGBA32_UINT, Reduced = RG32UINT. TargetPdf and M only uses 16 bits in reduced
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint2 mNumMaxPhotons = uint2(500000,50000);               //Size of the photon buffer
+    uint2 mNumMaxPhotons = uint2(400000,100000);               //Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;
     bool mUseDynamicePhotonDispatchCount = true;    //Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 2000000;       //Max value for dynamically dispatched photons
     float mPhotonDynamicGuardPercentage = 0.08f;    //Determines how much space of the buffer is used to guard against buffer overflows 
     float mPhotonDynamicChangePercentage = 0.05f;    //The percentage the buffer is increased/decreased per frame
-    uint2 mCurrentPhotonCount = uint2(0,0);             //Gets data from GPU buffer
+    uint2 mCurrentPhotonCount = uint2(1000000,1000000);             //Gets data from GPU buffer
+    float mASBuildBufferPhotonOverestimate = 1.15f;
     uint mNumDispatchedPhotons = 700000;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
@@ -267,13 +268,14 @@ private:
     bool mEnableCausticPhotonCollection = true;
     int mMaxCausticBounces = 0;
     bool mUseStatisticProgressivePM = true;
+    bool mUseStatisticProgressivePMGlobal = false;
     float mPPM_Alpha = 0.66f;
     uint mFramesCameraStill = 0;
 
     //Photon Culling
     bool mUsePhotonCulling = true;
-    uint mCullingHashBufferSizeBits = 20;   //Determines the size of the buffer 2^x.
-    bool mPhotonCullingRebuildBuffer = false;   //Rebuilds buffer if size was changed
+    uint mCullingHashBufferSizeBits = 22;   //Determines the size of the buffer 2^x.
+    bool mPhotonCullingRebuildBuffer = true;   //Rebuilds buffer if size was changed
   
 
     //Runtime
