@@ -217,10 +217,12 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     bool isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
     
     isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff) && pDiffuseRef > 0;
-       
+
+    bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
+    
     //store hit if lobe is diffuse
     //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
-    if(isDiffuse)
+    if (isDiffuse || (!valid && pDiffuseRef > 0))
     {        
         writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission, HitInfo(triangleHit), rayData.distance);
         
@@ -228,7 +230,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         return;
     }
 
-    if (!generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData))
+    if (!valid)
     {
         rayData.distance = -1.f;
         rayData.terminated = true;
