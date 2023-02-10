@@ -274,8 +274,10 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             widget.text("Current Radius: " + std::to_string(mPhotonCollectRadius.x) + " ; " + std::to_string(mPhotonCollectRadius.y));
             widget.var("SPPM Alpha", mPPM_Alpha, 0.f, 1.f, 0.001f);
             widget.tooltip("Alpha value for radius reduction after Knaus and Zwicker (2011).");
-            if (widget.button("Reset Radius Reduction"))
+            if (widget.button("Reset Radius Reduction")) {
+                mPhotonCollectRadius = mPhotonCollectionRadiusStart;
                 mFramesCameraStill = 0;
+            }
         }
 
 
