@@ -82,7 +82,10 @@ struct Reservoir{
     //Finalizes a sample. Normalizes the Wsum to W (and uses weightSum to store W)
     [mutating] void finalizeSample(float normalizationNumerator, float normalizationDenominator){
         float denominator = targetPdf * normalizationDenominator;
-
-        weightSum = denominator > 0 ? (weightSum * normalizationNumerator) / denominator : 0.f;
+        
+        if(denominator > 0)
+            weightSum = (weightSum * normalizationNumerator) / denominator;
+        else
+            weightSum = 0;
     }
 };

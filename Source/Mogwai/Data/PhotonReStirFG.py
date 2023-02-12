@@ -20,7 +20,7 @@ def render_graph_FGReSTIR():
     g.addPass(AccumulatePass, 'AccumulatePass')
     ToneMapper = createPass('ToneMapper', {'outputSize': IOSize.Default, 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': ToneMapOp.Aces, 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': ExposureMode.AperturePriority})
     g.addPass(ToneMapper, 'ToneMapper')
-    VBufferPM = createPass('VBufferPM', {'outputSize': IOSize.Default, 'samplePattern': 3, 'specRoughCutoff': 0.0, 'sampleCount': 32, 'useAlphaTest': True, 'adjustShadingNormals': True})
+    VBufferPM = createPass('VBufferPM', {'outputSize': IOSize.Default, 'samplePattern': 3, 'specRoughCutoff': 1.0, 'sampleCount': 32, 'useAlphaTest': True, 'adjustShadingNormals': True})
     g.addPass(VBufferPM, 'VBufferPM')
     ReStirExp = createPass('ReStirExp')
     g.addPass(ReStirExp, 'ReStirExp')

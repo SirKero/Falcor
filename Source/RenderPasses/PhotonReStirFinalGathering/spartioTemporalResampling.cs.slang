@@ -232,9 +232,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
             int2 spartialOffset = int2(round(randSamp * gSamplingRadius));
             idx = prevIdx + spartialOffset;
 
-            //Check if index is valid
-            if(idx.x < 0 && idx.y < 0 && idx.x > gFrameDim.x && idx.y > gFrameDim.y)
-                continue;
+            //Cap to valid index
+            min(max(uint2(0), idx), gFrameDim - 1);
             
              //Get surface and check if valid
             Surface neighSurface = getSurface(idx, true); 

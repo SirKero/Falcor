@@ -145,9 +145,9 @@ struct Surface{
 
     //Gets the one channel average diffuse target pdf for Resampling
     float getDiffusePdf(const float3 toLight, const float Li = 1.f){
-        const float3 N = normal;
+        const float3 N = normalize(normal);
         const float NdotL = saturate(dot(N, toLight));
-
+        
         //Eval BSDF
         float diffuseBRDF = NdotL * M_1_PI;
         if(diffuseProb > 0)
