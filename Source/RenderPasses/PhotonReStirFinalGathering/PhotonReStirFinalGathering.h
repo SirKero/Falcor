@@ -243,6 +243,7 @@ private:
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
     bool mUseDiffuseOnlyShading = true;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
     bool mUseReducedReservoirFormat = true;    // Full precision = RGBA32_UINT, Reduced = RG32UINT. TargetPdf and M only uses 16 bits in reduced
+    bool mBoostSampleTestVisibility = false;    //Extra visibility test for boosting
 
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer

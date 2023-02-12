@@ -252,7 +252,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         //Kill the reservoir
         bool vplValid = true;
-        if(!vpl.valid || vpl.replaced){
+        if(!vpl.valid){
             sampledReservoir.weightSum = 0;
             vplValid = false;
         }
@@ -314,11 +314,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
         
         //Trace ray
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
-        if (ps > 0.0)
+        if (ps > 0)
         {
             SceneRayQuery < 0 > rayQuery;
             dist *= kRayEpsilon;
-            const Ray ray = Ray(biasSurface.posW, ls.dir, 0.001f, dist);
+            const Ray ray = Ray(biasSurface.posW, ls.dir, 0.0f, dist);
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
             {
                 ps = 0.0f;

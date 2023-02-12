@@ -46,6 +46,7 @@ Texture2D <float> gNeighborMask;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
+    bool gTestVisibility;               //Visibility test
 }
 
 cbuffer Constant
@@ -337,6 +338,24 @@ void main(uint2 dTid : SV_DispatchThreadID)
     r.finalizeSample(1.0f, r.M);
 #endif
 
+//Test visibility of the sample
+ #if BIAS_CORRECTION_MODE != BIAS_MODE_RAYTRACE
+    if (gTestVisibility)
+    {
+        LightSample ls = { };
+        float distance = 0;
+        bool valid = getLightSample(selectedVPL, currentSurface.posW, ls, distance);
+        distance *= kRayEpsilon;
+        // Ray Query for shadow test; <0> means disabled alpha testing; TODO: Add static const for alpha test
+        SceneRayQuery < 0 > rayQuery;
+        const Ray ray = Ray(currentSurface.posW, ls.dir, 0.f, distance);
+        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+        {
+            r.weightSum = 0.f; //Set weight to zero if light is not visible
+        }
+    }
+#endif
+    
 #ifdef USE_REDUCED_RESERVOIR_FORMAT
     gReservoirWrite[dTid] = r.packReduced();
 #else

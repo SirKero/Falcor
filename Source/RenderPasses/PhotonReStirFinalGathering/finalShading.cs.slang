@@ -129,7 +129,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.f, distance);
         if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
         {
-            valid = false;
+            valid = false;           
         }
     }
         
@@ -183,5 +183,6 @@ void main(uint2 dTid : SV_DispatchThreadID)
     if (is_valid(gSpecularIllumination)) gSpecularIllumination[dTid] = float4(specularIllumination, distance);
         
     gColor[dTid] = float4(outColor, 1.0f);
+
    
 }

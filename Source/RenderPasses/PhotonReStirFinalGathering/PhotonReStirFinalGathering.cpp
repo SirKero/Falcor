@@ -225,8 +225,6 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
 
-    changed |= widget.var("Initial Candidates", mInitialCandidates, 0u, 8u);
-
     if (auto group = widget.group("PhotonMapper")) {
         //Dispatched Photons
         changed |= widget.checkbox("Enable dynamic photon dispatch", mUseDynamicePhotonDispatchCount);
@@ -327,8 +325,13 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
                 widget.tooltip("Temporal age a sample should have");
             }
         }
-        if ((mResamplingMode & ResamplingMode::Spartial) > 0) {
-            if (auto group = widget.group("Spartial Options")) {
+        
+
+        if (auto group = widget.group("Spartial Options")) {
+            changed |= widget.var("Current it spatial candidates", mInitialCandidates, 0u, 8u);
+            changed |= widget.checkbox("Visibility check boost spatial sampling", mBoostSampleTestVisibility);
+
+            if ((mResamplingMode & ResamplingMode::Spartial) > 0) {
                 changed |= widget.var("Spartial Samples", mSpartialSamples, 0u, mResamplingMode & ResamplingMode::SpartioTemporal ? 8u : 32u);
                 widget.tooltip("Number of spartial samples");
 
@@ -1060,6 +1063,7 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
+    var[uniformName]["gTestVisibility"] = mBoostSampleTestVisibility;
     if (mReset || mReuploadBuffers || mBiasCorrectionChanged) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
@@ -1226,7 +1230,6 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("BIAS_CORRECTION_MODE", std::to_string(mBiasCorrectionMode));
-        defines.add("OFFSET_BUFFER_SIZE", std::to_string(kNumNeighborOffsets));
         if (mUseDiffuseOnlyShading) defines.add("DIFFUSE_SHADING_ONLY");
         if (mUseReducedReservoirFormat) defines.add("USE_REDUCED_RESERVOIR_FORMAT");
         defines.add(getValidResourceDefines(kInputChannels, renderData));
