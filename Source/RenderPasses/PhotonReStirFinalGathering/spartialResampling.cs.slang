@@ -177,7 +177,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         #ifndef DIFFUSE_SHADING_ONLY
             targetPdf = valid ?  currentSurface.getPdf(ls.dir, ls.Li): 0.f;
         #else
-            targetPdf = valid ?  currentSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+            targetPdf = valid ?  currentSurface.getDiffusePdf(ls.dir, ls.Li): 0.f;
         #endif
         }
         
@@ -220,7 +220,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     #ifndef DIFFUSE_SHADING_ONLY
         float ps = valid ?  biasSurface.getPdf(ls.dir, ls.Li): 0.f;
     #else
-        float ps = valid ?  biasSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+        float ps = valid ?  biasSurface.getDiffusePdf(ls.dir, ls.Li): 0.f;
     #endif
 
         //Trace ray

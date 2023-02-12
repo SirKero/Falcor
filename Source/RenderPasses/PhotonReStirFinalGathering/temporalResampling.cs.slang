@@ -207,7 +207,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         #ifndef DIFFUSE_SHADING_ONLY
             targetPdf = validLS ?  currentSurface.getPdf(ls.dir, ls.Li): 0.f;
         #else
-            targetPdf = validLS ?  currentSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+            targetPdf = validLS ?  currentSurface.getDiffusePdf(ls.dir, ls.Li): 0.f;
         #endif
         }
 
@@ -229,7 +229,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     #ifndef DIFFUSE_SHADING_ONLY
         float ps = valid ?  temporalSurface.getPdf(ls.dir, ls.Li): 0.f;
     #else
-        float ps = valid ?  temporalSurface.getPdfDiffuse(ls.dir, ls.Li): 0.f;
+        float ps = valid ?  temporalSurface.getDiffusePdf(ls.dir, ls.Li): 0.f;
     #endif
 
         #if BIAS_CORRECTION_MODE >= BIAS_MODE_RAYTRACE
