@@ -178,12 +178,7 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
 
     //Accept all hits but reject if the surface is only specular
     float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
-    if (luminance(bsdfProperties.diffuseReflectionAlbedo) <= 0)
-        pDiffuseRef = 0;
-    
-    float rnd = sampleNext1D(rayData.sg);
-    bool diffuseHit = rnd <= pDiffuseRef; //Check if diffuse
-    
+    bool diffuseHit = luminance(bsdfProperties.diffuseReflectionAlbedo) > 0;    
     
     if(diffuseHit){
         rayData.distance = RayTCurrent();
