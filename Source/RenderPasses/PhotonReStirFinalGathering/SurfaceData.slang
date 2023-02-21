@@ -113,7 +113,7 @@ struct Surface{
         s.diffuse = diffuse;
         s.specular = specular;
         float sumWeights = diffuse + specular;
-        s.diffuseProb = sumWeights < 1e-7f ? 1.0f : (diffuse / sumWeights);
+        s.diffuseProb = sumWeights < 1e-7f ? 1.0f : saturate(diffuse / sumWeights);
     
         return s;
     }

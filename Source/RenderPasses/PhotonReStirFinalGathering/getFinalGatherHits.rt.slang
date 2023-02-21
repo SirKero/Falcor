@@ -245,7 +245,7 @@ void rayGen()
         TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
 
         selectPdf = bsdfSample.pdf * traceData.pDiffuseRef;
-
+        
         extraInfoPacked = uint2((f32tof16(targetPdf) << 16) | f32tof16(selectPdf), encodeNormal2x16(bsdfSample.wo));
 
         float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;

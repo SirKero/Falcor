@@ -150,7 +150,7 @@ void rayGen()
         return;                     //TODO write invalid reservoir? 
 
     uint2 extraData = gFinalGatherExtraInfo[launchIndex];
-    float3 approxViewDir = decodeNormal2x16(extraData.y);
+    float3 approxViewDir = normalize(decodeNormal2x16(extraData.y));
     float targetPdf = f16tof32(extraData.x >> 16);
     float invSelectPdf = 1.f/f16tof32(extraData.x);
     
@@ -163,11 +163,11 @@ void rayGen()
     RayData rayData = RayData();
     rayData.diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;          //Diffuse reflectance is stored in flux before collection
     float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
-    float NdotV = saturate(dot(sd.N, sd.V));
-    float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
-    float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
-    float specProb = luminance(specularReflectance);
-    rayData.diffuseReflectance *= (diffProb + specProb) / diffProb; //Diffuse reflectance is stored in flux before collection
+    float3 specProb = bsdfProperties.specularReflectance;
+    float3 diffFactor = float3(0.f);
+    if (diffProb > 0.f)
+        diffFactor = (rayData.diffuseReflectance + specProb) / rayData.diffuseReflectance;
+    rayData.diffuseReflectance *= diffFactor; //Diffuse reflectance is stored in flux before collection
     rayData.radiance = float3(0.f);
     
     //Ray description 
@@ -187,7 +187,7 @@ void rayGen()
     uint lightIdx = index2Dto1D(launchIndex, launchDim.x);
     float Li = luminance(radiance);
 
-    targetPdf *= Li;
+    targetPdf *= Li * saturate(dot(sd.N,-approxViewDir));
 
     Reservoir r = Reservoir();
 

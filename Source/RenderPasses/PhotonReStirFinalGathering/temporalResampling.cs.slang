@@ -117,6 +117,8 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     
     ls.Li = luminance(vpl.flux);
 
+    ls.Li *= saturate(dot(vpl.normal, -ls.dir));
+    
     return ls.Li > 0;   //true if sample is valid
 }
 
