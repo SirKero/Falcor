@@ -226,7 +226,7 @@ void rayGen()
 
     BSDFSample bsdfSample;
     //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
-    sd.mtl.setActiveLobes((uint) LobeType::Reflection);
+    sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
     bool valid = bsdf.sample(sd, traceData.sg, bsdfSample, true);
     
     //Fill Surface Buffer used for calculating the target PDF
