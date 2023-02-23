@@ -24,6 +24,7 @@ cbuffer PerFrame
     uint gFrameCount;       // Frame count since scene was loaded.
     float gCollectionRadius;
     float gHashScaleFactor; //Hash scale factor. 1/diameter
+    bool gDiffuseOnly;    
 }
 
 cbuffer Constant{
@@ -43,6 +44,13 @@ RWTexture2D<uint2> gFinalGatherExtraInfo;
 RWTexture2D<uint> gPhotonCullingMask;
 RWTexture2D<float> gValidNeighborsMask;
 
+//Outputs
+#if USE_REDUCED_RESERVOIR_FORMAT
+    RWTexture2D<uint2> gReservoir;
+#else
+    RWTexture2D<uint4> gReservoir;
+#endif
+
 static const bool kUsePhotonCulling = USE_PHOTON_CULLING;
 static const bool kAllowHitsInRadius = ALLOW_HITS_IN_RADIUS;    //Enables or disables hits inside of the collection radius
 static const bool kFillMask = FILL_MASK;
@@ -52,7 +60,7 @@ struct TraceData{
     uint   packedNormal;   ///< Face normal encoded in 16 bit polar coordinates
     float pDiffuseRef;
     float  distance;            ///< 
-    uint _pad;
+    float NdotL;                ///< NdotL precalculated for targetPDF
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
     
@@ -61,7 +69,7 @@ struct TraceData{
     static TraceData create()
     {
         TraceData d;
-        d._pad = 0;
+        d.NdotL = 0.f;
         d.packedHitInfo = {};
         d.packedNormal = 0;
         d.distance = -1;
@@ -185,6 +193,7 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
         rayData.packedNormal = encodeNormal2x16(sd.N);
         rayData.pDiffuseRef = pDiffuseRef;
         rayData.packedHitInfo = HitInfo(triangleHit).getData();
+        rayData.NdotL = saturate(dot(sd.N, incomingRayDir));
     }else{
         rayData.distance = -1.f;
     }
@@ -213,36 +222,42 @@ void rayGen()
     let bsdfProperties = bsdf.getProperties(sd);
 
     TraceData traceData = TraceData::create();
-    traceData.sg = SampleGenerator(launchIndex, gFrameCount + 15 * 13);    //TODO add seed offset
+    traceData.sg = SampleGenerator(launchIndex, gFrameCount + 3 * 13);
 
     BSDFSample bsdfSample;
     //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
-    sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
+    sd.mtl.setActiveLobes((uint) LobeType::Reflection);
     bool valid = bsdf.sample(sd, traceData.sg, bsdfSample, true);
     
     //Fill Surface Buffer used for calculating the target PDF
     Surface surface = Surface::create(sd.computeNewRayOrigin(), sd.N, sd.V, linZ, bsdfProperties.roughness,
                                       luminance(bsdfProperties.diffuseReflectionAlbedo), luminance(bsdfProperties.specularReflectance));
 
-
-    float targetPdf = surface.getPdf(bsdfSample.wo);
-    float selectPdf = 1.f;
+    Reservoir reservoir = Reservoir();
+    if (gDiffuseOnly)
+        reservoir.targetPdf = surface.getDiffusePdf(bsdfSample.wo);
+    else
+        reservoir.targetPdf = surface.getPdf(bsdfSample.wo);
+    
+    reservoir.weightSum = 1.f / bsdfSample.pdf; // 1/selectPDF
     uint2 extraInfoPacked = uint2(0);
 
+    RayDesc tRay;
+    tRay.Origin = sd.computeNewRayOrigin();
+    tRay.TMin = 0.0;
+    tRay.TMax = 1000.f;
+    tRay.Direction = bsdfSample.wo;
+    
     if (valid)
     {
-        RayDesc tRay;
-        tRay.Origin = sd.computeNewRayOrigin();
-        tRay.TMin = 0.0;
-        tRay.TMax = 1000.f;
-        tRay.Direction = bsdfSample.wo; //Use as Normal
-
         TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
-
-        selectPdf = bsdfSample.pdf * traceData.pDiffuseRef;
-        
-        extraInfoPacked = uint2((f32tof16(targetPdf) << 16) | f32tof16(selectPdf), encodeNormal2x16(bsdfSample.wo));
-
+        valid = traceData.distance >= 0;
+    }
+    
+    if (valid)
+    {
+        reservoir.targetPdf *= traceData.NdotL;         //Precalculate NdotL
+        reservoir.M = encodeNormal2x8(bsdfSample.wo);  //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
         float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
     
         if (kUsePhotonCulling)
@@ -250,7 +265,7 @@ void rayGen()
             photonCulling(hitPos);
         }
 
-        //Reject hit points that are inside the collection radius
+    //Reject hit points that are inside the collection radius
         if (!kAllowHitsInRadius)
         {
             float distDiff = distance(hitPos, sd.posW);
@@ -258,15 +273,21 @@ void rayGen()
             valid = distDiff > gCollectionRadius;
         }
     }
+
     
     if (!valid)
     {
         traceData.packedHitInfo = { };
         surface.viewDepth = -1.f; //Set to invalid depth
+        reservoir.weightSum = 0.f;  //invalidate reseroir
     }
    
     //Store data in buffers
     gFinalGatherHit[launchIndex] = traceData.packedHitInfo;
-    gFinalGatherExtraInfo[launchIndex] = extraInfoPacked;       //TODO: Optimize this. Reservoir could be used!
     gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = surface.pack();
+    #if USE_REDUCED_RESERVOIR_FORMAT
+        gReservoir[launchIndex] = reservoir.packReduced();
+    #else
+        gReservoir[launchIndex] = reservoir.pack();
+    #endif
 }

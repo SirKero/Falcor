@@ -313,7 +313,6 @@ private:
     Buffer::SharedPtr mpPhotonCounterCPU;  //For showing the current number of photons in the UI
     Texture::SharedPtr mpPrevViewTex;      //If view texture is used, we store the last frame here
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
-    Texture::SharedPtr mpFinalGatherExtraInfo;    //Incoming Direction for the final gather hit
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
     Texture::SharedPtr mpCausticPhotonsFlux[2];    //Flux onsurfaces for caustic photons
 

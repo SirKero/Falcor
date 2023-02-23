@@ -28,7 +28,6 @@ cbuffer PerFrame
 StructuredBuffer<uint4> gPackedPhotonData;
 StructuredBuffer<AABB> gPhotonAABB;
 Texture2D<PackedHitInfo> gFinalGatherHit;
-Texture2D<uint2> gFinalGatherExtraInfo;
 
 RaytracingAccelerationStructure gPhotonAS;
 
@@ -144,69 +143,68 @@ void rayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
+
+    Reservoir r = Reservoir(gReservoir[launchIndex]);
+    float3 approxViewDir = decodeNormal2x8(r.M);    //Approximate direction is stored in M
+    r.M = 1;    //set M to the right value
+
+    HitInfo hitInfo = HitInfo(gFinalGatherHit[launchIndex]);    
+
+    VPL photonLight = { };
     
-    HitInfo hitInfo = HitInfo(gFinalGatherHit[launchIndex]);
-    if(!hitInfo.isValid())
-        return;                     //TODO write invalid reservoir? 
-
-    uint2 extraData = gFinalGatherExtraInfo[launchIndex];
-    float3 approxViewDir = normalize(decodeNormal2x16(extraData.y));
-    float targetPdf = f16tof32(extraData.x >> 16);
-    float invSelectPdf = 1.f/f16tof32(extraData.x);
-    
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = loadShadingData(hitInfo, approxViewDir, lod);
-    let bsdf = gScene.materials.getBSDF(sd, lod);
-    let bsdfProperties = bsdf.getProperties(sd);
-            
-    //Prepare payload
-    RayData rayData = RayData();
-    rayData.diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;          //Diffuse reflectance is stored in flux before collection
-    float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
-    float3 specProb = bsdfProperties.specularReflectance;
-    float3 diffFactor = float3(0.f);
-    if (diffProb > 0.f)
-        diffFactor = (rayData.diffuseReflectance + specProb) / rayData.diffuseReflectance;
-    rayData.diffuseReflectance *= diffFactor; //Diffuse reflectance is stored in flux before collection
-    rayData.radiance = float3(0.f);
-    
-    //Ray description 
-    RayDesc ray;
-    ray.Origin = sd.posW;
-    ray.TMin = 0.0;
-    ray.TMax = 0.0001;
-    ray.Direction = sd.N;    //Use as Normal
-
-    //Closest hit shader can be skipped
-    uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
-    
-    TraceRay(gPhotonAS, rayFlags, 1 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
-    float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius);    //Get new flux
-  
-    //ReSTIR Candidate
-    uint lightIdx = index2Dto1D(launchIndex, launchDim.x);
-    float Li = luminance(radiance);
-
-    targetPdf *= Li * saturate(dot(sd.N,-approxViewDir));
-
-    Reservoir r = Reservoir();
-
-    //Create the light
-    bool vplValid = true;
-    VPL photonLight = {};
-    if (any(isnan(radiance)) || any(isinf(radiance)) || any(radiance < 0))
-        vplValid = false;
-    photonLight.posW = sd.computeNewRayOrigin();
-    photonLight.normal = sd.N;
-    photonLight.flux = radiance;
-    photonLight.valid = vplValid;
-
-    
-    if (vplValid)
+    if (hitInfo.isValid())
     {
-        r.updateReservoir(invSelectPdf, targetPdf, 0.5 /*random var*/); //Add the candidate
-        r.finalizeSample(1.f, 1.f);
+        let lod = ExplicitLodTextureSampler(0.f);
+        ShadingData sd = loadShadingData(hitInfo, approxViewDir, lod);
+        let bsdf = gScene.materials.getBSDF(sd, lod);
+        let bsdfProperties = bsdf.getProperties(sd);
+            
+        //Prepare payload
+        RayData rayData = RayData();
+        rayData.diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo; //Diffuse reflectance is stored in flux before collection
+        float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
+        float3 specProb = bsdfProperties.specularReflectance;
+        float3 diffFactor = float3(0.f);
+        if (diffProb > 0.f)
+            diffFactor = (rayData.diffuseReflectance + specProb) / rayData.diffuseReflectance;
+        //rayData.diffuseReflectance *= diffFactor; //Diffuse reflectance is stored in flux before collection
+        rayData.radiance = float3(0.f);
+    
+        //Ray description 
+        RayDesc ray;
+        ray.Origin = sd.posW;
+        ray.TMin = 0.0;
+        ray.TMax = 0.0001;
+        ray.Direction = sd.N; //Use as Normal
+
+        //Closest hit shader can be skipped
+        uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
+    
+        TraceRay(gPhotonAS, rayFlags, 1 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
+        float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius); //Get new flux
+  
+        //ReSTIR Candidate
+        uint lightIdx = index2Dto1D(launchIndex, launchDim.x);
+        float Li = luminance(radiance);
+
+        r.targetPdf *= Li;
+    
+        //Create the light
+        bool vplValid = true;
+        if (any(isnan(radiance)) || any(isinf(radiance)))
+            vplValid = false;
+        photonLight.posW = sd.computeNewRayOrigin();
+        photonLight.normal = sd.N;
+        photonLight.flux = radiance;
+        photonLight.valid = vplValid;
+
+    
+        if (!vplValid || Li <= 0)
+        {
+            r.weightSum = 0.f;  //No contribution
+        }
     }
+   
 
 #if USE_REDUCED_RESERVOIR_FORMAT
     gReservoir[launchIndex] = r.packReduced();

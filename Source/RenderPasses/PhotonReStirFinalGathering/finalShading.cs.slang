@@ -76,9 +76,8 @@ void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float
     distance = sqrt(distSqr);
     toLight = toLight/ distance;    //normalize
 
-    float cosTheta = saturate(dot(vpl.normal, -toLight));
-    
-    Li = vpl.flux * cosTheta;
+    Li = vpl.flux;
+    Li *= saturate(dot(normalize(vpl.normal), -toLight));   //Cos Theta
 }
 
 [numthreads(16, 16, 1)]
@@ -146,11 +145,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
         sd.mtl.setActiveLobes((uint) LobeType::Specular);
         specular = bsdf.eval(sd, toLight, sg) * Li;
 #else   //Scale up by diffuse probability
-        float3 diffProb = bsdfProperties.diffuseReflectionAlbedo;
-        float3 specProb = bsdfProperties.specularReflectance;
+        const float3 diffProb = bsdfProperties.diffuseReflectionAlbedo;
+        const float3 specProb = bsdfProperties.specularReflectance;
         float3 diffFactor = float3(0.f);
-        if(luminance(diffProb) > 0.f)
-            diffFactor = (diffProb + specProb) / diffProb;
+        for(uint i=0; i<3; i++){
+            if(diffProb[i] > 0.f)
+                    diffFactor[i] = (diffProb[i] + specProb[i]) / diffProb[i];
+        }
         diffuse *= diffFactor;
 #endif
     }

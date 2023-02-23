@@ -552,7 +552,6 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     {
         mScreenRes = renderData.getDefaultTextureDims();
         mpFinalGatherHit.reset();
-        mpFinalGatherExtraInfo.reset();
         for (size_t i = 0; i <= 1; i++) {
             mpSurfaceBuffer[i].reset();
             mpPrevViewTex.reset();
@@ -625,13 +624,6 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
         mpFinalGatherHit->setName("PhotonReStir::FinalGatherHitInfo");
     }
 
-    if (!mpFinalGatherExtraInfo) {
-        mpFinalGatherExtraInfo = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
-                                             ResourceFormat::RG32Uint, 1u, 1u, nullptr,
-                                             ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpFinalGatherExtraInfo->setName("PhotonReStir::FinalGatherExtraInfo");
-    }
-
     //Create view tex for previous frame
     if (renderData[kInViewDesc.name] != nullptr && !mpPrevViewTex) {
         auto viewTex = renderData[kInViewDesc.name]->asTexture();
@@ -700,10 +692,20 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
         pRenderContext->clearUAV(mpPhotonCullingMask->getUAV().get(), uint4(0));
     }
 
+    //Clear Reservoirs
+    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
+    //Also clear the initial candidates buffer
+    if (mInitialCandidates > 0) {
+        pRenderContext->clearUAV(mpReservoirBoostBuffer->getUAV().get(), uint4(0));
+        pRenderContext->clearUAV(mpPhotonLightBoostBuffer->getUAV().get(), uint4(0));
+    }
+
     //Defines
     mGetFinalGatherHitPass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
     mGetFinalGatherHitPass.pProgram->addDefine("ALLOW_HITS_IN_RADIUS", mAllowFinalGatherPointsInRadius ? "1" : "0");
     mGetFinalGatherHitPass.pProgram->addDefine("FILL_MASK", mpValidNeighborMask ? "1" : "0");
+    mGetFinalGatherHitPass.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
 
     if (!mGetFinalGatherHitPass.pVars) {
         FALCOR_ASSERT(mGetFinalGatherHitPass.pProgram);
@@ -728,6 +730,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var[nameBuf]["gFrameCount"] = mFrameCount;
     var[nameBuf]["gCollectionRadius"] = mPhotonCollectRadius;
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]); //Take Global
+    var[nameBuf]["gDiffuseOnly"] = mUseDiffuseOnlyShading;
 
     nameBuf = "Constant";
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
@@ -737,9 +740,9 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var["gView"] = renderData[kInViewDesc.name]->asTexture();
     var["gLinZ"] = renderData[kInRayDistance.name]->asTexture();
 
+    var["gReservoir"] = mInitialCandidates > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gFinalGatherHit"] = mpFinalGatherHit;
-    var["gFinalGatherExtraInfo"] = mpFinalGatherExtraInfo;
     var["gPhotonCullingMask"] = mpPhotonCullingMask;
     var["gValidNeighborsMask"] = mpValidNeighborMask;
 
@@ -845,13 +848,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
 void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("CollectPhotonsAndGenerateReservoir");
-    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
-    pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
-    //Also clear the initial candidates buffer
-    if (mInitialCandidates > 0) {
-        pRenderContext->clearUAV(mpReservoirBoostBuffer->getUAV().get(), uint4(0));
-        pRenderContext->clearUAV(mpPhotonLightBoostBuffer->getUAV().get(), uint4(0));
-    }
+    
     
 
     //Defines
@@ -886,7 +883,6 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     var["gPhotonAABB"] = mpPhotonAABB[0];
     var["gPackedPhotonData"] = mpPhotonData[0];
     var["gFinalGatherHit"] = mpFinalGatherHit;
-    var["gFinalGatherExtraInfo"] = mpFinalGatherExtraInfo;
 
     bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
     FALCOR_ASSERT(tlasValid);
