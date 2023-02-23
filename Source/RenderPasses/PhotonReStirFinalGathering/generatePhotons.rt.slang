@@ -59,7 +59,7 @@ struct RayData
     float3  direction;      ///< Next path segment direction.
     bool    diffuseHit;     ///< saves if the his is diffuse
     float3 diffuseScalar;
-    float _pad;
+    bool isEmissive;        ///<If the hit is emissive
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
 
@@ -73,6 +73,7 @@ struct RayData
         d.thp = float3(1);
         d.origin = float3(0);
         d.direction = float3(0);
+        d.isEmissive = false;
         return d;
     }
 };
@@ -116,7 +117,7 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
     //Get Flux
     float2 uv = tri.getTexCoord(barycentrics);
     pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area * M_PI;
-    pls.flux /= triangleSelectionPdf;
+    pls.flux *= triangleSelectionPdf;
 
     return true;
 }
@@ -188,28 +189,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.direction = bsdfSample.wo;
     rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 
-    //get diffuse power
-
-    /*
-    if(rayData.diffuseHit){
-        //Get diffuse reflection factor
-        float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
-        float NdotV = saturate(dot(sd.N, sd.V));
-        float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
-        float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
-        float specProb = luminance(specularReflectance);
-        float diffFactor = (diffProb + specProb) / diffProb;
-        
-        //Slower
-        //sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
-        //rayData.diffuseScalar = bsdf.eval(sd, sd.N, rayData.sg);
-        //Faster same result
-        
-        const float NdotL = saturate(dot(sd.N, incomingRayDir));
-        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
-        rayData.diffuseScalar *= diffFactor; 
-    }
-    */
+    
     //if throughput is 0, return
     if (!valid || any(rayData.thp <= 0))
         rayData.terminated = true;
@@ -250,10 +230,10 @@ void rayGen()
     float lightDirPDF = 1.0;
     ray.Direction = sample_cosine_hemisphere_polar(sampleNext2D(rayData.sg), lightDirPDF);
     fromLocalToWorld(pls.normal, ray.Direction);
-    //pls.flux /= lightDirPDF;
-    pls.flux /= launchDim.x * launchDim.y;  //Division through all photons
+    pls.flux /= lightDirPDF;
+    pls.flux /= launchDim.x * launchDim.y; //Division through all photons
 
-    ray.Origin = pls.posW + 0.01 * pls.normal;
+    ray.Origin = pls.posW + 0.01f * pls.normal;
     ray.TMin = 0.01f;
     ray.TMax = 10000.f;
     
@@ -277,8 +257,6 @@ void rayGen()
     {
         photon.flux = pls.flux * rayData.thp;
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
-
-        
 
         photonPos = rayData.origin;
         photon.dir = ray.Direction;

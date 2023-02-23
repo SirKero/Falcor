@@ -114,7 +114,7 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
     //Get Flux
     float2 uv = tri.getTexCoord(barycentrics);
     pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area * M_PI;
-    pls.flux /= triangleSelectionPdf;
+    pls.flux *= triangleSelectionPdf;
 
     return true;
 }
@@ -183,9 +183,15 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         //sd.mtl.setActiveLobes((uint)LobeType::DiffuseReflection);
         //rayData.diffuseScalar = bsdf.eval(sd, sd.N, rayData.sg);
         //Faster same result
-        float3 diffProb = (bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectance) / bsdfProperties.diffuseReflectionAlbedo;
+        float3 diffProb = float3(0);
+        for (uint i = 0; i < 3; i++)
+        {
+            if (bsdfProperties.diffuseReflectionAlbedo[i] > 0.f)
+                diffProb[i] = (bsdfProperties.diffuseReflectionAlbedo[i] + bsdfProperties.specularReflectance[i]) / bsdfProperties.diffuseReflectionAlbedo[i];
+        }
+        
         const float NdotL = saturate(dot(sd.N, incomingRayDir));
-        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI;
+        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI * diffProb;
         
     }
     //if throughput is 0, return
@@ -228,7 +234,7 @@ void rayGen()
     float lightDirPDF = 1.0;
     ray.Direction = sample_cosine_hemisphere_polar(sampleNext2D(rayData.sg), lightDirPDF);
     fromLocalToWorld(pls.normal, ray.Direction);
-    //pls.flux /= lightDirPDF;
+    pls.flux /= lightDirPDF;
     pls.flux /= launchDim.x * launchDim.y;  //Division through all photons
 
     ray.Origin = pls.posW + 0.01 * pls.normal;
@@ -254,9 +260,6 @@ void rayGen()
         photon.flux = pls.flux * rayData.thp;
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
-        if(rayData.terminated)
-            break;
-
         photonPos = rayData.origin;
         photon.dir = ray.Direction;
         reflectedDiffuse = rayData.diffuseHit;
@@ -264,9 +267,9 @@ void rayGen()
         //rejection
         float rndRoulette = sampleNext1D(rayData.sg);
         bool roulette = rndRoulette <= gRejection;
-              
+            
         //store photon light
-        if (reflectedDiffuse && roulette)
+        if ((reflectedDiffuse && roulette) && !wasReflectedSpecular)
         { 
             uint photonIndex = 0;
             photon.flux *= rayData.diffuseScalar * invRejection;
@@ -283,7 +286,10 @@ void rayGen()
             if(kUsePdfSampling) gPhotonPdfTexture[ReSTIR_LinearIndexToZCurve(photonIndex)] = luminance(photon.flux);
             //break;  //Stop here to not sample points multiple times
         }
-   
+
+        if (rayData.terminated)
+            break;
+        
         //Russian Roulette
         //if(reflectedDiffuse) rayData.thp * invInvRejection; //Scale global photon up if it was not stored
         const float rrVal = luminance(rayData.thp);
@@ -302,7 +308,7 @@ void rayGen()
                 
         //update ray for next iteration
         ray.Origin = rayData.origin;
-        ray.Direction = rayData.direction;
+        ray.Direction = rayData.direction;        
     }
     
 }
