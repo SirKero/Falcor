@@ -188,6 +188,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.packedNormal = encodeNormal2x16(sd.N);
     rayData.direction = bsdfSample.wo;
     rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
+    rayData.isEmissive = luminance(bsdfProperties.emission) > 0;
 
     
     //if throughput is 0, return
@@ -258,6 +259,10 @@ void rayGen()
         photon.flux = pls.flux * rayData.thp;
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
+        //Stop if a light source was hit
+        if (rayData.isEmissive)
+            return;
+        
         photonPos = rayData.origin;
         photon.dir = ray.Direction;
         reflectedDiffuse = rayData.diffuseHit;

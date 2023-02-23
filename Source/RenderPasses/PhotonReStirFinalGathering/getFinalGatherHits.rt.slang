@@ -186,7 +186,8 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
 
     //Accept all hits but reject if the surface is only specular
     float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
-    bool diffuseHit = luminance(bsdfProperties.diffuseReflectionAlbedo) > 0;    
+    bool diffuseHit = luminance(bsdfProperties.diffuseReflectionAlbedo) > 0;
+    diffuseHit &= luminance(bsdfProperties.emission) <= 0;  //Ignore emissive hits, as they are sampled by ReSTIR
     
     if(diffuseHit){
         rayData.distance = RayTCurrent();

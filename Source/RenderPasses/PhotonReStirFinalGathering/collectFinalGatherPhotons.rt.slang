@@ -167,7 +167,7 @@ void rayGen()
         float3 diffFactor = float3(0.f);
         if (diffProb > 0.f)
             diffFactor = (rayData.diffuseReflectance + specProb) / rayData.diffuseReflectance;
-        //rayData.diffuseReflectance *= diffFactor; //Diffuse reflectance is stored in flux before collection
+        rayData.diffuseReflectance *= diffFactor; //Diffuse reflectance is stored in flux before collection
         rayData.radiance = float3(0.f);
     
         //Ray description 
