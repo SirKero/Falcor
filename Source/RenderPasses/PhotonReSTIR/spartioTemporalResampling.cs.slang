@@ -196,7 +196,10 @@ float getSurfacePdf(in Surface surface, in LightSample ls){
 
     //Eval BSDF
     float diffuseBRDF = NdotL * M_1_PI;
-    diffuseBRDF /= surface.diffuseProb;
+    if(surface.diffuseProb > 0)
+        diffuseBRDF /= surface.diffuseProb;
+    else
+        diffuseBRDF = 0.f;
     
     return diffuseBRDF * ls.Li; 
 #endif   

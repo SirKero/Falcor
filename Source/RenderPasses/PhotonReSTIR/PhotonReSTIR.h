@@ -55,7 +55,7 @@ public:
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene);
-    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
+    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override;
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
     //Structs and enum
@@ -121,6 +121,10 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Pass for debuging uses
+    */
+    void debugPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /* Fills the neighbor offset buffer with psyeudo random numbers
     */
     void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
@@ -182,6 +186,17 @@ private:
     bool mUpdateRenderSettings = true;
     uint mFrameCount = 0;
 
+    //Debug
+    bool mPausePhotonReStir = false;       //Stops rendering
+    bool mEnableDebug = false;
+    bool mCopyLastColorImage = false;
+    bool mCopyPixelData = false;
+    float mDebugDistanceFalloff = 100.f;
+    
+    float mDebugPointRadius = 0.2f;
+    uint2 mDebugCurrentClickedPixel = uint2(0, 0);
+    std::vector<uint4> mDebugData;
+
     //Falcor Vars
     Scene::SharedPtr mpScene;       //Pointer for scene
     SampleGenerator::SharedPtr mpSampleGenerator;       //Sample generator for Generate pass
@@ -195,6 +210,7 @@ private:
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
     ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
+    ComputePass::SharedPtr mpDebugPass;                     //FOr debuging
 
     //Buffer
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir
@@ -209,6 +225,9 @@ private:
     Texture::SharedPtr mpPhotonReservoirNormal[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPrevViewTex;               //If view buffer is set, this texture is used for view of the frame before
+    Texture::SharedPtr mpDebugColorCopy;            //Copy of the color buffer
+    Buffer::SharedPtr mpDebugInfoBuffer;            //ContainsDebugInfo
+    Texture::SharedPtr mpDebugVBuffer;            //Copy of the V-Buffer used for the iteration
 
     //
     //Ray tracing programms and helper

@@ -292,6 +292,7 @@ void rayGen()
         
         //Russian Roulette
         //if(reflectedDiffuse) rayData.thp * invInvRejection; //Scale global photon up if it was not stored
+        
         const float rrVal = luminance(rayData.thp);
         const float prob = max(0.f, 1.f - rrVal);
         float rnd = sampleNext1D(rayData.sg);
@@ -303,7 +304,7 @@ void rayGen()
         {
             rayData.thp /= (1.f - prob);
         }
-
+        
         wasReflectedSpecular = !reflectedDiffuse;
                 
         //update ray for next iteration

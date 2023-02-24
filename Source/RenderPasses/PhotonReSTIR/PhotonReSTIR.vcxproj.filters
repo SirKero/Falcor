@@ -43,6 +43,9 @@
     <ShaderSource Include="PhotonLight.slang">
       <Filter>Shader\StructsAndFunctions</Filter>
     </ShaderSource>
+    <ShaderSource Include="debugPass.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shader">

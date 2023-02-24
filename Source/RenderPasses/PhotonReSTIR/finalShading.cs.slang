@@ -82,7 +82,7 @@ void getEmissiveLight(uint2 idx,in float3 worldPos, out float distance ,out floa
     distance = sqrt(distSqr);
     toLight = toLight/ distance;    //normalize
 
-    float cosTheta = dot(photonNormal, -toLight);
+    float cosTheta = saturate(dot(photonNormal, -toLight));
     
     float pdf = distSqr / max(FLT_MIN, cosTheta);
     Li = photonFlux / pdf;
@@ -164,8 +164,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif
     }
     
-
     float3 outColor = diffuse + specular;
+    //float3 outColor = Li;
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;

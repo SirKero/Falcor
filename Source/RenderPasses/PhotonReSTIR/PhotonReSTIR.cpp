@@ -51,6 +51,7 @@ namespace {
     const char kShaderSpartialPass[] = "RenderPasses/PhotonReSTIR/spartialResampling.cs.slang";
     const char kShaderSpartioTemporalPass[] = "RenderPasses/PhotonReSTIR/spartioTemporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIR/finalShading.cs.slang";
+    const char kShaderDebugPass[] = "RenderPasses/PhotonReSTIR/debugPass.cs.slang";
 
     // Ray tracing settings that affect the traversal stack size.
     const uint32_t kMaxPayloadSizeBytes = 96u;
@@ -115,6 +116,17 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
     if (!mpScene)
         return;
 
+    if (mPausePhotonReStir) {
+
+        debugPass(pRenderContext, renderData);
+        //Stop Debuging
+        if (!mEnableDebug)
+            mPausePhotonReStir = false;
+
+        //Skip the rest
+        return;
+    }
+
     if (mReset)
         resetPass();
 
@@ -175,6 +187,14 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
     //Copy the view buffer if it is valid
     if (renderData[kInViewDesc.name] != nullptr) {
         pRenderContext->copyResource(mpPrevViewTex.get(), renderData[kInViewDesc.name]->asTexture().get());
+    }
+
+    if (mEnableDebug) {
+        mPausePhotonReStir = true;
+        if(renderData[kOutputChannels[0].name] != nullptr)
+            pRenderContext->copyResource(mpDebugColorCopy.get(), renderData[kOutputChannels[0].name]->asTexture().get());
+        if(renderData[kInVBufferDesc.name] != nullptr)
+            pRenderContext->copyResource(mpDebugVBuffer.get(), renderData[kInVBufferDesc.name]->asTexture().get());
     }
 
     //Reset the reset vars
@@ -277,7 +297,38 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
             widget.tooltip("Only uses diffuse shading for ReSTIR. Can be used if V-Buffer is traced until diffuse. Triggers Recompilation of shaders");
         }
     }
-   
+    if (auto group = widget.group("Debug")) {
+        widget.checkbox("Pause rendering", mEnableDebug);
+        widget.tooltip("Pauses rendering. Freezes all resources for debug purposes.");
+        if (mEnableDebug) {
+            widget.checkbox("Show PhotonReStir Image", mCopyLastColorImage);
+            widget.var("Debug Point Rad", mDebugPointRadius, 0.001f, 100000.f, 0.001f);
+            widget.var("ShadingDistanceFalloff", mDebugDistanceFalloff, 0.f, 1000000.f, 1.f);
+            widget.text("Press Right Click to select a Pixel");
+            widget.text("SelectedPixel: (" + std::to_string(mDebugCurrentClickedPixel.x) + "," + std::to_string(mDebugCurrentClickedPixel.y) + ")");
+            
+            if (!mDebugData.empty()) {
+                auto cast_to_float = [](uint3 val) {
+                    return float3(reinterpret_cast<float&>(val.x), reinterpret_cast<float&>(val.y), reinterpret_cast<float&>(val.z));
+                };
+
+                widget.text("Current Reservoir: (Idx:" + std::to_string(mDebugData[0].x) + ", M:" + std::to_string(mDebugData[0].y) + ", W:" + std::to_string(reinterpret_cast<float&>(mDebugData[0].z)) + ",tPDF:" + std::to_string(reinterpret_cast<float&>(mDebugData[0].w)) + ")");
+                float3 data = cast_to_float(uint3(mDebugData[1].xyz));
+                widget.text("Current Photon Position: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[2].xyz));
+                widget.text("Current Photon Normal: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[3].xyz));
+                widget.text("Current Photon Flux: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                widget.text("Prev Reservoir: (Idx:" + std::to_string(mDebugData[4].x) + ", M:" + std::to_string(mDebugData[4].y) + ", W:" + std::to_string(reinterpret_cast<float&>(mDebugData[4].z)) + ",tPDF:" + std::to_string(reinterpret_cast<float&>(mDebugData[4].w)) + ")");
+                data = cast_to_float(uint3(mDebugData[5].xyz));
+                widget.text("Prev Photon Position: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[6].xyz));
+                widget.text("Prev Photon Normal: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[7].xyz));
+                widget.text("Prev Photon Flux: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+            }
+        }
+   }
 
     mReset |= widget.button("Recompile");
     mReuploadBuffers |= changed;
@@ -451,10 +502,10 @@ void PhotonReSTIR::prepareBuffers(RenderContext* pRenderContext, const RenderDat
     if (!mpReservoirBuffer[0] || !mpReservoirBuffer[1]) {
         mpReservoirBuffer[0] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
                                                  1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpReservoirBuffer[0]->setName("ReStirExp::ReservoirBuf1");
+        mpReservoirBuffer[0]->setName("PhotonReStir::ReservoirBuf1");
         mpReservoirBuffer[1] = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::RGBA32Uint,
                                                  1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
-        mpReservoirBuffer[1]->setName("ReStirExp::ReservoirBuf2");
+        mpReservoirBuffer[1]->setName("PhotonReStir::ReservoirBuf2");
     }
     
     //Create a buffer filled with surface info for current and last frame
@@ -462,9 +513,9 @@ void PhotonReSTIR::prepareBuffers(RenderContext* pRenderContext, const RenderDat
         uint2 texDim = renderData.getDefaultTextureDims();
         uint bufferSize = texDim.x * texDim.y;
         mpSurfaceBuffer[0] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
-        mpSurfaceBuffer[0]->setName("ReStirExp::SurfaceBuffer1");
+        mpSurfaceBuffer[0]->setName("PhotonReStir::SurfaceBuffer1");
         mpSurfaceBuffer[1] = Buffer::createStructured(sizeof(uint) * 8, bufferSize);
-        mpSurfaceBuffer[1]->setName("ReStirExp::SurfaceBuffer2");
+        mpSurfaceBuffer[1]->setName("PhotonReStir::SurfaceBuffer2");
     }
 
     //Create an fill the neighbor offset buffer
@@ -475,7 +526,7 @@ void PhotonReSTIR::prepareBuffers(RenderContext* pRenderContext, const RenderDat
         mpNeighborOffsetBuffer = Texture::create1D(kNumNeighborOffsets, ResourceFormat::RG8Snorm, 1, 1, offsets.data());
 
 
-        mpNeighborOffsetBuffer->setName("ReStirExp::NeighborOffsetBuffer");
+        mpNeighborOffsetBuffer->setName("PhotonReStir::NeighborOffsetBuffer");
     }
 
     //Create view tex for previous frame
@@ -483,11 +534,21 @@ void PhotonReSTIR::prepareBuffers(RenderContext* pRenderContext, const RenderDat
         auto viewTex = renderData[kInViewDesc.name]->asTexture();
         mpPrevViewTex = Texture::create2D(viewTex->getWidth(), viewTex->getHeight(), viewTex->getFormat(), 1, 1,
                                           nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
-        mpPrevViewTex->setName("ReStirExp::PrevViewTexture");
+        mpPrevViewTex->setName("PhotonReStir::PrevViewTexture");
     }
 
     if (!mpSampleGenerator) {
         mpSampleGenerator = SampleGenerator::create(SAMPLE_GENERATOR_UNIFORM);
+    }
+
+    if (mEnableDebug) {
+        mpDebugColorCopy = Texture::create2D(mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA16Float, 1,1,nullptr, ResourceBindFlags::ShaderResource |ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget);
+        mpDebugColorCopy->setName("PhotonReStir::DebugColorCopy");
+        mpDebugVBuffer = Texture::create2D(mScreenRes.x, mScreenRes.y, HitInfo::kDefaultFormat, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget);
+        mpDebugVBuffer->setName("PhotonReStir::DebugVBufferCopy");
+        mpDebugInfoBuffer = Buffer::create(sizeof(uint32_t) * 32, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpDebugInfoBuffer->setName("PhotonReStir::Debug");
+        mDebugData.resize(8);
     }
 }
 
@@ -969,6 +1030,78 @@ void PhotonReSTIR::finalShadingPass(RenderContext* pRenderContext, const RenderD
     mpFinalShading->execute(pRenderContext, uint3(targetDim, 1));
 }
 
+void PhotonReSTIR::debugPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("Debug");
+
+    //Create pass
+    if (!mpDebugPass) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderDebugPass).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
+        defines.add(getValidResourceDefines(kOutputChannels, renderData));
+
+        mpDebugPass = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpDebugPass);
+
+    // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
+    mpDebugPass->getProgram()->addDefines(getValidResourceDefines(kOutputChannels, renderData));
+
+    //Set variables
+    auto var = mpDebugPass->getRootVar();
+
+    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
+    auto bindAsTex = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+
+    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
+    mpSampleGenerator->setShaderData(var);          //Sample generator
+
+    uint reservoirIndex = mResamplingMode == ResamplingMode::Spartial ? (mFrameCount + 1) % 2 : mFrameCount % 2;
+
+    bindReservoirs(var, (mFrameCount-1 % 2), true);
+
+    var["gOrigColor"] = mpDebugColorCopy;
+    var["gOrigVBuffer"] = mpDebugVBuffer;
+    var["gDebugData"] = mpDebugInfoBuffer;
+    bindAsTex(kInVBufferDesc);
+    bindAsTex(kOutputChannels[0]);
+
+    //Uniform
+    std::string uniformName = "PerFrame";
+    var[uniformName]["gDebugPointRadius"] = mDebugPointRadius;
+    var[uniformName]["gCurrentClickedPixel"] = mDebugCurrentClickedPixel;
+    var[uniformName]["gCopyLastColor"] = mCopyLastColorImage;
+    var[uniformName]["gCopyPixelData"] = mCopyPixelData;
+    var[uniformName]["gDistanceFalloff"] = mDebugDistanceFalloff;
+
+    //Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpDebugPass->execute(pRenderContext, uint3(targetDim, 1));
+
+    if (mCopyPixelData) {
+        pRenderContext->flush(true);
+
+        void* data = mpDebugInfoBuffer->map(Buffer::MapType::Read);
+        std::memcpy(mDebugData.data(), data, sizeof(uint) * 32);
+        mpDebugInfoBuffer->unmap();
+        mCopyPixelData = false;
+    }
+   
+}
+
 void PhotonReSTIR::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
 {
     // Taken from the RTXDI implementation
@@ -1032,4 +1165,17 @@ void PhotonReSTIR::computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, 
     outWidth = uint32_t(textureWidth);
     outHeight = uint32_t(textureHeight);
     outMipLevels = uint32_t(textureMips);
+}
+
+bool PhotonReSTIR::onMouseEvent(const MouseEvent& mouseEvent)
+{
+    if (mEnableDebug) {
+        if (mouseEvent.type == MouseEvent::Type::ButtonDown && mouseEvent.button == Input::MouseButton::Right)
+        {
+            mDebugCurrentClickedPixel = uint2(mouseEvent.pos * float2(mScreenRes));
+            mCopyPixelData = true;
+            return true;
+        }
+    }
+    return false;
 }
