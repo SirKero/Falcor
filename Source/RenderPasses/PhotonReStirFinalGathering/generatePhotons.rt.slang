@@ -47,6 +47,8 @@ Texture2D<uint>gPhotonCullingMask;
 
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const uint kUsePhotonCulling = USE_PHOTON_CULLING;
+static const uint kRayFlagTerminatedMiss = 1;
+static const uint kRayFlagTerminatedHit = 2;
 
 /** Payload for scatter ray (80B).
 */
@@ -55,7 +57,7 @@ struct RayData
     float3  thp;            ///< Current path throughput. This is updated at each path vertex.
     uint   packedNormal;   ///< Face normal encoded in 16 bit polar coordinates
     float3  origin;         ///< Next path segment origin.
-    bool terminated; ///< Set to true when path is terminated.
+    uint terminated; ///< Set to true when path is terminated.
     float3  direction;      ///< Next path segment direction.
     bool    diffuseHit;     ///< saves if the his is diffuse
     float3 diffuseScalar;
@@ -68,7 +70,7 @@ struct RayData
     static RayData create()
     {
         RayData d;
-        d.terminated = false;
+        d.terminated = 0;
         d.packedNormal = 0;
         d.thp = float3(1);
         d.origin = float3(0);
@@ -150,9 +152,7 @@ bool cullingTest(float3 origin)
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
 {
-    rayData.terminated = true;
-
-    //TODO: Add enviroment map color if ray misses scene 
+    rayData.terminated |= kRayFlagTerminatedMiss;
 }
 
 [shader("closesthit")]
@@ -193,7 +193,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     //if throughput is 0, return
     if (!valid || any(rayData.thp <= 0))
-        rayData.terminated = true;
+        rayData.terminated |= kRayFlagTerminatedHit;
 }
 
 //Use anyhit for alpha test if activated
@@ -260,8 +260,8 @@ void rayGen()
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         //Stop if a light source was hit
-        if (rayData.isEmissive)
-            return;
+        if (rayData.isEmissive || (rayData.terminated & kRayFlagTerminatedMiss > 0))
+            break;
         
         photonPos = rayData.origin;
         photon.dir = ray.Direction;
@@ -298,7 +298,7 @@ void rayGen()
         }
 
         //If next sampled ray is invalid return here
-        if (rayData.terminated)
+        if (rayData.terminated > 0)
             break;
         
         //Russian Roulette

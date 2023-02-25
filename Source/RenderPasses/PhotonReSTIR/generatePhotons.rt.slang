@@ -40,6 +40,8 @@ RWTexture2D<float> gPhotonPdfTexture;
 
 static const uint kPhotonLightBufferSize = PHOTON_BUFFER_SIZE;
 static const bool kUsePdfSampling = USE_PDF_SAMPLING;
+static const uint kRayFlagTerminatedMiss = 1;
+static const uint kRayFlagTerminatedHit = 2;
 
 /** Payload for scatter ray (80B).
 */
@@ -48,7 +50,7 @@ struct RayData
     float3  thp;            ///< Current path throughput. This is updated at each path vertex.
     uint   packedNormal;   ///< Face normal encoded in 16 bit polar coordinates
     float3  origin;         ///< Next path segment origin.
-    bool terminated; ///< Set to true when path is terminated.
+    uint terminated; ///< Set to true when path is terminated.
     float3  direction;      ///< Next path segment direction.
     bool    diffuseHit;     ///< saves if the his is diffuse
     float3 diffuseScalar;
@@ -63,7 +65,7 @@ struct RayData
     static RayData create()
     {
         RayData d;
-        d.terminated = false;
+        d.terminated = 0;
         d.packedNormal = 0;
         d.normal = float3(0,1,0);
         d.thp = float3(1);
@@ -137,7 +139,7 @@ void fromLocalToWorld(in float3 lightDirW, inout float3 dir)
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
 {
-    rayData.terminated = true;
+    rayData.terminated |= kRayFlagTerminatedMiss;
 
     //TODO: Add enviroment map color if ray misses scene 
 }
@@ -196,7 +198,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     }
     //if throughput is 0, return
     if (!valid || any(rayData.thp <= 0))
-        rayData.terminated = true;
+        rayData.terminated |= kRayFlagTerminatedHit;
 }
 
 //Use anyhit for alpha test if activated
@@ -260,6 +262,10 @@ void rayGen()
         photon.flux = pls.flux * rayData.thp;
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
+        //Ray Missed scene and photon cannot be stored
+        if (rayData.terminated & kRayFlagTerminatedMiss > 0)
+            break;
+        
         photonPos = rayData.origin;
         photon.dir = ray.Direction;
         reflectedDiffuse = rayData.diffuseHit;
@@ -287,7 +293,8 @@ void rayGen()
             //break;  //Stop here to not sample points multiple times
         }
 
-        if (rayData.terminated)
+        //If the ray is terminated
+        if (rayData.terminated > 0)
             break;
         
         //Russian Roulette
