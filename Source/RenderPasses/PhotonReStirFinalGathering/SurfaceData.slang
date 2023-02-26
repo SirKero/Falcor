@@ -46,33 +46,28 @@ struct Surface{
         set { packedNormal = encodeNormal2x16(newValue); }
     }
 
-     // Diffuse reflectance.
-    property float diffuse
+     // Diffuse lobe probability.
+    property float diffuseProb
     {
-        get { return unpackUnorm8(packedWeights); }
-        set { packedWeights = (packedWeights & ~0xff) | packUnorm8(newValue); }
+        get { return f16tof32(packedWeights);}
+        set { packedWeights = (packedWeights & ~0xffff) | (f32tof16(newValue)); }
     }
 
     // Specular reflectance.
     property float specular
     {
-        get { return unpackUnorm8(packedWeights >> 8); }
-        set { packedWeights = (packedWeights & ~0xff00) | (packUnorm8(newValue) << 8); }
+        get { return unpackUnorm8(packedWeights >> 16); }
+        set { packedWeights = (packedWeights & ~0xff0000) | (packUnorm8(newValue) << 16);}
     }
 
     // Specular roughness.
     property float roughness
     {
-        get { return unpackUnorm8(packedWeights >> 16); }
-        set { packedWeights = (packedWeights & ~0xff0000) | (packUnorm8(newValue) << 16); }
-    }
-
-    // Diffuse lobe probability.
-    property float diffuseProb
-    {
         get { return unpackUnorm8(packedWeights >> 24); }
         set { packedWeights = (packedWeights & ~0xff000000) | (packUnorm8(newValue) << 24); }
     }
+
+   
 
     //Empty init
     __init(){
@@ -110,7 +105,6 @@ struct Surface{
         s.normal = normal;
         s.viewDepth = viewDepth;
         s.roughness = roughness;
-        s.diffuse = diffuse;
         s.specular = specular;
         float sumWeights = diffuse + specular;
         s.diffuseProb = sumWeights < 1e-7f ? 1.0f : saturate(diffuse / sumWeights);
@@ -150,11 +144,12 @@ struct Surface{
         
         //Eval BSDF
         float diffuseBRDF = NdotL * M_1_PI;
+        
         if(diffuseProb > 0)
             diffuseBRDF /= diffuseProb;
         else
             diffuseBRDF = 0.f;
-    
+        
         return max(0.f, diffuseBRDF * Li); 
     }
 };

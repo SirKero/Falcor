@@ -162,11 +162,16 @@ void rayGen()
         //Prepare payload
         RayData rayData = RayData();
         rayData.diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo; //Diffuse reflectance is stored in flux before collection
-        float diffProb = luminance(bsdfProperties.diffuseReflectionAlbedo);
-        float3 specProb = bsdfProperties.specularReflectance;
+
+        const float3 diffProb = bsdfProperties.diffuseReflectionAlbedo;
+        const float3 specProb = bsdfProperties.specularReflectance;
         float3 diffFactor = float3(0.f);
-        if (diffProb > 0.f)
-            diffFactor = (rayData.diffuseReflectance + specProb) / rayData.diffuseReflectance;
+        for (uint i = 0; i < 3; i++)
+        {
+            if (diffProb[i] > 0.f)
+                diffFactor[i] = (rayData.diffuseReflectance[i] + specProb[i]) / rayData.diffuseReflectance[i];
+        }
+        
         rayData.diffuseReflectance *= diffFactor; //Diffuse reflectance is stored in flux before collection
         rayData.radiance = float3(0.f);
     

@@ -91,13 +91,14 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     ShadingData sd = loadShadingData(hit, WorldRayDirection(), lod);
 
     //Check for different surfaces
-    /*
+    
     if (dot(pd.normal, sd.faceN) < 0.6)
     {
         return;
     }
-    */
+    
     //Photon contribution
+    sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
     let bsdf = gScene.materials.getBSDF(sd, lod);
     float3 f_r = bsdf.eval(sd, pd.dir, rayData.sg); //right sign? 
     rayData.radiance += f_r * pd.flux;
