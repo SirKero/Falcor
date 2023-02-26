@@ -89,10 +89,9 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     let lod = ExplicitLodTextureSampler(0.f);
     //World Direction is set to the viewDir we get from the vBuffer
     ShadingData sd = loadShadingData(hit, WorldRayDirection(), lod);
-
     //Check for different surfaces
     
-    if (dot(pd.normal, sd.faceN) < 0.6)
+    if (dot(pd.normal, sd.N) < 0.6)
     {
         return;
     }

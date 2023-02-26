@@ -116,7 +116,7 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
     //Get Flux
     float2 uv = tri.getTexCoord(barycentrics);
     pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area * M_PI;
-    pls.flux *= triangleSelectionPdf;
+    pls.flux /= triangleSelectionPdf;
 
     return true;
 }
@@ -199,6 +199,11 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     //if throughput is 0, return
     if (!valid || any(rayData.thp <= 0))
         rayData.terminated |= kRayFlagTerminatedHit;
+    if (luminance(rayData.diffuseScalar) <= 0)
+    {
+        rayData.terminated |= kRayFlagTerminatedMiss;
+    }
+
 }
 
 //Use anyhit for alpha test if activated
@@ -236,9 +241,9 @@ void rayGen()
     float lightDirPDF = 1.0;
     ray.Direction = sample_cosine_hemisphere_polar(sampleNext2D(rayData.sg), lightDirPDF);
     fromLocalToWorld(pls.normal, ray.Direction);
-    pls.flux /= lightDirPDF;
+    //pls.flux /= lightDirPDF;
     pls.flux /= launchDim.x * launchDim.y;  //Division through all photons
-
+    
     ray.Origin = pls.posW + 0.01 * pls.normal;
     ray.TMin = 0.01f;
     ray.TMax = 10000.f;
