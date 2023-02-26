@@ -51,10 +51,12 @@ namespace {
     const char kShaderSpartialPass[] = "RenderPasses/PhotonReSTIR/spartialResampling.cs.slang";
     const char kShaderSpartioTemporalPass[] = "RenderPasses/PhotonReSTIR/spartioTemporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIR/finalShading.cs.slang";
+    const char kShaderCollectCausticPhotons[] = "RenderPasses/PhotonReSTIR/collectCausticPhotons.rt.slang";
     const char kShaderDebugPass[] = "RenderPasses/PhotonReSTIR/debugPass.cs.slang";
 
     // Ray tracing settings that affect the traversal stack size.
     const uint32_t kMaxPayloadSizeBytes = 96u;
+    const uint32_t kMaxPayloadSizeBytesCollect = 80u;
     const uint32_t kMaxAttributeSizeBytes = 8u;
     const uint32_t kMaxRecursionDepth = 2u;
 
@@ -147,6 +149,9 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
     //Presample generated photon lights
     presamplePhotonLightsPass(pRenderContext, renderData);
 
+    //Collect the caustic photons
+    collectCausticPhotons(pRenderContext, renderData);
+
     //Copy the counter for UI
     copyPhotonCounter(pRenderContext);
     
@@ -197,6 +202,20 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
             pRenderContext->copyResource(mpDebugVBuffer.get(), renderData[kInVBufferDesc.name]->asTexture().get());
     }
 
+    //Reduce radius if desired with formula by Knaus & Zwicker (2011)
+   //Is only done as long as the camera did not move
+    if (mUseStatisticProgressivePM) {
+        if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::CameraMoved)) {
+            mFramesCameraStill = 0;
+            mCausticCollectRadius = mCausticCollectionRadiusStart;
+        }
+
+        float itF = static_cast<float>(mFramesCameraStill);
+        mCausticCollectRadius *= sqrt((itF + mPPM_Alpha) / (itF + 1.0f));
+
+        mFramesCameraStill++;
+    }
+
     //Reset the reset vars
     mReuploadBuffers = mReset ? true : false;
     mBiasCorrectionChanged = false;
@@ -215,8 +234,10 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
         if (disPhotonChanged)
             mNumDispatchedPhotons = (uint)(dispatchedPhotons / mPhotonYExtent) * mPhotonYExtent;
         //Buffer size
-        widget.text("Photon Lights: " + std::to_string(mCurrentPhotonLightsCount) + " / " + std::to_string(mNumMaxPhotons));
+        widget.text("Photons: " + std::to_string(mCurrentPhotonCount[0]) + " / " + std::to_string(mNumMaxPhotons[0]));
+        widget.text("Caustic photons: " + std::to_string(mCurrentPhotonCount[1]) + " / " + std::to_string(mNumMaxPhotons[1]));
         widget.var("Photon Light Buffer Size", mNumMaxPhotonsUI, 100u, 100000000u, 100);
+        widget.tooltip("First -> Global, Second -> Caustic");
         mChangePhotonLightBufferSize = widget.button("Apply", true);
         if (mChangePhotonLightBufferSize) mNumMaxPhotons = mNumMaxPhotonsUI;
 
@@ -227,6 +248,35 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
 
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
+
+        if (auto group = widget.group("Caustic Options",true)) {
+            changed |= widget.checkbox("Enable Caustics", mEnableCausticPhotonCollection);
+            widget.tooltip("Enables caustics. Else they are treated as global photons");
+            bool radiusChanged = widget.var("Collect Radius", mCausticCollectionRadiusStart, 0.00001f, 1000.f, 0.00001f);
+            widget.tooltip("Photon Radii for final gather and caustic collecton. First->Global, Second->Caustic");
+            if (radiusChanged) {
+                mCausticCollectRadius = mCausticCollectionRadiusStart;
+                mFramesCameraStill = 0;
+            }
+            widget.checkbox("Use SPPM when Camera is still", mUseStatisticProgressivePM);
+            widget.tooltip("Uses Statistic Progressive photon mapping to reduce the radius when the camera stays still");
+            if (mUseStatisticProgressivePM) {
+                widget.text("Current Radius: " + std::to_string(mCausticCollectRadius));
+                widget.var("SPPM Alpha", mPPM_Alpha, 0.f, 1.f, 0.001f);
+                widget.tooltip("Alpha value for radius reduction after Knaus and Zwicker (2011).");
+                if (widget.button("Reset Radius Reduction")) {
+                    mCausticCollectRadius = mCausticCollectionRadiusStart;
+                    mFramesCameraStill = 0;
+                }
+            }
+            changed |= widget.var("Max Diffuse Bounces", mMaxCausticBounces, -1, 1000);
+            widget.tooltip("Max diffuse bounces after that a specular hit is still counted as an caustic.\n -1 -> Always, 0 -> Only direct caustics (LSD paths), 1-> L(D)SD paths ...");
+            widget.checkbox("Use Temporal Filter", mCausticUseTemporalFilter);
+            if (mCausticUseTemporalFilter) {
+                widget.var("Temporal History Limit", mCausticTemporalFilterMaxHistory, 0u, MAXUINT32);
+                widget.tooltip("Determines the max median over caustic iterations");
+            }
+        }
 
     }
 
@@ -367,6 +417,25 @@ void PhotonReSTIR::setScene(RenderContext* pRenderContext, const Scene::SharedPt
 
             mPhotonGeneratePass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
         }
+
+        //Collect Caustic Photons
+        {
+            RtProgram::Desc desc;
+            desc.addShaderLibrary(kShaderCollectCausticPhotons);
+            desc.setMaxPayloadSize(kMaxPayloadSizeBytesCollect);
+            desc.setMaxAttributeSize(kMaxAttributeSizeBytes);
+            desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+            //Scene geometry count is needed as the scene acceleration struture bound with the scene defines
+            mCollectCausticPhotonsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());  //Scene geometry count is needed for scene construct to work
+            auto& sbt = mCollectCausticPhotonsPass.pBindingTable;
+            sbt->setRayGen(desc.addRayGen("rayGen"));
+            sbt->setMiss(0, desc.addMiss("miss"));
+            sbt->setHitGroup(0, 0, desc.addHitGroup("", "anyHit", "intersection"));
+
+            mCollectCausticPhotonsPass.pProgram = RtProgram::create(desc, mpScene->getSceneDefines());
+        }
+
     }
 
 }
@@ -436,22 +505,30 @@ void PhotonReSTIR::preparePhotonBuffers(RenderContext* pRenderContext,const Rend
 
 
     if (!mpPhotonLightCounter) {
-        mpPhotonLightCounter = Buffer::create(sizeof(uint));
+        mpPhotonLightCounter = Buffer::create(sizeof(uint) * 2);
         mpPhotonLightCounter->setName("PhotonReSTIR::PhotonCounterGPU");
     }
     if (!mpPhotonLightCounterCPU) {
-        mpPhotonLightCounterCPU = Buffer::create(sizeof(uint),ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonLightCounterCPU = Buffer::create(sizeof(uint) * 2,ResourceBindFlags::None, Buffer::CpuAccess::Read);
         mpPhotonLightCounterCPU->setName("PhotonReSTIR::PhotonCounterCPU");
     }
     if (!mpPhotonLights) {
         //Calculate real photon max size
-        mpPhotonLights = Buffer::createStructured(sizeof(float) * 12, mNumMaxPhotons);
+        mpPhotonLights = Buffer::createStructured(sizeof(float) * 12, mNumMaxPhotons.x);
         mpPhotonLights->setName("PhotonReSTIR::PhotonLights");
+    }
+    if (!mpCausticPhotonAABB) {
+        mpCausticPhotonAABB = Buffer::createStructured(sizeof(D3D12_RAYTRACING_AABB), mNumMaxPhotons.y);
+        mpCausticPhotonAABB->setName("PhotonReStir::CausticAABB");
+    }
+    if (!mpCausticPhotonData) {
+        mpCausticPhotonData = Buffer::createStructured(sizeof(uint) * 4, mNumMaxPhotons.y);
+        mpCausticPhotonData->setName("PhotonReStir::PhotonData");
     }
     //Create pdf texture
     if (mUsePdfSampling) {
         uint width, height, mip;
-        computePdfTextureSize(mNumMaxPhotons, width, height, mip);
+        computePdfTextureSize(mNumMaxPhotons.x, width, height, mip);
         if (!mpPhotonLightPdfTex || mpPhotonLightPdfTex->getWidth() != width || mpPhotonLightPdfTex->getHeight() != height || mpPhotonLightPdfTex->getMipCount() != mip) {
             mpPhotonLightPdfTex = Texture::create2D(width, height, ResourceFormat::R16Float, 1u, mip, nullptr,
                                                     ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
@@ -527,6 +604,13 @@ void PhotonReSTIR::prepareBuffers(RenderContext* pRenderContext, const RenderDat
 
 
         mpNeighborOffsetBuffer->setName("PhotonReStir::NeighborOffsetBuffer");
+    }
+
+    if (!mpCausticPhotonsFlux[0] || !mpCausticPhotonsFlux[1]) {
+        for (uint i = 0; i < 2; i++) {
+            mpCausticPhotonsFlux[i] = Texture::create2D(mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+            mpCausticPhotonsFlux[i]->setName("PhotonReStir::CausticPhotonTex" + std::to_string(i));
+        }
     }
 
     //Create view tex for previous frame
@@ -608,7 +692,8 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     pRenderContext->clearUAV(mpPhotonLights.get()->getUAV().get(), uint4(0));
 
     //Defines
-    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE", std::to_string(mNumMaxPhotons));
+    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
+    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mPhotonGeneratePass.pProgram->addDefine("USE_PDF_SAMPLING", mUsePdfSampling ? "1": "0");
 
     if (!mPhotonGeneratePass.pVars) {
@@ -636,6 +721,7 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     //PerFrame Constant Buffer
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
+    var[nameBuf]["gPhotonRadius"] = mCausticCollectRadius;
 
     //Upload constant buffer only if options changed
     if (mReuploadBuffers) {
@@ -644,12 +730,17 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
         var[nameBuf]["gRejection"] = mPhotonRejection;
         var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
+        var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
+        var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
+
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
     var["gPhotonLights"] = mpPhotonLights;
     var["gPhotonCounter"] = mpPhotonLightCounter;
+    var["gCausticPhotonAABB"] = mpCausticPhotonAABB;
+    var["gCausticPackedPhotonData"] = mpCausticPhotonData;
     if(mUsePdfSampling) var["gPhotonPdfTexture"] = mpPhotonLightPdfTex;
 
     // Get dimensions of ray dispatch.
@@ -661,7 +752,21 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
     pRenderContext->uavBarrier(mpPhotonLightCounter.get());
     pRenderContext->uavBarrier(mpPhotonLights.get());
+    pRenderContext->uavBarrier(mpCausticPhotonData.get());
+    pRenderContext->uavBarrier(mpCausticPhotonAABB.get());
     if (mUsePdfSampling) mpPhotonLightPdfTex->generateMips(pRenderContext);
+
+    //Build Acceleration Structure for caustics if enabled
+    //Create as if not valid
+    if (mEnableCausticPhotonCollection) {
+        if (!mPhotonAS.tlas.pTlas) {
+            mPhotonAS.update = false;
+            createAccelerationStructure(pRenderContext, mPhotonAS, 1, { mNumMaxPhotons[1] }, { mpCausticPhotonAABB->getGpuAddress() });
+        }
+        uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount.y) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons.y;
+        uint photonBuildSize = std::min(mNumMaxPhotons[1], currentPhotons);
+        buildAccelerationStructure(pRenderContext, mPhotonAS, { photonBuildSize });
+    } 
 }
 
 void PhotonReSTIR::presamplePhotonLightsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -703,6 +808,67 @@ void PhotonReSTIR::presamplePhotonLightsPass(RenderContext* pRenderContext, cons
     mpPresamplePhotonLightsPass->execute(pRenderContext, uint3(targetDim, 1));
 
     pRenderContext->uavBarrier(mpPresampledPhotonLights.get());
+}
+
+void PhotonReSTIR::collectCausticPhotons(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    //Return if pass is disabled
+    if (!mEnableCausticPhotonCollection) return;
+    FALCOR_PROFILE("CollectCausticPhotons");
+    pRenderContext->clearTexture(mpCausticPhotonsFlux[mFrameCount % 2].get());   //clear for now
+
+
+    if (!mCollectCausticPhotonsPass.pVars) {
+        FALCOR_ASSERT(mCollectCausticPhotonsPass.pProgram);
+
+        // Configure program.
+        mCollectCausticPhotonsPass.pProgram->addDefines(mpSampleGenerator->getDefines());
+        mCollectCausticPhotonsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        // Create program variables for the current program.
+        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+        mCollectCausticPhotonsPass.pVars = RtProgramVars::create(mCollectCausticPhotonsPass.pProgram, mCollectCausticPhotonsPass.pBindingTable);
+
+        // Bind utility classes into shared data.
+        auto var = mCollectCausticPhotonsPass.pVars->getRootVar();
+        mpSampleGenerator->setShaderData(var);
+    };
+    FALCOR_ASSERT(mCollectCausticPhotonsPass.pVars);
+
+    auto var = mCollectCausticPhotonsPass.pVars->getRootVar();
+
+    //Set Constant Buffers
+    std::string nameBuf = "PerFrame";
+    var[nameBuf]["gFrameCount"] = mFrameCount;
+    var[nameBuf]["gPhotonRadius"] = mCausticCollectRadius;
+    var[nameBuf]["gEnableTemporalFilter"] = mCausticUseTemporalFilter;
+    var[nameBuf]["gTemporalFilterHistoryLimit"] = mCausticTemporalFilterMaxHistory;
+
+    //Bind caustic photon data (index -> 1)
+    var["gPhotonAABB"] = mpCausticPhotonAABB;
+    var["gPackedPhotonData"] = mpCausticPhotonData;
+
+    //First diffuse hit data
+    var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
+    var["gView"] = renderData[kInViewDesc.name]->asTexture();
+    var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();
+
+    //Output flux
+    var["gCausticImage"] = mpCausticPhotonsFlux[mFrameCount % 2];
+    var["gCausticImagePrev"] = mpCausticPhotonsFlux[(mFrameCount + 1) % 2];
+
+    //Bind Acceleration structure
+    bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
+    FALCOR_ASSERT(tlasValid);
+
+    //Create dimensions based on the number of VPLs
+    uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    //Trace the photons
+    mpScene->raytrace(pRenderContext, mCollectCausticPhotonsPass.pProgram.get(), mCollectCausticPhotonsPass.pVars, uint3(targetDim, 1));
+
+    //Barrier for written buffer
+    pRenderContext->uavBarrier(mpCausticPhotonsFlux[mFrameCount % 2].get());
 }
 
 void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1013,10 +1179,13 @@ void PhotonReSTIR::finalShadingPass(RenderContext* pRenderContext, const RenderD
     bindAsTex(kInMVecDesc);
     bindAsTex(kInViewDesc); 
     for (auto& out : kOutputChannels) bindAsTex(out);
+    var["gCausticPhotons"] = mpCausticPhotonsFlux[mFrameCount % 2];
 
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
+    var[uniformName]["gEnableCaustics"] = mEnableCausticPhotonCollection;
+    
     if (mReset || mReuploadBuffers) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
@@ -1132,10 +1301,10 @@ void PhotonReSTIR::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
 void PhotonReSTIR::copyPhotonCounter(RenderContext* pRenderContext)
 {
     //Copy the photonConter to a CPU Buffer
-    pRenderContext->copyBufferRegion(mpPhotonLightCounterCPU.get(), 0, mpPhotonLightCounter.get(), 0, sizeof(uint32_t));
+    pRenderContext->copyBufferRegion(mpPhotonLightCounterCPU.get(), 0, mpPhotonLightCounter.get(), 0, sizeof(uint32_t) * 2);
 
     void* data = mpPhotonLightCounterCPU->map(Buffer::MapType::Read);
-    std::memcpy(&mCurrentPhotonLightsCount, data, sizeof(uint));
+    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint32_t) * 2);
     mpPhotonLightCounterCPU->unmap();
 }
 
@@ -1165,6 +1334,185 @@ void PhotonReSTIR::computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, 
     outWidth = uint32_t(textureWidth);
     outHeight = uint32_t(textureHeight);
     outMipLevels = uint32_t(textureMips);
+}
+
+void PhotonReSTIR::createAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel, const uint numberBlas, const std::vector<uint>& aabbCount, const std::vector<uint64_t>& aabbGpuAddress)
+{
+    //clear all previous data
+    for (uint i = 0; i < accel.blas.size(); i++)
+        accel.blas[i].reset();
+    accel.blas.clear();
+    accel.blasData.clear();
+    accel.instanceDesc.clear();
+    accel.tlasScratch.reset();
+    accel.tlas.pInstanceDescs.reset();  accel.tlas.pSrv = nullptr;  accel.tlas.pTlas.reset();
+
+    accel.numberBlas = numberBlas;
+
+    createBottomLevelAS(pRenderContext, accel, aabbCount, aabbGpuAddress);
+    createTopLevelAS(pRenderContext, accel);
+}
+
+void PhotonReSTIR::createTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel)
+{
+    accel.instanceDesc.clear(); //clear to be sure that it is empty
+
+    //fill the instance description if empty
+    for (int i = 0; i < accel.numberBlas; i++) {
+        D3D12_RAYTRACING_INSTANCE_DESC desc = {};
+        desc.AccelerationStructure = accel.blas[i]->getGpuAddress();
+        desc.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        desc.InstanceID = i;
+        desc.InstanceMask = accel.numberBlas < 8 ? 1 << i : 0xFF;  //For up to 8 they are instanced seperatly
+        desc.InstanceContributionToHitGroupIndex = 0;
+
+        //Create a identity matrix for the transform and copy it to the instance desc
+        glm::mat4 transform4x4 = glm::identity<glm::mat4>();
+        std::memcpy(desc.Transform, &transform4x4, sizeof(desc.Transform));
+        accel.instanceDesc.push_back(desc);
+    }
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+    inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    inputs.NumDescs = (uint32_t)accel.numberBlas;
+    inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+
+    //Prebuild
+    FALCOR_GET_COM_INTERFACE(gpDevice->getApiHandle(), ID3D12Device5, pDevice5);
+    pDevice5->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &accel.tlasPrebuildInfo);
+    accel.tlasScratch = Buffer::create(accel.tlasPrebuildInfo.ScratchDataSizeInBytes, Buffer::BindFlags::UnorderedAccess, Buffer::CpuAccess::None);
+    accel.tlasScratch->setName("PhotonReStir::TLAS_Scratch");
+
+    //Create buffers for the TLAS
+    accel.tlas.pTlas = Buffer::create(accel.tlasPrebuildInfo.ResultDataMaxSizeInBytes, Buffer::BindFlags::AccelerationStructure, Buffer::CpuAccess::None);
+    accel.tlas.pTlas->setName("PhotonReStir::TLAS");
+    accel.tlas.pInstanceDescs = Buffer::create((uint32_t)accel.numberBlas * sizeof(D3D12_RAYTRACING_INSTANCE_DESC), Buffer::BindFlags::None, Buffer::CpuAccess::Write, accel.instanceDesc.data());
+    accel.tlas.pInstanceDescs->setName("PhotonReStir::TLAS_Instance_Description");
+
+    //Acceleration Structure Buffer view for access in shader
+    accel.tlas.pSrv = ShaderResourceView::createViewForAccelerationStructure(accel.tlas.pTlas);
+}
+
+void PhotonReSTIR::createBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel, const std::vector<uint> aabbCount, const std::vector<uint64_t> aabbGpuAddress)
+{
+    //Create Number of desired blas and reset max size
+    accel.blasData.resize(accel.numberBlas);
+    accel.blas.resize(accel.numberBlas);
+    accel.blasScratchMaxSize = 0;
+
+    FALCOR_ASSERT(aabbCount.size() >= accel.numberBlas);
+    FALCOR_ASSERT(aabbGpuAddress.size() >= accel.numberBlas);
+
+    //Prebuild
+    for (size_t i = 0; i < accel.numberBlas; i++) {
+        auto& blas = accel.blasData[i];
+
+        //Create geometry description
+        D3D12_RAYTRACING_GEOMETRY_DESC& desc = blas.geomDescs;
+        desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+        desc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_NO_DUPLICATE_ANYHIT_INVOCATION;         //< Important! So that photons are not collected multiple times
+        desc.AABBs.AABBCount = aabbCount[i];
+        desc.AABBs.AABBs.StartAddress = aabbGpuAddress[i];
+        desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+
+        //Create input for blas
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS& inputs = blas.buildInputs;
+        inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+        inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+        inputs.NumDescs = 1;
+        inputs.pGeometryDescs = &blas.geomDescs;
+
+        //Build option flags
+        inputs.Flags = accel.fastBuild ? D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        if (accel.update) inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        //get prebuild Info
+        FALCOR_GET_COM_INTERFACE(gpDevice->getApiHandle(), ID3D12Device5, pDevice5);
+        pDevice5->GetRaytracingAccelerationStructurePrebuildInfo(&blas.buildInputs, &blas.prebuildInfo);
+
+        // Figure out the padded allocation sizes to have proper alignment.
+        FALCOR_ASSERT(blas.prebuildInfo.ResultDataMaxSizeInBytes > 0);
+        blas.blasByteSize = align_to((uint64_t)D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT, blas.prebuildInfo.ResultDataMaxSizeInBytes);
+
+        uint64_t scratchByteSize = std::max(blas.prebuildInfo.ScratchDataSizeInBytes, blas.prebuildInfo.UpdateScratchDataSizeInBytes);
+        blas.scratchByteSize = align_to((uint64_t)D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT, scratchByteSize);
+
+        accel.blasScratchMaxSize = std::max(blas.scratchByteSize, accel.blasScratchMaxSize);
+    }
+
+    //Create the scratch and blas buffers
+    accel.blasScratch = Buffer::create(accel.blasScratchMaxSize, Buffer::BindFlags::UnorderedAccess);
+    accel.blasScratch->setName("PhotonReStir::BlasScratch");
+
+    for (uint i = 0; i < accel.numberBlas; i++) {
+        accel.blas[i] = Buffer::create(accel.blasData[i].blasByteSize, Buffer::BindFlags::AccelerationStructure);
+        accel.blas[i]->setName("PhotonReStir::BlasBuffer" + std::to_string(i));
+    }
+}
+
+void PhotonReSTIR::buildAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel, const std::vector<uint>& aabbCount)
+{
+    //TODO check per assert if buffers are set
+    buildBottomLevelAS(pRenderContext, accel, aabbCount);
+    buildTopLevelAS(pRenderContext, accel);
+}
+
+void PhotonReSTIR::buildTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel)
+{
+    FALCOR_PROFILE("buildPhotonTlas");
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+    inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+    inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+    inputs.NumDescs = (uint32_t)accel.instanceDesc.size();
+    //Update Flag could be set for TLAS. This made no real time difference in our test so it is left out. Updating could reduce the memory of the TLAS scratch buffer a bit
+    inputs.Flags = accel.fastBuild ? D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+    if (accel.update) inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
+    asDesc.Inputs = inputs;
+    asDesc.Inputs.InstanceDescs = accel.tlas.pInstanceDescs->getGpuAddress();
+    asDesc.ScratchAccelerationStructureData = accel.tlasScratch->getGpuAddress();
+    asDesc.DestAccelerationStructureData = accel.tlas.pTlas->getGpuAddress();
+
+    // Create TLAS
+    FALCOR_GET_COM_INTERFACE(pContext->getLowLevelData()->getCommandList(), ID3D12GraphicsCommandList4, pList4);
+    pContext->resourceBarrier(accel.tlas.pInstanceDescs.get(), Resource::State::NonPixelShader);
+    pList4->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
+    pContext->uavBarrier(accel.tlas.pTlas.get());                   //barrier for the tlas so it can be used savely after creation
+}
+
+void PhotonReSTIR::buildBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel, const std::vector<uint>& aabbCount)
+{
+
+    FALCOR_PROFILE("buildPhotonBlas");
+    if (!gpDevice->isFeatureSupported(Device::SupportedFeatures::Raytracing))
+    {
+        throw std::exception("Raytracing is not supported by the current device");
+    }
+
+    for (size_t i = 0; i < accel.numberBlas; i++) {
+        auto& blas = accel.blasData[i];
+
+        //barriers for the scratch and blas buffer
+        pContext->uavBarrier(accel.blasScratch.get());
+        pContext->uavBarrier(accel.blas[i].get());
+
+        blas.geomDescs.AABBs.AABBCount = static_cast<UINT64>(aabbCount[i]);
+
+        //Fill the build desc struct
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
+        asDesc.Inputs = blas.buildInputs;
+        asDesc.ScratchAccelerationStructureData = accel.blasScratch->getGpuAddress();
+        asDesc.DestAccelerationStructureData = accel.blas[i]->getGpuAddress();
+
+        //Build the acceleration structure
+        FALCOR_GET_COM_INTERFACE(pContext->getLowLevelData()->getCommandList(), ID3D12GraphicsCommandList4, pList4);
+        pList4->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
+
+        //Barrier for the blas
+        pContext->uavBarrier(accel.blas[i].get());
+    }
 }
 
 bool PhotonReSTIR::onMouseEvent(const MouseEvent& mouseEvent)

@@ -72,6 +72,37 @@ public:
         RayTraced = 2u
     };
 private:
+    //Acceleration Structure helpers Structs
+    struct BLASData {
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuildInfo;
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS buildInputs;
+        D3D12_RAYTRACING_GEOMETRY_DESC geomDescs;
+
+        uint64_t blasByteSize = 0;                    ///< Maximum result data size for the BLAS build, including padding.
+        uint64_t scratchByteSize = 0;                   ///< Maximum scratch data size for the BLAS build, including padding.
+    };
+
+    struct TLASData {
+        Buffer::SharedPtr pTlas;
+        ShaderResourceView::SharedPtr pSrv;             ///< Shader Resource View for binding the TLAS.
+        Buffer::SharedPtr pInstanceDescs;               ///< Buffer holding instance descs for the TLAS.
+    };
+
+    //Holds all needed data for an Acceleration Structure
+    struct SphereAccelerationStructure {
+        size_t numberBlas = 1;
+        bool fastBuild = false;
+        bool update = false;
+        size_t blasScratchMaxSize;
+        std::vector<BLASData> blasData;
+        std::vector<Buffer::SharedPtr> blas;
+        std::vector<D3D12_RAYTRACING_INSTANCE_DESC> instanceDesc;
+        Buffer::SharedPtr blasScratch;
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlasPrebuildInfo;
+        Buffer::SharedPtr tlasScratch;
+        TLASData tlas;
+    };
+
     PhotonReSTIR() : RenderPass(kInfo) {}
 
     /** Resets the pass
@@ -100,6 +131,10 @@ private:
     /** Generate Photon lights
     */
     void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    /** Collect the caustic photons
+    */
+    void collectCausticPhotons(RenderContext* pRenderContext, const RenderData& renderData);
 
     /** Generates the canidates for the pass and stores them inside the reservoir
     */
@@ -141,6 +176,33 @@ private:
     */
     void computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels);
 
+    /*  * Creates the acceleration structure.
+       * Has to be called at least once to create the AS. buildAccelerationStructure(...) needs to be called after that to build/update the AS
+       * Calling it with an existing AS rebuilds it
+   */
+    void createAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel, const uint numberBlas, const std::vector<uint>& aabbCount, const std::vector<uint64_t>& aabbGpuAddress);
+
+    /** Creates the TLAS
+    */
+    void createTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel);
+
+    /** Creates the BLAS
+    */
+    void createBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel, const std::vector<uint> aabbCount, const std::vector<uint64_t> aabbGpuAddress);
+
+    /* * Builds the acceleration structure. Is needed every time one of the aabb buffers changes
+    */
+    void buildAccelerationStructure(RenderContext* pRenderContext, SphereAccelerationStructure& accel, const std::vector<uint>& aabbCount);
+
+    /** Build or Update the TLAS
+    */
+    void buildTopLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel);
+
+    /** Build the BLAS
+    */
+    void buildBottomLevelAS(RenderContext* pContext, SphereAccelerationStructure& accel, const std::vector<uint>& aabbCount);
+
+
     //Constants
     const uint kNumNeighborOffsets = 8192;  //Size of neighbor offset buffer
 
@@ -165,18 +227,27 @@ private:
     bool mUseDiffuseShadingOnly = false;    //Use only diffuse shading for ReSTIR. Can be used if VBuffer is traced until diffuse hit
     //Photon
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
-    uint mNumMaxPhotons = 400000;               //Max number of photon lights per iteration
-    uint mNumMaxPhotonsUI = mNumMaxPhotons;
-    uint mCurrentPhotonLightsCount = 0;             //Gets data from GPU buffer
+    uint2 mNumMaxPhotons = uint2(400000,100000); //Max number of photon lights per iteration
+    uint2 mNumMaxPhotonsUI = mNumMaxPhotons;
+    uint2 mCurrentPhotonCount = uint2(1000000, 1000000);             //Gets data from GPU buffer
     uint mNumDispatchedPhotons = 524288;        //Number of dispatched photons 
     uint mPhotonYExtent = 512;
     uint mPhotonMaxBounces = 10;             //Number of bounces  TODOSplit this up in transmissive specular and diffuse
     float mPhotonRejection = 0.3f;          //Rejection probability
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
-
     bool mUsePdfSampling = false;
-
+    //Caustics settings
+    float mASBuildBufferPhotonOverestimate = 1.15f;
+    bool mCausticUseTemporalFilter = true;
+    uint mCausticTemporalFilterMaxHistory = 60;
+    float mCausticCollectionRadiusStart = 0.005f;                   //Caustic Photon Collect radius
+    float mCausticCollectRadius = mCausticCollectionRadiusStart;     //Radius for collection
+    bool mEnableCausticPhotonCollection = true;
+    int mMaxCausticBounces = 0;
+    bool mUseStatisticProgressivePM = true;
+    float mPPM_Alpha = 0.66f;
+    uint mFramesCameraStill = 0;
 
     //Runtime
     bool mReset = true;
@@ -217,6 +288,8 @@ private:
     Buffer::SharedPtr mpSurfaceBuffer[2];       //Buffer for surface data
     Texture::SharedPtr mpNeighborOffsetBuffer;   //Constant buffer with neighbor offsets
     Buffer::SharedPtr mpPhotonLights;           //Buffer containing the photon light sources
+    Buffer::SharedPtr mpCausticPhotonData;      //Caustic photon data
+    Buffer::SharedPtr mpCausticPhotonAABB;      //AABB for the acceleration structure
     Texture::SharedPtr mpPhotonLightPdfTex;    //1 Channel luminance texture for power presampling
     Buffer::SharedPtr mpPresampledPhotonLights; //Presampled Photon lights
     Buffer::SharedPtr mpPhotonLightCounter;     //Counter for the number of lights
@@ -225,9 +298,12 @@ private:
     Texture::SharedPtr mpPhotonReservoirNormal[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPhotonReservoirFlux[2];    //Encoded Photon reservoir. One reservoir is two textures
     Texture::SharedPtr mpPrevViewTex;               //If view buffer is set, this texture is used for view of the frame before
+    Texture::SharedPtr mpCausticPhotonsFlux[2];    //Flux onsurfaces for caustic photons
+
     Texture::SharedPtr mpDebugColorCopy;            //Copy of the color buffer
     Buffer::SharedPtr mpDebugInfoBuffer;            //ContainsDebugInfo
     Texture::SharedPtr mpDebugVBuffer;            //Copy of the V-Buffer used for the iteration
+    
 
     //
     //Ray tracing programms and helper
@@ -248,5 +324,8 @@ private:
         }
     };
 
-    RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass 
+    RayTraceProgramHelper mPhotonGeneratePass;          ///<Description for the Generate Photon pass
+    RayTraceProgramHelper mCollectCausticPhotonsPass;   ///< Collect the caustic photons directly
+
+    SphereAccelerationStructure mPhotonAS;
 };

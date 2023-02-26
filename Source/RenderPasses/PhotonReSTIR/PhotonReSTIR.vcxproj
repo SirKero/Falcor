@@ -36,6 +36,7 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ShaderSource Include="collectCausticPhotons.rt.slang" />
     <ShaderSource Include="debugPass.cs.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />
     <ShaderSource Include="finalShading.cs.slang" />

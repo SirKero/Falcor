@@ -21,6 +21,8 @@ Texture2D<float4> gPhotonReservoirPos;
 Texture2D<float4> gPhotonReservoirNormal;
 Texture2D<float4> gPhotonReservoirFlux;
 
+Texture2D<float4> gCausticPhotons;
+
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
 Texture2D <float4> gView;
@@ -35,6 +37,7 @@ RWTexture2D<float4> gSpecularReflectance;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
+    bool gEnableCaustics;               //Enable caustics
 }
 
 cbuffer Constant
@@ -164,8 +167,11 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif
     }
     
-    float3 outColor = diffuse + specular;
-    //float3 outColor = Li;
+    float3 colorCaustics = float3(0);
+    if (gEnableCaustics)
+        colorCaustics = gCausticPhotons[dTid].xyz;
+    
+    float3 outColor = diffuse + specular + colorCaustics;
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;

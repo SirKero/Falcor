@@ -18,7 +18,8 @@ import PhotonLight;
 cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
-    uint3 _pad1;
+    float gPhotonRadius;    //CausticRadius for the AABB
+    uint2 _pad1;
 }
 
 cbuffer CB
@@ -27,6 +28,9 @@ cbuffer CB
     float gRejection; //Probability that a photon is stored as a light
     bool gUseAlphaTest;
     bool gAdjustShadingNormals;
+    bool gEnableCaustics; //Enable caustic photons
+    int gCausticsBounces; //Number of diffuse bounces allowed for caustic photons
+    uint2 _pad2;
 };
 
 cbuffer Light{
@@ -35,10 +39,12 @@ cbuffer Light{
 
 
 RWStructuredBuffer<PhotonLight> gPhotonLights;
+RWStructuredBuffer<AABB> gCausticPhotonAABB;
+RWStructuredBuffer<uint4> gCausticPackedPhotonData;
 RWBuffer<uint> gPhotonCounter;
 RWTexture2D<float> gPhotonPdfTexture;
 
-static const uint kPhotonLightBufferSize = PHOTON_BUFFER_SIZE;
+static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const bool kUsePdfSampling = USE_PDF_SAMPLING;
 static const uint kRayFlagTerminatedMiss = 1;
 static const uint kRayFlagTerminatedHit = 2;
@@ -174,7 +180,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     float3 rayOrigin = sd.computeNewRayOrigin(!transmission); //false is for transmissions
     rayData.origin = rayOrigin;
     rayData.thp *= valid ? bsdfSample.weight : float3(0);
-    rayData.packedNormal = encodeNormal2x16(sd.faceN);
+    rayData.packedNormal = encodeNormal2x16(sd.N);
     rayData.normal = sd.N;
     rayData.direction = bsdfSample.wo;
     rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
@@ -258,7 +264,9 @@ void rayGen()
     
     uint rayFlags = 0;
 
-    bool wasReflectedSpecular = false;
+    const uint maxCausticBounces = gCausticsBounces >= 0 ? gCausticsBounces : gMaxRecursion;
+    uint currentCausticBounces = 0;
+    bool storeAsCaustic = false;
     bool reflectedDiffuse = false;
         
     //recursion where the photons are shot
@@ -280,22 +288,40 @@ void rayGen()
         bool roulette = rndRoulette <= gRejection;
             
         //store photon light
-        if ((reflectedDiffuse && roulette) && !wasReflectedSpecular)
-        { 
+        if (reflectedDiffuse && (roulette || storeAsCaustic))
+        {
+            uint photonType = storeAsCaustic ? 1 : 0; //Global = 0 or caustic = 1
             uint photonIndex = 0;
-            photon.flux *= rayData.diffuseScalar * invRejection;
-            InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
-            photonIndex = min(photonIndex, kPhotonLightBufferSize); //TODO set as uniform
-
-            PhotonLight pl = {};
-            pl.posW = float4(photonPos,1);
-            pl.normal = rayData.normal;
-            pl.flux = photon.flux;
-            pl.valid = 1;
+            if (photonType == 0) //Photon Light (Global)
+                photon.flux *= rayData.diffuseScalar * invRejection;
+            InterlockedAdd(gPhotonCounter[photonType], 1u, photonIndex);
+            //Only store photon if the buffer space allows it
+            if (photonIndex <= kPhotonBufferSize[photonType])
+            {
+                if (photonType == 1)    //Caustic
+                {
+                    AABB photonAABB = AABB(photonPos - gPhotonRadius, photonPos + gPhotonRadius);
+                    gCausticPhotonAABB[photonIndex] = photonAABB;
+                    PhotonData pd = PhotonData();
+                    pd.flux = photon.flux;
+                    pd.dir = -photon.dir;
+                    pd.packedNormal = rayData.packedNormal;
+                
+                    gCausticPackedPhotonData[photonIndex] = pd.pack();
+                }
+                else    //Global
+                {
+                    PhotonLight pl = { };
+                    pl.posW = float4(photonPos, 1);
+                    pl.normal = rayData.normal;
+                    pl.flux = photon.flux;
+                    pl.valid = 1;
             
-            gPhotonLights[photonIndex] = pl;
-            if(kUsePdfSampling) gPhotonPdfTexture[ReSTIR_LinearIndexToZCurve(photonIndex)] = luminance(photon.flux);
-            //break;  //Stop here to not sample points multiple times
+                    gPhotonLights[photonIndex] = pl;
+                    if (kUsePdfSampling)
+                        gPhotonPdfTexture[ReSTIR_LinearIndexToZCurve(photonIndex)] = luminance(photon.flux);
+                }
+            }
         }
 
         //If the ray is terminated
@@ -317,7 +343,15 @@ void rayGen()
             rayData.thp /= (1.f - prob);
         }
         
-        wasReflectedSpecular = !reflectedDiffuse;
+        //Caustics handling
+        if (gEnableCaustics)
+        {
+            storeAsCaustic = !reflectedDiffuse;
+            if (currentCausticBounces > maxCausticBounces)
+                storeAsCaustic = false;
+            if (reflectedDiffuse)
+                currentCausticBounces++;
+        }
                 
         //update ray for next iteration
         ray.Origin = rayData.origin;

@@ -46,6 +46,9 @@
     <ShaderSource Include="debugPass.cs.slang">
       <Filter>Shader</Filter>
     </ShaderSource>
+    <ShaderSource Include="collectCausticPhotons.rt.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shader">
