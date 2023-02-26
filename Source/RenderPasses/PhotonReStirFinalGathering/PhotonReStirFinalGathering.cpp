@@ -249,8 +249,8 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         widget.text("Photons: " + std::to_string(mCurrentPhotonCount[0]) + " / " + std::to_string(mNumMaxPhotons[0]));
         widget.text("Caustic photons: " + std::to_string(mCurrentPhotonCount[1]) + " / " + std::to_string(mNumMaxPhotons[1]));
         widget.var("Photon Buffer Size", mNumMaxPhotonsUI, 100u, 100000000u, 100);
-        mChangePhotonLightBufferSize = widget.button("Apply", true);
         widget.tooltip("First -> Global, Second -> Caustic");
+        mChangePhotonLightBufferSize = widget.button("Apply", true);
         if (mChangePhotonLightBufferSize) mNumMaxPhotons = mNumMaxPhotonsUI;
 
         changed |= widget.var("Light Store Probability", mPhotonRejection, 0.f, 1.f, 0.0001f);
@@ -1421,47 +1421,6 @@ void PhotonReSTIRFinalGathering::bindPhotonLight(ShaderVar& var, uint index, boo
     if (bindPrev) {
         var["gPhotonLightPrev"] = mpPhotonLightBuffer[(index + 1) % 2];
     }
-    /*
-    switch (pass)
-    {
-    case CurrentPass::GenerateAdditional:
-        var["gVpls"] = mpPhotonLightBuffer[index % 2];
-        var["gVplsWrite"] = mpPhotonLightBuffer[2];
-        break;
-    case CurrentPass::Resampling:
-        //Bind input vpls for resampling depending if we generated additional candidates
-        if (mInitialCandidates > 0) {
-            var["gVpls"] = mpPhotonLightBuffer[2];
-        }
-        else {
-            var["gVpls"] = mpPhotonLightBuffer[index % 2];
-        }
-        var["gVplsWrite"] = mpPhotonLightBuffer[index % 2];
-        var["gVplPrev"] = mpPhotonLightBuffer[(index + 1) % 2];
-        break;
-    case CurrentPass::SpartialResampling:
-        //Bind input vpls for resampling depending if we generated additional candidates
-        if (mInitialCandidates > 0) {
-            var["gVpls"] = mpPhotonLightBuffer[2];
-        }
-        else {
-            var["gVpls"] = mpPhotonLightBuffer[index % 2];
-        }
-        var["gVplsWrite"] = mpPhotonLightBuffer[(index + 1) % 2];
-        break;
-    case CurrentPass::FinalShading:
-        var["gVpls"] = mpPhotonLightBuffer[index % 2];
-        break;
-    case CurrentPass::FinalShadingNoResampling:
-        if (mInitialCandidates > 0) {
-            var["gVpls"] = mpPhotonLightBuffer[2];
-        }
-        else {
-            var["gVpls"] = mpPhotonLightBuffer[index % 2];
-        }
-        break;
-    }
-    */
 }
 
 void PhotonReSTIRFinalGathering::computePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels)
