@@ -55,8 +55,8 @@ public:
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene);
-    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
-    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
+    virtual bool onMouseEvent(const MouseEvent& mouseEvent) override;
+    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
     //Structs and enum
     enum ResamplingMode {
@@ -175,6 +175,10 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Pass for debuging pixel values
+    */
+    void debugPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     /* Fills the neighbor offset buffer with psyeudo random numbers
     */
     void fillNeighborOffsetBuffer(std::vector<int8_t>& buffer);
@@ -278,7 +282,6 @@ private:
     uint mCullingHashBufferSizeBits = 22;   //Determines the size of the buffer 2^x.
     bool mPhotonCullingRebuildBuffer = true;   //Rebuilds buffer if size was changed
   
-
     //Runtime
     bool mReset = true;
     bool mReuploadBuffers = true;
@@ -286,6 +289,16 @@ private:
     uint2 mScreenRes = { 0,0 };
     bool mUpdateRenderSettings = true;
     uint mFrameCount = 0;
+
+    //Debug
+    bool mPausePhotonReStir = false;       //Stops rendering
+    bool mEnableDebug = false;
+    bool mCopyLastColorImage = false;
+    bool mCopyPixelData = false;
+    float mDebugDistanceFalloff = 10.f;
+    float mDebugPointRadius = 0.05f;
+    uint2 mDebugCurrentClickedPixel = uint2(0, 0);
+    std::vector<uint4> mDebugData;
 
     //Falcor Vars
     Scene::SharedPtr mpScene;       //Pointer for scene
@@ -298,6 +311,7 @@ private:
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
     ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
+    ComputePass::SharedPtr mpDebugPass;                     //For debuging
 
     //Buffer
     Buffer::SharedPtr mpPhotonLightBuffer[2];
@@ -315,6 +329,10 @@ private:
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
     Texture::SharedPtr mpCausticPhotonsFlux[2];    //Flux onsurfaces for caustic photons
+
+    Texture::SharedPtr mpDebugColorCopy;            //Copy of the color buffer
+    Buffer::SharedPtr mpDebugInfoBuffer;            //ContainsDebugInfo
+    Texture::SharedPtr mpDebugVBuffer;            //Copy of the V-Buffer used for the iteration
 
     //
     //Ray tracing programms and helper

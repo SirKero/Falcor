@@ -56,7 +56,7 @@ public:
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene);
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override;
-    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
+    virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override;
 
     //Structs and enum
     enum ResamplingMode {
@@ -156,7 +156,7 @@ private:
     */
     void finalShadingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    /** Pass for debuging uses
+    /** Pass to debug pixel values
     */
     void debugPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -262,9 +262,8 @@ private:
     bool mEnableDebug = false;
     bool mCopyLastColorImage = false;
     bool mCopyPixelData = false;
-    float mDebugDistanceFalloff = 100.f;
-    
-    float mDebugPointRadius = 0.2f;
+    float mDebugDistanceFalloff = 10.f;
+    float mDebugPointRadius = 0.05f;
     uint2 mDebugCurrentClickedPixel = uint2(0, 0);
     std::vector<uint4> mDebugData;
 
@@ -281,7 +280,7 @@ private:
     ComputePass::SharedPtr mpSpartialResampling;            //Spartial Resampling Pass
     ComputePass::SharedPtr mpSpartioTemporalResampling;     //Spartio Temporal Resampling Pass
     ComputePass::SharedPtr mpFinalShading;                  //Final Shading Pass
-    ComputePass::SharedPtr mpDebugPass;                     //FOr debuging
+    ComputePass::SharedPtr mpDebugPass;                     //For debuging
 
     //Buffer
     Texture::SharedPtr mpReservoirBuffer[2];    //Buffers for the reservoir

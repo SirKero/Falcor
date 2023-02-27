@@ -62,6 +62,7 @@ private:
     float mScaleReStir = 1.f;
     float mScaleReStirVpl = 1.f;
     float mScaleThroughput = 1.f;
+    bool mIgnoreThroughput = false;
 
     ComputePass::SharedPtr mpCompositeReStirVplPass;
 };

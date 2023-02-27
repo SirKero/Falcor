@@ -52,6 +52,9 @@
     <ShaderSource Include="collectCausticPhotons.rt.slang">
       <Filter>Shader\Photon</Filter>
     </ShaderSource>
+    <ShaderSource Include="debugPass.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Shader">

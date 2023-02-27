@@ -7,7 +7,7 @@ cbuffer CB
     float scaleReStir;
     float scaleReStirVpl;
     float scaleThroughput;
-    uint _pad;
+    bool ignoreThroughput;  //Ignores the throughput
 };
 
 //Inputs
@@ -27,6 +27,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float3 reStir = scaleReStir * gInReStir[dTid].xyz;
     float3 reStirVpl = scaleReStirVpl * gInReStirVpl[dTid].xyz;
     float3 thp = scaleThroughput * gInThroughput[dTid].xyz;
-    gOutput[dTid] = float4((reStir + reStirVpl) * thp,1.f);
+    if (ignoreThroughput)
+        thp = float3(1.f);
     
+    gOutput[dTid] = float4((reStir + reStirVpl) * thp, 1.f);   
 }

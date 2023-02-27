@@ -38,6 +38,7 @@
   <ItemGroup>
     <ShaderSource Include="collectCausticPhotons.rt.slang" />
     <ShaderSource Include="collectFinalGatherPhotons.rt.slang" />
+    <ShaderSource Include="debugPass.cs.slang" />
     <ShaderSource Include="generateAdditionalCandidates.cs.slang" />
     <ShaderSource Include="%28unused%29generateFinalGatheringCandidates.rt.slang" />
     <ShaderSource Include="fillSurfaceInfo.cs.slang" />

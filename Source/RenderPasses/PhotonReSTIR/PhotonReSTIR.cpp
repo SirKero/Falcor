@@ -119,7 +119,6 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
         return;
 
     if (mPausePhotonReStir) {
-
         debugPass(pRenderContext, renderData);
         //Stop Debuging
         if (!mEnableDebug)
@@ -378,7 +377,7 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
                 widget.text("Prev Photon Flux: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
             }
         }
-   }
+    }
 
     mReset |= widget.button("Recompile");
     mReuploadBuffers |= changed;
@@ -1522,6 +1521,16 @@ bool PhotonReSTIR::onMouseEvent(const MouseEvent& mouseEvent)
         {
             mDebugCurrentClickedPixel = uint2(mouseEvent.pos * float2(mScreenRes));
             mCopyPixelData = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PhotonReSTIR::onKeyEvent(const KeyboardEvent& keyEvent) {
+    if (mEnableDebug) {
+        if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::O) {
+            mCopyLastColorImage = !mCopyLastColorImage;     //Flip
             return true;
         }
     }

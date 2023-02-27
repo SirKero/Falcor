@@ -53,6 +53,8 @@ namespace {
     const char kShaderSpartioTemporalPass[] = "RenderPasses/PhotonReSTIRFinalGathering/spartioTemporalResampling.cs.slang";
     const char kShaderFinalShading[] = "RenderPasses/PhotonReSTIRFinalGathering/finalShading.cs.slang";
     const char kShaderCollectCausticPhotons[] = "RenderPasses/PhotonReSTIRFinalGathering/collectCausticPhotons.rt.slang";
+    const char kShaderDebugPass[] = "RenderPasses/PhotonReSTIRFinalGathering/debugPass.cs.slang";
+
     // Ray tracing settings that affect the traversal stack size.
     const uint32_t kMaxPayloadSizeBytesVPL = 48u;
     const uint32_t kMaxPayloadSizeBytesCollect = 80u;
@@ -132,6 +134,16 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
     if (mReset)
         resetPass();
 
+    if (mPausePhotonReStir) {
+        debugPass(pRenderContext, renderData);
+        //Stop Debuging
+        if (!mEnableDebug)
+            mPausePhotonReStir = false;
+
+        //Skip the rest
+        return;
+    }
+
     mpScene->getLightCollection(pRenderContext);
 
     //currently we only support emissive lights
@@ -193,6 +205,14 @@ void PhotonReSTIRFinalGathering::execute(RenderContext* pRenderContext, const Re
     //Copy view buffer if it is used
     if (renderData[kInViewDesc.name] != nullptr) {
         pRenderContext->copyResource(mpPrevViewTex.get(), renderData[kInViewDesc.name]->asTexture().get());
+    }
+
+    if (mEnableDebug) {
+        mPausePhotonReStir = true;
+        if (renderData[kOutputChannels[0].name] != nullptr)
+            pRenderContext->copyResource(mpDebugColorCopy.get(), renderData[kOutputChannels[0].name]->asTexture().get());
+        if (renderData[kInVBufferDesc.name] != nullptr)
+            pRenderContext->copyResource(mpDebugVBuffer.get(), renderData[kInVBufferDesc.name]->asTexture().get());
     }
 
     //Reduce radius if desired with formula by Knaus & Zwicker (2011)
@@ -353,7 +373,39 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         mReset |= widget.checkbox("Use reduced Reservoir format", mUseReducedReservoirFormat);
         widget.tooltip("If enabled uses RG32_UINT instead of RGBA32_UINT. In reduced format the targetPDF and M only have 16 bits while the weight still has full precision");
     }
-   
+
+    if (auto group = widget.group("Debug")) {
+        widget.checkbox("Pause rendering", mEnableDebug);
+        widget.tooltip("Pauses rendering. Freezes all resources for debug purposes.");
+        if (mEnableDebug) {
+            widget.checkbox("Show PhotonReStir Image", mCopyLastColorImage);
+            widget.var("Debug Point Rad", mDebugPointRadius, 0.001f, 100000.f, 0.001f);
+            widget.var("ShadingDistanceFalloff", mDebugDistanceFalloff, 0.f, 1000000.f, 1.f);
+            widget.text("Press Right Click to select a Pixel");
+            widget.text("SelectedPixel: (" + std::to_string(mDebugCurrentClickedPixel.x) + "," + std::to_string(mDebugCurrentClickedPixel.y) + ")");
+
+            if (!mDebugData.empty()) {
+                auto cast_to_float = [](uint3 val) {
+                    return float3(reinterpret_cast<float&>(val.x), reinterpret_cast<float&>(val.y), reinterpret_cast<float&>(val.z));
+                };
+
+                widget.text("Current Reservoir: (M:" + std::to_string(mDebugData[0].x) + ", W:" + std::to_string(reinterpret_cast<float&>(mDebugData[0].y)) + ",tPDF:" + std::to_string(reinterpret_cast<float&>(mDebugData[0].z)) + ")");
+                float3 data = cast_to_float(uint3(mDebugData[1].xyz));
+                widget.text("Current Photon Position: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[2].xyz));
+                widget.text("Current Photon Normal: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[3].xyz));
+                widget.text("Current Photon Flux: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                widget.text("Prev Reservoir: (M:" + std::to_string(mDebugData[4].x) + ", W:" + std::to_string(reinterpret_cast<float&>(mDebugData[4].y)) + ",tPDF:" + std::to_string(reinterpret_cast<float&>(mDebugData[4].z)) + ")");
+                data = cast_to_float(uint3(mDebugData[5].xyz));
+                widget.text("Prev Photon Position: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[6].xyz));
+                widget.text("Prev Photon Normal: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+                data = cast_to_float(uint3(mDebugData[7].xyz));
+                widget.text("Prev Photon Flux: (" + std::to_string(data.x) + "," + std::to_string(data.y) + "," + std::to_string(data.z) + ")");
+            }
+        }
+    }
 
     mReset |= widget.button("Recompile");
     mReuploadBuffers |= changed;
@@ -472,6 +524,7 @@ void PhotonReSTIRFinalGathering::resetPass(bool resetScene)
     mpSpartioTemporalResampling.reset();
     mpFinalShading.reset();
     mpGenerateAdditionalCandidates.reset();
+    mpDebugPass.reset();
 
     if (resetScene) {
         mpEmissiveLightSampler.reset();
@@ -677,6 +730,17 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
             mpPhotonLightBoostBuffer.reset();
         }
     }
+
+    if (mEnableDebug) {
+        mpDebugColorCopy = Texture::create2D(mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget);
+        mpDebugColorCopy->setName("PhotonReStir::DebugColorCopy");
+        mpDebugVBuffer = Texture::create2D(mScreenRes.x, mScreenRes.y, HitInfo::kDefaultFormat, 1, 1, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget);
+        mpDebugVBuffer->setName("PhotonReStir::DebugVBufferCopy");
+        mpDebugInfoBuffer = Buffer::create(sizeof(uint32_t) * 32, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpDebugInfoBuffer->setName("PhotonReStir::Debug");
+        mDebugData.resize(8);
+    }
+
 }
 
 void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1344,6 +1408,80 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
     mpFinalShading->execute(pRenderContext, uint3(targetDim, 1));
 }
 
+void PhotonReSTIRFinalGathering::debugPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE("Debug");
+
+    //Create pass
+    if (!mpDebugPass) {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderDebugPass).csEntry("main").setShaderModel("6_5");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        Program::DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
+        defines.add(getValidResourceDefines(kOutputChannels, renderData));
+        if (mUseReducedReservoirFormat) defines.add("USE_REDUCED_RESERVOIR_FORMAT");
+
+        mpDebugPass = ComputePass::create(desc, defines, true);
+    }
+    FALCOR_ASSERT(mpDebugPass);
+
+    // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
+    mpDebugPass->getProgram()->addDefines(getValidResourceDefines(kOutputChannels, renderData));
+
+    //Set variables
+    auto var = mpDebugPass->getRootVar();
+
+    // Lamda for binding textures. These needs to be done per-frame as the buffers may change anytime.
+    auto bindAsTex = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData[desc.name]->asTexture();
+        }
+    };
+
+    mpScene->setRaytracingShaderData(pRenderContext, var, 1);   //Set scene data
+    mpSampleGenerator->setShaderData(var);          //Sample generator
+
+    uint reservoirIndex = mResamplingMode == ResamplingMode::Spartial ? (mFrameCount + 1) % 2 : mFrameCount % 2;
+
+    bindReservoirs(var, (mFrameCount - 1 % 2), true);
+    bindPhotonLight(var, (mFrameCount - 1 % 2), true);
+
+    var["gOrigColor"] = mpDebugColorCopy;
+    var["gOrigVBuffer"] = mpDebugVBuffer;
+    var["gDebugData"] = mpDebugInfoBuffer;
+    bindAsTex(kInVBufferDesc);
+    bindAsTex(kOutputChannels[0]);
+
+    //Uniform
+    std::string uniformName = "PerFrame";
+    var[uniformName]["gDebugPointRadius"] = mDebugPointRadius;
+    var[uniformName]["gCurrentClickedPixel"] = mDebugCurrentClickedPixel;
+    var[uniformName]["gCopyLastColor"] = mCopyLastColorImage;
+    var[uniformName]["gCopyPixelData"] = mCopyPixelData;
+    var[uniformName]["gDistanceFalloff"] = mDebugDistanceFalloff;
+    var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
+
+    //Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpDebugPass->execute(pRenderContext, uint3(targetDim, 1));
+
+    if (mCopyPixelData) {
+        pRenderContext->flush(true);
+
+        void* data = mpDebugInfoBuffer->map(Buffer::MapType::Read);
+        std::memcpy(mDebugData.data(), data, sizeof(uint) * 32);
+        mpDebugInfoBuffer->unmap();
+        mCopyPixelData = false;
+    }
+
+}
 
 void PhotonReSTIRFinalGathering::fillNeighborOffsetBuffer(std::vector<int8_t>& buffer)
 {
@@ -1614,4 +1752,27 @@ void PhotonReSTIRFinalGathering::buildBottomLevelAS(RenderContext* pContext, Sph
         //Barrier for the blas
         pContext->uavBarrier(accel.blas[i].get());
     }
+}
+
+bool PhotonReSTIRFinalGathering::onMouseEvent(const MouseEvent& mouseEvent)
+{
+    if (mEnableDebug) {
+        if (mouseEvent.type == MouseEvent::Type::ButtonDown && mouseEvent.button == Input::MouseButton::Right)
+        {
+            mDebugCurrentClickedPixel = uint2(mouseEvent.pos * float2(mScreenRes));
+            mCopyPixelData = true;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool PhotonReSTIRFinalGathering::onKeyEvent(const KeyboardEvent& keyEvent) {
+    if (mEnableDebug) {
+        if (keyEvent.type == KeyboardEvent::Type::KeyPressed && keyEvent.key == Input::Key::O) {
+            mCopyLastColorImage = !mCopyLastColorImage;     //Flip
+            return true;
+        }
+    }
+    return false;
 }

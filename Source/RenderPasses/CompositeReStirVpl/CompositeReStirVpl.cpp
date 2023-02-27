@@ -117,6 +117,7 @@ void CompositeReStirVpl::execute(RenderContext* pRenderContext, const RenderData
     var["CB"]["scaleReStir"] = mScaleReStir;
     var["CB"]["scaleReStirVpl"] = mScaleReStirVpl;
     var["CB"]["scaleThroughput"] = mScaleThroughput;
+    var["CB"]["ignoreThroughput"] = mIgnoreThroughput;
 
     var["gInReStir"] = renderData[kInputReStir]->asTexture();
     var["gInReStirVpl"] = renderData[kInputReStirVpl]->asTexture();
@@ -131,4 +132,6 @@ void CompositeReStirVpl::renderUI(Gui::Widgets& widget)
     widget.var("Scale ReStir", mScaleReStir,0.f);
     widget.var("Scale ReStirVpl", mScaleReStirVpl, 0.f);
     widget.var("Scale Throughput", mScaleThroughput, 0.f);
+    widget.checkbox("Ignore Throughput", mIgnoreThroughput);
+    widget.tooltip("Set thp to 1");
 }
