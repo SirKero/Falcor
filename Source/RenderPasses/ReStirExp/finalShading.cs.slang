@@ -173,8 +173,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         
     }
     
-
-    float3 outColor = diffuse + specular + bsdfProperties.emission;
+    float3 outColor = luminance(bsdfProperties.emission) > 0 ? bsdfProperties.emission : diffuse + specular;    //If light was hit only output the light
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;

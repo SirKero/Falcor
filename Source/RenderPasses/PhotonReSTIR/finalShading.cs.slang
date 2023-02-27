@@ -121,6 +121,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
 
+    if (luminance(bsdfProperties.emission) > 0) //Emissive surfaces are not handled here
+        return;
+    
     if(r.weightSum < 0 || r.M == 0){
         valid = false;
     }

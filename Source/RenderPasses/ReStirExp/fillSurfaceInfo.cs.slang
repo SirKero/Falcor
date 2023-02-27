@@ -82,6 +82,11 @@ void main(uint2 dTid : SV_DispatchThreadID){
         surface.diffuse = diffuse;
         surface.specular = specular;
         surface.diffuseProb = diffuseProb;
+
+        if (luminance(bsdfProperties.emission) > 0)
+        {
+            surface.viewDepth = -1.f; //Invalidate Surface
+        }
     }
     
     gSurfaceData[index2Dto1D(dTid, gFrameDim.x)] = surface.pack();
