@@ -30,6 +30,11 @@
 #include "Utils/Sampling/SampleGenerator.h"
 #include <chrono>
 
+#include "Rendering/Lights/LightBVHSampler.h"
+#include "Rendering/Lights/EmissivePowerSampler.h"
+#include "Rendering/Lights/EmissiveUniformSampler.h"
+
+
 using namespace Falcor;
 
 class PhotonMapper : public RenderPass
@@ -131,16 +136,6 @@ private:
     */
     void prepareRandomSeedBuffer(const uint2 screenDimensions);
 
-    /** Prepares a light sample texture for the photon generate pass
-    */
-    void createLightSampleTexture(RenderContext* pRenderContext);
-
-    /** Gets the active emissive triangles from the light collection.
-    *  This is analogous to the function from LightCollection. It is here to prevent changes to the core of Falcor.
-    *  As this is done once it has no impact on performance and only a minimal impact on CPU-Memory
-    */
-    void getActiveEmissiveTriangles(RenderContext* pRenderContext);
-
     /** Creates the Photon Collection Program
     */
     void createCollectionProgram();
@@ -169,9 +164,14 @@ private:
     */
     void photonASDebugPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    /** Handles the emissive light sampler
+    */
+    bool prepareLighting(RenderContext* pRenderContext);
+
     // Internal state
     Scene::SharedPtr            mpScene;                    ///< Current scene.
     SampleGenerator::SharedPtr  mpSampleGenerator;          ///< GPU sample generator.
+    EmissiveLightSampler::SharedPtr mpEmissiveLightSampler;     //EmissiveLightSampler for Photon generation
 
     //Constants
     const float                 kMinPhotonRadius = 0.00001f;                 ///< Too small radiis should not be used as it could lead to floating point errors. 
@@ -216,6 +216,7 @@ private:
 
     uint                        mNumPhotons = 2000000;                   ///< Number of Photons shot
     uint                        mNumPhotonsUI = mNumPhotons;            ///< For UI. It is decopled from the runtime var because changes have to be confirmed
+    const uint                  mPhotonYExtent = 512;
     uint                        mGlobalBufferSizeUI = mNumPhotons / 2;    ///< Size of the Global Photon Buffer
     uint                        mCausticBufferSizeUI = mNumPhotons / 4;   ///< Size of the Caustic Photon Buffer
 
@@ -223,6 +224,10 @@ private:
 
     bool                        mAccelerationStructureFastBuild = true;    ///< Build mode for acceleration structure
     bool                        mAccelerationStructureFastBuildUI = mAccelerationStructureFastBuild;
+
+    int                         mMaxCausticBounces = 0;
+    float                       mPhotonRayTMin = 0.02f;
+
 
     // Collect only
     bool                        mDisableGlobalCollection = false;       ///<Disabled the collection of global photons
@@ -275,17 +280,7 @@ private:
 
 
     //Light
-    std::vector<uint> mActiveEmissiveTriangles;
-    bool            mRebuildLightTex = false;
-    LightTexMode mLightTexMode = LightTexMode::power;
-    Texture::SharedPtr mLightSampleTex;
-    Buffer::SharedPtr mPhotonsPerTriangle;
-    const uint mMaxDispatchY = 512;
-    uint mPGDispatchX = 0;
-    uint mAnalyticEndIndex = 0;
-    uint mNumLights = 0;
-    float mAnalyticInvPdf = 0.0f;
-    float mEmissiveInvPdf = 0.0f;
+    
 
     // Ray tracing program.
     struct RayTraceProgramHelper

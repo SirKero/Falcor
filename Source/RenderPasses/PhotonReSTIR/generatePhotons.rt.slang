@@ -30,7 +30,7 @@ cbuffer CB
     bool gAdjustShadingNormals;
     bool gEnableCaustics; //Enable caustic photons
     int gCausticsBounces; //Number of diffuse bounces allowed for caustic photons
-    uint2 _pad2;
+    float gRayTMin; //TMin for photon ray
 };
 
 cbuffer Light{
@@ -250,8 +250,8 @@ void rayGen()
     //pls.flux /= lightDirPDF;
     pls.flux /= launchDim.x * launchDim.y;  //Division through all photons
     
-    ray.Origin = pls.posW + 0.01 * pls.normal;
-    ray.TMin = 0.01f;
+    ray.Origin = pls.posW;
+    ray.TMin = gRayTMin;
     ray.TMax = 10000.f;
     
     //create photon

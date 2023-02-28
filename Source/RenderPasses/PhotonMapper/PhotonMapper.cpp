@@ -182,6 +182,8 @@ void PhotonMapper::execute(RenderContext* pRenderContext, const RenderData& rend
         mpScene->getLightCollection(pRenderContext);
     }
 
+    prepareLighting(pRenderContext);
+
     if (mResizePhotonBuffers) {
         //Fits the buffer with the user defined offset percentage
         if (mFitBuffersToPhotonShot) {
@@ -222,10 +224,12 @@ void PhotonMapper::execute(RenderContext* pRenderContext, const RenderData& rend
     }
 
     //Create / Rebuild light sample texture
+    /*
     if (!mLightSampleTex || mRebuildLightTex) {
         createLightSampleTexture(pRenderContext);
         mRebuildLightTex = false;
     }
+    */
 
     //Build / Rebuild Buffer for photon culling
     if (mEnablePhotonCulling && (!mCullingBuffer || mRebuildCullingBuffer)) {
@@ -349,6 +353,8 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
     dirty |= widget.checkbox("Use Photon Face Normal Rejection", mUseFaceNormalToReject);
     widget.tooltip("Uses encoded Face Normal to reject photon hits on different surfaces (corners / other side of wall). Is around 2% slower");
 
+    dirty |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
+    widget.tooltip("Sets the tMin value for the photon generation pass");
     widget.dummy("", dummySpacing);
 
     //Timer
@@ -446,13 +452,6 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
         dirty |= widget.checkbox("Fast Build", mAccelerationStructureFastBuildUI);
         widget.tooltip("Enables Fast Build for Acceleration Structure. If enabled tracing time is worse");
     }
-    // Light sample texture
-    if (auto group = widget.group("Light Sample Tex")) {
-        mRebuildLightTex |= widget.dropdown("Sample mode", kLightTexModeList, (uint32_t&)mLightTexMode);
-        widget.tooltip("Changes photon distribution for the light sampling texture. Also rebuilds the texture.");
-        mRebuildLightTex |= widget.button("Rebuild Light Tex");
-        dirty |= mRebuildLightTex;
-    }
 
     //Disable Photon Collection
     if (auto group = widget.group("Disable Photon Collect")) {
@@ -541,6 +540,7 @@ void PhotonMapper::prepareVars()
 
     // Configure program.
     mTracerGenerate.pProgram->addDefines(mpSampleGenerator->getDefines());
+    mTracerGenerate.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
     mTracerGenerate.pProgram->setTypeConformances(mpScene->getTypeConformances());
     // Create program variables for the current program.
     // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
@@ -639,7 +639,7 @@ void PhotonMapper::resetPhotonMapper()
     mCullingBuffer.reset();
 
     //reset light sample tex
-    mLightSampleTex = nullptr;
+    mpEmissiveLightSampler.reset();
 }
 
 void PhotonMapper::changeNumPhotons()
@@ -648,7 +648,6 @@ void PhotonMapper::changeNumPhotons()
     if (mNumPhotonsUI != mNumPhotons) {
         //Reset light sample tex and frame counter
         mNumPhotons = mNumPhotonsUI;
-        mLightSampleTex = nullptr;
         mFrameCount = 0;
     }
 
@@ -703,7 +702,12 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
     mTracerGenerate.pProgram->addDefine("RAY_TMAX_CULLING", std::to_string(kCollectTMax));
     mTracerGenerate.pProgram->addDefine("CULLING_USE_PROJECTION", std::to_string(mUseProjectionMatrixCulling));
     mTracerGenerate.pProgram->addDefine("PHOTON_FACE_NORMAL", mUseFaceNormalToReject ? "1" : "0");
+    mTracerGenerate.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mGlobalBuffers.maxSize));
+    mTracerGenerate.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mCausticBuffers.maxSize));
+    mTracerGenerate.pProgram->addDefine("USE_PHOTON_CULLING", mEnablePhotonCulling ? "1" : "0");
 
+
+    FALCOR_ASSERT(mpEmissiveLightSampler);
     if (!mTracerGenerate.pVars) prepareVars();
     FALCOR_ASSERT(mTracerGenerate.pVars);
 
@@ -711,32 +715,27 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
 
     auto var = mTracerGenerate.pVars->getRootVar();
 
+    mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+
     // Set constants (uniforms).
     // 
     //PerFrame Constant Buffer
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
-    var[nameBuf]["gCausticRadius"] = mCausticRadius;
-    var[nameBuf]["gGlobalRadius"] = mGlobalRadius;
+    var[nameBuf]["gPhotonRadius"] = float2(mCausticRadius, mGlobalRadius);
     var[nameBuf]["gHashScaleFactor"] = 1.0f / (mGlobalRadius * 2);  //Radius needs to be double to ensure that all photons from the camera cell are in it
 
     //Upload constant buffer only if options changed
     if (mResetConstantBuffers) {
         nameBuf = "CB";
         var[nameBuf]["gMaxRecursion"] = mMaxBounces;
-        var[nameBuf]["gPRNGDimension"] = dict.keyExists(kRenderPassPRNGDimension) ? dict[kRenderPassPRNGDimension] : 0u;
-        var[nameBuf]["gGlobalRejection"] = mRejectionProbability;
-        var[nameBuf]["gEmissiveScale"] = mIntensityScalar;
-
-        var[nameBuf]["gSpecRoughCutoff"] = mSpecRoughCutoff;
-        var[nameBuf]["gAnalyticInvPdf"] = mAnalyticInvPdf;
-        var[nameBuf]["gAdjustShadingNormals"] = mAdjustShadingNormals;
+        var[nameBuf]["gRejection"] = mRejectionProbability;
         var[nameBuf]["gUseAlphaTest"] = mUseAlphaTest;
-
-        var[nameBuf]["gEnablePhotonCulling"] = mEnablePhotonCulling;
-        var[nameBuf]["gCullingHashSize"] = 1 << mCullingHashBufferSizeBytes;
+        var[nameBuf]["gAdjustShadingNormals"] = mAdjustShadingNormals;
+        var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBytes;    //Size of the Photon Culling buffer. 2^x
+        var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
         var[nameBuf]["gCullingYExtent"] = mCullingYExtent;
-        var[nameBuf]["gCullingProjTest"] = mPCullingrojectionTestOver;
+        var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
     }
 
     //set the Photon Buffers
@@ -748,10 +747,7 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
     }
 
     //Rest of the buffers
-    var["gRndSeedBuffer"] = mRandNumSeedBuffer;
     var["gPhotonCounter"] = mPhotonCounterBuffer.counter;
-    var["gLightSample"] = mLightSampleTex;
-    var["gNumPhotonsPerEmissive"] = mPhotonsPerTriangle;
 
     //Set optinal culling variables
     if (mEnablePhotonCulling) {
@@ -759,7 +755,7 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
     }
 
     // Get dimensions of ray dispatch.
-    const uint2 targetDim = uint2(mPGDispatchX, mMaxDispatchY);
+    const uint2 targetDim = uint2(mNumPhotons / mPhotonYExtent, mPhotonYExtent);
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     //Trace the photons
@@ -1068,209 +1064,6 @@ void PhotonMapper::prepareRandomSeedBuffer(const uint2 screenDimensions)
     FALCOR_ASSERT(mRandNumSeedBuffer);
 }
 
-void PhotonMapper::createLightSampleTexture(RenderContext* pRenderContext)
-{
-    if (mPhotonsPerTriangle) mPhotonsPerTriangle.reset();
-    if (mLightSampleTex) mLightSampleTex.reset();
-
-    FALCOR_ASSERT(mpScene);    //Scene has to be set
-
-    auto analyticLights = mpScene->getActiveLights();
-    auto lightCollection = mpScene->getLightCollection(pRenderContext);
-
-    uint analyticPhotons = 0;
-    uint numEmissivePhotons = 0;
-    //If there are analytic Lights split number of Photons even between the analytic light and the number of emissive models (approximation of the number of emissive lights)
-    if (analyticLights.size() != 0) {
-        uint lightsTotal = static_cast<uint>(analyticLights.size() + lightCollection->getMeshLights().size());
-        float percentAnalytic = static_cast<float>(analyticLights.size()) / static_cast<float>(lightsTotal);
-        analyticPhotons = static_cast<uint>(mNumPhotons * percentAnalytic);
-        analyticPhotons += (uint)analyticLights.size() - (analyticPhotons % (uint)analyticLights.size());  //add it up so every light gets the same number of photons
-        numEmissivePhotons = mNumPhotons - analyticPhotons;
-    }
-    else
-        numEmissivePhotons = mNumPhotons;
-
-    std::vector<uint> numPhotonsPerTriangle;    //only filled when there are emissive
-
-    if (numEmissivePhotons > 0) {
-        getActiveEmissiveTriangles(pRenderContext);
-        auto meshLightTriangles = lightCollection->getMeshLightTriangles();
-        //Get total area to distribute to get the number of photons per area.
-        float totalMode = 0;
-        for (uint i = 0; i < (uint)mActiveEmissiveTriangles.size(); i++) {
-            uint triIdx = mActiveEmissiveTriangles[i];
-
-            switch (mLightTexMode) {
-            case LightTexMode::power:
-                totalMode += meshLightTriangles[triIdx].flux;
-                break;
-            case LightTexMode::area:
-                totalMode += meshLightTriangles[triIdx].area;
-                break;
-            default:
-                totalMode += meshLightTriangles[triIdx].flux;
-            }
-
-        }
-        float photonsPerMode = numEmissivePhotons / totalMode;
-
-        //Calculate photons on a per triangle base
-        uint tmpNumEmissivePhotons = 0; //Real count will change due to rounding
-        numPhotonsPerTriangle.reserve(mActiveEmissiveTriangles.size());
-        for (uint i = 0; i < (uint)mActiveEmissiveTriangles.size(); i++) {
-            uint triIdx = mActiveEmissiveTriangles[i];
-            uint photons = 0;
-
-            switch (mLightTexMode) {
-            case LightTexMode::power:
-                photons = static_cast<uint>(std::ceil(meshLightTriangles[triIdx].flux * photonsPerMode));
-                break;
-            case LightTexMode::area:
-                photons = static_cast<uint>(std::ceil(meshLightTriangles[triIdx].area * photonsPerMode));
-                break;
-            default:
-                photons = static_cast<uint>(std::ceil(meshLightTriangles[triIdx].flux * photonsPerMode));
-            }
-
-            if (photons == 0) photons = 1;  //shoot at least one photon
-            tmpNumEmissivePhotons += photons;
-            numPhotonsPerTriangle.push_back(photons);
-        }
-        numEmissivePhotons = tmpNumEmissivePhotons;     //get real photon count
-    }
-
-    uint totalNumPhotons = numEmissivePhotons + analyticPhotons;
-
-    //calculate the pdf for analytic and emissive light
-    if (analyticPhotons > 0 && analyticLights.size() > 0) {
-        mAnalyticInvPdf = (static_cast<float>(totalNumPhotons) * static_cast<float>(analyticLights.size())) / static_cast<float>(analyticPhotons);
-    }
-    if (numEmissivePhotons > 0 && lightCollection->getActiveLightCount()) {
-        mEmissiveInvPdf = (static_cast<float>(totalNumPhotons) * lightCollection->getActiveLightCount()) / static_cast<float>(numEmissivePhotons);
-    }
-
-
-    const uint blockSize = 16;
-    const uint blockSizeSq = blockSize * blockSize;
-
-    //Create texture. The texture fills 16x16 fields with information
-
-    uint xPhotons = (totalNumPhotons / mMaxDispatchY) + 1;
-    xPhotons += (xPhotons % blockSize == 0 && analyticPhotons > 0) ? blockSize : blockSize - (xPhotons % blockSize);  //Fill up so x to 16x16 block with at least 1 block extra when mixed
-
-    //Init the texture with the invalid index (zero)
-    //Negative indices are analytic and postivie indices are emissive
-    std::vector<int32_t> lightIdxTex(xPhotons * mMaxDispatchY, 0);
-
-    //Helper functions
-    auto getIndex = [&](uint2 idx) {
-        return idx.x + idx.y * xPhotons;
-    };
-
-    auto getBlockStartingIndex = [&](uint blockIdx) {
-        blockIdx = blockIdx * blockSize;          //Multiply by the expansion of the box in x
-        uint x = blockIdx % xPhotons;
-        uint y = (blockIdx / xPhotons) * blockSize;
-        return uint2(x, y);
-    };
-
-    //Fill analytic lights
-    if (analyticLights.size() > 0) {
-        uint numCurrentLight = 0;
-        uint step = analyticPhotons / static_cast<uint>(analyticLights.size());
-        bool stop = false;
-        for (uint i = 0; i <= analyticPhotons / blockSizeSq; i++) {
-            if (stop) break;
-            for (uint y = 0; y < blockSize; y++) {
-                if (stop) break;
-                for (uint x = 0; x < blockSize; x++) {
-                    if (numCurrentLight >= analyticPhotons) {
-                        stop = true;
-                        break;
-                    }
-                    uint2 idx = getBlockStartingIndex(i);
-                    idx += uint2(x, y);
-                    int32_t lightIdx = static_cast<int32_t>((numCurrentLight / step) + 1);  //current light index + 1
-                    lightIdx *= -1;                                                         //turn it negative as it is a analytic light
-                    lightIdxTex[getIndex(idx)] = lightIdx;
-                    numCurrentLight++;
-                }
-            }
-        }
-    }
-
-
-    //Fill emissive lights
-    if (numEmissivePhotons > 0) {
-        uint analyticEndBlock = analyticPhotons > 0 ? (analyticPhotons / blockSizeSq) + 1 : 0;    //we have guaranteed an extra block
-        uint currentActiveTri = 0;
-        uint lightInActiveTri = 0;
-        bool stop = false;
-        for (uint i = 0; i <= numEmissivePhotons / blockSizeSq; i++) {
-            if (stop) break;
-            for (uint y = 0; y < blockSize; y++) {
-                if (stop) break;
-                for (uint x = 0; x < blockSize; x++) {
-                    if (currentActiveTri >= static_cast<uint>(numPhotonsPerTriangle.size())) {
-                        stop = true;
-                        break;
-                    }
-                    uint2 idx = getBlockStartingIndex(i + analyticEndBlock);
-                    idx += uint2(x, y);
-                    int32_t lightIdx = static_cast<int32_t>(currentActiveTri + 1);      //emissive has the positive index
-                    lightIdxTex[getIndex(idx)] = lightIdx;
-
-                    //Check if the number of photons exeed that of the current active triangle
-                    lightInActiveTri++;
-                    if (lightInActiveTri >= numPhotonsPerTriangle[currentActiveTri]) {
-                        currentActiveTri++;
-                        lightInActiveTri = 0;
-                    }
-                }
-            }
-        }
-    }
-
-
-
-    //Create texture and Pdf buffer
-    mLightSampleTex = Texture::create2D(xPhotons, mMaxDispatchY, ResourceFormat::R32Int, 1, 1, lightIdxTex.data());
-    mLightSampleTex->setName("PhotonMapper::LightSampleTex");
-
-    //Create a buffer for num photons per triangle
-    if (numPhotonsPerTriangle.size() == 0) {
-        numPhotonsPerTriangle.push_back(0);
-    }
-    mPhotonsPerTriangle = Buffer::createStructured(sizeof(uint), static_cast<uint32_t>(numPhotonsPerTriangle.size()), ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, numPhotonsPerTriangle.data());
-    mPhotonsPerTriangle->setName("PhotonMapper::mPhotonsPerTriangleEmissive");
-
-
-    //Set numPhoton variable
-    mPGDispatchX = xPhotons;
-
-    mNumPhotons = mPGDispatchX * mMaxDispatchY;
-    mNumPhotonsUI = mNumPhotons;
-}
-
-void PhotonMapper::getActiveEmissiveTriangles(RenderContext* pRenderContext)
-{
-    auto lightCollection = mpScene->getLightCollection(pRenderContext);
-
-    auto meshLightTriangles = lightCollection->getMeshLightTriangles();
-
-    mActiveEmissiveTriangles.clear();
-    mActiveEmissiveTriangles.reserve(meshLightTriangles.size());
-
-    for (uint32_t triIdx = 0; triIdx < (uint32_t)meshLightTriangles.size(); triIdx++)
-    {
-        if (meshLightTriangles[triIdx].flux > 0.f)
-        {
-            mActiveEmissiveTriangles.push_back(triIdx);
-        }
-    }
-}
-
 void PhotonMapper::createCollectionProgram()
 {
     //reset program
@@ -1542,4 +1335,34 @@ void PhotonMapper::photonASDebugPass(RenderContext* pRenderContext, const Render
     // Trace the photons
     mpScene->raytrace(pRenderContext, mPhotonASDebugPass.pProgram.get(), mPhotonASDebugPass.pVars, uint3(targetDim, 1));    //TODO: Check if scene defines can be set manually
 
+}
+
+bool PhotonMapper::prepareLighting(RenderContext* pRenderContext)
+{
+    bool lightingChanged = false;
+
+    if (mpScene->useEmissiveLights()) {
+        //Init light sampler if not set
+        if (!mpEmissiveLightSampler) {
+            //Ensure that emissive light struct is build by falcor
+            const auto& pLights = mpScene->getLightCollection(pRenderContext);
+            FALCOR_ASSERT(pLights && pLights->getActiveLightCount() > 0);
+            //TODO: Support different types of sampler
+            mpEmissiveLightSampler = EmissivePowerSampler::create(pRenderContext, mpScene);
+            lightingChanged = true;
+        }
+    }
+    else {
+        if (mpEmissiveLightSampler) {
+            mpEmissiveLightSampler = nullptr;
+            lightingChanged = true;
+        }
+    }
+
+    //Update Emissive light sampler
+    if (mpEmissiveLightSampler) {
+        lightingChanged |= mpEmissiveLightSampler->update(pRenderContext);
+    }
+
+    return lightingChanged;
 }

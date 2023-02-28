@@ -6,4 +6,12 @@
   <ItemGroup>
     <ClInclude Include="RTPM.h" />
   </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="PhotonCulling.cs.slang" />
+    <ShaderSource Include="PhotonCullingHash.slang" />
+    <ShaderSource Include="PhotonMapperCollect.rt.slang" />
+    <ShaderSource Include="PhotonMapperGenerate.rt.slang" />
+    <ShaderSource Include="PhotonMapperStochasticCollect.rt.slang" />
+    <ShaderSource Include="showPhotonAccelerationStructure.rt.slang" />
+  </ItemGroup>
 </Project>

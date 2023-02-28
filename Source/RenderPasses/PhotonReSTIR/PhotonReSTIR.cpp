@@ -245,6 +245,9 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
 
         changed |= widget.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
 
+        changed |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
+        widget.tooltip("Sets the tMin value for the photon generation pass");
+
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
 
@@ -731,6 +734,7 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
         var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
         var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
         var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
+        var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
 
     }
 

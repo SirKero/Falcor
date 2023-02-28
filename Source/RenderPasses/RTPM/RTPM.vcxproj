@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{E484AEEC-ED88-408E-ADA5-66DF6301D75B}</ProjectGuid>
+    <ProjectGuid>{B54B5B86-0F36-4EC0-A8DE-DA787BF35365}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>RTPM</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
@@ -34,6 +34,14 @@
     <ProjectReference Include="..\..\Falcor\Falcor.vcxproj">
       <Project>{2c535635-e4c5-4098-a928-574f0e7cd5f9}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="PhotonCulling.cs.slang" />
+    <ShaderSource Include="PhotonCullingHash.slang" />
+    <ShaderSource Include="PhotonMapperCollect.rt.slang" />
+    <ShaderSource Include="PhotonMapperGenerate.rt.slang" />
+    <ShaderSource Include="PhotonMapperStochasticCollect.rt.slang" />
+    <ShaderSource Include="showPhotonAccelerationStructure.rt.slang" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

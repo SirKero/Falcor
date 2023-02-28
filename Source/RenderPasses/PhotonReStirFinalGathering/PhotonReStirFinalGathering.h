@@ -276,6 +276,7 @@ private:
     bool mUseStatisticProgressivePMGlobal = false;
     float mPPM_Alpha = 0.66f;
     uint mFramesCameraStill = 0;
+    float mPhotonRayTMin = 0.02f;
 
     //Photon Culling
     bool mUsePhotonCulling = true;

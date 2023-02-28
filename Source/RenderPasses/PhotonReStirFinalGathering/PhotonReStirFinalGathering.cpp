@@ -285,6 +285,9 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             mFramesCameraStill = 0;
         }
 
+        changed |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
+        widget.tooltip("Sets the tMin value for the photon generation pass");
+
         widget.checkbox("Use SPPM when Camera is still", mUseStatisticProgressivePM);
         widget.tooltip("Uses Statistic Progressive photon mapping to reduce the radius when the camera stays still");
         if (mUseStatisticProgressivePM) {
@@ -873,6 +876,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
         var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
         var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
         var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
+        var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
     }
 
     mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
