@@ -131,7 +131,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     }
     
     //Get to light direction
-    float distance = 0;
+    float distance = 1000000000.f;
     float3 toLight = { };
     float3 Li = { };
     getEmissiveLight(r,sd.posW ,distance , toLight, Li);

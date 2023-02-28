@@ -38,6 +38,8 @@ RWTexture2D<float4> gEmissive;
 //Optional
 RWTexture2D<float> gLinDepth;
 RWTexture2D<float2> gMVec;
+RWTexture2D<float4> gNormWRoughMat;
+RWTexture2D<float2> gLinZFirstHit;
 
 #define is_valid(name) (is_valid_##name != 0)
 
@@ -102,7 +104,7 @@ Ray cameraComputeRandomRayThinlens(uint2 pixel, uint2 frameDim, float2 u , float
     return ray;
 }
 
-void writeHit(uint2 pixel, float3 rayDir, float3 thp, float3 emissive, const in HitInfo hit,const float linZ )
+void writeHit(const in uint2 pixel, const in float3 rayDir,const in float3 thp, const in float3 emissive , const in float3 normal, const in float roughness, const in HitInfo hit,const in float linZ )
 {
     gVBuffer[pixel] = hit.getData();
     gViewWorld[pixel] = float4(rayDir, 1);
@@ -111,6 +113,13 @@ void writeHit(uint2 pixel, float3 rayDir, float3 thp, float3 emissive, const in 
 
     //If depth in valid write it
     if (is_valid(gLinDepth)) gLinDepth[pixel] = linZ;
+    if (is_valid(gNormWRoughMat))
+    {
+        float2 octNormal = ndir_to_oct_unorm(normal);
+        float materialID = 0.f;
+        gNormWRoughMat[pixel] = float4(octNormal, roughness, materialID);
+    }
+
 }
 
 void writeMiss(uint2 pixel)
@@ -119,6 +128,8 @@ void writeMiss(uint2 pixel)
 
     if (is_valid(gLinDepth)) gLinDepth[pixel] = 0.f;
     if (is_valid(gMVec)) gMVec[pixel] = { };
+    if (is_valid(gNormWRoughMat)) gNormWRoughMat[pixel] = { };
+    
 }
 
 //TODO: Add other miss colors, as throughput then has to be respected
@@ -164,10 +175,29 @@ bool generateNewRay(const in ShadingData sd, const in IBSDF bsdf, float3 rayOrig
     return false;
 }
 
+float3 computeDdxPosW(float3 posW, float3 normW, float2 invFrameDim)
+    {
+        float3 projRight = normalize(cross(normW, cross(normW, gScene.camera.data.cameraV)));
+        float distanceToHit = length(posW - gScene.camera.data.posW);
+        float2 ddNdc = float2(2.f, -2.f) * invFrameDim;
+        float distRight = distanceToHit * ddNdc.x / dot(normalize(gScene.camera.data.cameraV), projRight);
+        return distRight * projRight;
+    }
+
+    float3 computeDdyPosW(float3 posW, float3 normW, float2 invFrameDim)
+    {
+        float3 projUp = normalize(cross(normW, cross(normW, gScene.camera.data.cameraU)));
+        float distanceToHit = length(posW - gScene.camera.data.posW);
+        float2 ddNdc = float2(2.f, -2.f) * invFrameDim;
+        float distUp = distanceToHit * ddNdc.y / dot(normalize(gScene.camera.data.cameraU), projUp);
+        return distUp * projUp;
+    }
+
 [shader("closesthit")]
 void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
+    float2 invFrameDim = 1.f / DispatchRaysDimensions().xy;
    // Evaluate Falcor's material parameters at the hit point.
     TriangleHit triangleHit;
     triangleHit.instanceID = getGeometryInstanceID();
@@ -175,7 +205,10 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     triangleHit.barycentrics = attribs.barycentrics;
     VertexData v = gScene.getVertexData(triangleHit);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-
+    
+    let lod = ExplicitLodTextureSampler(0.f);
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayData.direction, lod);
+    
     //Calc Motion Vector if it is valid on first valid hit
     if(is_valid(gMVec) && rayData.pathLength == 0 && !gUseRandomPixelPosCamera){
         float3 prevPosW = gScene.getPrevPosW(triangleHit);
@@ -188,12 +221,23 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         gMVec[launchIndex] = motionVec;
     }
 
-    rayData.pathLength++;
-    
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayData.direction, lod);
+    //Calc linZ for the first hit
+    if (is_valid(gLinZFirstHit) && rayData.pathLength == 0 && !gUseRandomPixelPosCamera)
+    {
+        float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+        float curLinearZ = curPosH.w;
 
-    
+        //Derevative
+        float3 ddxPosW = computeDdxPosW(sd.posW, sd.faceN, invFrameDim);
+        float3 ddyPosW = computeDdyPosW(sd.posW, sd.faceN, invFrameDim);
+        float4 curPosH_dx = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+        float4 curPosH_dy = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+        float ddxLinearZ = abs(curPosH_dx.w - curLinearZ);
+        float ddyLinearZ = abs(curPosH_dy.w - curLinearZ);
+        float dLinearZ = max(ddxLinearZ, ddyLinearZ);
+        gLinZFirstHit[launchIndex] = float2(curLinearZ, dLinearZ);
+    }
+        
     if (gAdjustShadingNormals)
     {
         adjustShadingNormal(sd, v);
@@ -222,12 +266,13 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     isDiffuse |= luminance(bsdfProperties.emission) > 0;
     
     bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
-    
+
+    rayData.pathLength++;
     //store hit if lobe is diffuse
     //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
     if (isDiffuse || (!valid && (pReflection > 0)))
     {        
-        writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission, HitInfo(triangleHit), rayData.distance);
+        writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission, sd.N, bsdfProperties.roughness, HitInfo(triangleHit), rayData.distance);
         
         rayData.terminated = true;
         return;
@@ -261,11 +306,7 @@ void rayGen()
     }
    
     uint rayFlags = 0;
-    RayDesc ray;
-    ray.Origin = camRay.origin;
-    ray.Direction = camRay.dir;
-    ray.TMax = camRay.tMax;
-    ray.TMin = camRay.tMin;
+    RayDesc ray = camRay.toRayDesc();
 
     rayData.origin = ray.Origin;
     rayData.direction = ray.Direction;

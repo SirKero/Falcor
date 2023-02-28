@@ -67,6 +67,8 @@ namespace
     {
         { "linearDepth",          "gLinDepth",           "Distance from camera to hitpoint",  true /* optional */, ResourceFormat::R32Float    },
         { "mvec",                 "gMVec",    "Motion vector",                    true /* optional */, ResourceFormat::RG32Float   },
+        { "normWRoughMat",        "gNormWRoughMat",  "World Normal, Roughness, Material",   true /* optional */, ResourceFormat::RGB10A2Unorm},
+        { "FirstHitLinZ",          "gLinZFirstHit",           "LinZ for the first hit",  true /* optional */, ResourceFormat::RG32Float    }
     };
 
     // UI variables.
