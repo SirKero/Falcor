@@ -218,6 +218,7 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
         var[bufName]["gAdjustShadingNormals"] = mAdjustShadingNormals;
         var[bufName]["gUseAlphaTest"] = mUseAlphaTest;
         var[bufName]["gUseRandomPixelPosCamera"] = mCameraUseRandomSample;
+        var[bufName]["gUseDeltaRejection"] = mUseDeltaRejection;
     }
 
     // Bind Output Textures. These needs to be done per-frame as the buffers may change anytime.

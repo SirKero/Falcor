@@ -261,36 +261,35 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     float rnd = sampleNext1D(rayData.sg);
     bool isDiffuse = true;
-    if(gUseDeltaRejection)   //Reject everything that is not delta
+    if (gUseDeltaRejection){ //Reject everything that is not delta
         isDiffuse = (pDiffuseRef > 0) && ((lobes & (uint) LobeType::Delta) == 0);
-    else //Spec roughness rejection
-    {
-        isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
-        isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
-    }
+    }else{ //Spec roughness rejection
+            isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
+            isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
+        }
         
     //Stop if material is emissive
-    isDiffuse |= luminance(bsdfProperties.emission) > 0;
+        isDiffuse |= luminance(bsdfProperties.emission) > 0;
     
-    bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
+        bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
 
-    rayData.pathLength++;
+        rayData.pathLength++;
     //store hit if lobe is diffuse
     //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
-    if (isDiffuse || (!valid && (pReflection > 0)))
-    {        
-        writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission, sd.N, bsdfProperties.roughness, HitInfo(triangleHit), rayData.distance);
+        if (isDiffuse || (!valid && (pReflection > 0)))
+        {
+            writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission, sd.N, bsdfProperties.roughness, HitInfo(triangleHit), rayData.distance);
         
-        rayData.terminated = true;
-        return;
-    }
+            rayData.terminated = true;
+            return;
+        }
 
-    if (!valid)
-    {
-        rayData.distance = -1.f;
-        rayData.terminated = true;
+        if (!valid)
+        {
+            rayData.distance = -1.f;
+            rayData.terminated = true;
+        }
     }
-}
 
 [shader("raygeneration")]
 void rayGen()
