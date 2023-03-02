@@ -245,6 +245,9 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
 
         changed |= widget.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
 
+        changed |= widget.checkbox("Generation store non delta", mGenerationDeltaRejection);
+        widget.tooltip("Interpret every non delta reflection as diffuse surface");
+
         changed |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
         widget.tooltip("Sets the tMin value for the photon generation pass");
 
@@ -735,12 +738,17 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
         //Upload constant buffer only if options changed
         if (mReuploadBuffers) {
+            //Fill flags
+            uint flags = 0;
+            if (mPhotonUseAlphaTest) flags |= 0x01;
+            if (mPhotonAdjustShadingNormal) flags |= 0x02;
+            if (mEnableCausticPhotonCollection) flags |= 0x04;
+            if (mGenerationDeltaRejection) flags |= 0x08;
+
             nameBuf = "CB";
             var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
             var[nameBuf]["gRejection"] = mPhotonRejection;
-            var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
-            var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
-            var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
+            var[nameBuf]["gFlags"] = flags;
             var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
             var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
 

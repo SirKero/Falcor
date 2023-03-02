@@ -26,7 +26,8 @@ cbuffer CB
     bool gUseAlphaTest;     //uses alpha test if activated
     
     bool gUseRandomPixelPosCamera;  //Uses a randomly generated pixel offset for camera direction sampeling instead of fixed jitter
-    uint3 _pad;
+    bool gUseDeltaRejection;        //Delta rejection
+    uint2 _pad;
 };
 
 // Outputs
@@ -248,7 +249,8 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
-        
+
+    uint lobes = bsdf.getLobes(sd);
     //get material properties
     let bsdfProperties = bsdf.getProperties(sd);
 
@@ -258,10 +260,15 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     float pReflection = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / norm;
     
     float rnd = sampleNext1D(rayData.sg);
-    bool isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
-    
-    isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
-
+    bool isDiffuse = true;
+    if(gUseDeltaRejection)   //Reject everything that is not delta
+        isDiffuse = (pDiffuseRef > 0) && ((lobes & (uint) LobeType::Delta) == 0);
+    else //Spec roughness rejection
+    {
+        isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
+        isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
+    }
+        
     //Stop if material is emissive
     isDiffuse |= luminance(bsdfProperties.emission) > 0;
     

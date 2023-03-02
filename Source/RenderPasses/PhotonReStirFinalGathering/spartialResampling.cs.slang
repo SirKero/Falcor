@@ -58,7 +58,8 @@ cbuffer Constant
     float gSamplingRadius;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
-    float gVplRadius;               //Vpl radius
+    float gMatThreshold;               //Vpl radius
+    uint _pad;
 }
 
 struct LightSample{
@@ -91,13 +92,6 @@ Surface getSurface(uint2 idx)
     PackedSurfaceData surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
     return Surface(surfaceData, viewDir);
-}
-
-bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
-    float normalCheck = dot(currNormal, neighNormal);
-    float minLinZDiff = currLinZ * gDepthThreshold;
-    float linZDiff = abs(currLinZ - neighLinZ);
-    return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
 bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float sampleDistance){
@@ -160,7 +154,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         if (!neighSurface.valid)
             continue;
         
-        if(!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, neighSurface.normal, neighSurface.viewDepth))
+        if (!currentSurface.isValidNeighbor(neighSurface, gDepthThreshold, gNormalThreshold, gMatThreshold))
             continue;
 
         //If neighbor has passed the tests get reservoir and compair them

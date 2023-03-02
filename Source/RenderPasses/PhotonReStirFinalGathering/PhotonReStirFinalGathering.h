@@ -242,6 +242,7 @@ private:
     uint mDisocclusionBoostSamples = 2;     // Number of spartial samples if no temporal surface was found
     float mSamplingRadius = 20.f;           //Sampling radius in pixel
     float mRelativeDepthThreshold = 0.15f;   // Realtive Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
+    float mMaterialThreshold = 0.2f;        //Maximum absolute difference in diffuse material probability
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
@@ -279,6 +280,7 @@ private:
     float mPhotonRayTMin = 0.02f;
     bool mSkipPhotonGeneration = false;     //Only trace the photons every X iteration
     uint mSkipPhotonGenerationCount = 10;   //Gap between photon generation counts.
+    bool mGenerationDeltaRejection = true;         //Interpret every non delta surface as diffuse
 
     //Photon Culling
     bool mUsePhotonCulling = true;

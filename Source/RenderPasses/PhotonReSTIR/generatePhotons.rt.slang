@@ -26,23 +26,31 @@ cbuffer CB
 {
     uint gMaxRecursion; //Max photon recursion depths
     float gRejection; //Probability that a photon is stored as a light
-    bool gUseAlphaTest;
-    bool gAdjustShadingNormals;
-    bool gEnableCaustics; //Enable caustic photons
+    uint gFlags;
     int gCausticsBounces; //Number of diffuse bounces allowed for caustic photons
     float gRayTMin; //TMin for photon ray
+    uint3 _pad;
 };
 
 cbuffer Light{
     EmissiveLightSampler gEmissiveSampler;
 }
 
-
 RWStructuredBuffer<PhotonLight> gPhotonLights;
 RWStructuredBuffer<AABB> gCausticPhotonAABB;
 RWStructuredBuffer<uint4> gCausticPackedPhotonData;
 RWBuffer<uint> gPhotonCounter;
 RWTexture2D<float> gPhotonPdfTexture;
+
+enum
+class GenerationFlags // : uint32_t
+{
+    None                = 0x00,
+    AlphaTest           = 0x01,     //Enable Alpha test
+    AdjShadingNormals   = 0x02,     //Adjust the shading normals
+    EnableCaustics      = 0x04,     //Enable caustic photons.
+    DeltaRejection      = 0x08,     //Accept every non delta material as diffuse
+};
 
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const bool kUsePdfSampling = USE_PDF_SAMPLING;
@@ -60,7 +68,7 @@ struct RayData
     float3  direction;      ///< Next path segment direction.
     bool    diffuseHit;     ///< saves if the his is diffuse
     float3 diffuseScalar;
-    uint _pad;
+    bool isEmissive;    ///<Hit an emissive surface
     float3 normal;
     uint _pad2;
 
@@ -78,7 +86,7 @@ struct RayData
         d.diffuseScalar = float3(1);
         d.origin = float3(0);
         d.direction = float3(0);
-        d._pad = 0;
+        d.isEmissive = false;
         return d;
     }
 };
@@ -163,13 +171,14 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
 
     //Adjust shading normals if desired
     
-    if (gAdjustShadingNormals)
+    if (gFlags & (uint) GenerationFlags::AdjShadingNormals)
     {
         adjustShadingNormal(sd, v);
     }
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
+    uint lobes = bsdf.getLobes(sd);
     let bsdfProperties = bsdf.getProperties(sd);
 
     bool valid = bsdf.sample(sd, rayData.sg, bsdfSample, true /*ImportanceSampling*/);
@@ -183,7 +192,11 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.packedNormal = encodeNormal2x16(sd.N);
     rayData.normal = sd.N;
     rayData.direction = bsdfSample.wo;
-    rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
+    rayData.isEmissive = luminance(bsdfProperties.emission) > 0;
+    if (gFlags & (uint) GenerationFlags::DeltaRejection)
+        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Reflection) && ((lobes & (uint) LobeType::Delta) == 0);
+    else
+        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 
     //get diffuse power
     if(rayData.diffuseHit){
@@ -216,7 +229,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
 [shader("anyhit")]
 void anyHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
 {
-    if (gUseAlphaTest)
+    if (gFlags & (uint) GenerationFlags::AlphaTest)
     {
         // Alpha test for non-opaque geometry.
         GeometryInstanceID instanceID = getGeometryInstanceID();
@@ -276,7 +289,7 @@ void rayGen()
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         //Ray Missed scene and photon cannot be stored
-        if (rayData.terminated & kRayFlagTerminatedMiss > 0)
+        if (rayData.isEmissive || rayData.terminated & kRayFlagTerminatedMiss > 0)
             break;
         
         photonPos = rayData.origin;
@@ -344,7 +357,7 @@ void rayGen()
         }
         
         //Caustics handling
-        if (gEnableCaustics)
+        if (gFlags & (uint) GenerationFlags::EnableCaustics)
         {
             storeAsCaustic = !reflectedDiffuse;
             if (currentCausticBounces > maxCausticBounces)

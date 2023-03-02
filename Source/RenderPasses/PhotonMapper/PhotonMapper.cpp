@@ -353,6 +353,9 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
     dirty |= widget.checkbox("Use Photon Face Normal Rejection", mUseFaceNormalToReject);
     widget.tooltip("Uses encoded Face Normal to reject photon hits on different surfaces (corners / other side of wall). Is around 2% slower");
 
+    dirty |= widget.checkbox("Generation store non delta", mGenerationDeltaRejection);
+    widget.tooltip("Interpret every non delta reflection as diffuse surface");
+
     dirty |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
     widget.tooltip("Sets the tMin value for the photon generation pass");
     widget.dummy("", dummySpacing);
@@ -728,10 +731,15 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
     //Upload constant buffer only if options changed
     if (mResetConstantBuffers) {
         nameBuf = "CB";
+        //Fill flags
+        uint flags = 0;
+        if (mUseAlphaTest) flags |= 0x01;
+        if (mAdjustShadingNormals) flags |= 0x02;
+        if (mGenerationDeltaRejection) flags |= 0x08;
+
         var[nameBuf]["gMaxRecursion"] = mMaxBounces;
         var[nameBuf]["gRejection"] = mRejectionProbability;
-        var[nameBuf]["gUseAlphaTest"] = mUseAlphaTest;
-        var[nameBuf]["gAdjustShadingNormals"] = mAdjustShadingNormals;
+        var[nameBuf]["gFlags"] = flags;
         var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBytes;    //Size of the Photon Culling buffer. 2^x
         var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
         var[nameBuf]["gCullingYExtent"] = mCullingYExtent;

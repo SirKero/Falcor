@@ -152,4 +152,23 @@ struct Surface{
         
         return max(0.f, diffuseBRDF * Li); 
     }
+
+    //ReStir version
+    bool isValidNeighbor(const in Surface neighbor, const float depthThreshold, const float normalThreshold)
+    {
+        float normalCheck = dot(normal, neighbor.normal);
+        float minLinZDiff = viewDepth * depthThreshold;
+        float linZDiff = abs(viewDepth - neighbor.viewDepth);
+        return ((normalCheck >= normalThreshold) && (linZDiff <= minLinZDiff));
+    }
+    //ReStir heuristic + material difference
+    bool isValidNeighbor(const in Surface neighbor, const float depthThreshold, const float normalThreshold, const float matThreshold)
+    {
+        float normalCheck = dot(normal, neighbor.normal);
+        float minLinZDiff = viewDepth * depthThreshold;
+        float linZDiff = abs(viewDepth - neighbor.viewDepth);
+        float matDiff = abs(diffuseProb - neighbor.diffuseProb);
+
+        return ((normalCheck >= normalThreshold) && (linZDiff <= minLinZDiff) && (matThreshold >= matDiff));
+    }
 };

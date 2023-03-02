@@ -28,18 +28,28 @@ cbuffer CB
 {
     uint gMaxRecursion; //Max photon recursion depths
     float gRejection; //Probability that a photon is stored as a light
-    bool gUseAlphaTest;
-    bool gAdjustShadingNormals;
+    uint gFlags; //Flags for the pass. See GenerationFlags enum
     uint gHashSize; //Size is always 2^x
     int gCausticsBounces; //Number of diffuse bounces allowed for caustic photons
     uint gCullingYExtent; //Y-Extend of the hash texture
     float gRayTMin; //TMin for photon ray
+    uint _pad;
 };
 
 cbuffer Light
 {
     EmissiveLightSampler gEmissiveSampler;
 }
+
+enum
+class GenerationFlags // : uint32_t
+{
+    None                = 0x00,
+    AlphaTest           = 0x01,     //Enable Alpha test
+    AdjShadingNormals   = 0x02,     //Adjust the shading normals
+    EnableCaustics      = 0x04,     //Enable caustic photons.
+    DeltaRejection      = 0x08,     //Accept every non delta material as diffuse
+};
 
 struct PhotonInfo {
         float3 flux;
@@ -196,13 +206,14 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
 
     //Adjust shading normals if desired
     
-    if (gAdjustShadingNormals)
+    if (gFlags & (uint) GenerationFlags::AdjShadingNormals)
     {
         adjustShadingNormal(sd, v);
     }
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
+    uint lobes = bsdf.getLobes(sd);
     let bsdfProperties = bsdf.getProperties(sd);
 
     bool valid = bsdf.sample(sd, rayData.sg, bsdfSample, true /*ImportanceSampling*/);
@@ -215,8 +226,11 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.thp *= valid ? bsdfSample.weight : float3(0);
     rayData.packedNormal = encodeNormal2x16(sd.N);
     rayData.direction = bsdfSample.wo;
-    rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
     rayData.isEmissive = luminance(bsdfProperties.emission) > 0;
+    if (gFlags & (uint) GenerationFlags::DeltaRejection)
+        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Reflection) && ((lobes & (uint) LobeType::Delta) == 0);
+    else
+        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 
     
     //if throughput is 0, return
@@ -228,7 +242,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
 [shader("anyhit")]
 void anyHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
 {
-    if (gUseAlphaTest)
+    if (gFlags & (uint) GenerationFlags::AlphaTest)
     {
         // Alpha test for non-opaque geometry.
         GeometryInstanceID instanceID = getGeometryInstanceID();

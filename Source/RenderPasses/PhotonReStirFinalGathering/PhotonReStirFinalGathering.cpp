@@ -285,6 +285,9 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             mFramesCameraStill = 0;
         }
 
+        changed |= widget.checkbox("Generation store non delta",mGenerationDeltaRejection);
+        widget.tooltip("Interpret every non delta reflection as diffuse surface");
+
         changed |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
         widget.tooltip("Sets the tMin value for the photon generation pass");
 
@@ -349,6 +352,10 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
                 changed |= widget.var("Normal Threshold", mNormalThreshold, 0.0f, 1.0f, 0.0001f);
                 widget.tooltip("Maximum cosine of angle between normals. 1 = Exactly the same ; 0 = disabled");
+
+                changed |= widget.var("Material Threshold", mMaterialThreshold, 0.0f, 1.0f, 0.0001f);
+                widget.tooltip("Maximus absolute difference between the Diffuse probabilitys of the surfaces. 1 = Disabled ; 0 = Same surface");
+                
             }
         }
         if ((mResamplingMode & ResamplingMode::Temporal) > 0) {
@@ -811,6 +818,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     nameBuf = "Constant";
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
     var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
+    var[nameBuf]["gDeltaRejection"] = mGenerationDeltaRejection;
 
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();
@@ -879,13 +887,18 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
 
         //Upload constant buffer only if options changed
         if (mReuploadBuffers) {
+            //Fill flags
+            uint flags = 0;
+            if (mPhotonUseAlphaTest) flags |= 0x01;
+            if (mPhotonAdjustShadingNormal) flags |= 0x02;
+            if (mEnableCausticPhotonCollection) flags |= 0x04;
+            if (mGenerationDeltaRejection) flags |= 0x08;
+
             nameBuf = "CB";
             var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
             var[nameBuf]["gRejection"] = mPhotonRejection;
-            var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
-            var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
+            var[nameBuf]["gFlags"] = flags;
             var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
-            var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
             var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
             var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
         }
@@ -1148,6 +1161,7 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gMatThreshold"] = mMaterialThreshold;
         var[uniformName]["gMaskMipLevel"] = mValidNeighborMaskMipLevel;
     }
 
@@ -1212,6 +1226,7 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gMatThreshold"] = mMaterialThreshold;
     }
 
     //Execute
@@ -1278,7 +1293,7 @@ void PhotonReSTIRFinalGathering::spartialResampling(RenderContext* pRenderContex
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
-        var[uniformName]["gVplRadius"] = mPhotonCollectRadius;
+        var[uniformName]["gMatThreshold"] = mMaterialThreshold;
     }
 
     //Execute
@@ -1343,6 +1358,7 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gMatThreshold"] = mMaterialThreshold;
         var[uniformName]["gDisocclusionBoostSamples"] = mDisocclusionBoostSamples;
         var[uniformName]["gVplRadius"] = mPhotonCollectRadius;
     }

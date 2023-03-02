@@ -55,6 +55,8 @@ cbuffer Constant
     uint gMaxAge;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
+    float gMatThreshold;            //Material threshold
+    uint2 _pad;
 }
 
 struct LightSample{
@@ -95,14 +97,6 @@ Surface getSurface(uint2 idx, bool prev)
         surfaceData = gSurface[index2Dto1D(idx, gFrameDim.x)];
     
     return Surface(surfaceData, viewDir);
-}
-
-
-bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
-    float normalCheck = dot(currNormal, neighNormal);
-    float minLinZDiff = currLinZ * gDepthThreshold;
-    float linZDiff = abs(currLinZ - neighLinZ);
-    return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
 bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float sampleDistance){
@@ -178,7 +172,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             continue;
 
         //Test surface similarity and discard if too different
-        if(!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, temporalSurface.normal, temporalSurface.viewDepth))
+        if (!currentSurface.isValidNeighbor(temporalSurface, gDepthThreshold, gNormalThreshold, gMatThreshold))
             continue;
 
         //Valid hit was found

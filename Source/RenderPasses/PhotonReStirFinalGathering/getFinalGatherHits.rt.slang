@@ -30,6 +30,8 @@ cbuffer PerFrame
 cbuffer Constant{
     uint gHashSize;     //Size is always 2^x
     bool gUseAlphaTest; //Alpha test
+    bool gDeltaRejection;   //Accept every non delta surface as diffuse
+    uint _pda;
 }
 
 // Inputs
@@ -186,8 +188,12 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
 
     //Accept all hits but reject if the surface is only specular
     float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
+
     bool diffuseHit = luminance(bsdfProperties.diffuseReflectionAlbedo) > 0;
-    diffuseHit &= luminance(bsdfProperties.emission) <= 0;  //Ignore emissive hits, as they are sampled by ReSTIR
+    if (gDeltaRejection)
+        diffuseHit &= (bsdf.getLobes(sd) & (uint) LobeType::Delta) == 0;    //Do not accept surfaces with delta reflections
+        
+    diffuseHit &= luminance(bsdfProperties.emission) <= 0; //Ignore emissive hits, as they are sampled by ReSTIR
     
     if(diffuseHit){
         rayData.distance = RayTCurrent();
@@ -227,7 +233,10 @@ void rayGen()
 
     BSDFSample bsdfSample;
     //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
-    sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
+    if (gDiffuseOnly)
+        sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
+    else
+        sd.mtl.setActiveLobes((uint) LobeType::Reflection);
     bool valid = bsdf.sample(sd, traceData.sg, bsdfSample, true);
     
     //Fill Surface Buffer used for calculating the target PDF

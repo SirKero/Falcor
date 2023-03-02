@@ -228,6 +228,8 @@ private:
     int                         mMaxCausticBounces = 0;
     float                       mPhotonRayTMin = 0.02f;
 
+    bool                        mGenerationDeltaRejection = true;         //Interpret every non delta surface as diffuse
+
 
     // Collect only
     bool                        mDisableGlobalCollection = false;       ///<Disabled the collection of global photons

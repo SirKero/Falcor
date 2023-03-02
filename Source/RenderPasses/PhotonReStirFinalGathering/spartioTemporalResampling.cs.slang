@@ -57,8 +57,10 @@ cbuffer Constant{
     float gSamplingRadius;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
+    float gMatThreshold;            //Differences between the diffuse probabilities of the materials
     uint gDisocclusionBoostSamples; //Number of spartial samples if no temporal surface was found
     float gVplRadius;               //Vpl radius
+    uint2 _pad;
 }
 
 struct LightSample{
@@ -110,13 +112,6 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     adjustShadingNormal(sd, v);
     
     return sd;
-}
-
-bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ){
-    float normalCheck = dot(currNormal, neighNormal);
-    float minLinZDiff = currLinZ * gDepthThreshold;
-    float linZDiff = abs(currLinZ - neighLinZ);
-    return ( (normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff) );
 }
 
 bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float sampleDistance){
@@ -194,9 +189,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
             continue;
 
         //Test surface similarity and discard if too different
-        if(!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, temporalSurface.normal, temporalSurface.viewDepth))
+        if (!currentSurface.isValidNeighbor(temporalSurface, gDepthThreshold, gNormalThreshold, gMatThreshold))
             continue;
-
+        
         //Valid hit was found
         temporalOffset = offset;
         foundTemporalSurface = true;
@@ -242,7 +237,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
             if(!neighSurface.valid)
                 continue;
         
-            if(!isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, neighSurface.normal, neighSurface.viewDepth))
+            if (!currentSurface.isValidNeighbor(neighSurface, gDepthThreshold, gNormalThreshold, gMatThreshold))
                 continue;
         }
             
