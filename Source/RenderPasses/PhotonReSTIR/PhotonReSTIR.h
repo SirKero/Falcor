@@ -249,6 +249,8 @@ private:
     float mPPM_Alpha = 0.66f;
     uint mFramesCameraStill = 0;
     float mPhotonRayTMin = 0.02f;
+    bool mSkipPhotonGeneration = false;     //Only trace the photons every X iteration
+    uint mSkipPhotonGenerationCount = 10;   //Gap between photon generation counts.
 
     //Runtime
     bool mReset = true;
