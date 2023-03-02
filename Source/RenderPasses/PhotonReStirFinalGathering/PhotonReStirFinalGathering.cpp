@@ -288,6 +288,14 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         changed |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
         widget.tooltip("Sets the tMin value for the photon generation pass");
 
+        widget.checkbox("Skip Photon Geneneration iterations", mSkipPhotonGeneration);
+        widget.tooltip("Trace photons and build the acceleration structure only every X frame. Disables photon culling");
+        if (mSkipPhotonGeneration) {
+            widget.slider("Skip PGen Count", mSkipPhotonGenerationCount, 2u, 60u);
+            widget.tooltip("Number of iterations were the photon generation is skipped");
+        }
+
+
         widget.checkbox("Use SPPM when Camera is still", mUseStatisticProgressivePM);
         widget.tooltip("Uses Statistic Progressive photon mapping to reduce the radius when the camera stays still");
         if (mUseStatisticProgressivePM) {
@@ -316,6 +324,7 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
         changed |= widget.checkbox("Use Photon Culling", mUsePhotonCulling);
         widget.tooltip("Enabled culling of photon based on a hash grid. Photons are only stored on cells that are collected");
+        if (mSkipPhotonGeneration) mUsePhotonCulling = false;   //Disable culling if generation pass is skipped
         if (mUsePhotonCulling) {
             mPhotonCullingRebuildBuffer = widget.var("Culling Size Bytes", mCullingHashBufferSizeBits, 10u, 27u);
             widget.tooltip("Size of the culling buffer (2^x) and effective hash bytes used");
@@ -825,92 +834,96 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
         mpValidNeighborMask->generateMips(pRenderContext);
 }
 
+
 void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE("GeneratePhotons");
-    //Clear Counter
-    pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
-    pRenderContext->clearUAV(mpPhotonAABB[0]->getUAV().get(), uint4(0));
-    pRenderContext->clearUAV(mpPhotonAABB[1]->getUAV().get(), uint4(0));
+    if (!mSkipPhotonGeneration || (mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) == 0))) {
+        //Clear Counter
+        pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
+        pRenderContext->clearUAV(mpPhotonAABB[0]->getUAV().get(), uint4(0));
+        pRenderContext->clearUAV(mpPhotonAABB[1]->getUAV().get(), uint4(0));
 
-    //Defines
-    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
-    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
-    mPhotonGeneratePass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
+        //Defines
+        mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
+        mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
+        mPhotonGeneratePass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
 
-    if (!mPhotonGeneratePass.pVars) {
-        FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
-        FALCOR_ASSERT(mpEmissiveLightSampler);
+        if (!mPhotonGeneratePass.pVars) {
+            FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
+            FALCOR_ASSERT(mpEmissiveLightSampler);
 
-        // Configure program.
-        mPhotonGeneratePass.pProgram->addDefines(mpSampleGenerator->getDefines());
-        mPhotonGeneratePass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
-        mPhotonGeneratePass.pProgram->setTypeConformances(mpScene->getTypeConformances());
-        // Create program variables for the current program.
-        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-        mPhotonGeneratePass.pVars = RtProgramVars::create(mPhotonGeneratePass.pProgram, mPhotonGeneratePass.pBindingTable);
+            // Configure program.
+            mPhotonGeneratePass.pProgram->addDefines(mpSampleGenerator->getDefines());
+            mPhotonGeneratePass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+            mPhotonGeneratePass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+            // Create program variables for the current program.
+            // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+            mPhotonGeneratePass.pVars = RtProgramVars::create(mPhotonGeneratePass.pProgram, mPhotonGeneratePass.pBindingTable);
 
-        // Bind utility classes into shared data.
+            // Bind utility classes into shared data.
+            auto var = mPhotonGeneratePass.pVars->getRootVar();
+            mpSampleGenerator->setShaderData(var);
+        };
+        FALCOR_ASSERT(mPhotonGeneratePass.pVars);
+
         auto var = mPhotonGeneratePass.pVars->getRootVar();
-        mpSampleGenerator->setShaderData(var);
-    };
-    FALCOR_ASSERT(mPhotonGeneratePass.pVars);
 
-    auto var = mPhotonGeneratePass.pVars->getRootVar();
+        // Set constants (uniforms).
+        // 
+        //PerFrame Constant Buffer
+        std::string nameBuf = "PerFrame";
+        var[nameBuf]["gFrameCount"] = mFrameCount;
+        var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
+        var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
 
-    // Set constants (uniforms).
-    // 
-    //PerFrame Constant Buffer
-    std::string nameBuf = "PerFrame";
-    var[nameBuf]["gFrameCount"] = mFrameCount;
-    var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
-    var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
+        //Upload constant buffer only if options changed
+        if (mReuploadBuffers) {
+            nameBuf = "CB";
+            var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
+            var[nameBuf]["gRejection"] = mPhotonRejection;
+            var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
+            var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
+            var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
+            var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
+            var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
+            var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
+        }
 
-    //Upload constant buffer only if options changed
-    if (mReuploadBuffers) {
-        nameBuf = "CB";
-        var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
-        var[nameBuf]["gRejection"] = mPhotonRejection;
-        var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest; 
-        var[nameBuf]["gAdjustShadingNormals"] = mPhotonAdjustShadingNormal;
-        var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
-        var[nameBuf]["gEnableCaustics"] = mEnableCausticPhotonCollection;
-        var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
-        var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+
+        //Set the photon buffers
+        for (uint32_t i = 0; i < 2; i++) {
+            var["gPhotonAABB"][i] = mpPhotonAABB[i];
+            var["gPackedPhotonData"][i] = mpPhotonData[i];
+        }
+        var["gPhotonCounter"] = mpPhotonCounter;
+        var["gPhotonCullingMask"] = mpPhotonCullingMask;
+
+        // Get dimensions of ray dispatch.
+        const uint2 targetDim = uint2(mNumDispatchedPhotons / mPhotonYExtent, mPhotonYExtent);
+        FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+        //Trace the photons
+        mpScene->raytrace(pRenderContext, mPhotonGeneratePass.pProgram.get(), mPhotonGeneratePass.pVars, uint3(targetDim, 1));
+
+        pRenderContext->uavBarrier(mpPhotonCounter.get());
+        pRenderContext->uavBarrier(mpPhotonAABB[0].get());
+        pRenderContext->uavBarrier(mpPhotonData[0].get());
+        pRenderContext->uavBarrier(mpPhotonAABB[1].get());
+        pRenderContext->uavBarrier(mpPhotonData[1].get());
+
+        //Build Acceleration Structure
+        //Create as if not valid
+        if (!mPhotonAS.tlas.pTlas) {
+            mPhotonAS.update = false;
+            createAccelerationStructure(pRenderContext, mPhotonAS, 2, { mNumMaxPhotons[0] , mNumMaxPhotons[1] }, { mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress() });
+        }
+        uint2 currentPhotons = mFrameCount > 0 ? uint2(float2(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
+        uint2 photonBuildSize = uint2(std::min(mNumMaxPhotons[0], currentPhotons[0]), std::min(mNumMaxPhotons[1], currentPhotons[1]));
+        buildAccelerationStructure(pRenderContext, mPhotonAS, { photonBuildSize[0],photonBuildSize[1] });
+
     }
-
-    mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
-
-    //Set the photon buffers
-    for (uint32_t i = 0; i < 2; i++) {
-        var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPackedPhotonData"][i] = mpPhotonData[i];
-    }
-    var["gPhotonCounter"] = mpPhotonCounter;
-    var["gPhotonCullingMask"] = mpPhotonCullingMask;
-
-    // Get dimensions of ray dispatch.
-    const uint2 targetDim = uint2(mNumDispatchedPhotons/mPhotonYExtent, mPhotonYExtent);
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-
-    //Trace the photons
-    mpScene->raytrace(pRenderContext, mPhotonGeneratePass.pProgram.get(), mPhotonGeneratePass.pVars, uint3(targetDim, 1));
-
-    pRenderContext->uavBarrier(mpPhotonCounter.get());
-    pRenderContext->uavBarrier(mpPhotonAABB[0].get());
-    pRenderContext->uavBarrier(mpPhotonData[0].get());
-    pRenderContext->uavBarrier(mpPhotonAABB[1].get());
-    pRenderContext->uavBarrier(mpPhotonData[1].get());
-
-    //Build Acceleration Structure
-    //Create as if not valid
-    if (!mPhotonAS.tlas.pTlas) {
-        mPhotonAS.update = false;
-        createAccelerationStructure(pRenderContext, mPhotonAS, 2, { mNumMaxPhotons[0] , mNumMaxPhotons[1]}, {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()});
-    }
-    uint2 currentPhotons = mFrameCount > 0 ? uint2(float2(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
-    uint2 photonBuildSize = uint2(std::min(mNumMaxPhotons[0], currentPhotons[0]), std::min(mNumMaxPhotons[1], currentPhotons[1]));
-    buildAccelerationStructure(pRenderContext, mPhotonAS, { photonBuildSize[0],photonBuildSize[1]});
 }
 
 void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRenderContext, const RenderData& renderData)
