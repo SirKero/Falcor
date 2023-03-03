@@ -103,6 +103,7 @@ private:
     bool                        mAdjustShadingNormals = true;                                   ///< Adjust shading normals.
     bool                        mComputeDOF = false;                                            ///< Adjust shading normals.
     bool                        mUseDeltaRejection = true;                                      ///< Delta rejection strategy for surfaces
+    bool                        mForceMostProbablePath = true;                                  ///< Trace the most probable path between transmission and reflection
 
      // Runtime data
     uint                        mFrameCount = 0;            ///< Frame count since last Reset

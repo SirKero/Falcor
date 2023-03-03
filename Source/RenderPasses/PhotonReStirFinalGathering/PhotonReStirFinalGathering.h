@@ -246,7 +246,7 @@ private:
     float mNormalThreshold = 0.6f;          //Cosine of maximum angle between both normals allowed
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
-    bool mUseDiffuseOnlyShading = true;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
+    bool mUseDiffuseOnlyShading = false;        //Only uses diffuse shading for ReSTIR. Can be used if VBuffer only contains diffuse hits
     bool mUseReducedReservoirFormat = true;    // Full precision = RGBA32_UINT, Reduced = RG32UINT. TargetPdf and M only uses 16 bits in reduced
     bool mBoostSampleTestVisibility = false;    //Extra visibility test for boosting
 

@@ -68,7 +68,19 @@ namespace
         { "linearDepth",          "gLinDepth",           "Distance from camera to hitpoint",  true /* optional */, ResourceFormat::R32Float    },
         { "mvec",                 "gMVec",    "Motion vector",                    true /* optional */, ResourceFormat::RG32Float   },
         { "normWRoughMat",        "gNormWRoughMat",  "World Normal, Roughness, Material",   true /* optional */, ResourceFormat::RGB10A2Unorm},
-        { "FirstHitLinZ",          "gLinZFirstHit",           "LinZ for the first hit",  true /* optional */, ResourceFormat::RG32Float    }
+        { "FirstHitLinZ",          "gLinZFirstHit",           "LinZ for the first hit",  true /* optional */, ResourceFormat::RG32Float    },
+        { "NRDDiffuseReflectance",          "gNRDDiffuseReflectance",           "Delta Reflection Reflectance",  true /* optional */, ResourceFormat::RGBA16Float    },
+        { "NRDSpecularReflectance",          "gNRDSpecularReflectance",           "Delta Reflection Reflectance",  true /* optional */, ResourceFormat::RGBA16Float    },
+        { "NRDDeltaReflectionReflectance",          "gNRDDeltaReflectionReflectance",           "Delta Reflection Reflectance",  true /* optional */, ResourceFormat::RGBA16Float    },
+        { "NRDDeltaReflectionEmission",          "gNRDDeltaReflectionEmission",           "Delta Reflection Emission",  true /* optional */, ResourceFormat::RGBA32Float    },
+        { "NRDDeltaReflectionNormWRoughMat",          "gNRDDeltaReflectionNormWRoughMat",           "Delta Reflection World Normal, Roughness, Material",  true /* optional */, ResourceFormat::RGB10A2Unorm    },
+        { "NRDDeltaReflectionHitDistance",          "gNRDDeltaReflectionHitDistance",           "Hit Distance (PathLenght - Primary Hit Distance) for a specular hit",  true /* optional */, ResourceFormat::R16Float    },
+        { "NRDDeltaTransmissionReflectance",          "gNRDDeltaTransmissionReflectance",           "Delta Transmission Reflectance",  true /* optional */, ResourceFormat::RGBA16Float    },
+        { "NRDDeltaTransmissionEmission",          "gNRDDeltaTransmissionEmission",           "Delta Transmission Emission",  true /* optional */, ResourceFormat::RGBA32Float    },
+        { "NRDDeltaTransmissionNormWRoughMat",          "gNRDDeltaTransmissionNormWRoughMat",           "Delta Transmission World Normal, Roughness, Material",  true /* optional */, ResourceFormat::RGB10A2Unorm    },
+        { "NRDFirstPosW",          "gNRDFirstPosW",           "PosW for the first hit",  true /* optional */, ResourceFormat::RG32Float    },
+        { "NRDDeltaTransmissionPosW",          "gNRDDeltaTransmissionPosW",           "PosW for the transmission hit",  true /* optional */, ResourceFormat::RGBA32Float    },
+        { "NRDMask",                 "gNRDMask",                 "Info for which part that pass is",         false , ResourceFormat::R8Uint },
     };
 
     // UI variables.
@@ -170,6 +182,7 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
         auto pTex = renderData[channel.name]->asTexture();
         if (pTex) pRenderContext->clearUAV(pTex->getUAV().get(), float4(0.f));
     };
+    //TODO optimize this
     pRenderContext->clearUAV(pVBuff->getUAV().get(), float4(0.f));
     for (const auto& channel : kOutputChannels) clear(channel);
     for (const auto& channel : kExtraOutputChannels) clear(channel);
@@ -199,6 +212,7 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
     // These defines should not modify the program vars. Do not trigger program vars re-creation.
     mTracer.pProgram->addDefines(getValidResourceDefines(kExtraOutputChannels, renderData));    //Valid defines for extra channels
     mTracer.pProgram->addDefine("COMPUTE_DEPTH_OF_FIELD", mComputeDOF ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_NRD", renderData[kExtraOutputChannels[5].name] != nullptr ? "1" : "0");
     // Prepare program vars. This may trigger shader compilation.
     // The program should have all necessary defines set at this point.
 
@@ -219,6 +233,7 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
         var[bufName]["gUseAlphaTest"] = mUseAlphaTest;
         var[bufName]["gUseRandomPixelPosCamera"] = mCameraUseRandomSample;
         var[bufName]["gUseDeltaRejection"] = mUseDeltaRejection;
+        var[bufName]["gForceMostProbablePath"] = mForceMostProbablePath;
     }
 
     // Bind Output Textures. These needs to be done per-frame as the buffers may change anytime.
@@ -306,6 +321,10 @@ void VBufferPM::renderUI(Gui::Widgets& widget)
         mOptionsChanged |= widget.var("SpecRoughCutoff", mSpecRoughCutoff, 0.0f, 1.0f, 0.01f);
         widget.tooltip("The cutoff for Diffuse amd Specular Materials. All Reflections above this threshold are considered diffuse, does not apply to transmissive materials.\n 0 - always take first hit (except for transmissive materials). \n 1 - Only use bsdf lobes");
     }
+
+    mOptionsChanged |= widget.checkbox("Force most probable path", mForceMostProbablePath);
+    widget.tooltip("Takes the most probable path between a delta refraction/reflection");
+
 
     // Sample pattern controls.
     bool updatePattern = widget.dropdown("Sample pattern", kSamplePatternList, (uint32_t&)mSamplePattern);

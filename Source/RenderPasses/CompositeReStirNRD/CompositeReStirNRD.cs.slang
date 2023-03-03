@@ -1,0 +1,80 @@
+/** Composite Pass that blends the ReStirVpl passes together
+*/
+
+cbuffer CB
+{
+    uint2 frameDim;
+    bool gEnableReStir;
+    bool gEnablePhotonReStir;
+    bool gEnableThroughput;
+};
+
+//Inputs
+Texture2D<float4> gPhotonReStirDiffuse;
+Texture2D<float4> gPhotonReStirSpecular;
+Texture2D<float4> gReStirDiffuse;
+Texture2D<float4> gReStirSpecular;
+Texture2D<float4> gThp;
+Texture2D<uint> gNRDMask;
+
+//Output
+RWTexture2D<float4> gNRDDiffuseRadianceHitDistance;
+RWTexture2D<float4> gNRDSpecularRadianceHitDistance;
+RWTexture2D<float4> gNRDDeltaReflectionRadianceHitDistance;
+RWTexture2D<float4> gNRDDeltaTransmissionRadianceHitDistance;
+
+[numthreads(16, 16, 1)]
+void main(uint2 dTid : SV_DispatchThreadID)
+{
+    if (any(dTid >= frameDim))
+        return;
+
+    float3 thp = float(1.f);
+    if(gEnableThroughput)
+        thp = gThp[dTid].xyz;
+       
+    float4 diffuse = float4(0);
+    if(gEnableReStir)
+        diffuse += gPhotonReStirDiffuse[dTid];
+    if (gEnablePhotonReStir)
+    {
+        float4 reStir = gReStirDiffuse[dTid];
+        diffuse.xyz += reStir.xyz;
+        diffuse.w = max(diffuse.w, reStir.w); //Use ReStir hitDistance for now
+    }
+    diffuse.xyz *= thp;
+    
+    float4 specular = float4(0);
+    if (gEnableReStir)
+        specular += gPhotonReStirSpecular[dTid];
+    if (gEnablePhotonReStir)
+    {
+        float4 reStir = gReStirSpecular[dTid];
+        specular.xyz += reStir.xyz;
+        specular.w = max(specular.w, reStir.w); //Use ReStir hitDistance for now
+    }
+    specular.xyz *= thp;
+    
+    uint mask = gNRDMask[dTid];
+
+    gNRDDiffuseRadianceHitDistance[dTid] = mask == 0 ? diffuse : float4(0);
+    gNRDSpecularRadianceHitDistance[dTid] = mask == 0 ? specular : float4(0);
+
+    float4 added = float4(diffuse.xyz, diffuse.w);  //NRD can only filter diffuse for reflections and transmissions
+    if (mask & 0x01)    //Transmission
+    {
+        gNRDDeltaTransmissionRadianceHitDistance[dTid] = added;
+        gNRDDeltaReflectionRadianceHitDistance[dTid] = float4(0);
+    }
+    else if (mask & 0x02)   //Delta Reflection
+    {
+        gNRDDeltaReflectionRadianceHitDistance[dTid] = added;
+        gNRDDeltaTransmissionRadianceHitDistance[dTid] = float4(0);
+    }
+    else //No problems
+    {
+        gNRDDeltaReflectionRadianceHitDistance[dTid] = float4(0);
+        gNRDDeltaTransmissionRadianceHitDistance[dTid] = float4(0);
+
+    }
+}

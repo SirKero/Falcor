@@ -5,12 +5,13 @@ import Scene.Raytracing;
 import Scene.Intersection;
 import Scene.Camera.CameraData;
 import Utils.Math.MathHelpers;
+import Rendering.Materials.Microfacet;
 import Utils.Sampling.SampleGenerator;
 import Utils.Geometry.GeometryHelpers;
 import Scene.Material.ShadingUtils;
 import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
-
+import RenderPasses.Shared.Denoising.NRDHelpers;
 
 
 cbuffer PerFrame
@@ -27,7 +28,8 @@ cbuffer CB
     
     bool gUseRandomPixelPosCamera;  //Uses a randomly generated pixel offset for camera direction sampeling instead of fixed jitter
     bool gUseDeltaRejection;        //Delta rejection
-    uint2 _pad;
+    bool gForceMostProbablePath;    //For delta reflections force the most probable path
+    uint _pad;
 };
 
 // Outputs
@@ -42,16 +44,33 @@ RWTexture2D<float2> gMVec;
 RWTexture2D<float4> gNormWRoughMat;
 RWTexture2D<float2> gLinZFirstHit;
 
+//NRD
+RWTexture2D<float4> gNRDDiffuseReflectance;
+RWTexture2D<float4> gNRDSpecularReflectance;
+RWTexture2D<float4> gNRDDeltaReflectionReflectance;
+RWTexture2D<float4> gNRDDeltaReflectionEmission;
+RWTexture2D<float4> gNRDDeltaReflectionNormWRoughMat;
+RWTexture2D<float> gNRDDeltaReflectionHitDistance;
+RWTexture2D<float4> gNRDDeltaTransmissionReflectance;
+RWTexture2D<float4> gNRDDeltaTransmissionEmission;
+RWTexture2D<float4> gNRDDeltaTransmissionNormWRoughMat;
+RWTexture2D<float4> gNRDFirstPosW;
+RWTexture2D<float4> gNRDDeltaTransmissionPosW;
+RWTexture2D<uint> gNRDMask;
+
+
 #define is_valid(name) (is_valid_##name != 0)
 
 static const bool kComputeDepthOfField = COMPUTE_DEPTH_OF_FIELD;
+static const bool kUseNRD = USE_NRD; 
+static const float kNRDMinReflectance = 0.04f;
 
 /** Payload for scatter ray (64B).
 */
 struct RayData
 {
     float3 thp; ///< Current path throughput. This is updated at each path vertex.
-    bool terminated; ///< Set to true when path is terminated.
+    uint flags; ///< Set to true when path is terminated.Top 16 bits are used for first hit distance
     float3 origin; ///< Next path segment origin.
     uint pathLength; ///<Length of the path
     float3 direction; ///< Next path segment direction.
@@ -63,13 +82,22 @@ struct RayData
     */
     __init(SampleGenerator sg){
         this.thp = float3(1.0);
-        this.terminated = false; 
+        this.flags = 0; 
         this.origin = float3(0); 
         this.distance = 0.f; 
         this.direction = float3(0); 
         this.pathLength = 0;
         this.sg = sg;
     }
+};
+
+enum
+class Flags //:uint32_t
+{
+    Terminated = 0x01,
+    Transmissive = 0x02,
+    Reflection = 0x04,
+    NDR = 0x06,
 };
 
 /** Computes a camera ray for a given pixel assuming a thin-lens camera model with a random instead of a fixed jitter. Based on computeRandomRayThinlens()
@@ -105,7 +133,7 @@ Ray cameraComputeRandomRayThinlens(uint2 pixel, uint2 frameDim, float2 u , float
     return ray;
 }
 
-void writeHit(const in uint2 pixel, const in float3 rayDir,const in float3 thp, const in float3 emissive , const in float3 normal, const in float roughness, const in HitInfo hit,const in float linZ )
+void writeHit(const in uint2 pixel, const in float3 rayDir,const in float3 thp, const float3 emissive , const in HitInfo hit,const in float linZ )
 {
     gVBuffer[pixel] = hit.getData();
     gViewWorld[pixel] = float4(rayDir, 1);
@@ -114,13 +142,45 @@ void writeHit(const in uint2 pixel, const in float3 rayDir,const in float3 thp, 
 
     //If depth in valid write it
     if (is_valid(gLinDepth)) gLinDepth[pixel] = linZ;
+}
+
+void writeDirectMaterialInfo(const in uint2 pixel, const in float3 normal, const in float roughness)
+{
     if (is_valid(gNormWRoughMat))
     {
         float2 octNormal = ndir_to_oct_unorm(normal);
         float materialID = 0.f;
         gNormWRoughMat[pixel] = float4(octNormal, roughness, materialID);
     }
+}
 
+void writeNRDDeltaReflectionHit(const in uint2 pixel, const in float hitDistance, const in float3 deltaReflectance, const float3 emission, const in float3 normal, const in float roughness)
+{
+    float3 reflectance = max(kNRDMinReflectance, deltaReflectance);
+    float2 octNormal = ndir_to_oct_unorm(normal);
+    float clampedRougness = roughness < 0.08f ? 0.0f : roughness;   //Clap roughness so it is representative of what is used in renderer
+    float materialID = 0.f;
+    
+    gNRDDeltaReflectionReflectance[pixel] = float4(reflectance, 0.f);
+    gNRDDeltaReflectionEmission[pixel] = float4(emission, 0.f);
+    gNRDDeltaReflectionNormWRoughMat[pixel] = float4(octNormal, clampedRougness, materialID);
+    gNRDDeltaReflectionHitDistance[pixel] = hitDistance;
+    gNRDMask[pixel] = 0x02;
+
+}
+
+void writeNRDDeltaTransmissionHit(const in uint2 pixel, const in float3 posW, const in float3 deltaReflectance, const float3 emission, const in float3 normal, const in float roughness)
+{
+    float3 reflectance = max(kNRDMinReflectance, deltaReflectance);
+    float2 octNormal = ndir_to_oct_unorm(normal);
+    float clampedRougness = roughness < 0.08f ? 0.0f : roughness; //Clap roughness so it is representative of what is used in renderer
+    float materialID = 0.f;
+
+    gNRDDeltaTransmissionReflectance[pixel] = float4(reflectance, 0.f);
+    gNRDDeltaTransmissionEmission[pixel] = float4(emission, 0.f);
+    gNRDDeltaTransmissionNormWRoughMat[pixel] = float4(octNormal, clampedRougness, materialID);
+    gNRDDeltaTransmissionPosW[pixel] = float4(posW, 0.f);
+    gNRDMask[pixel] = 0x01;
 }
 
 void writeMiss(uint2 pixel)
@@ -138,7 +198,7 @@ void writeMiss(uint2 pixel)
 void miss(inout RayData rayData : SV_RayPayload)
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
-    rayData.terminated = true;
+    rayData.flags |= (uint) Flags::Terminated;
     writeMiss(launchIndex);
 }
 
@@ -209,6 +269,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayData.direction, lod);
+    rayData.distance += distance(ObjectRayOrigin(), sd.posW); //accumulate ray distance
     
     //Calc Motion Vector if it is valid on first valid hit
     if(is_valid(gMVec) && rayData.pathLength == 0 && !gUseRandomPixelPosCamera){
@@ -222,9 +283,10 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         gMVec[launchIndex] = motionVec;
     }
 
-    //Calc linZ for the first hit
-    if (is_valid(gLinZFirstHit) && rayData.pathLength == 0 && !gUseRandomPixelPosCamera)
+    
+    if (is_valid(gLinZFirstHit) && rayData.pathLength == 0)
     {
+        
         float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
         float curLinearZ = curPosH.w;
 
@@ -236,21 +298,30 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         float ddxLinearZ = abs(curPosH_dx.w - curLinearZ);
         float ddyLinearZ = abs(curPosH_dy.w - curLinearZ);
         float dLinearZ = max(ddxLinearZ, ddyLinearZ);
-        gLinZFirstHit[launchIndex] = float2(curLinearZ, dLinearZ);
-    }
         
+        gLinZFirstHit[launchIndex] = float2(curLinearZ, dLinearZ); //Expects float2; Difference is ignored though
+        //rayData.distance = curLinearZ;
+        
+        //gLinZFirstHit[launchIndex] = float2(rayData.distance, 0); //Expects float2; Difference is ignored though
+    }
+
+    //Calc linZ for the first hit
+    if (rayData.pathLength == 0)
+        rayData.flags |= f32tof16(rayData.distance) << 16;
+            
     if (gAdjustShadingNormals)
     {
         adjustShadingNormal(sd, v);
     }
     
     float3 thpStart = rayData.thp;
-    rayData.distance += distance(ObjectRayOrigin(), sd.posW);   //accumulate ray distance
+    
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
 
     uint lobes = bsdf.getLobes(sd);
+    
     //get material properties
     let bsdfProperties = bsdf.getProperties(sd);
 
@@ -261,35 +332,103 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     float rnd = sampleNext1D(rayData.sg);
     bool isDiffuse = true;
+    
     if (gUseDeltaRejection){ //Reject everything that is not delta
         isDiffuse = (pDiffuseRef > 0) && ((lobes & (uint) LobeType::Delta) == 0);
     }else{ //Spec roughness rejection
             isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
             isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
         }
-        
-    //Stop if material is emissive
-        isDiffuse |= luminance(bsdfProperties.emission) > 0;
-    
-        bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
 
-        rayData.pathLength++;
-    //store hit if lobe is diffuse
-    //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
-        if (isDiffuse || (!valid && (pReflection > 0)))
+   
+    // For glass in reflections, force guide paths to always follow transmission/reflection based on albedos.
+    // This is pretty hacky but works best our of the possible options.
+    // Stable guide buffers are a necessity.
+    bool isTracedFurther = !isDiffuse;
+    if (isTracedFurther && gForceMostProbablePath)
+    {
+        if (bsdfProperties.isTransmissive && all(bsdfProperties.specularReflectionAlbedo <= bsdfProperties.specularTransmissionAlbedo))
         {
-            writeHit(launchIndex, -WorldRayDirection(), thpStart, bsdfProperties.emission, sd.N, bsdfProperties.roughness, HitInfo(triangleHit), rayData.distance);
-        
-            rayData.terminated = true;
-            return;
+            sd.mtl.setActiveLobes((uint) LobeType::Transmission);
         }
-
-        if (!valid)
+        else
         {
-            rayData.distance = -1.f;
-            rayData.terminated = true;
+            sd.mtl.setActiveLobes((uint) LobeType::Reflection);
         }
     }
+        
+    //Stop if material is emissive
+    isDiffuse |= luminance(bsdfProperties.emission) > 0;
+    
+    bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
+
+    //Write to FirstposW if it is a transmissive sample
+    if (is_valid(gNRDFirstPosW) && rayData.pathLength == 0 && bsdfSample.isLobe(LobeType::Transmission))
+    {
+        gNRDFirstPosW[launchIndex] = float4(sd.posW, 0.f);
+    }
+    
+    rayData.pathLength++;
+    //store hit if lobe is diffuse
+    //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
+    if (isDiffuse || (!valid && (pReflection > 0)))
+    {
+        bool ndrHit = (rayData.flags & (uint) Flags::NDR) && kUseNRD;
+        writeHit(launchIndex, -WorldRayDirection(), thpStart, ndrHit ? float3(0) : bsdfProperties.emission, HitInfo(triangleHit), rayData.distance);
+        if(rayData.pathLength == 0)
+            writeDirectMaterialInfo(launchIndex,sd.N, bsdfProperties.roughness);
+
+        //Reflectance
+        if (is_valid(gNRDDiffuseReflectance))
+        {
+            gNRDDiffuseReflectance[launchIndex] = float4(max(kNRDMinReflectance, bsdfProperties.diffuseReflectionAlbedo), 0);
+
+        }
+        if (is_valid(gNRDSpecularReflectance))
+        {
+            float NdotV = saturate(dot(sd.N, sd.V));
+            float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
+            float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
+            gNRDSpecularReflectance[launchIndex] = float4(max(kNRDMinReflectance, specularReflectance), 0);
+        }
+        
+        if (ndrHit)
+        {
+            const MaterialType materialType = sd.mtl.getMaterialType();
+            bool hasDeltaLobes = (lobes & (uint) LobeType::Delta) > 0;
+            float3 reflectance = getMaterialReflectanceForDeltaPaths(materialType, hasDeltaLobes, sd, bsdfProperties);
+            
+            if (rayData.flags & (uint) Flags::Transmissive)
+            {
+                writeNRDDeltaTransmissionHit(launchIndex, sd.posW, reflectance, bsdfProperties.emission, sd.N, bsdfProperties.roughness);
+            }
+            else if (rayData.flags & (uint) Flags::Reflection)
+            {
+                float firstHitDistance = f16tof32((rayData.flags >> 16) & 0xFFFF);
+                float hitDistance = rayData.distance - firstHitDistance;
+                writeNRDDeltaReflectionHit(launchIndex, hitDistance, reflectance, bsdfProperties.emission, sd.N, bsdfProperties.roughness);
+            }
+        }
+       
+        rayData.flags |= (uint) Flags::Terminated;
+        return;
+    }
+
+    //Set flags
+    if (gUseDeltaRejection)
+    {
+        if (bsdfSample.isLobe(LobeType::Transmission))
+            rayData.flags |= (uint) Flags::Transmissive;
+        else
+            rayData.flags |= (uint) Flags::Reflection;
+    }
+        
+    
+    if (!valid){
+        rayData.distance = -1.f;
+        rayData.flags |= (uint) Flags::Terminated;
+    }
+}
 
 [shader("raygeneration")]
 void rayGen()
@@ -323,7 +462,7 @@ void rayGen()
         TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         //If ray is invalid return
-        if (rayData.terminated){
+        if (rayData.flags & (uint) Flags::Terminated){
             if(rayData.distance < 0)
                 writeMiss(launchIndex);
             break;
@@ -334,7 +473,7 @@ void rayGen()
         ray.Origin = rayData.origin;
         ray.Direction = rayData.direction;
         if(i==0){
-            ray.TMin = 0;    //Change tMin for transparent hits
+            ray.TMin = 0.001;    //Change tMin for transparent hits
         }
     }
 }
