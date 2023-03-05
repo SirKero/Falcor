@@ -170,11 +170,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
 #endif
     }
     
-    float3 colorCaustics = float3(0);
     if (gEnableCaustics)
-        colorCaustics = gCausticPhotons[dTid].xyz;
+        diffuse += gCausticPhotons[dTid].xyz; //Add to diffuse for it to work with NDR
     
-    float3 outColor = diffuse + specular + colorCaustics;
+    float3 outColor = diffuse + specular;
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;
