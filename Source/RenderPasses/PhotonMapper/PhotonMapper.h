@@ -225,7 +225,7 @@ private:
     bool                        mAccelerationStructureFastBuild = true;    ///< Build mode for acceleration structure
     bool                        mAccelerationStructureFastBuildUI = mAccelerationStructureFastBuild;
 
-    int                         mMaxCausticBounces = 0;
+    int                         mMaxCausticBounces = mMaxBounces;
     float                       mPhotonRayTMin = 0.02f;
 
     bool                        mGenerationDeltaRejection = true;         //Interpret every non delta surface as diffuse

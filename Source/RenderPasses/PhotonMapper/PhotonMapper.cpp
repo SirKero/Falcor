@@ -356,6 +356,9 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
     dirty |= widget.checkbox("Generation store non delta", mGenerationDeltaRejection);
     widget.tooltip("Interpret every non delta reflection as diffuse surface");
 
+    dirty |= widget.slider("Max Caustic Bounces", mMaxCausticBounces, 0, 32);
+    widget.tooltip("Diffuse bounces where a caustic still counts as caustic");
+
     dirty |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
     widget.tooltip("Sets the tMin value for the photon generation pass");
     widget.dummy("", dummySpacing);

@@ -36,6 +36,8 @@ def render_graph_g():
     g.addEdge('VBufferPM.throughput', 'CompositeReStirVpl.Throughput')
     g.addEdge('CompositeReStirVpl.Out', 'AccumulatePass.input')
     g.markOutput('ToneMapper.dst')
+    g.markOutput('AccumulatePass.output')
+    
     return g
 
 g = render_graph_g()

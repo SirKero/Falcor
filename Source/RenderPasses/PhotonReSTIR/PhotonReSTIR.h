@@ -239,12 +239,12 @@ private:
     bool mUsePdfSampling = false;
     //Caustics settings
     float mASBuildBufferPhotonOverestimate = 1.15f;
-    bool mCausticUseTemporalFilter = true;
+    bool mCausticUseTemporalFilter = false;
     uint mCausticTemporalFilterMaxHistory = 60;
     float mCausticCollectionRadiusStart = 0.005f;                   //Caustic Photon Collect radius
     float mCausticCollectRadius = mCausticCollectionRadiusStart;     //Radius for collection
     bool mEnableCausticPhotonCollection = true;
-    int mMaxCausticBounces = 0;
+    int mMaxCausticBounces = 10;
     bool mUseStatisticProgressivePM = true;
     float mPPM_Alpha = 0.66f;
     uint mFramesCameraStill = 0;

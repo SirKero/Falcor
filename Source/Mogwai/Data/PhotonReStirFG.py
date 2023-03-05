@@ -42,6 +42,8 @@ def render_graph_FGReSTIR():
     g.addEdge('VBufferPM.linearDepth', 'PhotonReSTIRFinalGathering.RayDepth')
     g.addEdge('PhotonReSTIRFinalGathering.color', 'CompositeReStirVpl.ReStirVpl')
     g.markOutput('ToneMapper.dst')
+    g.markOutput('AccumulatePass.output')
+    
     return g
 
 FGReSTIR = render_graph_FGReSTIR()

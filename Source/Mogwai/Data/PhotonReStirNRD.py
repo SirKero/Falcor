@@ -83,6 +83,7 @@ def render_graph_PhotonReStirFGNRD():
     g.addEdge('VBufferPM.NRDDeltaTransmissionReflectance', 'ModulateIllumination.deltaTransmissionReflectance')
     g.addEdge('AccumulatePass.output', 'ToneMapper.src')
     g.markOutput('ToneMapper.dst')
+    g.markOutput('AccumulatePass.output')
     return g
 
 PhotonReStirFGNRD = render_graph_PhotonReStirFGNRD()

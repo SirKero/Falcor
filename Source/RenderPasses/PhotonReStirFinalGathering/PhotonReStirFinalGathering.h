@@ -269,10 +269,10 @@ private:
     bool mPhotonUseAlphaTest = true;
     bool mPhotonAdjustShadingNormal = true;
     bool mAllowFinalGatherPointsInRadius = true;
-    bool mCausticUseTemporalFilter = true;
+    bool mCausticUseTemporalFilter = false;
     uint mCausticTemporalFilterMaxHistory = 60;
     bool mEnableCausticPhotonCollection = true;
-    int mMaxCausticBounces = 0;
+    int mMaxCausticBounces = 10;
     bool mUseStatisticProgressivePM = true;
     bool mUseStatisticProgressivePMGlobal = false;
     float mPPM_Alpha = 0.66f;
