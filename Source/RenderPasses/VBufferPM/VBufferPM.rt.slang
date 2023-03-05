@@ -360,7 +360,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     // This is pretty hacky but works best our of the possible options.
     // Stable guide buffers are a necessity.
     bool isTracedFurther = !isDiffuse;
-    if (isTracedFurther && gForceMostProbablePath)
+    if (rayData.pathLength == 0 && isTracedFurther && gForceMostProbablePath)
     {
         if (bsdfProperties.isTransmissive && all(bsdfProperties.specularReflectionAlbedo <= bsdfProperties.specularTransmissionAlbedo))
         {
@@ -400,15 +400,15 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         gNRDFirstPosW[launchIndex] = float4(sd.posW, 0.f);
     }
     
-    rayData.pathLength++;
+    if (rayData.pathLength == 0 && is_valid(gNormWRoughMat))
+        writeDirectMaterialInfo(launchIndex, sd.N, bsdfProperties.roughness);
+    
     //store hit if lobe is diffuse
     //if ((bsdfSample.isLobe(LobeType::DiffuseReflection) || (bsdfSample.isLobe(LobeType::Reflection) && isDiffuse)) && (!rayData.terminated || isDiffuse))
-    if (isDiffuse || (!valid && (pReflection > 0)))
+    if (isDiffuse)
     {
         bool ndrHit = (rayData.flags & (uint) Flags::NDR) && kUseNRD;
         writeHit(launchIndex, -WorldRayDirection(), thpStart, ndrHit ? float3(0) : bsdfProperties.emission, HitInfo(triangleHit), rayData.distance);
-        if(rayData.pathLength == 0)
-            writeDirectMaterialInfo(launchIndex,sd.N, bsdfProperties.roughness);
 
         if (kUseNRD && !ndrHit)
         {
@@ -444,7 +444,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     }
         
     //Set flags
-    if (gUseDeltaRejection)
+    if (gUseDeltaRejection && rayData.pathLength == 0)
     {
         if (bsdfSample.isLobe(LobeType::Transmission))
             rayData.flags |= (uint) Flags::Transmissive;
@@ -453,7 +453,8 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         else
             rayData.flags |= (uint) Flags::NonDeltaReflection;
     }
-        
+
+    rayData.pathLength++;
     
     if (!valid && !isDiffuse){
         rayData.distance = -1.f;
