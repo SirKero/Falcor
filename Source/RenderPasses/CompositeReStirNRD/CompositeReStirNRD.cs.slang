@@ -34,9 +34,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
         thp = gThp[dTid].xyz;
        
     float4 diffuse = float4(0);
-    if(gEnableReStir)
-        diffuse += gPhotonReStirDiffuse[dTid];
     if (gEnablePhotonReStir)
+        diffuse += gPhotonReStirDiffuse[dTid];
+    if (gEnableReStir)
     {
         float4 reStir = gReStirDiffuse[dTid];
         diffuse.xyz += reStir.xyz;
@@ -49,9 +49,9 @@ void main(uint2 dTid : SV_DispatchThreadID)
         diffuse = float4(0);
     
     float4 specular = float4(0);
-    if (gEnableReStir)
-        specular += gPhotonReStirSpecular[dTid];
     if (gEnablePhotonReStir)
+        specular += gPhotonReStirSpecular[dTid];
+    if (gEnableReStir)
     {
         float4 reStir = gReStirSpecular[dTid];
         specular.xyz += reStir.xyz;
