@@ -100,7 +100,7 @@ class Flags //:uint32_t
     NonDeltaReflection = 0x08,
     Reflection = 0x0C,
     NDR = 0x0E,
-    Miss = 0x10,
+    Miss = 0x20,
 };
 
 /** Computes a camera ray for a given pixel assuming a thin-lens camera model with a random instead of a fixed jitter. Based on computeRandomRayThinlens()
@@ -202,10 +202,14 @@ void writeMiss(uint2 pixel, bool miss = false)
         if (is_valid(gMVec)) gMVec[pixel] = { };
         if (is_valid(gNRDDiffuseReflectance)) gNRDDiffuseReflectance[pixel] = { };
         if (is_valid(gNRDSpecularReflectance)) gNRDSpecularReflectance[pixel] = { };
+        if (is_valid(gNRDDeltaReflectionReflectance)) gNRDDeltaReflectionReflectance[pixel] = {   };
+        if (is_valid(gNRDDeltaTransmissionReflectance))   gNRDDeltaTransmissionReflectance[pixel] = {   };
+        if (is_valid(gNRDDeltaReflectionHitDistance)) gNRDDeltaReflectionHitDistance[pixel] = 1.f;
+        if (is_valid(gNRDDeltaReflectionNormWRoughMat)) gNRDDeltaReflectionNormWRoughMat[pixel] = {  };
+        
+        
+        if (is_valid(gNRDMask))  gNRDMask[pixel] = 0x00;
     }
-    if (is_valid(gNRDDeltaReflectionReflectance)) gNRDDeltaReflectionReflectance[pixel] = {  };
-    if (is_valid(gNRDDeltaTransmissionReflectance)) gNRDDeltaTransmissionReflectance[pixel] = { };
-    if (is_valid(gNRDMask)) gNRDMask[pixel] = 0x00;
 }
 
 //TODO: Add other miss colors, as throughput then has to be respected
@@ -414,6 +418,8 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         {
             gNRDDeltaReflectionReflectance[launchIndex] = {  };
             gNRDDeltaTransmissionReflectance[launchIndex] = {  };
+            gNRDDeltaReflectionEmission[launchIndex] = { };
+            gNRDDeltaTransmissionEmission[launchIndex] = { };
             gNRDMask[launchIndex] = 0x00;
         }
         
@@ -430,7 +436,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
             else if (rayData.flags & (uint) Flags::DeltaReflection)
             {
                 float firstHitDistance = f16tof32((rayData.flags >> 16) & 0xFFFF);
-                float hitDistance = rayData.distance - firstHitDistance;
+                float hitDistance = max(FLT_MIN, rayData.distance - firstHitDistance);
                 writeNRDDeltaReflectionHit(launchIndex, hitDistance, reflectance, bsdfProperties.emission, sd.N, bsdfProperties.roughness);
             }
             else
@@ -448,7 +454,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     {
         if (bsdfSample.isLobe(LobeType::Transmission))
             rayData.flags |= (uint) Flags::Transmissive;
-        else if (bsdfSample.isLobe(LobeType::DeltaReflection))
+        else if (bsdfSample.isLobe(LobeType::Reflection) && ((lobes & (uint) LobeType::Delta) > 0))
             rayData.flags |= (uint) Flags::DeltaReflection;
         else
             rayData.flags |= (uint) Flags::NonDeltaReflection;
