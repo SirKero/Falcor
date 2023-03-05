@@ -96,8 +96,11 @@ class Flags //:uint32_t
 {
     Terminated = 0x01,
     Transmissive = 0x02,
-    Reflection = 0x04,
-    NDR = 0x06,
+    DeltaReflection = 0x04,
+    NonDeltaReflection = 0x08,
+    Reflection = 0x0C,
+    NDR = 0x0E,
+    Miss = 0x10,
 };
 
 /** Computes a camera ray for a given pixel assuming a thin-lens camera model with a random instead of a fixed jitter. Based on computeRandomRayThinlens()
@@ -160,14 +163,15 @@ void writeNRDDeltaReflectionHit(const in uint2 pixel, const in float hitDistance
     float2 octNormal = ndir_to_oct_unorm(normal);
     float clampedRougness = roughness < 0.08f ? 0.0f : roughness;   //Clap roughness so it is representative of what is used in renderer
     float materialID = 0.f;
-    
+
+    gNRDDeltaTransmissionReflectance[pixel] = {};
     gNRDDeltaReflectionReflectance[pixel] = float4(reflectance, 0.f);
     gNRDDeltaReflectionEmission[pixel] = float4(emission, 0.f);
     gNRDDeltaReflectionNormWRoughMat[pixel] = float4(octNormal, clampedRougness, materialID);
     gNRDDeltaReflectionHitDistance[pixel] = hitDistance;
     gNRDMask[pixel] = 0x02;
 
-}
+    }
 
 void writeNRDDeltaTransmissionHit(const in uint2 pixel, const in float3 posW, const in float3 deltaReflectance, const float3 emission, const in float3 normal, const in float roughness)
 {
@@ -176,6 +180,7 @@ void writeNRDDeltaTransmissionHit(const in uint2 pixel, const in float3 posW, co
     float clampedRougness = roughness < 0.08f ? 0.0f : roughness; //Clap roughness so it is representative of what is used in renderer
     float materialID = 0.f;
 
+    gNRDDeltaReflectionReflectance[pixel] = {};
     gNRDDeltaTransmissionReflectance[pixel] = float4(reflectance, 0.f);
     gNRDDeltaTransmissionEmission[pixel] = float4(emission, 0.f);
     gNRDDeltaTransmissionNormWRoughMat[pixel] = float4(octNormal, clampedRougness, materialID);
@@ -183,23 +188,34 @@ void writeNRDDeltaTransmissionHit(const in uint2 pixel, const in float3 posW, co
     gNRDMask[pixel] = 0x01;
 }
 
-void writeMiss(uint2 pixel)
+void writeMiss(uint2 pixel, bool miss = false)
 {
     gVBuffer[pixel] = { };
-
+    gThp[pixel] = { };
+    gEmissive[pixel] = { };
     if (is_valid(gLinDepth)) gLinDepth[pixel] = 0.f;
-    if (is_valid(gMVec)) gMVec[pixel] = { };
     if (is_valid(gNormWRoughMat)) gNormWRoughMat[pixel] = { };
-    
+
+    if (miss)
+    {
+        if (is_valid(gLinZFirstHit)) gLinZFirstHit[pixel] = {  };
+        if (is_valid(gMVec)) gMVec[pixel] = { };
+        if (is_valid(gNRDDiffuseReflectance)) gNRDDiffuseReflectance[pixel] = { };
+        if (is_valid(gNRDSpecularReflectance)) gNRDSpecularReflectance[pixel] = { };
+    }
+    if (is_valid(gNRDDeltaReflectionReflectance)) gNRDDeltaReflectionReflectance[pixel] = {  };
+    if (is_valid(gNRDDeltaTransmissionReflectance)) gNRDDeltaTransmissionReflectance[pixel] = { };
+    if (is_valid(gNRDMask)) gNRDMask[pixel] = 0x00;
 }
 
 //TODO: Add other miss colors, as throughput then has to be respected
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
 {
-    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 pixel = DispatchRaysIndex().xy;
     rayData.flags |= (uint) Flags::Terminated;
-    writeMiss(launchIndex);
+    rayData.flags |= (uint) Flags::Miss;
+    rayData.distance = -1.f;
 }
 
 //add anyHit shader for alpha test
@@ -269,12 +285,14 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayData.direction, lod);
-    rayData.distance += distance(ObjectRayOrigin(), sd.posW); //accumulate ray distance
+
+    if(rayData.pathLength > 0)
+        rayData.distance += distance(ObjectRayOrigin(), sd.posW); //accumulate ray distance
     
     //Calc Motion Vector if it is valid on first valid hit
     if(is_valid(gMVec) && rayData.pathLength == 0 && !gUseRandomPixelPosCamera){
         float3 prevPosW = gScene.getPrevPosW(triangleHit);
-        float2 pixelPos = DispatchRaysIndex().xy + float2(0.5f, 0.5f);
+        float2 pixelPos = float2(launchIndex) + float2(0.5f, 0.5f);
         float4 prevPosH = mul(float4(prevPosW, 1.f), gScene.camera.data.prevViewProjMatNoJitter);
         float2 motionVec = calcMotionVector(pixelPos, prevPosH, DispatchRaysDimensions().xy);
         // Remove camera jitter from motion vector 
@@ -284,30 +302,27 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     }
 
     
-    if (is_valid(gLinZFirstHit) && rayData.pathLength == 0)
+    if (rayData.pathLength == 0)
     {
-        
         float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
         float curLinearZ = curPosH.w;
-
-        //Derevative
-        float3 ddxPosW = computeDdxPosW(sd.posW, sd.faceN, invFrameDim);
-        float3 ddyPosW = computeDdyPosW(sd.posW, sd.faceN, invFrameDim);
-        float4 curPosH_dx = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
-        float4 curPosH_dy = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
-        float ddxLinearZ = abs(curPosH_dx.w - curLinearZ);
-        float ddyLinearZ = abs(curPosH_dy.w - curLinearZ);
-        float dLinearZ = max(ddxLinearZ, ddyLinearZ);
-        
-        gLinZFirstHit[launchIndex] = float2(curLinearZ, dLinearZ); //Expects float2; Difference is ignored though
-        //rayData.distance = curLinearZ;
-        
-        //gLinZFirstHit[launchIndex] = float2(rayData.distance, 0); //Expects float2; Difference is ignored though
-    }
-
-    //Calc linZ for the first hit
-    if (rayData.pathLength == 0)
+        rayData.distance = curLinearZ;
+        //Calc linZ for the first hit
         rayData.flags |= f32tof16(rayData.distance) << 16;
+        if (is_valid(gLinZFirstHit))
+        {
+            //Derevative
+            float3 ddxPosW = computeDdxPosW(sd.posW, sd.faceN, invFrameDim);
+            float3 ddyPosW = computeDdyPosW(sd.posW, sd.faceN, invFrameDim);
+            float4 curPosH_dx = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+            float4 curPosH_dy = mul(float4(sd.posW + ddxPosW, 1.f), gScene.camera.data.viewProjMatNoJitter);
+            float ddxLinearZ = abs(curPosH_dx.w - curLinearZ);
+            float ddyLinearZ = abs(curPosH_dy.w - curLinearZ);
+            float dLinearZ = max(ddxLinearZ, ddyLinearZ);
+        
+            gLinZFirstHit[launchIndex] = float2(curLinearZ, dLinearZ);
+        }
+    }
             
     if (gAdjustShadingNormals)
     {
@@ -336,9 +351,9 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     if (gUseDeltaRejection){ //Reject everything that is not delta
         isDiffuse = (pDiffuseRef > 0) && ((lobes & (uint) LobeType::Delta) == 0);
     }else{ //Spec roughness rejection
-            isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
-            isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
-        }
+        isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
+        isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
+    }
 
    
     // For glass in reflections, force guide paths to always follow transmission/reflection based on albedos.
@@ -359,6 +374,23 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         
     //Stop if material is emissive
     isDiffuse |= luminance(bsdfProperties.emission) > 0;
+
+    //Reflectance
+    if (kUseNRD && rayData.pathLength == 0)
+    {
+        if (is_valid(gNRDDiffuseReflectance))
+        {
+            gNRDDiffuseReflectance[launchIndex] = float4(max(kNRDMinReflectance, bsdfProperties.diffuseReflectionAlbedo), 0);
+        }
+        if (is_valid(gNRDSpecularReflectance))
+        {
+            float NdotV = saturate(dot(sd.N, sd.V));
+            float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
+            float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
+            gNRDSpecularReflectance[launchIndex] = float4(max(kNRDMinReflectance, specularReflectance), 0);
+        }
+    }
+    
     
     bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
 
@@ -378,18 +410,11 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         if(rayData.pathLength == 0)
             writeDirectMaterialInfo(launchIndex,sd.N, bsdfProperties.roughness);
 
-        //Reflectance
-        if (is_valid(gNRDDiffuseReflectance))
+        if (kUseNRD && !ndrHit)
         {
-            gNRDDiffuseReflectance[launchIndex] = float4(max(kNRDMinReflectance, bsdfProperties.diffuseReflectionAlbedo), 0);
-
-        }
-        if (is_valid(gNRDSpecularReflectance))
-        {
-            float NdotV = saturate(dot(sd.N, sd.V));
-            float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
-            float3 specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectance, ggxAlpha, NdotV);
-            gNRDSpecularReflectance[launchIndex] = float4(max(kNRDMinReflectance, specularReflectance), 0);
+            gNRDDeltaReflectionReflectance[launchIndex] = {  };
+            gNRDDeltaTransmissionReflectance[launchIndex] = {  };
+            gNRDMask[launchIndex] = 0x00;
         }
         
         if (ndrHit)
@@ -402,29 +427,35 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
             {
                 writeNRDDeltaTransmissionHit(launchIndex, sd.posW, reflectance, bsdfProperties.emission, sd.N, bsdfProperties.roughness);
             }
-            else if (rayData.flags & (uint) Flags::Reflection)
+            else if (rayData.flags & (uint) Flags::DeltaReflection)
             {
                 float firstHitDistance = f16tof32((rayData.flags >> 16) & 0xFFFF);
                 float hitDistance = rayData.distance - firstHitDistance;
                 writeNRDDeltaReflectionHit(launchIndex, hitDistance, reflectance, bsdfProperties.emission, sd.N, bsdfProperties.roughness);
             }
+            else
+            {
+                gNRDMask[launchIndex] = 0x04;
+            }
         }
+        
        
         rayData.flags |= (uint) Flags::Terminated;
-        return;
     }
-
+        
     //Set flags
     if (gUseDeltaRejection)
     {
         if (bsdfSample.isLobe(LobeType::Transmission))
             rayData.flags |= (uint) Flags::Transmissive;
+        else if (bsdfSample.isLobe(LobeType::DeltaReflection))
+            rayData.flags |= (uint) Flags::DeltaReflection;
         else
-            rayData.flags |= (uint) Flags::Reflection;
+            rayData.flags |= (uint) Flags::NonDeltaReflection;
     }
         
     
-    if (!valid){
+    if (!valid && !isDiffuse){
         rayData.distance = -1.f;
         rayData.flags |= (uint) Flags::Terminated;
     }
@@ -448,6 +479,7 @@ void rayGen()
     else
     {
         camRay = gScene.camera.computeRayThinlens(launchIndex, launchDim, sampleNext2D(rayData.sg)); //get jittered ray
+        //camRay = gScene.camera.computeRayPinhole(launchIndex, launchDim);
     }
    
     uint rayFlags = 0;
@@ -464,7 +496,7 @@ void rayGen()
         //If ray is invalid return
         if (rayData.flags & (uint) Flags::Terminated){
             if(rayData.distance < 0)
-                writeMiss(launchIndex);
+                writeMiss(launchIndex, (rayData.flags & (uint) Flags::Miss) > 0);
             break;
         }
            

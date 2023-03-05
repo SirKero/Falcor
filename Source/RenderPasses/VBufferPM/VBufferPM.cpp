@@ -80,7 +80,7 @@ namespace
         { "NRDDeltaTransmissionNormWRoughMat",          "gNRDDeltaTransmissionNormWRoughMat",           "Delta Transmission World Normal, Roughness, Material",  true /* optional */, ResourceFormat::RGB10A2Unorm    },
         { "NRDFirstPosW",          "gNRDFirstPosW",           "PosW for the first hit",  true /* optional */, ResourceFormat::RG32Float    },
         { "NRDDeltaTransmissionPosW",          "gNRDDeltaTransmissionPosW",           "PosW for the transmission hit",  true /* optional */, ResourceFormat::RGBA32Float    },
-        { "NRDMask",                 "gNRDMask",                 "Info for which part that pass is",         false , ResourceFormat::R8Uint },
+        { "NRDMask",                 "gNRDMask",                 "Info for which part that pass is",         true , ResourceFormat::R8Uint },
     };
 
     // UI variables.
@@ -181,16 +181,14 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
     {
         auto pTex = renderData[channel.name]->asTexture();
         if (pTex) pRenderContext->clearUAV(pTex->getUAV().get(), float4(0.f));
-    };
-    //TODO optimize this
-    pRenderContext->clearUAV(pVBuff->getUAV().get(), float4(0.f));
-    for (const auto& channel : kOutputChannels) clear(channel);
-    for (const auto& channel : kExtraOutputChannels) clear(channel);
+    };   
 
 
     //If we have no scene just return
     if (!mpScene) {
-
+        pRenderContext->clearUAV(pVBuff->getUAV().get(), float4(0.f));
+        for (const auto& channel : kOutputChannels) clear(channel);
+        for (const auto& channel : kExtraOutputChannels) clear(channel);
         return;
     }
 

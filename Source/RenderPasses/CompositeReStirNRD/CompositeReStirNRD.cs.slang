@@ -57,8 +57,13 @@ void main(uint2 dTid : SV_DispatchThreadID)
     
     uint mask = gNRDMask[dTid];
 
-    gNRDDiffuseRadianceHitDistance[dTid] = mask == 0 ? diffuse : float4(0);
-    gNRDSpecularRadianceHitDistance[dTid] = mask == 0 ? specular : float4(0);
+    if((mask & 0x04) > 0)
+        specular = diffuse;
+    
+    gNRDDiffuseRadianceHitDistance[dTid] = mask == 0 || ((mask & 0x04) > 0) ? diffuse: float4(0);
+    gNRDSpecularRadianceHitDistance[dTid] = mask == 0 || ((mask & 0x04) > 0) ? specular : float4(0);
+
+    
 
     float4 added = float4(diffuse.xyz, diffuse.w);  //NRD can only filter diffuse for reflections and transmissions
     if (mask & 0x01)    //Transmission
