@@ -64,6 +64,7 @@ RWTexture2D<uint> gNRDMask;
 static const bool kComputeDepthOfField = COMPUTE_DEPTH_OF_FIELD;
 static const bool kUseNRD = USE_NRD; 
 static const float kNRDMinReflectance = 0.04f;
+static const float kDepthPathMiss = 650000.f;
 
 /** Payload for scatter ray (64B).
 */
@@ -193,12 +194,12 @@ void writeMiss(uint2 pixel, bool miss = false)
     gVBuffer[pixel] = { };
     gThp[pixel] = { };
     gEmissive[pixel] = { };
-    if (is_valid(gLinDepth)) gLinDepth[pixel] = 0.f;
+    if (is_valid(gLinDepth)) gLinDepth[pixel] = kDepthPathMiss;
     if (is_valid(gNormWRoughMat)) gNormWRoughMat[pixel] = { };
 
     if (miss)
     {
-        if (is_valid(gLinZFirstHit)) gLinZFirstHit[pixel] = {  };
+        if (is_valid(gLinZFirstHit)) gLinZFirstHit[pixel] = float2(kDepthPathMiss, 0.f);
         if (is_valid(gMVec)) gMVec[pixel] = { };
         if (is_valid(gNRDDiffuseReflectance)) gNRDDiffuseReflectance[pixel] = { };
         if (is_valid(gNRDSpecularReflectance)) gNRDSpecularReflectance[pixel] = { };

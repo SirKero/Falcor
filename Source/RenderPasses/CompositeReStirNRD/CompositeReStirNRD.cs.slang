@@ -43,6 +43,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
         diffuse.w = max(diffuse.w, reStir.w); //Use ReStir hitDistance for now
     }
     diffuse.xyz *= thp;
+
+    //Guard agains invalid 
+    if (any(isnan(diffuse) | any(isinf(diffuse))))
+        diffuse = float4(0);
     
     float4 specular = float4(0);
     if (gEnableReStir)
@@ -54,6 +58,10 @@ void main(uint2 dTid : SV_DispatchThreadID)
         specular.w = max(specular.w, reStir.w); //Use ReStir hitDistance for now
     }
     specular.xyz *= thp;
+
+    //Guard agains invalid 
+    if (any(isnan(specular) | any(isinf(specular))))
+        specular = float4(0);
     
     uint mask = gNRDMask[dTid];
 
