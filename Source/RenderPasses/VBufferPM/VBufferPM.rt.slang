@@ -145,7 +145,7 @@ void writeHit(const in uint2 pixel, const in float3 rayDir,const in float3 thp, 
     gEmissive[pixel] = float4(emissive, 1);
 
     //If depth in valid write it
-    if (is_valid(gLinDepth)) gLinDepth[pixel] = linZ;
+    if (is_valid(gLinDepth)) gLinDepth[pixel] = max(FLT_MIN, linZ);
 }
 
 void writeDirectMaterialInfo(const in uint2 pixel, const in float3 normal, const in float roughness)
@@ -310,7 +310,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     if (rayData.pathLength == 0)
     {
         float4 curPosH = mul(float4(sd.posW, 1.f), gScene.camera.data.viewProjMatNoJitter);
-        float curLinearZ = curPosH.w;
+        float curLinearZ = max(FLT_MIN, curPosH.w);
         rayData.distance = curLinearZ;
         //Calc linZ for the first hit
         rayData.flags |= f32tof16(rayData.distance) << 16;
@@ -432,13 +432,13 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
             
             if (rayData.flags & (uint) Flags::Transmissive)
             {
-                writeNRDDeltaTransmissionHit(launchIndex, sd.posW, reflectance, bsdfProperties.emission, sd.N, bsdfProperties.roughness);
+                writeNRDDeltaTransmissionHit(launchIndex, sd.posW, reflectance, bsdfProperties.emission * thpStart, sd.N, bsdfProperties.roughness);
             }
             else if (rayData.flags & (uint) Flags::DeltaReflection)
             {
                 float firstHitDistance = f16tof32((rayData.flags >> 16) & 0xFFFF);
                 float hitDistance = max(FLT_MIN, rayData.distance - firstHitDistance);
-                writeNRDDeltaReflectionHit(launchIndex, hitDistance, reflectance, bsdfProperties.emission, sd.N, bsdfProperties.roughness);
+                writeNRDDeltaReflectionHit(launchIndex, hitDistance, reflectance, bsdfProperties.emission * thpStart, sd.N, bsdfProperties.roughness);
             }
             else
             {
@@ -451,7 +451,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     }
         
     //Set flags
-    if (gUseDeltaRejection && rayData.pathLength == 0)
+    if (gUseDeltaRejection && rayData.pathLength == 0 && kUseNRD)
     {
         if (bsdfSample.isLobe(LobeType::Transmission))
             rayData.flags |= (uint) Flags::Transmissive;
