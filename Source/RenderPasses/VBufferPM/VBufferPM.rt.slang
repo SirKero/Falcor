@@ -39,6 +39,7 @@ RWTexture2D<float4> gThp;
 RWTexture2D<float4> gEmissive;
 
 //Optional
+RWTexture2D<float2> gDepth;
 RWTexture2D<float> gLinDepth;
 RWTexture2D<float2> gMVec;
 RWTexture2D<float4> gNormWRoughMat;
@@ -326,6 +327,11 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
             float dLinearZ = max(ddxLinearZ, ddyLinearZ);
         
             gLinZFirstHit[launchIndex] = float2(curLinearZ, dLinearZ);
+        }
+        if (is_valid(gDepth))
+        {
+            gDepth[launchIndex] = curPosH.z / curPosH.w;
+
         }
     }
             

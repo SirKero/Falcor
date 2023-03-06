@@ -65,6 +65,7 @@ namespace
     //Additional output channels
     const ChannelList kExtraOutputChannels =
     {
+        { "depth",                "gDepth",           "Depth Buffer",  true /* optional */, ResourceFormat::R32Float    },
         { "linearDepth",          "gLinDepth",           "Distance from camera to hitpoint",  true /* optional */, ResourceFormat::R32Float    },
         { "mvec",                 "gMVec",    "Motion vector",                    true /* optional */, ResourceFormat::RG32Float   },
         { "normWRoughMat",        "gNormWRoughMat",  "World Normal, Roughness, Material",   true /* optional */, ResourceFormat::RGB10A2Unorm},
