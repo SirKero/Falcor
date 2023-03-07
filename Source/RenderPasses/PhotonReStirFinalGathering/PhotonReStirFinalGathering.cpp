@@ -367,9 +367,6 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         
 
         if (auto group = widget.group("Spartial Options")) {
-            changed |= widget.var("Current it spatial candidates", mInitialCandidates, 0u, 8u);
-            changed |= widget.checkbox("Visibility check boost spatial sampling", mBoostSampleTestVisibility);
-
             if ((mResamplingMode & ResamplingMode::Spartial) > 0) {
                 changed |= widget.var("Spartial Samples", mSpartialSamples, 0u, mResamplingMode & ResamplingMode::SpartioTemporal ? 8u : 32u);
                 widget.tooltip("Number of spartial samples");
@@ -380,6 +377,9 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
                 changed |= widget.var("Sampling Radius", mSamplingRadius, 0.0f, 200.f);
                 widget.tooltip("Radius for the Spartial Samples");
             }
+
+            changed |= widget.var("Sample Boosting (Adds Bias)", mSampleBoosting, 0u, 8u);
+            changed |= widget.checkbox("Visibility check boost spatial sampling", mBoostSampleTestVisibility);
         }
 
         if (auto group = widget.group("Misc")) {
@@ -678,17 +678,6 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
         }
     }
 
-    //Create Valid Neighbor mask
-    if (!mpValidNeighborMask && mInitialCandidates > 0) {
-        mpValidNeighborMask = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::R8Unorm,
-                                                1, mValidNeighborMaskMipLevel, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource | ResourceBindFlags::RenderTarget);
-        mpValidNeighborMask->setName("PhotonReStir::ValidNeighborMask");
-    }
-    //Reset texture if not used
-    else if (mpValidNeighborMask && mInitialCandidates == 0) {
-        mpValidNeighborMask.reset();
-    }
-
     if (!mpFinalGatherHit) {
         mpFinalGatherHit = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
                                              HitInfo::kDefaultFormat, 1u, 1u, nullptr,
@@ -729,7 +718,7 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
         }
     }
 
-    if (mInitialCandidates > 0) {
+    if (mSampleBoosting > 0) {
         if (!mpReservoirBoostBuffer) {
             mpReservoirBoostBuffer = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y,
                 mUseReducedReservoirFormat ? ResourceFormat::RG32Uint : ResourceFormat::RGBA32Uint,
@@ -766,20 +755,16 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 {
     FALCOR_PROFILE("GetFinalGatheringHit");
 
-    if (mpValidNeighborMask) {
-        pRenderContext->clearTexture(mpValidNeighborMask.get(), float4(1, 1, 1, 1));
-    }
-
     //Clear the buffer if photon culling is used
     if (mUsePhotonCulling) {
         pRenderContext->clearUAV(mpPhotonCullingMask->getUAV().get(), uint4(0));
     }
 
-    //Clear Reservoirs
-    pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
-    pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
+    //Clear Reservoirs (Already done in passes)
+    //pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
+    //pRenderContext->clearUAV(mpPhotonLightBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
     //Also clear the initial candidates buffer
-    if (mInitialCandidates > 0) {
+    if (mSampleBoosting > 0) {
         pRenderContext->clearUAV(mpReservoirBoostBuffer->getUAV().get(), uint4(0));
         pRenderContext->clearUAV(mpPhotonLightBoostBuffer->getUAV().get(), uint4(0));
     }
@@ -787,7 +772,6 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     //Defines
     mGetFinalGatherHitPass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
     mGetFinalGatherHitPass.pProgram->addDefine("ALLOW_HITS_IN_RADIUS", mAllowFinalGatherPointsInRadius ? "1" : "0");
-    mGetFinalGatherHitPass.pProgram->addDefine("FILL_MASK", mpValidNeighborMask ? "1" : "0");
     mGetFinalGatherHitPass.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
 
     if (!mGetFinalGatherHitPass.pVars) {
@@ -824,11 +808,10 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var["gView"] = renderData[kInViewDesc.name]->asTexture();
     var["gLinZ"] = renderData[kInRayDistance.name]->asTexture();
 
-    var["gReservoir"] = mInitialCandidates > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
+    var["gReservoir"] = mSampleBoosting > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gPhotonCullingMask"] = mpPhotonCullingMask;
-    var["gValidNeighborsMask"] = mpValidNeighborMask;
 
     //Create dimensions based on the number of VPLs
     uint2 targetDim = renderData.getDefaultTextureDims();
@@ -836,10 +819,6 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 
     //Trace the photons
     mpScene->raytrace(pRenderContext, mGetFinalGatherHitPass.pProgram.get(), mGetFinalGatherHitPass.pVars, uint3(targetDim, 1));
-
-    //Generate mips for mask
-    if (mpValidNeighborMask)
-        mpValidNeighborMask->generateMips(pRenderContext);
 }
 
 
@@ -943,8 +922,6 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
 {
     FALCOR_PROFILE("CollectPhotonsAndGenerateReservoir");
     
-    
-
     //Defines
     mGeneratePMCandidatesPass.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
 
@@ -972,8 +949,8 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.x;
 
     //Bind reservoir and light buffer depending on the boost buffer
-    var["gReservoir"] = mInitialCandidates > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
-    var["gPhotonLights"] = mInitialCandidates > 0 ? mpPhotonLightBoostBuffer : mpPhotonLightBuffer[mFrameCount % 2];
+    var["gReservoir"] = mSampleBoosting > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
+    var["gPhotonLights"] = mSampleBoosting > 0 ? mpPhotonLightBoostBuffer : mpPhotonLightBuffer[mFrameCount % 2];
     var["gPhotonAABB"] = mpPhotonAABB[0];
     var["gPackedPhotonData"] = mpPhotonData[0];
     var["gFinalGatherHit"] = mpFinalGatherHit;
@@ -989,8 +966,8 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     mpScene->raytrace(pRenderContext, mGeneratePMCandidatesPass.pProgram.get(), mGeneratePMCandidatesPass.pVars, uint3(targetDim, 1));
 
     //Barrier for written buffer depending if boosting is enabled
-    pRenderContext->uavBarrier(mInitialCandidates > 0 ? mpReservoirBoostBuffer.get() : mpReservoirBuffer[mFrameCount % 2].get());
-    pRenderContext->uavBarrier(mInitialCandidates > 0 ? mpPhotonLightBoostBuffer.get() : mpPhotonLightBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mSampleBoosting > 0 ? mpReservoirBoostBuffer.get() : mpReservoirBuffer[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mSampleBoosting > 0 ? mpPhotonLightBoostBuffer.get() : mpPhotonLightBuffer[mFrameCount % 2].get());
 }
 
 void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1118,7 +1095,7 @@ void PhotonReSTIRFinalGathering::distributeAndCollectFinalGatherPhotonPass(Rende
 */
 void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    if (mInitialCandidates == 0) return;   //Only execute pass if more than 1 candidate is requested
+    if (mSampleBoosting == 0) return;   //Only execute pass if more than 1 candidate is requested
 
     FALCOR_PROFILE("Additional Candidates");
 
@@ -1153,8 +1130,6 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     var["gPhotonLightWrite"] = mpPhotonLightBuffer[mFrameCount % 2];
     var["gSurface"] = mpSurfaceBuffer[mFrameCount % 2];
     var[kInViewDesc.texname] = renderData[kInViewDesc.name]->asTexture();
-    
-    var["gNeighborMask"] = mpValidNeighborMask;
 
     //Uniform
     std::string uniformName = "PerFrame";
@@ -1163,12 +1138,11 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
     if (mReset || mReuploadBuffers || mBiasCorrectionChanged) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
-        var[uniformName]["gSpartialSamples"] = mInitialCandidates;
+        var[uniformName]["gSpartialSamples"] = mSampleBoosting;
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gMatThreshold"] = mMaterialThreshold;
-        var[uniformName]["gMaskMipLevel"] = mValidNeighborMaskMipLevel;
     }
 
 

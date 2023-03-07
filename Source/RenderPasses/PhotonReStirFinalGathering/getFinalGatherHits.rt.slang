@@ -44,7 +44,6 @@ RWStructuredBuffer<PackedSurfaceData> gSurfaceData;
 RWTexture2D<PackedHitInfo> gFinalGatherHit;
 RWTexture2D<uint2> gFinalGatherExtraInfo;
 RWTexture2D<uint> gPhotonCullingMask;
-RWTexture2D<float> gValidNeighborsMask;
 
 //Outputs
 #if USE_REDUCED_RESERVOIR_FORMAT
@@ -55,7 +54,6 @@ RWTexture2D<float> gValidNeighborsMask;
 
 static const bool kUsePhotonCulling = USE_PHOTON_CULLING;
 static const bool kAllowHitsInRadius = ALLOW_HITS_IN_RADIUS;    //Enables or disables hits inside of the collection radius
-static const bool kFillMask = FILL_MASK;
 
 struct TraceData{
     PackedHitInfo packedHitInfo;  //< Reflection albedo of the current hit point
@@ -213,84 +211,81 @@ void rayGen()
     uint2 launchDim = DispatchRaysDimensions().xy;
     
     HitInfo hitInfo = HitInfo(gVBuffer[launchIndex]);
-    if (!hitInfo.isValid())
-    {
-        gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = Surface().pack();
-        if(kFillMask)
-            gValidNeighborsMask[launchIndex] = 0.f;
-    }
-        
-
-    float3 view = -gView[launchIndex].xyz;
-    float linZ = gLinZ[launchIndex];
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = loadShadingData(hitInfo, view, lod);
-    let bsdf = gScene.materials.getBSDF(sd, lod);
-    let bsdfProperties = bsdf.getProperties(sd);
-
+    Surface surface = Surface();
+    Reservoir reservoir = Reservoir();
     TraceData traceData = TraceData::create();
-    traceData.sg = SampleGenerator(launchIndex, gFrameCount + 3 * 13);
+    if (hitInfo.isValid())
+    {
+        float3 view = -gView[launchIndex].xyz;
+        float linZ = gLinZ[launchIndex];
+        let lod = ExplicitLodTextureSampler(0.f);
+        ShadingData sd = loadShadingData(hitInfo, view, lod);
+        let bsdf = gScene.materials.getBSDF(sd, lod);
+        let bsdfProperties = bsdf.getProperties(sd);
 
-    BSDFSample bsdfSample;
-    //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
-    if (gDiffuseOnly)
-        sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
-    else
-        sd.mtl.setActiveLobes((uint) LobeType::Reflection);
-    bool valid = bsdf.sample(sd, traceData.sg, bsdfSample, true);
+        traceData.sg = SampleGenerator(launchIndex, gFrameCount + 3 * 13);
+
+        //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
+        if (gDiffuseOnly)
+            sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
+        else
+            sd.mtl.setActiveLobes((uint) LobeType::Reflection);
+
+        BSDFSample bsdfSample;
+        bool validSample = bsdf.sample(sd, traceData.sg, bsdfSample, true);
     
-    //Fill Surface Buffer used for calculating the target PDF
-    Surface surface = Surface::create(sd.computeNewRayOrigin(), sd.N, sd.V, linZ, bsdfProperties.roughness,
+        //Fill Surface Buffer used for calculating the target PDF
+        surface = Surface::create(sd.computeNewRayOrigin(), sd.N, sd.V, linZ, bsdfProperties.roughness,
                                       luminance(bsdfProperties.diffuseReflectionAlbedo), luminance(bsdfProperties.specularReflectance));
 
-    Reservoir reservoir = Reservoir();
-    if (gDiffuseOnly)
-        reservoir.targetPdf = surface.getDiffusePdf(bsdfSample.wo);
-    else
-        reservoir.targetPdf = surface.getPdf(bsdfSample.wo);
     
-    reservoir.weightSum = 1.f / bsdfSample.pdf; // 1/selectPDF
-    uint2 extraInfoPacked = uint2(0);
+        if (gDiffuseOnly)
+            reservoir.targetPdf = surface.getDiffusePdf(bsdfSample.wo);
+        else
+            reservoir.targetPdf = surface.getPdf(bsdfSample.wo);
+    
+        reservoir.weightSum = 1.f / bsdfSample.pdf; // 1/selectPDF
 
-    RayDesc tRay;
-    tRay.Origin = sd.computeNewRayOrigin();
-    tRay.TMin = 0.0;
-    tRay.TMax = 1000.f;
-    tRay.Direction = bsdfSample.wo;
+        RayDesc tRay;
+        tRay.Origin = sd.computeNewRayOrigin();
+        tRay.TMin = 0.0;
+        tRay.TMax = 1000.f;
+        tRay.Direction = bsdfSample.wo;
     
-    if (valid)
-    {
-        TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
-        valid = traceData.distance >= 0;
-    }
-    
-    if (valid)
-    {
-        reservoir.targetPdf *= traceData.NdotL;         //Precalculate NdotL
-        reservoir.M = encodeNormal2x8(bsdfSample.wo);  //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
-        float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
-    
-        if (kUsePhotonCulling)
+        if (validSample)
         {
-            photonCulling(hitPos);
+            TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
+            validSample = traceData.distance >= 0;
+        }
+    
+        if (validSample)
+        {
+            reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
+            reservoir.M = encodeNormal2x8(bsdfSample.wo); //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
+            float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
+    
+            if (kUsePhotonCulling)
+            {
+                photonCulling(hitPos);
+            }
+
+        //Reject hit points that are inside the collection radius
+            if (!kAllowHitsInRadius)
+            {
+                float distDiff = distance(hitPos, sd.posW);
+                //Invalidate hit data
+                validSample = distDiff > gCollectionRadius;
+            }
         }
 
-    //Reject hit points that are inside the collection radius
-        if (!kAllowHitsInRadius)
+    
+        if (!validSample)
         {
-            float distDiff = distance(hitPos, sd.posW);
-            //Invalidate hit data
-            valid = distDiff > gCollectionRadius;
+            traceData.packedHitInfo = { };
+            reservoir.weightSum = 0.f; //invalidate reseroir
         }
     }
-
-    
-    if (!valid)
-    {
-        traceData.packedHitInfo = { };
-        reservoir.weightSum = 0.f;  //invalidate reseroir
-    }
-   
+        
     //Store data in buffers
     gFinalGatherHit[launchIndex] = traceData.packedHitInfo;
     gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = surface.pack();

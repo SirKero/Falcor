@@ -31,7 +31,6 @@ RWStructuredBuffer<PackedVPL> gPhotonLightWrite;
 StructuredBuffer<PackedSurfaceData>gSurface;
 Texture2D<float2> gMVec;
 Texture2D<float4> gView;
-Texture2D <float> gNeighborMask;
 
 #define BIAS_MODE_BASIC 1
 #define BIAS_MODE_RAYTRACE 2
@@ -57,7 +56,7 @@ cbuffer Constant
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
     float gMatThreshold;               //Vpl radius
-    uint gMaskMipLevel;
+    uint _pad;
 }
 
 struct LightSample{
@@ -107,74 +106,6 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     return ls.Li > 0;   //true if sample is valid
 }
 
-//Get a valid neighbor sample
-bool sampleMaskMIP(inout SampleGenerator sg, uint2 currentPixel , out int2 position, out float pdf)
-{
-    int lastMipLevel = max(0, gMaskMipLevel -1);
-    float2 dimF = float2(gFrameDim-1);
-    float2 relPos = float2(currentPixel.x / dimF.x, currentPixel.y / dimF.y);
-    dimF /= 1 << lastMipLevel;  //Convert to Mip level dim (div pow(2,MIPLevel))
-    relPos *= dimF;     //Get MIP pixel
-    relPos = clamp(relPos, float2(0), float2(gFrameDim - 1));   //Clamp at edge
-    relPos -= 0.5f;
-    position = int2(floor(relPos));    //convert to pixel
-    pdf = 1.f;
-    
-    for (int mipLevel = lastMipLevel; mipLevel >= 0; mipLevel--)
-    {
-
-        float4 samples;
-        samples.x = max(0.f, float(gNeighborMask.Load(int3(position.x + 0, position.y + 0, mipLevel))) );
-        samples.y = max(0.f, float(gNeighborMask.Load(int3(position.x + 0, position.y + 1, mipLevel))));
-        samples.z = max(0.f, float(gNeighborMask.Load(int3(position.x + 1, position.y + 0, mipLevel))));
-        samples.w = max(0.f, float(gNeighborMask.Load(int3(position.x + 1, position.y + 1, mipLevel))));
-
-        float weightSum = samples.x + samples.y + samples.z + samples.w;
-        //Return if invalid
-        if (weightSum <= 0)
-        {
-            pdf = 0;
-            return false;
-        }
-        samples /= weightSum; //Normalize Samples
-
-        float rnd = sampleNext1D(sg);
-
-        //Choose one of 4 samples
-        if (rnd < samples.x)
-        {
-            pdf *= samples.x;
-        }
-        else
-        {
-            rnd -= samples.x;
-            if (rnd < samples.y)
-            {
-                position += int2(0, 1);
-                pdf *= samples.y;
-            }
-            else
-            {
-                rnd -= samples.y;
-                if (rnd < samples.z)
-                {
-                    position += int2(1, 0);
-                    pdf *= samples.z;
-                }
-                else
-                {
-                    position += int2(1, 1);
-                    pdf *= samples.w;
-                }
-            }
-        }
-
-        if(mipLevel != 0)
-            position *= 2;
-    }
-    return true;
-}
-
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
 {
@@ -206,21 +137,15 @@ void main(uint2 dTid : SV_DispatchThreadID)
         cachedIndices[i] = 0xFFFFFFFF;  //Set to max int
         if (i % 2 == 0)
             cachedM[i / 2] = 0;
-        //Get random sample from sampling mask
-        //TODO: Make Toggable
-        /*
+        //Get random sample
+        
         float2 randSamp = (sampleNext2D(sg) * 2) - 1.f; //random sample in [-1,1]
-        int2 spartialOffset = int2(round(randSamp * 4.f));
+        int2 spartialOffset = int2(round(randSamp * 10.f));
         idx = currentIndex + spartialOffset;
-        */
 
-        
-        float selectPdf = 1.f; 
-        bool validMIPSample = sampleMaskMIP(sg, currentIndex, idx, selectPdf);
-        
-        if (!validMIPSample)
+        if (spartialOffset.x == 0 && spartialOffset.y == 0)
             continue;
-
+        
         //Check if index is valid TODO obsolete with MIP sample 
         if(idx.x < 0 && idx.y < 0 && idx.x >= gFrameDim.x && idx.y >= gFrameDim.y)
             continue;
@@ -348,7 +273,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         }
     }
 #endif
-    
+        
 #ifdef USE_REDUCED_RESERVOIR_FORMAT
     gReservoirWrite[dTid] = r.packReduced();
 #else
