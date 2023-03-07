@@ -62,6 +62,8 @@ private:
     bool mEnableReStir = true;
     bool mEnablePhotonReStir = true;
     bool mEnableThroughput = true;
+    bool mUseTransmissiveEmission = false;
+    bool mUseReflectiveEmission = false;
 
     ComputePass::SharedPtr mpCompositeReStirNDRPass;
 };

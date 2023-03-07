@@ -11,6 +11,8 @@ cbuffer CB
    
 };
 
+#define is_valid(name) (is_valid_##name != 0)
+
 //Inputs
 Texture2D<float4> gAin;
 Texture2D<float4> gBin;
@@ -90,7 +92,7 @@ void mainTemporal(uint2 dTid : SV_DispatchThreadID)
     {
         //Input A
         float2 motionOffset = gMvecA[dTid] * float2(gFrameDim);
-        float2 prevIdxF = motionOffset + float2(dTid) + float2(0.5f);
+        float2 prevIdxF = motionOffset + float2(dTid);
         if (prevIdxF.x > 0 && prevIdxF.y > 0 && prevIdxF.x < gFrameDim.x && prevIdxF.y < gFrameDim.y)
         {
             uint2 tempIndex = uint2(round(prevIdxF));
@@ -103,30 +105,35 @@ void mainTemporal(uint2 dTid : SV_DispatchThreadID)
             colorImgA.w = float(history);
         }
         //Input B
-        motionOffset = gMvecB[dTid] * float2(gFrameDim);
-        prevIdxF = motionOffset + float2(dTid) + float2(0.5f);
-        if (prevIdxF.x > 0 && prevIdxF.y > 0 && prevIdxF.x < gFrameDim.x && prevIdxF.y < gFrameDim.y)
+        if (is_valid(gBin))
         {
-            uint2 tempIndex = uint2(round(prevIdxF));
+            //if (is_valid(gMvecB))
+                motionOffset = gMvecB[dTid] * float2(gFrameDim);
+            prevIdxF = motionOffset + float2(dTid);
+            if (prevIdxF.x > 0 && prevIdxF.y > 0 && prevIdxF.x < gFrameDim.x && prevIdxF.y < gFrameDim.y)
+            {
+                uint2 tempIndex = uint2(round(prevIdxF));
             //Input B
-            float4 prev = gTempB[tempIndex];
-            uint history = min(gTemporalFilterLength, uint(round(prev.w + 0.1)) + 1); //History of this frame
-            prev.xyz *= (history - 1);
-            colorImgB.xyz += prev.xyz;
-            colorImgB.xyz /= history;
-            colorImgB.w = float(history);
+                float4 prev = gTempB[tempIndex];
+                uint history = min(gTemporalFilterLength, uint(round(prev.w + 0.1)) + 1); //History of this frame
+                prev.xyz *= (history - 1);
+                colorImgB.xyz += prev.xyz;
+                colorImgB.xyz /= history;
+                colorImgB.w = float(history);
+            }
         }
+        
         
         //Store Temporal Filter
         gTempA[dTid] = colorImgA;
-        gTempB[dTid] = colorImgB;
+        if (is_valid(gBin)) gTempB[dTid] = colorImgB;
     }
         
     //Blur (Not Temporally Filtered
     if (gBlurMode == 0)
     {
         gAout[dTid] = float4(colorImgA.xyz, 0);
-        gBout[dTid] = float4(colorImgB.xyz, 0);
+        if (is_valid(gBin)) gBout[dTid] = float4(colorImgB.xyz, 0);
     }
 }
 
@@ -138,17 +145,38 @@ void mainBlur(uint2 dTid : SV_DispatchThreadID)
 
     float4 colorImgA = { };
     float4 colorImgB = { };
+    float2 uv = (dTid + 0.5f) * gInvFrameDim;
 
-    if (gTemporalFilterLength > 0)
-    {        
-        colorImgA = float4(gTempA[dTid].xyz, 1.f);
-        colorImgB = float4(gTempB[dTid].xyz, 1.f);
-    }
-    else
+    //Do blur
+    switch (gBlurMode)
     {
-        colorImgA = float4(gAin[dTid].xyz, 1.f);
-        colorImgB = float4(gBin[dTid].xyz, 1.f);
+        case 1:
+            colorImgA = blurFilter2x2(gAin, uv, gInvFrameDim.x, gInvFrameDim.y);
+            break;
+        case 2:
+            colorImgA = blurFilter3x3(gAin, uv, gInvFrameDim.x, gInvFrameDim.y);
+            break;
+        case 3:
+            colorImgA = blurFilter5x5(gAin, uv, gInvFrameDim.x, gInvFrameDim.y);
+    }
+
+    if (true)
+    {
+        switch (gBlurMode)
+        {
+            case 1:
+                colorImgB = blurFilter2x2(gBin, uv, gInvFrameDim.x, gInvFrameDim.y);
+                break;
+            case 2:
+                colorImgB = blurFilter3x3(gBin, uv, gInvFrameDim.x, gInvFrameDim.y);
+                break;
+            case 3:
+                colorImgB = blurFilter5x5(gBin, uv, gInvFrameDim.x, gInvFrameDim.y);
+        }
     }
     
+    //Write out
+    gAout[dTid] = colorImgA;
+    if (true) gBout[dTid] = colorImgB;
 }
 

@@ -39,7 +39,12 @@ namespace {
        { "ReStirDiffuse",           "gReStirDiffuse",           "Diffuse for ReSTIR",                       false },
        { "ReStirSpecular",          "gReStirSpecular",          "Specular for ReSTIR",                      false },
        { "throughput",              "gThp",                     "Throughput for transparent materials",     false },
-       { "NRDMask",                 "gNRDMask",                 "Info for which part that pass is",         false , ResourceFormat::R8Uint },
+       { "NRDMask",                 "gNRDMask",                 "Info for which part that pass is",         true , ResourceFormat::R8Uint },
+       { "DeltaReflectionReflectance",                 "gDeltaReflectionReflectance",                 "Reflectance for delta reflection",         true },
+       { "TransmissionReflectance",                 "gTransmissionReflectance",                 "Reflectance for delta transmission",         true },
+       { "DeltaReflectionEmission",                 "gDeltaReflectionEmission",                 "Emission for delta reflection",         true },
+       { "TransmissionEmission",                 "gTransmissionEmission",                 "Emission for delta transmission",         true },
+
     };
 
     const ChannelList kOutputChannels = {
@@ -54,6 +59,8 @@ namespace {
     const std::string kEnableReStir = "enableReStir";
     const std::string kEnablePhotonReStir = "enablePhotonReStir";
     const std::string kEnableThroughput = "enableThroughput";
+    const std::string kEnableTranmissionEmission = "enableTranmissionEmission";
+    const std::string kEnableDeltaReflectionEmission = "enableDeltaReflectionEmission";
     const std::string kOutputFormat = "outputFormat";
 }
 
@@ -83,11 +90,13 @@ CompositeReStirNRD::CompositeReStirNRD(const Dictionary dict)
         else if (key == kEnablePhotonReStir) mEnablePhotonReStir = value;
         else if (key == kEnableThroughput) mEnableThroughput = value;
         else if (key == kOutputFormat) mOutputFormat = value;
+        else if (key == kEnableTranmissionEmission) mUseTransmissiveEmission = value;
+        else if (key == kEnableDeltaReflectionEmission) mUseReflectiveEmission = value;
         else logWarning("Unknown field '{}' in CompositeReStirVpl pass dictionary.", key);
     }
 
     // Create resources.
-    mpCompositeReStirNDRPass = ComputePass::create(kShaderFile, "main", Program::DefineList(), true);
+    mpCompositeReStirNDRPass = ComputePass::create(kShaderFile, "main", Program::DefineList(), false);
 }
 
 Dictionary CompositeReStirNRD::getScriptingDictionary()
@@ -97,6 +106,8 @@ Dictionary CompositeReStirNRD::getScriptingDictionary()
     dict[kEnableReStir] = mEnableReStir;
     dict[kEnablePhotonReStir] = mEnablePhotonReStir;
     dict[kEnableThroughput] = mEnableThroughput;
+    dict[kEnableTranmissionEmission] = mUseTransmissiveEmission;
+    dict[kEnableDeltaReflectionEmission] = mUseReflectiveEmission;
     if (mOutputFormat != ResourceFormat::Unknown) dict[kOutputFormat] = mOutputFormat;
     return Dictionary();
 }
@@ -120,6 +131,16 @@ void CompositeReStirNRD::compile(RenderContext* pRenderContext, const CompileDat
 
 void CompositeReStirNRD::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    Program::DefineList defineList = getValidResourceDefines(kInputChannels, renderData);
+
+    if (!mUseTransmissiveEmission) defineList["is_valid_gTransmissionEmission"] = "0";
+    if (!mUseReflectiveEmission) defineList["is_valid_gDeltaReflectionEmission"] = "0";
+
+    if (mpCompositeReStirNDRPass->getProgram()->addDefines(defineList))
+    {
+        mpCompositeReStirNDRPass->setVars(nullptr);
+    }
+
     //BindResources
     auto var = mpCompositeReStirNDRPass->getRootVar();
     var["CB"]["frameDim"] = mFrameDim;
@@ -148,4 +169,6 @@ void CompositeReStirNRD::renderUI(Gui::Widgets& widget)
     widget.checkbox("Enable Photon ReStir", mEnablePhotonReStir);
     widget.checkbox("Enable Throughput", mEnableThroughput);
     widget.tooltip("If disabled, thp is set to 1");
+    widget.checkbox("Enable Transmissive Emission", mUseTransmissiveEmission);
+    widget.checkbox("Enable Delta Reflection Emission", mUseReflectiveEmission);
 }

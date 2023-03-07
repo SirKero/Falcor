@@ -64,10 +64,10 @@ private:
     ImageFilter(const Dictionary dict);
 
     uint2 mFrameDim = { 0,0 };
-    bool mEnableTemporalFilter = true;
+    bool mEnableTemporalFilter = false;
     uint mTemporalFilterIt = 5;
 
-    uint mBlurFilterMode = BlurFilterMode::None;
+    uint mBlurFilterMode = BlurFilterMode::Blur2x2;
 
     Texture::SharedPtr mpTemporalTexA;
     Texture::SharedPtr mpTemporalTexB;

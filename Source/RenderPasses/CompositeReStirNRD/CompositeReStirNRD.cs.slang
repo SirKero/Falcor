@@ -16,12 +16,18 @@ Texture2D<float4> gReStirDiffuse;
 Texture2D<float4> gReStirSpecular;
 Texture2D<float4> gThp;
 Texture2D<uint> gNRDMask;
+Texture2D<float4> gDeltaReflectionReflectance;
+Texture2D<float4> gTransmissionReflectance;
+Texture2D<float4> gDeltaReflectionEmission;
+Texture2D<float4> gTransmissionEmission;
 
 //Output
 RWTexture2D<float4> gNRDDiffuseRadianceHitDistance;
 RWTexture2D<float4> gNRDSpecularRadianceHitDistance;
 RWTexture2D<float4> gNRDDeltaReflectionRadianceHitDistance;
 RWTexture2D<float4> gNRDDeltaTransmissionRadianceHitDistance;
+
+#define is_valid(name) (is_valid_##name != 0)
 
 [numthreads(16, 16, 1)]
 void main(uint2 dTid : SV_DispatchThreadID)
@@ -75,16 +81,22 @@ void main(uint2 dTid : SV_DispatchThreadID)
     gNRDSpecularRadianceHitDistance[dTid] = mask == 0 || ((mask & 0x04) > 0) ? specular : float4(0);
 
     
-
-    float4 added = float4(diffuse.xyz, diffuse.w);  //NRD can only filter diffuse for reflections and transmissions
     if (mask & 0x01)    //Transmission
     {
-        gNRDDeltaTransmissionRadianceHitDistance[dTid] = added;
+        if (is_valid(gTransmissionEmission))
+            diffuse.xyz += gTransmissionEmission[dTid].xyz;
+        if (is_valid(gTransmissionReflectance))
+            diffuse.xyz *= gTransmissionReflectance[dTid].xyz;
+        gNRDDeltaTransmissionRadianceHitDistance[dTid] = diffuse;
         gNRDDeltaReflectionRadianceHitDistance[dTid] = float4(0);
     }
     else if (mask & 0x02)   //Delta Reflection
     {
-        gNRDDeltaReflectionRadianceHitDistance[dTid] = added;
+        if (is_valid(gDeltaReflectionEmission))
+            diffuse.xyz += gDeltaReflectionEmission[dTid].xyz;
+        if (is_valid(gDeltaReflectionReflectance))
+            diffuse.xyz *= gDeltaReflectionReflectance[dTid].xyz;
+        gNRDDeltaReflectionRadianceHitDistance[dTid] = diffuse;
         gNRDDeltaTransmissionRadianceHitDistance[dTid] = float4(0);
     }
     else //No problems

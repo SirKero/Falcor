@@ -58,6 +58,15 @@ namespace {
         { "OutA", "gAout", "Filtered output image A", false, ResourceFormat::RGBA16Float },
         { "OutB", "gBout", "Filtered output image B", true, ResourceFormat::RGBA16Float },
     };
+
+    // UI variables.
+    const Gui::DropdownList kBlurModeList =
+    {
+        { ImageFilter::None, "None" },
+        { ImageFilter::Blur2x2, "Blur2x2" },
+        { ImageFilter::Blur3x3, "Blur3x3" },
+        { ImageFilter::Blur5x5, "Blur5x5" },
+    };
 }
 
 ImageFilter::SharedPtr ImageFilter::create(RenderContext* pRenderContext, const Dictionary& dict)
@@ -75,8 +84,8 @@ ImageFilter::ImageFilter(const Dictionary dict)
     }
 
     // Create resources.
-    mpTemporalFilterPass = ComputePass::create(kShader, "mainTemporal", Program::DefineList(), true);
-    mpBlurFilterPass = ComputePass::create(kShader, "mainTemporal", Program::DefineList(), true);
+    mpTemporalFilterPass = ComputePass::create(kShader, "mainTemporal", Program::DefineList(), false);
+    mpBlurFilterPass = ComputePass::create(kShader, "mainTemporal", Program::DefineList(), false);
 
     Sampler::Desc samplerDesc;
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Point);
@@ -105,8 +114,6 @@ void ImageFilter::compile(RenderContext* pRenderContext, const CompileData& comp
 
 void ImageFilter::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    //TODO Add valid texture defines
-
     //Build Textures for temporal filtering
     if (mEnableTemporalFilter) {
         if (!mpTemporalTexA) { //TODO Format as parameter
@@ -139,6 +146,13 @@ void ImageFilter::execute(RenderContext* pRenderContext, const RenderData& rende
 
     //BindResources
     if (mEnableTemporalFilter) {
+        //Defines
+        Program::DefineList defineList = getValidResourceDefines(kInputChannels, renderData);
+        if (mpTemporalFilterPass->getProgram()->addDefines(defineList))
+        {
+            mpTemporalFilterPass->setVars(nullptr);
+        }
+
         auto var = mpTemporalFilterPass->getRootVar();
 
         var["CB"]["gFrameDim"] = mFrameDim;
@@ -167,6 +181,20 @@ void ImageFilter::execute(RenderContext* pRenderContext, const RenderData& rende
 
     //Blur
     if (mBlurFilterMode > BlurFilterMode::None) {
+
+        //Defines
+        Program::DefineList defineList = getValidResourceDefines(kInputChannels, renderData);
+        if (mpBlurFilterPass->getProgram()->addDefines(defineList))
+        {
+            mpBlurFilterPass->setVars(nullptr);
+        }
+
+        //Use a barrier if the temporal filter was used
+        if (mEnableTemporalFilter) {
+            pRenderContext->uavBarrier(mpTemporalTexA.get());
+            pRenderContext->uavBarrier(mpTemporalTexB.get());
+        }
+
         auto var = mpBlurFilterPass->getRootVar();
 
         var["CB"]["gFrameDim"] = mFrameDim;
@@ -185,10 +213,14 @@ void ImageFilter::execute(RenderContext* pRenderContext, const RenderData& rende
         for (auto& input : kInputChannels) bindAsTex(input);
         for (auto& output : kOutputChannels) bindAsTex(output);
 
+        //Bind Inputs manual (Only input tex are needed, no need for the Mvecs for the blur)
+        //var[kInputChannels[0].texname] = mEnableTemporalFilter ? mpTemporalTexA : renderData[kInputChannels[0].name]->asTexture();
+        //var[kInputChannels[1].texname] = mEnableTemporalFilter ? mpTemporalTexB : renderData[kInputChannels[1].name]->asTexture();
+
+
+
         //Bind Internal
         var["gLinearSampler"] = mpLinearSampler;
-        var["gTempA"] = mpTemporalTexA;
-        var["gTempB"] = mpTemporalTexB;
 
         mpBlurFilterPass->execute(pRenderContext, mFrameDim.x, mFrameDim.y);
     }
@@ -201,4 +233,6 @@ void ImageFilter::renderUI(Gui::Widgets& widget)
     if (mEnableTemporalFilter) {
         widget.var("Temporal Filter Length", mTemporalFilterIt, 0u, 1000u, 1u);
     }
+    widget.dropdown("Blur Mord", kBlurModeList, mBlurFilterMode);
+    widget.tooltip("Change Blur mode. The Blur is executed after the temporal filter");
 }
