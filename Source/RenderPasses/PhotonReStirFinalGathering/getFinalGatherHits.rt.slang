@@ -288,7 +288,6 @@ void rayGen()
     if (!valid)
     {
         traceData.packedHitInfo = { };
-        surface.viewDepth = -1.f; //Set to invalid depth
         reservoir.weightSum = 0.f;  //invalidate reseroir
     }
    
