@@ -1025,6 +1025,10 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius.y;
     var[nameBuf]["gEnableTemporalFilter"] = mCausticUseTemporalFilter;
     var[nameBuf]["gTemporalFilterHistoryLimit"] = mCausticTemporalFilterMaxHistory;
+    var[nameBuf]["gDepthThreshold"] = mRelativeDepthThreshold;
+    var[nameBuf]["gNormalThreshold"] = mNormalThreshold;
+    var[nameBuf]["gMatThreshold"] = mMaterialThreshold;
+
 
     //Bind caustic photon data (index -> 1)
     var["gPhotonAABB"] = mpPhotonAABB[1];
@@ -1034,6 +1038,8 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();
     var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();
+    var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
+    var["gPrevSurfaceData"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
 
     //Output flux
     var["gCausticImage"] = mpCausticPhotonsFlux[mFrameCount % 2];
