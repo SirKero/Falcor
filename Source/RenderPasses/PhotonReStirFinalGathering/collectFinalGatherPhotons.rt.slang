@@ -101,8 +101,8 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     if(dot(pd.normal, normal) < 0.6){
         return;
     }
-    const float NdotL = saturate(dot(normal, pd.dir));
-    const float3 diffuseBrdf =  rayData.diffuseReflectance * NdotL * M_1_PI;
+    //const float NdotL = saturate(dot(normal, pd.dir));
+    const float3 diffuseBrdf =  rayData.diffuseReflectance * M_1_PI;
    
     rayData.radiance += diffuseBrdf * pd.flux;
 }

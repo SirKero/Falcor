@@ -78,7 +78,7 @@ void getEmissiveLight(uint idx,in float3 worldPos, bool resampled, out float dis
     toLight = toLight/ distance;    //normalize
 
     Li = vpl.flux;
-    if (resampled)
+    if (true)
     {
         Li *= saturate(dot(normalize(vpl.normal), -toLight)); //Cos Theta
     }

@@ -260,7 +260,7 @@ void rayGen()
     
         if (validSample)
         {
-            //reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
+            reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
             reservoir.M = encodeNormal2x8(bsdfSample.wo); //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
             float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
     

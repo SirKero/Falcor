@@ -125,8 +125,8 @@ struct Surface{
         float D = evalNdfGGX(roughness * roughness, NdotH);
         float G = evalMaskingSmithGGXSeparable(roughness, NdotL, NdotV);
 
-        float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
-        //float F = specular < 1e-8f ? 0.f : evalFresnelSchlick(specular, 1.f, LdotH) / specular; //Not "right" but less noisier
+        //float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+        float F = specular < 1e-8f ? 0.f : evalFresnelSchlick(specular, 1.f, LdotH) / specular; //Not "right" but less noisier
 
         //eval brdf terms
         float diffuseBRDF = NdotL * M_1_PI;

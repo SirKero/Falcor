@@ -1408,7 +1408,6 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
-    var[uniformName]["gWasResampled"] = mResamplingMode != ResamplingMode::NoResampling;
 
     if (mReset || mReuploadBuffers) {
         uniformName = "Constant";
