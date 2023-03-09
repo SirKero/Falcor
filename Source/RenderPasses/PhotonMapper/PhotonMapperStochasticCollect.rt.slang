@@ -243,7 +243,8 @@ void rayGen()
     //Add emission
     float3 pixEmission = gEmissive[launchIndex].xyz;
     radiance += pixEmission * thpMatID.xyz;
-    
+
+    /*
     //Accumulate the image
     if (gFrameCount > 0 )
     {
@@ -253,6 +254,6 @@ void rayGen()
         radiance += last;
         radiance /= frameCountF + 1.0;
     }
-    
+    */
     gPhotonImage[launchIndex] = float4(radiance, 1);
 }
