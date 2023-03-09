@@ -41,8 +41,7 @@ cbuffer Light
     EmissiveLightSampler gEmissiveSampler;
 }
 
-enum
-class GenerationFlags // : uint32_t
+enum class GenerationFlags // : uint32_t
 {
     None                = 0x00,
     AlphaTest           = 0x01,     //Enable Alpha test
@@ -144,7 +143,7 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
 
     //Get Flux
     float2 uv = tri.getTexCoord(barycentrics);
-    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area * M_PI;
+    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
     pls.flux /= triangleSelectionPdf;
 
     //Check if the material is double sided (infinetly thin)
@@ -165,19 +164,25 @@ float2 toSphericalCoordinate(float3 p)
     return float2(acos(p.y), atan2(p.z, p.x));
 }
 
+float3 fromWordlToLocal(const in float3 normal, float3 w)
+{
+    // reconstruct tangent frame based off worldspace normal
+    // this is ok for isotropic BRDFs
+    // for anisotropic BRDFs, we need a user defined tangent
+    float3 bitangent = perp_stark(normal);
+    float3 tangent = cross(bitangent, normal);
+
+    return float3(dot(bitangent, w), dot(tangent, w), dot(normal, w));
+}
+
 //transforms direction from local to world space
-void fromLocalToWorld(in float3 lightDirW, inout float3 dir)
+float3 fromLocalToWorld(const in float3 normal, float3 w)
 {
     //transform from local space -> random dir vector in world space
-    float3 tangent, bitangent;
-    if (abs(lightDirW.x) < 0.99)
-        tangent = cross(lightDirW, float3(1., 0., 0.));
-    else
-        tangent = cross(lightDirW, float3(0., 1., 0.));
-    tangent = normalize(tangent);
-    bitangent = cross(tangent, lightDirW);
+    float3 bitangent = perp_stark(normal);
+    float3 tangent = cross(bitangent, normal);
 
-    dir = dir.x * tangent + dir.y * bitangent + dir.z * lightDirW;
+    return w.x * tangent + w.y * bitangent + w.z * normal;
 }
 
 AABB calcPhotonAABB(in float3 center, in float radius)
@@ -281,9 +286,14 @@ void rayGen()
     
     RayDesc ray;
     float lightDirPDF = 1.0;
-    ray.Direction = sample_cosine_hemisphere_polar(sampleNext2D(rayData.sg), lightDirPDF);
-    fromLocalToWorld(pls.normal, ray.Direction);
-    //pls.flux /= lightDirPDF;
+    float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), lightDirPDF);
+
+    if ((woLocal.z < kMinCosTheta) || (lightDirPDF == 0.f))
+        return;
+    
+    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+    
+    pls.flux /= lightDirPDF;
     pls.flux /= launchDim.x * launchDim.y; //Division through all photons
 
     ray.Origin = pls.posW;
