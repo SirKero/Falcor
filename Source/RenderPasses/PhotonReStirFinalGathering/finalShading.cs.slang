@@ -41,7 +41,6 @@ RWTexture2D<float4> gDebug;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
-    bool gWasResampled;             //True if resampling was used
 }
 
 cbuffer Constant
@@ -68,7 +67,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-void getEmissiveLight(uint idx,in float3 worldPos, bool resampled, out float distance ,out float3 toLight, out float3 Li){
+void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float3 toLight, out float3 Li){
     //Get light position
     VPL vpl = VPL(gPhotonLight[idx]);
     
@@ -78,10 +77,7 @@ void getEmissiveLight(uint idx,in float3 worldPos, bool resampled, out float dis
     toLight = toLight/ distance;    //normalize
 
     Li = vpl.flux;
-    if (true)
-    {
-        Li *= saturate(dot(normalize(vpl.normal), -toLight)); //Cos Theta
-    }
+    Li *= saturate(dot(normalize(vpl.normal), -toLight)); //Cos Theta
         
 }
 
@@ -127,7 +123,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float distance = 0;
     float3 toLight = { };
     float3 Li = { };
-    getEmissiveLight(index2Dto1D(dTid, gFrameDim.x),sd.posW , gWasResampled ,distance , toLight, Li);
+    getEmissiveLight(index2Dto1D(dTid, gFrameDim.x),sd.posW  ,distance , toLight, Li);
     Li = max(0.f, Li * r.weightSum);
 
     //Check light visibility with a shadow ray
