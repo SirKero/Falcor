@@ -71,7 +71,7 @@ void getEmissiveLight(in Reservoir r, in float3 worldPos, out float distance ,ou
     ReSTIRLight light = ReSTIRLight(gLights[r.lightIdx]);
     
     EmissiveTriangle tri = gScene.lightCollection.getTriangle(light.lightIdx);
-    const float3 barycentrics = sample_triangle(r.uv);
+    const float3 barycentrics = { 1.f - r.uv.x - r.uv.y, r.uv.x, r.uv.y };
     float3 lightPos = tri.getPosition(barycentrics);
     //Get light dir
     toLight = lightPos - worldPos;

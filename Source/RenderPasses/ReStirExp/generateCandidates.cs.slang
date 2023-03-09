@@ -106,7 +106,8 @@ bool sampleLight(float3 rnd, const float3 surfacePosition,
     ReSTIRLight light = ReSTIRLight(gLights[ls.lightIdx]);
     
     // Uniformly sample the triangle's area by folding the random numbers such that u & v sum to less than 1.
-    ls.uv = ((rnd.y + rnd.z) <= 1.f) ? rnd.yz : 1.f - rnd.yz;
+    const float2 u = rnd.yz;
+    ls.uv = ((u.x + u.y) <= 1.f) ? u : 1.f - u;
     float3 normal = cross(light.edge0 , light.edge1);
     const float normalLength = length(normal);
     const float area = 0.5f * normalLength;
