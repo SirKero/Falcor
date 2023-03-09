@@ -220,16 +220,17 @@ void rayGen()
         float linZ = gLinZ[launchIndex];
         let lod = ExplicitLodTextureSampler(0.f);
         ShadingData sd = loadShadingData(hitInfo, view, lod);
-        let bsdf = gScene.materials.getBSDF(sd, lod);
-        let bsdfProperties = bsdf.getProperties(sd);
-
-        traceData.sg = SampleGenerator(launchIndex, gFrameCount + 3 * 13);
 
         //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
         if (gDiffuseOnly)
             sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
         else
             sd.mtl.setActiveLobes((uint) LobeType::Reflection);
+
+        let bsdf = gScene.materials.getBSDF(sd, lod);
+        let bsdfProperties = bsdf.getProperties(sd);
+
+        traceData.sg = SampleGenerator(launchIndex, gFrameCount + 3 * 13);
 
         BSDFSample bsdfSample;
         bool validSample = bsdf.sample(sd, traceData.sg, bsdfSample, true);
@@ -238,7 +239,6 @@ void rayGen()
         surface = Surface::create(sd.computeNewRayOrigin(), sd.N, sd.V, linZ, bsdfProperties.roughness,
                                       luminance(bsdfProperties.diffuseReflectionAlbedo), luminance(bsdfProperties.specularReflectance));
 
-    
         if (gDiffuseOnly)
             reservoir.targetPdf = surface.getDiffusePdf(bsdfSample.wo);
         else
@@ -260,7 +260,7 @@ void rayGen()
     
         if (validSample)
         {
-            reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
+            //reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
             reservoir.M = encodeNormal2x8(bsdfSample.wo); //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
             float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
     
