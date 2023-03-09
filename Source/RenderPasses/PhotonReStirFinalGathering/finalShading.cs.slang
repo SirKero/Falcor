@@ -127,7 +127,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
     float distance = 0;
     float3 toLight = { };
     float3 Li = { };
-    getEmissiveLight(index2Dto1D(dTid, gFrameDim.x),sd.posW , true ,distance , toLight, Li);
+    getEmissiveLight(index2Dto1D(dTid, gFrameDim.x),sd.posW , gWasResampled ,distance , toLight, Li);
     Li = max(0.f, Li * r.weightSum);
 
     //Check light visibility with a shadow ray
