@@ -147,6 +147,15 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
     pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area * M_PI;
     pls.flux /= triangleSelectionPdf;
 
+    //Check if the material is double sided (infinetly thin)
+    MaterialHeader mltHeader = gScene.materials.getMaterialHeader(tri.materialID);
+    //If the material is double sided, randomly flip the normal
+    if (mltHeader.isDoubleSided())
+    {
+        if (sampleNext1D(sg) >= 0.5f)
+            pls.normal = -tri.normal;
+    }
+    
     return true;
 }
 
@@ -215,7 +224,8 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     let bsdf = gScene.materials.getBSDF(sd, lod);
     uint lobes = bsdf.getLobes(sd);
     let bsdfProperties = bsdf.getProperties(sd);
-
+    bool hasDiffuseParts = luminance(bsdfProperties.diffuseReflectionAlbedo) > 0;
+    
     bool valid = bsdf.sample(sd, rayData.sg, bsdfSample, true /*ImportanceSampling*/);
 
     float3 thpStart = rayData.thp;
@@ -228,7 +238,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.direction = bsdfSample.wo;
     rayData.isEmissive = luminance(bsdfProperties.emission) > 0;
     if (gFlags & (uint) GenerationFlags::DeltaRejection)
-        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Reflection) && ((lobes & (uint) LobeType::Delta) == 0);
+        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Reflection) && (((lobes & (uint) LobeType::Delta) == 0) && hasDiffuseParts);
     else
         rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 

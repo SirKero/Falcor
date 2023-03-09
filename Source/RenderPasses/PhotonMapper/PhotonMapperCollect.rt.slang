@@ -223,6 +223,7 @@ void rayGen()
     radiance += pixEmission * thp.xyz;
     
     //Accumulate the image
+    /*
     if (gFrameCount > 0 )
     {
         float3 last = gPhotonImage[launchIndex].xyz;
@@ -231,6 +232,7 @@ void rayGen()
         radiance += last;
         radiance /= frameCountF + 1.0;
     }
-    
+    */
+
     gPhotonImage[launchIndex] = float4(radiance, 1);
 }
