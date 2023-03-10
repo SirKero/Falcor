@@ -690,6 +690,11 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
         mpFinalGatherHit->setName("PhotonReStir::FinalGatherHitInfo");
     }
 
+    if (!mpLightFactor) {
+        mpLightFactor = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::R16Unorm, 1u, 1u, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpLightFactor->setName("PhotonReStir::LightFactor");
+    }
+
     //Create view tex for previous frame
     if (renderData[kInViewDesc.name] != nullptr && !mpPrevViewTex) {
         auto viewTex = renderData[kInViewDesc.name]->asTexture();
@@ -818,6 +823,8 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gPhotonCullingMask"] = mpPhotonCullingMask;
+
+    var["gLightFactor"] = mpLightFactor;
 
     //Create dimensions based on the number of VPLs
     uint2 targetDim = renderData.getDefaultTextureDims();
@@ -961,6 +968,7 @@ void PhotonReSTIRFinalGathering::collectFinalGatherHitPhotons(RenderContext* pRe
     var["gPhotonAABB"] = mpPhotonAABB[0];
     var["gPackedPhotonData"] = mpPhotonData[0];
     var["gFinalGatherHit"] = mpFinalGatherHit;
+    var["gLightFactor"] = mpLightFactor;
 
     bool tlasValid = var["gPhotonAS"].setSrv(mPhotonAS.tlas.pSrv);
     FALCOR_ASSERT(tlasValid);

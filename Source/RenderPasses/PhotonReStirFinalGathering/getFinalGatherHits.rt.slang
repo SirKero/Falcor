@@ -44,6 +44,7 @@ RWStructuredBuffer<PackedSurfaceData> gSurfaceData;
 RWTexture2D<PackedHitInfo> gFinalGatherHit;
 RWTexture2D<uint2> gFinalGatherExtraInfo;
 RWTexture2D<uint> gPhotonCullingMask;
+RWTexture2D<float> gLightFactor;    //NdotL to take out of photon collect
 
 //Outputs
 #if USE_REDUCED_RESERVOIR_FORMAT
@@ -214,6 +215,8 @@ void rayGen()
     Surface surface = Surface();
     Reservoir reservoir = Reservoir();
     TraceData traceData = TraceData::create();
+    float lightFactor = 1.f;    //Store NdotL in it later
+    
     if (hitInfo.isValid())
     {
         float3 view = -gView[launchIndex].xyz;
@@ -263,7 +266,8 @@ void rayGen()
     
         if (validSample)
         {
-            //reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
+            reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
+            lightFactor = traceData.NdotL;
             reservoir.M = encodeNormal2x8(bsdfSample.wo); //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
             float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
     
@@ -290,6 +294,7 @@ void rayGen()
     }
         
     //Store data in buffers
+    gLightFactor[launchIndex] = lightFactor;
     gFinalGatherHit[launchIndex] = traceData.packedHitInfo;
     gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = surface.pack();
     #if USE_REDUCED_RESERVOIR_FORMAT

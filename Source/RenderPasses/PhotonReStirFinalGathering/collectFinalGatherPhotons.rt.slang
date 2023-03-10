@@ -28,6 +28,7 @@ cbuffer PerFrame
 StructuredBuffer<uint4> gPackedPhotonData;
 StructuredBuffer<AABB> gPhotonAABB;
 Texture2D<PackedHitInfo> gFinalGatherHit;
+Texture2D<float> gLightFactor;
 
 RaytracingAccelerationStructure gPhotonAS;
 
@@ -158,8 +159,8 @@ void rayGen()
         ShadingData sd = loadShadingData(hitInfo, approxViewDir, lod);
         let bsdf = gScene.materials.getBSDF(sd, lod);
         let bsdfProperties = bsdf.getProperties(sd);
-            
         //Prepare payload
+        
         RayData rayData = RayData();
         rayData.diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo; //Diffuse reflectance is stored in flux before collection
 
@@ -187,7 +188,11 @@ void rayGen()
     
         TraceRay(gPhotonAS, rayFlags, 1 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
         float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius); //Get new flux
-  
+        
+        float lightFactor = gLightFactor[launchIndex];  //Take out the NdotL from the radiance estimate
+        if(lightFactor > 0)
+            radiance /= lightFactor;
+        
         //ReSTIR Candidate
         uint lightIdx = index2Dto1D(launchIndex, launchDim.x);
         float Li = luminance(radiance);

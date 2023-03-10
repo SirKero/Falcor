@@ -335,6 +335,7 @@ private:
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
     Texture::SharedPtr mpCausticPhotonsFlux[2];    //Flux onsurfaces for caustic photons
+    Texture::SharedPtr mpLightFactor;
 
     Texture::SharedPtr mpDebugColorCopy;            //Copy of the color buffer
     Buffer::SharedPtr mpDebugInfoBuffer;            //ContainsDebugInfo
