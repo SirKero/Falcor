@@ -22,7 +22,7 @@ cbuffer PerFrame
     float gDepthThreshold; //Relative depth offset
     float gNormalThreshold; //Maximum cosine between both Normals that is allowed
     float gMatThreshold; //Material threshold
-    bool gCollectThisIteration; //If iteration skip is enabled, we do not need to collect every iteration
+    bool _pad;
 }
 
 // Inputs
@@ -180,14 +180,14 @@ void rayGen()
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     float3 radiance = float3(0);
     
-    if (valid && gCollectThisIteration)
+    if (valid)
     {
         TraceRay(gPhotonAS, rayFlags, 2 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
         float w = 1 / (M_PI * gPhotonRadius * gPhotonRadius);
         radiance += w * rayData.radiance;
     }
 
-    uint history = gCollectThisIteration ? 1 : 0;
+    uint history = 1;
     
     if (gEnableTemporalFilter)
     {      

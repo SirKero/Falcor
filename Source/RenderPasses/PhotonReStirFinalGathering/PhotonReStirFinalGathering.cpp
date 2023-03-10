@@ -1006,7 +1006,6 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     var[nameBuf]["gDepthThreshold"] = mRelativeDepthThreshold;
     var[nameBuf]["gNormalThreshold"] = mNormalThreshold;
     var[nameBuf]["gMatThreshold"] = mMaterialThreshold;
-    var[nameBuf]["gCollectThisIteration"] = !mSkipPhotonGeneration || (mSkipPhotonGeneration && ((mFrameCount% mSkipPhotonGenerationCount) == 0));
 
 
     //Bind caustic photon data (index -> 1)

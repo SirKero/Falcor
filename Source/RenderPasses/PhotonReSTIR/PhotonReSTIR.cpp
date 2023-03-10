@@ -865,7 +865,6 @@ void PhotonReSTIR::collectCausticPhotons(RenderContext* pRenderContext, const Re
     var[nameBuf]["gTemporalFilterHistoryLimit"] = mCausticTemporalFilterMaxHistory;
     var[nameBuf]["gDepthThreshold"] = mRelativeDepthThreshold;
     var[nameBuf]["gNormalThreshold"] = mNormalThreshold;
-    var[nameBuf]["gCollectThisIteration"] = !mSkipPhotonGeneration || (mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) == 0));
 
 
     //Bind caustic photon data (index -> 1)
