@@ -356,6 +356,9 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
     dirty |= widget.checkbox("Generation store non delta", mGenerationDeltaRejection);
     widget.tooltip("Interpret every non delta reflection as diffuse surface");
 
+    dirty |= widget.var("Generate Min Cos", mGenerateMinCos, 1e-6f, 1.f, 1e-6f);
+    widget.tooltip("Min cos where a generated direction is still valid (Very low probablities can generate fireflies)");
+
     dirty |= widget.slider("Max Caustic Bounces", mMaxCausticBounces, 0, 32);
     widget.tooltip("Diffuse bounces where a caustic still counts as caustic");
 
@@ -747,6 +750,7 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
         var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
         var[nameBuf]["gCullingYExtent"] = mCullingYExtent;
         var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
+        var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
     }
 
     //set the Photon Buffers

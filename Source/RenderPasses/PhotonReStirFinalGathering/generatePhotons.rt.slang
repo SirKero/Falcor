@@ -31,6 +31,8 @@ cbuffer CB
     uint gHashSize;     //Size is always 2^x
     int gCausticsBounces;    //Number of diffuse bounces allowed for caustic photons
     float gRayTMin;            //TMin for photon ray
+    float gMinCosGenerate;      //Min cos where a direction is still valid
+    uint _pad;
 };
 
 cbuffer Light{
@@ -262,7 +264,7 @@ void rayGen()
     float lightDirPDF = 1.0;
     float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), lightDirPDF);
 
-    if ((woLocal.z < kMinCosTheta) || (lightDirPDF == 0.f))
+    if ((woLocal.z < gMinCosGenerate) || (lightDirPDF <= 0.f))
         return;
     
     ray.Direction = fromLocalToWorld(pls.normal, woLocal);

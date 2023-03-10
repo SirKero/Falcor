@@ -288,6 +288,9 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         changed |= widget.checkbox("Generation store non delta",mGenerationDeltaRejection);
         widget.tooltip("Interpret every non delta reflection as diffuse surface");
 
+        changed |= widget.var("Generate Min Cos", mGenerateMinCos, 1e-6f, 1.f, 1e-6f);
+        widget.tooltip("Min cos where a generated direction is still valid (Very low probablities can generate fireflies)");
+
         changed |= widget.var("Photon Ray TMin", mPhotonRayTMin, 0.0001f, 100.f, 0.0001f);
         widget.tooltip("Sets the tMin value for the photon generation pass");
 
@@ -880,6 +883,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
             var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
             var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
             var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
+            var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
         }
 
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);

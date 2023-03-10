@@ -229,6 +229,7 @@ private:
     float                       mPhotonRayTMin = 0.02f;
 
     bool                        mGenerationDeltaRejection = true;         //Interpret every non delta surface as diffuse
+    float                       mGenerateMinCos = 0.0017f;              //outer 0.1 degree is rejected (generates fireflies)
 
 
     // Collect only

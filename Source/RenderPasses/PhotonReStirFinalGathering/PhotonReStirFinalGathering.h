@@ -280,6 +280,8 @@ private:
     bool mSkipPhotonGeneration = false;     //Only trace the photons every X iteration
     uint mSkipPhotonGenerationCount = 4;   //Gap between photon generation counts.
     bool mGenerationDeltaRejection = true;         //Interpret every non delta surface as diffuse
+    float mGenerateMinCos = 0.0017f;              //outer 0.1 degree is rejected (generates fireflies)
+
 
     //Photon Culling
     bool mUsePhotonCulling = true;
