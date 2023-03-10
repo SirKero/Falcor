@@ -250,7 +250,7 @@ private:
     uint mFramesCameraStill = 0;
     float mPhotonRayTMin = 0.02f;
     bool mSkipPhotonGeneration = false;     //Only trace the photons every X iteration
-    uint mSkipPhotonGenerationCount = 10;   //Gap between photon generation counts.
+    uint mSkipPhotonGenerationCount = 4;   //Gap between photon generation counts.
     bool mGenerationDeltaRejection = true;  //Interpret every non delta surface as diffuse
 
     //Runtime

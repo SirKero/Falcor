@@ -10,6 +10,7 @@ import Rendering.Materials.StandardMaterial;
 import Rendering.Lights.LightHelpers;
 
 import PhotonLight;
+import SurfaceData;
 
 cbuffer PerFrame
 {
@@ -17,12 +18,18 @@ cbuffer PerFrame
     float gPhotonRadius; // Radius for the caustic photons
     bool gEnableTemporalFilter; //Use the temporal filter
     uint gTemporalFilterHistoryLimit; //Limit for pixel median
+    float gDepthThreshold; //Relative depth offset
+    float gNormalThreshold; //Maximum cosine between both Normals that is allowed
+    bool gCollectThisIteration; //If iteration skip is enabled, we do not need to collect every iteration
+    uint _pad;
 }
 
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 Texture2D<float2> gMVec;
+StructuredBuffer<PackedSurfaceData> gSurfaceData;
+StructuredBuffer<PackedSurfaceData> gPrevSurfaceData;
 
 Texture2D<float4> gCausticImagePrev;
 // Outputs
@@ -66,6 +73,19 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     adjustShadingNormal(sd, v);
     
     return sd;
+}
+
+uint index2Dto1D(uint2 idx, uint width)
+{
+    return idx.x + width * idx.y;
+}
+
+bool isValidNeighbor(float3 currNormal, float currLinZ, float3 neighNormal, float neighLinZ)
+{
+    float normalCheck = dot(currNormal, neighNormal);
+    float minLinZDiff = currLinZ * gDepthThreshold;
+    float linZDiff = abs(currLinZ - neighLinZ);
+    return ((normalCheck >= gNormalThreshold) && (linZDiff <= minLinZDiff));
 }
 
 [shader("miss")]
@@ -167,14 +187,14 @@ void rayGen()
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
     float3 radiance = float3(0);
     
-    if (valid)
+    if (valid && gCollectThisIteration)
     {
         TraceRay(gPhotonAS, rayFlags, 0xFF /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
         float w = 1 / (M_PI * gPhotonRadius * gPhotonRadius);
         radiance += w * rayData.radiance;
     }
 
-    uint history = 1;
+    uint history = gCollectThisIteration ? 1 : 0;
     
     if (gEnableTemporalFilter)
     {
@@ -182,15 +202,22 @@ void rayGen()
         float2 prevIdxF = motionOffset + float2(launchIndex);
         float2 rndOffset = sampleNext2D(rayData.sg) - 0.5f;
         prevIdxF += rndOffset;
-        if (prevIdxF.x > 0 && prevIdxF.y > 0 && prevIdxF.x < launchDim.x && prevIdxF.y < launchDim.y)
+        uint2 tempIndex = uint2(round(prevIdxF));
+        if (tempIndex.x > 0 && tempIndex.y > 0 && tempIndex.x < launchDim.x && tempIndex.y < launchDim.y)
         {
-            uint2 tempIndex = uint2(round(prevIdxF));
-            //Because the caustic image is RGBA16F, we need to store the history as float. As values are in a low range this should not introduce any errors
-            float4 prev = gCausticImagePrev[tempIndex];
-            history = min(gTemporalFilterHistoryLimit, uint(round(prev.w)) + 1);
-            prev.xyz *= (history - 1);
-            radiance += prev.xyz;
-            radiance /= history;
+            //Load Surfaces
+            Surface currentSurface = Surface(gSurfaceData[index2Dto1D(launchIndex, launchDim.x)], ray.Direction);
+            Surface prevSurface = Surface(gPrevSurfaceData[index2Dto1D(tempIndex, launchDim.x)], ray.Direction);
+            
+            if (isValidNeighbor(currentSurface.normal, currentSurface.viewDepth, prevSurface.normal, prevSurface.viewDepth))
+            {
+               //Because the caustic image is RGBA16F, we need to store the history as float. As values are in a low range this should not introduce any errors
+                float4 prev = gCausticImagePrev[tempIndex];
+                history = min(gTemporalFilterHistoryLimit, uint(round(prev.w)) + history);
+                prev.xyz *= max(0, (history - 1));
+                radiance += prev.xyz;
+                radiance /= max(1u, history);
+            }
         }
     }
     

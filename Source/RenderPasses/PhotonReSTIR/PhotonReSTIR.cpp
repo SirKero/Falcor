@@ -835,8 +835,9 @@ void PhotonReSTIR::collectCausticPhotons(RenderContext* pRenderContext, const Re
     //Return if pass is disabled
     if (!mEnableCausticPhotonCollection) return;
     FALCOR_PROFILE("CollectCausticPhotons");
-    pRenderContext->clearTexture(mpCausticPhotonsFlux[mFrameCount % 2].get());   //clear for now
 
+    //Skip if we do not do any work this frame
+    if ((mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) == 0)) && !mCausticUseTemporalFilter) return;
 
     if (!mCollectCausticPhotonsPass.pVars) {
         FALCOR_ASSERT(mCollectCausticPhotonsPass.pProgram);
@@ -862,6 +863,10 @@ void PhotonReSTIR::collectCausticPhotons(RenderContext* pRenderContext, const Re
     var[nameBuf]["gPhotonRadius"] = mCausticCollectRadius;
     var[nameBuf]["gEnableTemporalFilter"] = mCausticUseTemporalFilter;
     var[nameBuf]["gTemporalFilterHistoryLimit"] = mCausticTemporalFilterMaxHistory;
+    var[nameBuf]["gDepthThreshold"] = mRelativeDepthThreshold;
+    var[nameBuf]["gNormalThreshold"] = mNormalThreshold;
+    var[nameBuf]["gCollectThisIteration"] = !mSkipPhotonGeneration || (mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) == 0));
+
 
     //Bind caustic photon data (index -> 1)
     var["gPhotonAABB"] = mpCausticPhotonAABB;
@@ -871,6 +876,8 @@ void PhotonReSTIR::collectCausticPhotons(RenderContext* pRenderContext, const Re
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();
     var["gMVec"] = renderData[kInMVecDesc.name]->asTexture();
+    var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
+    var["gPrevSurfaceData"] = mpSurfaceBuffer[(mFrameCount + 1) % 2];
 
     //Output flux
     var["gCausticImage"] = mpCausticPhotonsFlux[mFrameCount % 2];

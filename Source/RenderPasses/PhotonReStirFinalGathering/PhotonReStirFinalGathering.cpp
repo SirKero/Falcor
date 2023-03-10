@@ -975,8 +975,9 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     //Return if pass is disabled
     if (!mEnableCausticPhotonCollection) return;
     FALCOR_PROFILE("CollectCausticPhotons");
-    pRenderContext->clearTexture(mpCausticPhotonsFlux[mFrameCount % 2].get());   //clear for now
 
+    //Skip if we do not do any work this frame
+    if ((mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) == 0)) && !mCausticUseTemporalFilter) return;
 
     if (!mCollectCausticPhotonsPass.pVars) {
         FALCOR_ASSERT(mCollectCausticPhotonsPass.pProgram);
@@ -1005,6 +1006,7 @@ void PhotonReSTIRFinalGathering::collectCausticPhotons(RenderContext* pRenderCon
     var[nameBuf]["gDepthThreshold"] = mRelativeDepthThreshold;
     var[nameBuf]["gNormalThreshold"] = mNormalThreshold;
     var[nameBuf]["gMatThreshold"] = mMaterialThreshold;
+    var[nameBuf]["gCollectThisIteration"] = !mSkipPhotonGeneration || (mSkipPhotonGeneration && ((mFrameCount% mSkipPhotonGenerationCount) == 0));
 
 
     //Bind caustic photon data (index -> 1)
