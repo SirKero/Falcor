@@ -341,6 +341,8 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
         changed |= widget.checkbox("Final Gather Radius Rejection", mAllowFinalGatherPointsInRadius);
         widget.tooltip("Allow generated Final Gather hit points in the distance of the collection radius");
+        changed |= widget.checkbox("Create a Final Gather fallback sample", mCreateFallbackFinalGatherSample);
+        widget.tooltip("If bsdf sample is invalid, create another one with reference bsdf");
     }
 
     if (auto group = widget.group("ReSTIR")) {
@@ -806,6 +808,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
     var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
     var[nameBuf]["gDeltaRejection"] = mGenerationDeltaRejection;
+    var[nameBuf]["gCreateFallbackSample"] = mCreateFallbackFinalGatherSample;
 
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();

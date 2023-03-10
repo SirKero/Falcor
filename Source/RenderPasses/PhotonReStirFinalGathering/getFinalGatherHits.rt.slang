@@ -31,8 +31,8 @@ cbuffer Constant{
     uint gHashSize;     //Size is always 2^x
     bool gUseAlphaTest; //Alpha test
     bool gDeltaRejection;   //Accept every non delta surface as diffuse
-    uint _pda;
-}
+    bool gCreateFallbackSample; //Creates a reference sample if current sample was invalid
+}  
 
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
@@ -234,11 +234,14 @@ void rayGen()
 
         BSDFSample bsdfSample;
         bool validSample = bsdf.sample(sd, traceData.sg, bsdfSample, true);
-    
+
+        if (gCreateFallbackSample && !validSample)
+            validSample = bsdf.sample(sd, traceData.sg, bsdfSample, false);
+
         //Fill Surface Buffer used for calculating the target PDF
         surface = Surface::create(sd.computeNewRayOrigin(), sd.N, sd.V, linZ, bsdfProperties.roughness,
                                       luminance(bsdfProperties.diffuseReflectionAlbedo), luminance(bsdfProperties.specularReflectance));
-
+        
         if (gDiffuseOnly)
             reservoir.targetPdf = surface.getDiffusePdf(bsdfSample.wo);
         else
@@ -248,19 +251,19 @@ void rayGen()
 
         RayDesc tRay;
         tRay.Origin = sd.computeNewRayOrigin();
-        tRay.TMin = 0.0;
+        tRay.TMin = 0.001;
         tRay.TMax = 1000.f;
         tRay.Direction = bsdfSample.wo;
     
         if (validSample)
         {
             TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
-            validSample = traceData.distance >= 0;
+            validSample = traceData.distance > 0;
         }
     
         if (validSample)
         {
-            reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
+            //reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
             reservoir.M = encodeNormal2x8(bsdfSample.wo); //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
             float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
     
