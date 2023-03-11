@@ -705,8 +705,9 @@ void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     if (!mSkipPhotonGeneration || (mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) == 0))) {
         //Clear Counter
         pRenderContext->clearUAV(mpPhotonLightCounter.get()->getUAV().get(), uint4(0));
-
         pRenderContext->clearUAV(mpPhotonLights.get()->getUAV().get(), uint4(0));
+        if(mEnableCausticPhotonCollection)
+            pRenderContext->clearUAV(mpCausticPhotonAABB.get()->getUAV().get(), uint4(0));
 
         //Defines
         mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
