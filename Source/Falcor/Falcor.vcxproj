@@ -171,6 +171,7 @@
     <ClInclude Include="Rendering\Lights\LightBVHBuilder.h" />
     <ClInclude Include="Rendering\Lights\LightBVHSampler.h" />
     <ClInclude Include="Rendering\Materials\BSDFIntegrator.h" />
+    <ClInclude Include="Rendering\ReSTIRGI\ScreenSpaceReSTIR.h" />
     <ClInclude Include="Rendering\RTXDI\RTXDIModule.h" />
     <ClInclude Include="Rendering\RTXDI\RTXDI.h" />
     <ClInclude Include="Rendering\RTXGI\RTXGIVolume.h" />
@@ -236,6 +237,15 @@
     <ShaderSource Include="Rendering\Materials\StandardMaterial.slang" />
     <ShaderSource Include="Rendering\Materials\TexLODHelpers.slang" />
     <ShaderSource Include="Rendering\Materials\TexLODTypes.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\EvalContext.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\FinalSample.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\GIClearReservoirs.cs.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\GIResampling.cs.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\GIReservoir.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\Params.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\ReflectTypes.cs.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\ScreenSpaceReSTIR.slang" />
+    <ShaderSource Include="Rendering\ReSTIRGI\SurfaceData.slang" />
     <ShaderSource Include="Rendering\RTXDI\EnvLightUpdater.cs.slang" />
     <ShaderSource Include="Rendering\RTXDI\LightUpdater.cs.slang" />
     <ShaderSource Include="Rendering\RTXDI\PackedTypes.slang" />
@@ -903,6 +913,7 @@
     <ClCompile Include="Rendering\Lights\LightBVHSampler.cpp" />
     <ClCompile Include="Rendering\Materials\BSDFIntegrator.cpp" />
     <ClCompile Include="Rendering\Materials\TexLODTypes.cpp" />
+    <ClCompile Include="Rendering\ReSTIRGI\ScreenSpaceReSTIR.cpp" />
     <ClCompile Include="Rendering\RTXDI\RTXDI.cpp" />
     <ClCompile Include="Rendering\RTXDI\RTXDISDK.cpp" />
     <ClCompile Include="Rendering\RTXGI\RTXGISDK.cpp" />

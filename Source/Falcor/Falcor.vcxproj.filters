@@ -690,6 +690,9 @@
     <ClInclude Include="Rendering\RTXGI\RTXGIVolume.h">
       <Filter>Rendering\RTXGI</Filter>
     </ClInclude>
+    <ClInclude Include="Rendering\ReSTIRGI\ScreenSpaceReSTIR.h">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Core">
@@ -874,6 +877,9 @@
     </Filter>
     <Filter Include="RenderPasses\Volumes">
       <UniqueIdentifier>{679c016a-0763-441a-b7d9-13d2b62ee1bc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Rendering\ReSTIRGI">
+      <UniqueIdentifier>{41ab00e1-cb15-4ffc-8585-f7662f8ec840}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -1589,6 +1595,9 @@
     <ClCompile Include="Rendering\RTXGI\RTXGISDK.cpp">
       <Filter>Rendering\RTXGI</Filter>
     </ClCompile>
+    <ClCompile Include="Rendering\ReSTIRGI\ScreenSpaceReSTIR.cpp">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Xml Include="dependencies.xml" />
@@ -2241,6 +2250,33 @@
     </ShaderSource>
     <ShaderSource Include="Rendering\RTXGI\UpdateProbesDebugData.slang">
       <Filter>Rendering\RTXGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\EvalContext.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\FinalSample.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\GIClearReservoirs.cs.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\GIResampling.cs.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\GIReservoir.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\Params.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\ReflectTypes.cs.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\ScreenSpaceReSTIR.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Rendering\ReSTIRGI\SurfaceData.slang">
+      <Filter>Rendering\ReSTIRGI</Filter>
     </ShaderSource>
   </ItemGroup>
 </Project>
