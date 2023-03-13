@@ -103,7 +103,7 @@ private:
 
     /** Creates the Generate Photon pass, where the photons are shot through the scene and saved in an AABB and information buffer
     */
-    void generatePhotons(RenderContext* pRenderContext, const RenderData& renderData);
+    void generatePhotons(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers = true);
 
     /** Pass that collect the photons. It will shoot a infinit small ray at the current camera position and collect all photons.
     * The needed position etc. has to be provided by a gBuffer
@@ -214,6 +214,8 @@ private:
     uint                        mMaxBounces = 10;                        ///< Depth of recursion (0 = none).
     float                       mRejectionProbability = 0.3f;                ///< Probabilty that a Global photon is saved
 
+    bool                        mEnablePhotonSplit = false;               ///<Enables split between analytic and emissive
+    float                       mPhotonSplitRatio = 0.5f;               ///< Percent of emissive photons 0 = 0%; 1. = 100%
     uint                        mNumPhotons = 2000000;                   ///< Number of Photons shot
     uint                        mNumPhotonsUI = mNumPhotons;            ///< For UI. It is decopled from the runtime var because changes have to be confirmed
     const uint                  mPhotonYExtent = 512;
@@ -283,8 +285,6 @@ private:
 
 
     //Light
-    
-
     // Ray tracing program.
     struct RayTraceProgramHelper
     {
@@ -301,7 +301,7 @@ private:
             return r;
         }
     };
-
+    
     struct BlasData
     {
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO prebuildInfo;
@@ -333,7 +333,8 @@ private:
         Buffer::SharedPtr cpuCopy;
     }mPhotonCounterBuffer;
 
-    RayTraceProgramHelper mTracerGenerate;          ///<Description for the Generate Photon pass 
+    RayTraceProgramHelper mTracerGenerate;          ///<Description for the Generate Photon pass
+    RayTraceProgramHelper mTracerGenerateAdditional;          ///<Description for the Generate Photon pass 
     RayTraceProgramHelper mTracerCollect;                       ///<Collect pass collects the photons that where shot
     RayTraceProgramHelper mTracerStochasticCollect;           ///<Collect pass with stochastic collect shader instead of the normal one
     RayTraceProgramHelper mPhotonASDebugPass;

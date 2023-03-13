@@ -258,6 +258,9 @@ void PhotonMapper::execute(RenderContext* pRenderContext, const RenderData& rend
 
     generatePhotons(pRenderContext, renderData);
 
+    if (mEnablePhotonSplit)
+        generatePhotons(pRenderContext, renderData, false);
+
 
     //Barrier for the AABB buffers (they need to be ready for Acceleration Structure Building)
     pRenderContext->uavBarrier(mGlobalBuffers.aabb.get());
@@ -310,6 +313,12 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
     bool dirty = false;
 
     //Info
+    widget.checkbox("Use analytic and emissive light", mEnablePhotonSplit);
+    widget.tooltip("Emissive light is enabled on default. Enable this checkbox to additionally trace a analytic pass");
+    if (mEnablePhotonSplit) {
+        widget.var("Emissive/Analytic ratio", mPhotonSplitRatio, 0.f, 1.f, 0.001f);
+        widget.tooltip("Ratio for Emissive/Analytic photon distribution. 0.0 -> 0% Emissive, 1.0 -> 100% Emissive");
+    }
     widget.text("Iterations: " + std::to_string(mFrameCount));
     widget.text("Caustic Photons: " + std::to_string(mPhotonCount[0]) + " / " + std::to_string(mPhotonAccelSizeLastIt[0]) + " / " + std::to_string(mCausticBuffers.maxSize));
     widget.tooltip("Photons for current Iteration / Build Size Acceleration Structure / Max Buffer Size");
@@ -549,7 +558,8 @@ void PhotonMapper::prepareVars()
 
     // Configure program.
     mTracerGenerate.pProgram->addDefines(mpSampleGenerator->getDefines());
-    mTracerGenerate.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+    if(mpEmissiveLightSampler)
+        mTracerGenerate.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
     mTracerGenerate.pProgram->setTypeConformances(mpScene->getTypeConformances());
     // Create program variables for the current program.
     // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
@@ -677,46 +687,39 @@ void PhotonMapper::copyPhotonCounter(RenderContext* pRenderContext)
     mPhotonCounterBuffer.cpuCopy->unmap();
 }
 
-void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderData& renderData)
+void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers)
 {
-    FALCOR_PROFILE("Generation_Pass");
+    FALCOR_PROFILE(clearBuffers ? "Generation_Pass" : "Additional_Generation_Pass");
 
-    //Reset counter Buffers
-    pRenderContext->copyBufferRegion(mPhotonCounterBuffer.counter.get(), 0, mPhotonCounterBuffer.reset.get(), 0, sizeof(uint64_t));
-    pRenderContext->resourceBarrier(mPhotonCounterBuffer.counter.get(), Resource::State::ShaderResource);
+    if (clearBuffers) {
+        //Reset counter Buffers
+        pRenderContext->copyBufferRegion(mPhotonCounterBuffer.counter.get(), 0, mPhotonCounterBuffer.reset.get(), 0, sizeof(uint64_t));
+        pRenderContext->resourceBarrier(mPhotonCounterBuffer.counter.get(), Resource::State::ShaderResource);
 
-    //Clear the photon Buffers
-    pRenderContext->clearUAV(mGlobalBuffers.aabb.get()->getUAV().get(), uint4(0, 0, 0, 0));
-    pRenderContext->clearTexture(mGlobalBuffers.infoFlux.get(), float4(0, 0, 0, 0));
-    pRenderContext->clearTexture(mGlobalBuffers.infoDir.get(), float4(0, 0, 0, 0));
-    pRenderContext->clearUAV(mCausticBuffers.aabb.get()->getUAV().get(), uint4(0, 0, 0, 0));
-    pRenderContext->clearTexture(mCausticBuffers.infoFlux.get(), float4(0, 0, 0, 0));
-    pRenderContext->clearTexture(mCausticBuffers.infoDir.get(), float4(0, 0, 0, 0));
+        //Clear the photon Buffers
+        pRenderContext->clearUAV(mGlobalBuffers.aabb.get()->getUAV().get(), uint4(0, 0, 0, 0));
+        pRenderContext->clearTexture(mGlobalBuffers.infoFlux.get(), float4(0, 0, 0, 0));
+        pRenderContext->clearTexture(mGlobalBuffers.infoDir.get(), float4(0, 0, 0, 0));
+        pRenderContext->clearUAV(mCausticBuffers.aabb.get()->getUAV().get(), uint4(0, 0, 0, 0));
+        pRenderContext->clearTexture(mCausticBuffers.infoFlux.get(), float4(0, 0, 0, 0));
+        pRenderContext->clearTexture(mCausticBuffers.infoDir.get(), float4(0, 0, 0, 0));
+    }
 
-
-    auto lights = mpScene->getLights();
+    //Make sure the light collection is initialized and up to date if used
     auto lightCollection = mpScene->getLightCollection(pRenderContext);
 
     // Specialize the Generate program.
     //Changing these will trigger shader compilation
-    mTracerGenerate.pProgram->addDefine("USE_ANALYTIC_LIGHTS", mpScene->useAnalyticLights() ? "1" : "0");
-    mTracerGenerate.pProgram->addDefine("USE_EMISSIVE_LIGHTS", mpScene->useEmissiveLights() ? "1" : "0");
-    mTracerGenerate.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
-    mTracerGenerate.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
-    mTracerGenerate.pProgram->addDefine("MAX_PHOTON_INDEX_GLOBAL", std::to_string(mGlobalBuffers.maxSize));
-    mTracerGenerate.pProgram->addDefine("MAX_PHOTON_INDEX_CAUSTIC", std::to_string(mCausticBuffers.maxSize));
+    mTracerGenerate.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTracerGenerate.pProgram->addDefine("INFO_TEXTURE_HEIGHT", std::to_string(kInfoTexHeight));
-    mTracerGenerate.pProgram->addDefine("RAY_TMAX", std::to_string(1000.f));    //TODO: Set as variable
     mTracerGenerate.pProgram->addDefine("RAY_TMIN_CULLING", std::to_string(kCollectTMin));
     mTracerGenerate.pProgram->addDefine("RAY_TMAX_CULLING", std::to_string(kCollectTMax));
-    mTracerGenerate.pProgram->addDefine("CULLING_USE_PROJECTION", std::to_string(mUseProjectionMatrixCulling));
     mTracerGenerate.pProgram->addDefine("PHOTON_FACE_NORMAL", mUseFaceNormalToReject ? "1" : "0");
     mTracerGenerate.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mGlobalBuffers.maxSize));
     mTracerGenerate.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mCausticBuffers.maxSize));
     mTracerGenerate.pProgram->addDefine("USE_PHOTON_CULLING", mEnablePhotonCulling ? "1" : "0");
 
 
-    FALCOR_ASSERT(mpEmissiveLightSampler);
     if (!mTracerGenerate.pVars) prepareVars();
     FALCOR_ASSERT(mTracerGenerate.pVars);
 
@@ -724,7 +727,8 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
 
     auto var = mTracerGenerate.pVars->getRootVar();
 
-    mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    if(mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
     // Set constants (uniforms).
     // 
@@ -734,24 +738,25 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
     var[nameBuf]["gPhotonRadius"] = float2(mCausticRadius, mGlobalRadius);
     var[nameBuf]["gHashScaleFactor"] = 1.0f / (mGlobalRadius * 2);  //Radius needs to be double to ensure that all photons from the camera cell are in it
 
-    //Upload constant buffer only if options changed
-    if (mResetConstantBuffers) {
-        nameBuf = "CB";
-        //Fill flags
-        uint flags = 0;
-        if (mUseAlphaTest) flags |= 0x01;
-        if (mAdjustShadingNormals) flags |= 0x02;
-        if (mGenerationDeltaRejection) flags |= 0x08;
+    //Constant buffer
+    nameBuf = "CB";
+    //Fill flags
+    uint flags = 0;
+    if (mUseAlphaTest) flags |= 0x01;
+    if (mAdjustShadingNormals) flags |= 0x02;
+    if (mGenerationDeltaRejection) flags |= 0x08;
+    if (!mpScene->useEmissiveLights() || !clearBuffers) flags |= 0x10;
 
-        var[nameBuf]["gMaxRecursion"] = mMaxBounces;
-        var[nameBuf]["gRejection"] = mRejectionProbability;
-        var[nameBuf]["gFlags"] = flags;
-        var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBytes;    //Size of the Photon Culling buffer. 2^x
-        var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
-        var[nameBuf]["gCullingYExtent"] = mCullingYExtent;
-        var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
-        var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
-    }
+    var[nameBuf]["gMaxRecursion"] = mMaxBounces;
+    var[nameBuf]["gRejection"] = mRejectionProbability;
+    var[nameBuf]["gFlags"] = flags;
+    var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBytes;    //Size of the Photon Culling buffer. 2^x
+    var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
+    var[nameBuf]["gCullingYExtent"] = mCullingYExtent;
+    var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
+    var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
+        
+    
 
     //set the Photon Buffers
     for (uint32_t i = 0; i <= 1; i++)
@@ -770,11 +775,29 @@ void PhotonMapper::generatePhotons(RenderContext* pRenderContext, const RenderDa
     }
 
     // Get dimensions of ray dispatch.
-    const uint2 targetDim = uint2(mNumPhotons / mPhotonYExtent, mPhotonYExtent);
+    uint dispatchedPhotons = mNumPhotons;
+    if (mEnablePhotonSplit) {
+        float splitRatio = clearBuffers ? mPhotonSplitRatio : 1.f - mPhotonSplitRatio;
+        dispatchedPhotons = uint(std::round(dispatchedPhotons * splitRatio));
+    }
+        
+
+    const uint2 targetDim = uint2(std::max(1u,dispatchedPhotons / mPhotonYExtent), mPhotonYExtent);
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     //Trace the photons
     mpScene->raytrace(pRenderContext, mTracerGenerate.pProgram.get(), mTracerGenerate.pVars, uint3(targetDim, 1));
+
+    //If we do a second photon generation pass, set barriers
+    if (mEnablePhotonSplit) {
+        pRenderContext->uavBarrier(mPhotonCounterBuffer.counter.get());
+        pRenderContext->uavBarrier(mCausticBuffers.aabb.get());
+        pRenderContext->uavBarrier(mCausticBuffers.infoDir.get());
+        pRenderContext->uavBarrier(mCausticBuffers.infoFlux.get());
+        pRenderContext->uavBarrier(mGlobalBuffers.aabb.get());
+        pRenderContext->uavBarrier(mGlobalBuffers.infoDir.get());
+        pRenderContext->uavBarrier(mGlobalBuffers.infoFlux.get());
+    }
 }
 
 void PhotonMapper::collectPhotons(RenderContext* pRenderContext, const RenderData& renderData)

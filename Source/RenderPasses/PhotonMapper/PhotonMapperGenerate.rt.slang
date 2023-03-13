@@ -33,7 +33,7 @@ cbuffer CB
     int gCausticsBounces; //Number of diffuse bounces allowed for caustic photons
     uint gCullingYExtent; //Y-Extend of the hash texture
     float gRayTMin; //TMin for photon ray
-    float gMinCosGenerate;  //Min Cos 
+    float gMinCosGenerate;  //Min Cos
 };
 
 cbuffer Light
@@ -48,6 +48,7 @@ enum class GenerationFlags // : uint32_t
     AdjShadingNormals   = 0x02,     //Adjust the shading normals
     EnableCaustics      = 0x04,     //Enable caustic photons.
     DeltaRejection      = 0x08,     //Accept every non delta material as diffuse
+    AnalyticLight       = 0x10,     //Use analytic light shading
 };
 
 struct PhotonInfo {
@@ -116,6 +117,34 @@ struct RayData
     }
 };
 
+//cartesian to polar coodinate. Assumes p is normalized
+float2 toSphericalCoordinate(float3 p)
+{
+    return float2(acos(p.y), atan2(p.z, p.x));
+}
+
+float3 fromWordlToLocal(const in float3 normal, float3 w)
+{
+    // reconstruct tangent frame based off worldspace normal
+    // this is ok for isotropic BRDFs
+    // for anisotropic BRDFs, we need a user defined tangent
+    float3 bitangent = perp_stark(normal);
+    float3 tangent = cross(bitangent, normal);
+
+    return float3(dot(bitangent, w), dot(tangent, w), dot(normal, w));
+}
+
+//transforms direction from local to world space
+float3 fromLocalToWorld(const in float3 normal, float3 w)
+{
+    //transform from local space -> random dir vector in world space
+    float3 bitangent = perp_stark(normal);
+    float3 tangent = cross(bitangent, normal);
+
+    return w.x * tangent + w.y * bitangent + w.z * normal;
+}
+
+#if USE_EMISSIVE_LIGHT  //Function is only valid if the emissive sampler is set
 bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
 {
     if (gScene.lightCollection.isEmpty())
@@ -157,33 +186,51 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
     
     return true;
 }
+#endif
 
-//cartesian to polar coodinate. Assumes p is normalized
-float2 toSphericalCoordinate(float3 p)
+bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample pls, out float3 sampledDir)
 {
-    return float2(acos(p.y), atan2(p.z, p.x));
+    const uint lightCount = gScene.getLightCount();
+    if (lightCount == 0)
+        return false;
+    //Uniformly sample one of the analytic lights
+    float rndLightIdx = float(lightCount) * sampleNext1D(sg);
+    uint lightIdx = min(uint(round(rndLightIdx)), lightCount);
+    LightData lightData = gScene.getLight(lightIdx);
+
+    //Only Point(+ Spot) lights are supported (due to RTXDI)
+    if (lightData.type != uint(LightType::Point))
+        return false;
+    float invLightPdf;
+    float3 woLocal;
+    float3 rnd = sampleNext3D(sg);
+    rnd.z = 0;
+    float spotAngle = lightData.cosOpeningAngle;
+    if (lightData.openingAngle < M_2PI) //If the opening angle is smaller than 2PI it is a spotlight
+    {
+        spotAngle = cos(lightData.openingAngle - lightData.penumbraAngle * rnd.z);
+        woLocal = sample_cone(rnd.xy, spotAngle);
+    }
+    else //Pointlight
+    {
+        woLocal = sample_sphere(rnd.xy);
+    }
+    invLightPdf = M_2PI * (1.f - spotAngle);
+    
+    if (invLightPdf <= 0.f)
+        return false;
+
+    invLightPdf *= lightCount; //Take the select pdf into account
+    
+    //Fill the photon light struct
+    pls.posW = lightData.posW;
+    pls.normal = lightData.dirW;
+    pls.flux = lightData.intensity * invLightPdf;
+    
+    sampledDir = fromLocalToWorld(pls.normal, woLocal);
+    return true;
 }
 
-float3 fromWordlToLocal(const in float3 normal, float3 w)
-{
-    // reconstruct tangent frame based off worldspace normal
-    // this is ok for isotropic BRDFs
-    // for anisotropic BRDFs, we need a user defined tangent
-    float3 bitangent = perp_stark(normal);
-    float3 tangent = cross(bitangent, normal);
-
-    return float3(dot(bitangent, w), dot(tangent, w), dot(normal, w));
-}
-
-//transforms direction from local to world space
-float3 fromLocalToWorld(const in float3 normal, float3 w)
-{
-    //transform from local space -> random dir vector in world space
-    float3 bitangent = perp_stark(normal);
-    float3 tangent = cross(bitangent, normal);
-
-    return w.x * tangent + w.y * bitangent + w.z * normal;
-}
 
 AABB calcPhotonAABB(in float3 center, in float radius)
 {
@@ -280,20 +327,37 @@ void rayGen()
     RayData rayData = RayData.create();
     rayData.sg = SampleGenerator(launchIndex, gFrameCount + 1 * 13);
 
-    PhotonLightSample pls;
-    if (!createLightSample(rayData.sg, pls))
-        return;
-    
     RayDesc ray;
-    float lightDirPDF = 1.0;
-    float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), lightDirPDF);
+    PhotonLightSample pls;
+    
+#if USE_EMISSIVE_LIGHT
+    if(gFlags & (uint) GenerationFlags::AnalyticLight)
+#endif    
+    {
+        float3 sampleDir;
+        if (!createLightSampleAnalytic(rayData.sg, pls, sampleDir))
+            return;
+    
+        ray.Direction = sampleDir;
+    }
+#if USE_EMISSIVE_LIGHT
+    else{
+        if (!createLightSample(rayData.sg, pls))
+            return;
+    
+   
+        float lightDirPDF = 1.0;
+        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), lightDirPDF);
 
-    if ((woLocal.z < gMinCosGenerate) || (lightDirPDF <= 0.f))
-        return;
+        if ((woLocal.z < gMinCosGenerate) || (lightDirPDF <= 0.f))
+            return;
     
-    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+        ray.Direction = fromLocalToWorld(pls.normal, woLocal);
     
-    pls.flux /= lightDirPDF;
+        pls.flux /= lightDirPDF;
+    }
+#endif
+    
     pls.flux /= launchDim.x * launchDim.y; //Division through all photons
 
     ray.Origin = pls.posW;
