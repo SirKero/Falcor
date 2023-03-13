@@ -55,15 +55,8 @@ def render_graph_ReSTIRGI():
 
     g.addEdge("AccumulatePass.output", "ToneMapper.src")
 
-    g.markOutput('ReSTIRGIGBuffer.vPosW')
-    g.markOutput('ReSTIRGIGBuffer.vNormW')
-    g.markOutput('ReSTIRGIGBuffer.vColor')
-    g.markOutput('ReSTIRGIGBuffer.random')
-    g.markOutput('ReSTIRGIGBuffer.sPosW')
-    g.markOutput('ReSTIRGIGBuffer.sNormW')
-    g.markOutput('ReSTIRGIGBuffer.vColor')
-    g.markOutput('ReSTIRGIGBuffer.sColor')
     g.markOutput("ToneMapper.dst")
+    g.markOutput("AccumulatePass.output")
 
     return g
 
