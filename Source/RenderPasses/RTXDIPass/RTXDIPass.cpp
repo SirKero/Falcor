@@ -41,12 +41,16 @@ namespace
     const std::string kInputVBuffer = "vbuffer";
     const std::string kInputTexGrads = "texGrads";
     const std::string kInputMotionVectors = "mvec";
+    const std::string kInputViewDir = "viewDir";
+    const std::string kInputPathLength = "pathLength";
 
     const Falcor::ChannelList kInputChannels =
     {
         { kInputVBuffer,            "gVBuffer",                 "Visibility buffer in packed format"                       },
         { kInputTexGrads,           "gTextureGrads",            "Texture gradients", true /* optional */                   },
         { kInputMotionVectors,      "gMotionVector",            "Motion vector buffer (float format)", true /* optional */ },
+        { kInputViewDir,            "gViewDir",                 "View Vector", true /* optional */ },
+        { kInputPathLength,         "gPathLength",              "Path Length from camera to hit point", true /* optional */ },
     };
 
     const Falcor::ChannelList kOutputChannels =
@@ -104,6 +108,13 @@ void RTXDIPass::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     const auto& pVBuffer = renderData[kInputVBuffer]->asTexture();
     const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
+    const auto& pViewDir = renderData[kInputViewDir]->asTexture();
+    //Create a previous view direction texture if the view dir texture is set
+    if (pViewDir != nullptr && !mpViewDirPrev) {
+        mpViewDirPrev = Texture::create2D(pViewDir->getWidth(), pViewDir->getHeight(), pViewDir->getFormat(), 1u, 1u, nullptr,
+                                          ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpViewDirPrev->setName("RTXDI::PreviousViewDir");
+    }
 
     auto& dict = renderData.getDictionary();
 
@@ -121,9 +132,9 @@ void RTXDIPass::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     mpRTXDI->beginFrame(pRenderContext, mFrameDim);
 
-    prepareSurfaceData(pRenderContext, pVBuffer);
+    prepareSurfaceData(pRenderContext, pVBuffer, renderData);
 
-    mpRTXDI->update(pRenderContext, pMotionVectors);
+    mpRTXDI->update(pRenderContext, pMotionVectors, pViewDir, mpViewDirPrev);
 
     finalShading(pRenderContext, pVBuffer, renderData);
 
@@ -190,7 +201,7 @@ void RTXDIPass::renderUI(Gui::Widgets& widget)
     }
 }
 
-void RTXDIPass::prepareSurfaceData(RenderContext* pRenderContext, const Texture::SharedPtr& pVBuffer)
+void RTXDIPass::prepareSurfaceData(RenderContext* pRenderContext, const Texture::SharedPtr& pVBuffer, const RenderData& renderData)
 {
     FALCOR_ASSERT(mpRTXDI);
     FALCOR_ASSERT(pVBuffer);
@@ -206,6 +217,7 @@ void RTXDIPass::prepareSurfaceData(RenderContext* pRenderContext, const Texture:
         auto defines = mpScene->getSceneDefines();
         defines.add(mpRTXDI->getDefines());
         defines.add("GBUFFER_ADJUST_SHADING_NORMALS", mGBufferAdjustShadingNormals ? "1" : "0");
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
 
         mpPrepareSurfaceDataPass = ComputePass::create(desc, defines, true);
     }
@@ -218,7 +230,12 @@ void RTXDIPass::prepareSurfaceData(RenderContext* pRenderContext, const Texture:
 
     var["vbuffer"] = pVBuffer;
     var["frameDim"] = mFrameDim;
+    
     mpRTXDI->setShaderData(mpPrepareSurfaceDataPass->getRootVar());
+
+    var = mpPrepareSurfaceDataPass->getRootVar();
+    var["gPathLength"] = renderData[kInputPathLength]->asTexture();
+    var["gViewDir"] = renderData[kInputViewDir]->asTexture();
 
     mpPrepareSurfaceDataPass->execute(pRenderContext, mFrameDim.x, mFrameDim.y);
 }
@@ -240,6 +257,7 @@ void RTXDIPass::finalShading(RenderContext* pRenderContext, const Texture::Share
         defines.add(mpRTXDI->getDefines());
         defines.add("GBUFFER_ADJUST_SHADING_NORMALS", mGBufferAdjustShadingNormals ? "1" : "0");
         defines.add("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(getValidResourceDefines(kInputChannels, renderData));
         defines.add(getValidResourceDefines(kOutputChannels, renderData));
 
         mpFinalShadingPass = ComputePass::create(desc, defines, true);
@@ -262,6 +280,10 @@ void RTXDIPass::finalShading(RenderContext* pRenderContext, const Texture::Share
 
     // Bind output channels as UAV buffers.
     var = mpFinalShadingPass->getRootVar();
+
+    var["gViewDir"] = renderData[kInputViewDir]->asTexture();
+    var["gViewDirPrev"] = mpViewDirPrev;
+
     auto bind = [&](const ChannelDesc& channel)
     {
         Texture::SharedPtr pTex = renderData[channel.name]->asTexture();

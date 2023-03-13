@@ -173,6 +173,10 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
         mOptionsChanged = false;
         mResetConstantBuffers = true;
     }
+    // Pass flag for adjust shading normals to subsequent passes via the dictionary.
+    // Adjusted shading normals cannot be passed via the VBuffer, so this flag allows consuming passes to compute them when enabled.
+    dict[Falcor::kRenderPassGBufferAdjustShadingNormals] = mAdjustShadingNormals;
+
     //Get VBuffer
     auto pVBuff = renderData[kVBufferName]->asTexture();
     FALCOR_ASSERT(pVBuff);

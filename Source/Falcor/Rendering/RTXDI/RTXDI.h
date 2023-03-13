@@ -207,8 +207,10 @@ namespace Falcor
             Must be called once between beginFrame() and endFrame().
             \param[in] pRenderContext Render context.
             \param[in] pMotionVectors Motion vectors for temporal reprojection.
+            \param[in] pViewDir current view dir. Defaults to nullptr.
+            \param[in] pViewDirPrev previous view dir. Defaults to nullptr
         */
-        void update(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors);
+        void update(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors, const Texture::SharedPtr& pViewDir = nullptr , const Texture::SharedPtr& pViewDirPrev = nullptr);
 
         /** Get the pixel debug component.
             \return Returns the pixel debug component.
@@ -319,15 +321,15 @@ namespace Falcor
 
         // Compute pass launches.
 
-        void setShaderDataInternal(const ShaderVar& rootVar, const Texture::SharedPtr& pMotionVectors);
+        void setShaderDataInternal(const ShaderVar& rootVar, const Texture::SharedPtr& pMotionVectors, const Texture::SharedPtr& pViewDir = nullptr, const Texture::SharedPtr& pViewDirPrev = nullptr);
         void updateLights(RenderContext* pRenderContext);
         void updateEnvLight(RenderContext* pRenderContext);
         void presampleLights(RenderContext* pRenderContext);
-        void generateCandidates(RenderContext* pRenderContext, uint32_t outputReservoirID);
-        void testCandidateVisibility(RenderContext* pRenderContext, uint32_t candidateReservoirID);
-        uint32_t spatialResampling(RenderContext* pRenderContext, uint32_t inputReservoirID);
-        uint32_t temporalResampling(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID);
-        uint32_t spatiotemporalResampling(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID);
+        void generateCandidates(RenderContext* pRenderContext, uint32_t outputReservoirID, const Texture::SharedPtr& pViewDir = nullptr, const Texture::SharedPtr& pViewDirPrev = nullptr);
+        void testCandidateVisibility(RenderContext* pRenderContext, uint32_t candidateReservoirID, const Texture::SharedPtr& pViewDir = nullptr, const Texture::SharedPtr& pViewDirPrev = nullptr);
+        uint32_t spatialResampling(RenderContext* pRenderContext, uint32_t inputReservoirID, const Texture::SharedPtr& pViewDir = nullptr, const Texture::SharedPtr& pViewDirPrev = nullptr);
+        uint32_t temporalResampling(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID, const Texture::SharedPtr& pViewDir = nullptr, const Texture::SharedPtr& pViewDirPrev = nullptr);
+        uint32_t spatiotemporalResampling(RenderContext* pRenderContext, const Texture::SharedPtr& pMotionVectors, uint32_t candidateReservoirID, uint32_t lastFrameReservoirID, const Texture::SharedPtr& pViewDir = nullptr, const Texture::SharedPtr& pViewDirPrev = nullptr);
 
         // Internal routines.
 

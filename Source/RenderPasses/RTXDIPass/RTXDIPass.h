@@ -74,7 +74,7 @@ private:
     RTXDIPass(const Dictionary& dict);
     void parseDictionary(const Dictionary& dict);
 
-    void prepareSurfaceData(RenderContext* pRenderContext, const Texture::SharedPtr& pVBuffer);
+    void prepareSurfaceData(RenderContext* pRenderContext, const Texture::SharedPtr& pVBuffer, const RenderData& renderData);
     void finalShading(RenderContext* pRenderContext, const Texture::SharedPtr& pVBuffer, const RenderData& renderData);
 
     Scene::SharedPtr        mpScene;
@@ -84,6 +84,8 @@ private:
 
     ComputePass::SharedPtr  mpPrepareSurfaceDataPass;
     ComputePass::SharedPtr  mpFinalShadingPass;
+
+    Texture::SharedPtr      mpViewDirPrev;  //Copy view dir texture from last frame
 
     uint2                   mFrameDim = { 0, 0 };
     bool                    mOptionsChanged = false;
