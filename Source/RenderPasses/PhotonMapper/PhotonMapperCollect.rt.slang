@@ -129,7 +129,9 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     //Photon contribution
     let bsdf = gScene.materials.getBSDF(sd, lod);   
     float3 f_r = bsdf.eval(sd, -photon.dir.xyz, rayData.sg);
-    rayData.radiance += f_r * photon.flux.xyz;
+    float NdotL = saturate(dot(sd.N, -photon.dir.xyz));
+    if(NdotL > 0)
+        rayData.radiance += (f_r * photon.flux.xyz)/NdotL;
 }
 
 //Checks if the ray start point is inside the sphere.

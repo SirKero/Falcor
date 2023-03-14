@@ -170,8 +170,9 @@ float3 photonContribution(in const ShadingData sd, in IBSDF bsdf, inout RayData 
 
         //BSDF and contribution
         float3 f_r = bsdf.eval(sd, -photonDir, rayData.sg);
-       
-        radiance += f_r * photonFlux;
+        float NdotL = saturate(dot(sd.N, -photonDir));
+        if (NdotL > 0)
+            radiance += (f_r * photonFlux) / NdotL;
     }
 
     //Weight output radiance with number of photons for this pixel.

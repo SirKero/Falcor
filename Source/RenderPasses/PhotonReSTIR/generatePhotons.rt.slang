@@ -281,7 +281,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
         }
         
         const float NdotL = saturate(dot(sd.N, incomingRayDir));
-        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * NdotL * M_1_PI * diffProb;
+        rayData.diffuseScalar = bsdfProperties.diffuseReflectionAlbedo * M_1_PI * diffProb;
         
     }
     //if throughput is 0, return

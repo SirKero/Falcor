@@ -324,7 +324,6 @@ void rayGen()
     uint2 launchDim = DispatchRaysDimensions().xy;
 
     const float invRejection = 1.f / gRejection;
-    const float invInvRejection = 1.f / (1.f - gRejection);
      // Prepare ray payload.
     RayData rayData = RayData.create();
     rayData.sg = SampleGenerator(launchIndex, gFrameCount + 1 * 13);
