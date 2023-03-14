@@ -313,7 +313,7 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
     bool dirty = false;
 
     //Info
-    widget.checkbox("Use analytic and emissive light", mEnablePhotonSplit);
+    dirty |= widget.checkbox("Use analytic and emissive light", mEnablePhotonSplit);
     widget.tooltip("Emissive light is enabled on default. Enable this checkbox to additionally trace a analytic pass");
     if (mEnablePhotonSplit) {
         widget.var("Emissive/Analytic ratio", mPhotonSplitRatio, 0.f, 1.f, 0.001f);
@@ -1394,6 +1394,7 @@ bool PhotonMapper::prepareLighting(RenderContext* pRenderContext)
         if (mpEmissiveLightSampler) {
             mpEmissiveLightSampler = nullptr;
             lightingChanged = true;
+            mTracerGenerate.pVars.reset();
         }
     }
 

@@ -35,9 +35,11 @@ cbuffer CB
     uint _pad;
 };
 
+#if USE_EMISSIVE_LIGHT  //Buffer is only valid if emissive light is enabled
 cbuffer Light{
     EmissiveLightSampler gEmissiveSampler;
 }
+#endif
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<uint4> gPackedPhotonData[2];
@@ -52,6 +54,7 @@ enum class GenerationFlags // : uint32_t
     AdjShadingNormals   = 0x02,     //Adjust the shading normals
     EnableCaustics      = 0x04,     //Enable caustic photons.
     DeltaRejection      = 0x08,     //Accept every non delta material as diffuse
+    AnalyticLight       = 0x10,     //Use analytic light photons
 };
 
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
@@ -104,8 +107,32 @@ struct PhotonLightSample{
     float3 flux;
 };
 
+float3 fromWordlToLocal(const in float3 normal, float3 w)
+{
+    // reconstruct tangent frame based off worldspace normal
+    // this is ok for isotropic BRDFs
+    // for anisotropic BRDFs, we need a user defined tangent
+    float3 bitangent = perp_stark(normal);
+    float3 tangent = cross(bitangent, normal);
+
+    return float3(dot(bitangent, w), dot(tangent, w), dot(normal, w));
+}
+
+//transforms direction from local to world space
+float3 fromLocalToWorld(const in float3 normal, float3 w)
+{
+    //transform from local space -> random dir vector in world space
+    float3 bitangent = perp_stark(normal);
+    float3 tangent = cross(bitangent, normal);
+
+    return w.x * tangent + w.y * bitangent + w.z * normal;
+}
+
+#if USE_EMISSIVE_LIGHT  //Function is only valid if the emissive sampler is set
 bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
-    if (gScene.lightCollection.isEmpty()) return false;
+
+    if (gScene.lightCollection.isEmpty())
+        return false;
 
     //Randomly pick a triangle out of the global list with uniform probability
     const uint triangleCount = gScene.lightCollection.triangleCount;
@@ -145,26 +172,49 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
 
     return true;
 }
+#endif
 
-float3 fromWordlToLocal(const in float3 normal, float3 w)
+bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample pls, out float3 sampledDir)
 {
-    // reconstruct tangent frame based off worldspace normal
-    // this is ok for isotropic BRDFs
-    // for anisotropic BRDFs, we need a user defined tangent
-    float3 bitangent = perp_stark(normal);
-    float3 tangent = cross(bitangent, normal);
+    const uint lightCount = gScene.getLightCount();
+    if (lightCount == 0)
+        return false;
+    //Uniformly sample one of the analytic lights
+    float rndLightIdx = float(lightCount) * sampleNext1D(sg);
+    uint lightIdx = min(uint(round(rndLightIdx)), lightCount);
+    LightData lightData = gScene.getLight(lightIdx);
 
-    return float3(dot(bitangent, w), dot(tangent, w), dot(normal, w));
-}
+    //Only Point(+ Spot) lights are supported (due to RTXDI)
+    if (lightData.type != uint(LightType::Point))
+        return false;
+    float invLightPdf;
+    float3 woLocal;
+    float3 rnd = sampleNext3D(sg);
+    rnd.z = 0;
+    float spotAngle = lightData.cosOpeningAngle;
+    if (lightData.openingAngle < M_2PI) //If the opening angle is smaller than 2PI it is a spotlight
+    {
+        spotAngle = cos(lightData.openingAngle - lightData.penumbraAngle * rnd.z);
+        woLocal = sample_cone(rnd.xy, spotAngle);
+    }
+    else //Pointlight
+    {
+        woLocal = sample_sphere(rnd.xy);
+    }
+    invLightPdf = M_2PI * (1.f - spotAngle);
+    
+    if (invLightPdf <= 0.f)
+        return false;
 
-//transforms direction from local to world space
-float3 fromLocalToWorld(const in float3 normal, float3 w)
-{
-    //transform from local space -> random dir vector in world space
-    float3 bitangent = perp_stark(normal);
-    float3 tangent = cross(bitangent, normal);
-
-    return w.x * tangent + w.y * bitangent + w.z * normal;
+    invLightPdf *= lightCount; //Take the select pdf into account
+    
+    //Fill the photon light struct
+    pls.posW = lightData.posW;
+    pls.normal = lightData.dirW;
+    pls.flux = lightData.intensity * invLightPdf;
+    
+    sampledDir = fromLocalToWorld(pls.normal, woLocal);
+    return true;
 }
 
 //True if a photon should be stored, false otherwise
@@ -257,20 +307,36 @@ void rayGen()
     RayData rayData = RayData.create();
     rayData.sg = SampleGenerator(launchIndex, gFrameCount + 1 * 13 );
 
-    PhotonLightSample pls;
-    if(!createLightSample(rayData.sg, pls)) return;
-    
     RayDesc ray;
-    float lightDirPDF = 1.0;
-    float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), lightDirPDF);
+    PhotonLightSample pls;
 
-    if ((woLocal.z < gMinCosGenerate) || (lightDirPDF <= 0.f))
-        return;
+#if USE_EMISSIVE_LIGHT
+    if (gFlags & (uint) GenerationFlags::AnalyticLight)
+#endif
+    {   //Analytic light sample
+        float3 sampleDir;
+        if (!createLightSampleAnalytic(rayData.sg, pls, sampleDir))
+            return;
     
-    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+        ray.Direction = sampleDir;
+    }
+#if USE_EMISSIVE_LIGHT  
+    else { //Emissive light sample
+        if (!createLightSample(rayData.sg, pls))
+            return;
     
-    pls.flux /= lightDirPDF;
-    pls.flux /= launchDim.x * launchDim.y; //Division through all photons
+        float lightDirPDF = 1.0;
+        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), lightDirPDF);
+
+        if ((woLocal.z < gMinCosGenerate) || (lightDirPDF <= 0.f))
+            return;
+    
+        ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+        pls.flux /= lightDirPDF;
+    }
+#endif    
+    
+    pls.flux /= launchDim.x * launchDim.y; //Division through all dipatched photons
 
     ray.Origin = pls.posW;
     ray.TMin = gRayTMin;

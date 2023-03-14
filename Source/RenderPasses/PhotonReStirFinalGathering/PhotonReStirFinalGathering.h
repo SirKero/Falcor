@@ -141,7 +141,7 @@ private:
 
     /** Generate Photon lights
     */
-    void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers = true);
 
     /** Collect Photons at the final gather hit
     */
@@ -250,6 +250,8 @@ private:
     bool mBoostSampleTestVisibility = false;    //Extra visibility test for boosting
 
     //Photon
+    bool mEnablePhotonSplit = false;               ///<Enables split between analytic and emissive
+    float mPhotonSplitRatio = 0.5f;               ///< Percent of emissive photons 0 = 0%; 1. = 100%
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint2 mNumMaxPhotons = uint2(400000,100000);               //Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;

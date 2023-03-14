@@ -36,10 +36,12 @@ cbuffer CB
     float gMinCosGenerate;  //Min Cos
 };
 
+#if USE_EMISSIVE_LIGHT  //Buffer is only valid if emissive light is enabled
 cbuffer Light
 {
     EmissiveLightSampler gEmissiveSampler;
 }
+#endif
 
 enum class GenerationFlags // : uint32_t
 {
@@ -48,7 +50,7 @@ enum class GenerationFlags // : uint32_t
     AdjShadingNormals   = 0x02,     //Adjust the shading normals
     EnableCaustics      = 0x04,     //Enable caustic photons.
     DeltaRejection      = 0x08,     //Accept every non delta material as diffuse
-    AnalyticLight       = 0x10,     //Use analytic light shading
+    AnalyticLight       = 0x10,     //Use analytic light photons
 };
 
 struct PhotonInfo {
@@ -333,7 +335,7 @@ void rayGen()
 #if USE_EMISSIVE_LIGHT
     if(gFlags & (uint) GenerationFlags::AnalyticLight)
 #endif    
-    {
+    {   //Analytic light sample
         float3 sampleDir;
         if (!createLightSampleAnalytic(rayData.sg, pls, sampleDir))
             return;
@@ -341,7 +343,7 @@ void rayGen()
         ray.Direction = sampleDir;
     }
 #if USE_EMISSIVE_LIGHT
-    else{
+    else{   //Emissive light sample
         if (!createLightSample(rayData.sg, pls))
             return;
     
@@ -353,7 +355,6 @@ void rayGen()
             return;
     
         ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-    
         pls.flux /= lightDirPDF;
     }
 #endif
