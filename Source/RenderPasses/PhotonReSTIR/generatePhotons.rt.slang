@@ -181,7 +181,7 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
         return false;
     //Uniformly sample one of the analytic lights
     float rndLightIdx = float(lightCount) * sampleNext1D(sg);
-    uint lightIdx = min(uint(round(rndLightIdx)), lightCount);
+    uint lightIdx = min(uint(floor(rndLightIdx)), lightCount-1);
     LightData lightData = gScene.getLight(lightIdx);
 
     //Only Point(+ Spot) lights are supported (due to RTXDI)

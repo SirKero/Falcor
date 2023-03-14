@@ -80,7 +80,7 @@ Texture2D<uint> gCullingHashBuffer;
 
 // Static configuration based on defines set from the host.
 static const uint kInfoTexHeight = INFO_TEXTURE_HEIGHT;
-static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
+static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_CAUSTIC, PHOTON_BUFFER_SIZE_GLOBAL);
 static const uint kUsePhotonCulling = USE_PHOTON_CULLING;
 static const uint kRayFlagTerminatedMiss = 1;
 static const uint kRayFlagTerminatedHit = 2;
@@ -197,7 +197,7 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
         return false;
     //Uniformly sample one of the analytic lights
     float rndLightIdx = float(lightCount) * sampleNext1D(sg);
-    uint lightIdx = min(uint(round(rndLightIdx)), lightCount);
+    uint lightIdx = min(uint(floor(rndLightIdx)), lightCount-1);
     LightData lightData = gScene.getLight(lightIdx);
 
     //Only Point(+ Spot) lights are supported (due to RTXDI)
