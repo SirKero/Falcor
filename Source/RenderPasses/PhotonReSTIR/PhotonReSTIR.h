@@ -130,7 +130,7 @@ private:
 
     /** Generate Photon lights
     */
-    void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers = true);
 
     /** Collect the caustic photons
     */
@@ -226,6 +226,8 @@ private:
     bool mPresampledTitleSizeChanged = true;
     bool mUseDiffuseShadingOnly = false;    //Use only diffuse shading for ReSTIR. Can be used if VBuffer is traced until diffuse hit
     //Photon
+    bool mEnablePhotonSplit = false;               ///<Enables split between analytic and emissive
+    float mPhotonSplitRatio = 0.5f;               ///< Percent of emissive photons 0 = 0%; 1. = 100%
     bool mChangePhotonLightBufferSize = false;  //Change max size of photon lights buffer
     uint2 mNumMaxPhotons = uint2(400000,100000); //Max number of photon lights per iteration
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;

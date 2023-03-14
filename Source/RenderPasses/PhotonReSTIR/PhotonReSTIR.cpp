@@ -133,9 +133,6 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
 
     mpScene->getLightCollection(pRenderContext);
 
-    //currently we only support emissive lights
-    if (!mpScene->useEmissiveLights())return;
-
     prepareLighting(pRenderContext);
 
     preparePhotonBuffers(pRenderContext,renderData);
@@ -144,6 +141,9 @@ void PhotonReSTIR::execute(RenderContext* pRenderContext, const RenderData& rend
 
     //Generate Photons
     generatePhotonsPass(pRenderContext, renderData);
+
+    if (mEnablePhotonSplit)
+        generatePhotonsPass(pRenderContext, renderData, false);
 
     //Presample generated photon lights
     presamplePhotonLightsPass(pRenderContext, renderData);
@@ -228,6 +228,12 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("PhotonMapper")) {
         //Dispatched Photons
+        changed |= widget.checkbox("Use analytic and emissive light", mEnablePhotonSplit);
+        widget.tooltip("Emissive light is enabled on default. Enable this checkbox to additionally trace a analytic pass");
+        if (mEnablePhotonSplit) {
+            widget.var("Emissive/Analytic ratio", mPhotonSplitRatio, 0.f, 1.f, 0.001f);
+            widget.tooltip("Ratio for Emissive/Analytic photon distribution. 0.0 -> 0% Emissive, 1.0 -> 100% Emissive");
+        }
         uint dispatchedPhotons = mNumDispatchedPhotons;
         bool disPhotonChanged = widget.var("Dispatched Photons", dispatchedPhotons, mPhotonYExtent, 9984000u, (float)mPhotonYExtent);
         if (disPhotonChanged)
@@ -491,6 +497,7 @@ bool PhotonReSTIR::prepareLighting(RenderContext* pRenderContext)
         if (mpEmissiveLightSampler) {
             mpEmissiveLightSampler = nullptr;
             lightingChanged = true;
+            mPhotonGeneratePass.pVars.reset();
         }
     }
 
@@ -699,99 +706,112 @@ void PhotonReSTIR::prepareSurfaceBufferPass(RenderContext* pRenderContext, const
     pRenderContext->uavBarrier(mpSurfaceBuffer[mFrameCount % 2].get());
 }
 
-void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
+void PhotonReSTIR::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers)
 {
-    FALCOR_PROFILE("GeneratePhotons");
-    if (!mSkipPhotonGeneration || (mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) == 0))) {
-        //Clear Counter
+    FALCOR_PROFILE(clearBuffers ? "Generation_Pass" : "Additional_Generation_Pass");
+
+    if (mSkipPhotonGeneration && ((mFrameCount % mSkipPhotonGenerationCount) != 0)) return;
+
+    //Clear Counter
+    if (clearBuffers) {
         pRenderContext->clearUAV(mpPhotonLightCounter.get()->getUAV().get(), uint4(0));
         pRenderContext->clearUAV(mpPhotonLights.get()->getUAV().get(), uint4(0));
-        if(mEnableCausticPhotonCollection)
+        if (mEnableCausticPhotonCollection)
             pRenderContext->clearUAV(mpCausticPhotonAABB.get()->getUAV().get(), uint4(0));
+    }
 
-        //Defines
-        mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
-        mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
-        mPhotonGeneratePass.pProgram->addDefine("USE_PDF_SAMPLING", mUsePdfSampling ? "1" : "0");
+    //Defines
+    mPhotonGeneratePass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
+    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
+    mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
+    mPhotonGeneratePass.pProgram->addDefine("USE_PDF_SAMPLING", mUsePdfSampling ? "1" : "0");
 
-        if (!mPhotonGeneratePass.pVars) {
-            FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
-            FALCOR_ASSERT(mpEmissiveLightSampler);
+    if (!mPhotonGeneratePass.pVars) {
+        FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
 
-            // Configure program.
-            mPhotonGeneratePass.pProgram->addDefines(mpSampleGenerator->getDefines());
+        // Configure program.
+        mPhotonGeneratePass.pProgram->addDefines(mpSampleGenerator->getDefines());
+        if (mpEmissiveLightSampler)
             mPhotonGeneratePass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
-            mPhotonGeneratePass.pProgram->setTypeConformances(mpScene->getTypeConformances());
-            // Create program variables for the current program.
-            // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
-            mPhotonGeneratePass.pVars = RtProgramVars::create(mPhotonGeneratePass.pProgram, mPhotonGeneratePass.pBindingTable);
+        mPhotonGeneratePass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        // Create program variables for the current program.
+        // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+        mPhotonGeneratePass.pVars = RtProgramVars::create(mPhotonGeneratePass.pProgram, mPhotonGeneratePass.pBindingTable);
 
-            // Bind utility classes into shared data.
-            auto var = mPhotonGeneratePass.pVars->getRootVar();
-            mpSampleGenerator->setShaderData(var);
-        };
-        FALCOR_ASSERT(mPhotonGeneratePass.pVars);
-
+        // Bind utility classes into shared data.
         auto var = mPhotonGeneratePass.pVars->getRootVar();
+        mpSampleGenerator->setShaderData(var);
+    };
+    FALCOR_ASSERT(mPhotonGeneratePass.pVars);
 
-        // Set constants (uniforms).
-        // 
-        //PerFrame Constant Buffer
-        std::string nameBuf = "PerFrame";
-        var[nameBuf]["gFrameCount"] = mFrameCount;
-        var[nameBuf]["gPhotonRadius"] = mCausticCollectRadius;
+    auto var = mPhotonGeneratePass.pVars->getRootVar();
 
-        //Upload constant buffer only if options changed
-        if (mReuploadBuffers) {
-            //Fill flags
-            uint flags = 0;
-            if (mPhotonUseAlphaTest) flags |= 0x01;
-            if (mPhotonAdjustShadingNormal) flags |= 0x02;
-            if (mEnableCausticPhotonCollection) flags |= 0x04;
-            if (mGenerationDeltaRejection) flags |= 0x08;
+    // Set constants (uniforms).
+    // 
+    //PerFrame Constant Buffer
+    std::string nameBuf = "PerFrame";
+    var[nameBuf]["gFrameCount"] = mFrameCount;
+    var[nameBuf]["gPhotonRadius"] = mCausticCollectRadius;
 
-            nameBuf = "CB";
-            var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
-            var[nameBuf]["gRejection"] = mPhotonRejection;
-            var[nameBuf]["gFlags"] = flags;
-            var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
-            var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
-            var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
-        }
+    //Upload constant buffer only if options changed
+    
+    //Fill flags
+    uint flags = 0;
+    if (mPhotonUseAlphaTest) flags |= 0x01;
+    if (mPhotonAdjustShadingNormal) flags |= 0x02;
+    if (mEnableCausticPhotonCollection) flags |= 0x04;
+    if (mGenerationDeltaRejection) flags |= 0x08;
+    if (!mpScene->useEmissiveLights() || !clearBuffers) flags |= 0x10;  //Analytic lights collect flag
 
+    nameBuf = "CB";
+    var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
+    var[nameBuf]["gRejection"] = mPhotonRejection;
+    var[nameBuf]["gFlags"] = flags;
+    var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
+    var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
+    var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
+    
+
+    if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
-        var["gPhotonLights"] = mpPhotonLights;
-        var["gPhotonCounter"] = mpPhotonLightCounter;
-        var["gCausticPhotonAABB"] = mpCausticPhotonAABB;
-        var["gCausticPackedPhotonData"] = mpCausticPhotonData;
-        if (mUsePdfSampling) var["gPhotonPdfTexture"] = mpPhotonLightPdfTex;
+    var["gPhotonLights"] = mpPhotonLights;
+    var["gPhotonCounter"] = mpPhotonLightCounter;
+    var["gCausticPhotonAABB"] = mpCausticPhotonAABB;
+    var["gCausticPackedPhotonData"] = mpCausticPhotonData;
+    if (mUsePdfSampling) var["gPhotonPdfTexture"] = mpPhotonLightPdfTex;
 
-        // Get dimensions of ray dispatch.
-        const uint2 targetDim = uint2(mNumDispatchedPhotons / mPhotonYExtent, mPhotonYExtent);
-        FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-
-        //Trace the photons
-        mpScene->raytrace(pRenderContext, mPhotonGeneratePass.pProgram.get(), mPhotonGeneratePass.pVars, uint3(targetDim, 1));
-
-        pRenderContext->uavBarrier(mpPhotonLightCounter.get());
-        pRenderContext->uavBarrier(mpPhotonLights.get());
-        pRenderContext->uavBarrier(mpCausticPhotonData.get());
-        pRenderContext->uavBarrier(mpCausticPhotonAABB.get());
-        if (mUsePdfSampling) mpPhotonLightPdfTex->generateMips(pRenderContext);
-
-        //Build Acceleration Structure for caustics if enabled
-        //Create as if not valid
-        if (mEnableCausticPhotonCollection) {
-            if (!mPhotonAS.tlas.pTlas) {
-                mPhotonAS.update = false;
-                createAccelerationStructure(pRenderContext, mPhotonAS, 1, { mNumMaxPhotons[1] }, { mpCausticPhotonAABB->getGpuAddress() });
-            }
-            uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount.y) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons.y;
-            uint photonBuildSize = std::min(mNumMaxPhotons[1], currentPhotons);
-            buildAccelerationStructure(pRenderContext, mPhotonAS, { photonBuildSize });
-        }
+    // Get dimensions of ray dispatch.
+    uint dispatchedPhotons = mNumDispatchedPhotons;
+    if (mEnablePhotonSplit) {
+        float splitRatio = clearBuffers ? mPhotonSplitRatio : 1.f - mPhotonSplitRatio;
+        dispatchedPhotons = uint(std::round(dispatchedPhotons * splitRatio));
     }
+    const uint2 targetDim = uint2(dispatchedPhotons / mPhotonYExtent, mPhotonYExtent);
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    //Trace the photons
+    mpScene->raytrace(pRenderContext, mPhotonGeneratePass.pProgram.get(), mPhotonGeneratePass.pVars, uint3(targetDim, 1));
+
+    pRenderContext->uavBarrier(mpPhotonLightCounter.get());
+    pRenderContext->uavBarrier(mpPhotonLights.get());
+    pRenderContext->uavBarrier(mpCausticPhotonData.get());
+    pRenderContext->uavBarrier(mpCausticPhotonAABB.get());
+    if (mUsePdfSampling) mpPhotonLightPdfTex->generateMips(pRenderContext);
+
+    //Build Acceleration Structure for caustics if enabled
+    //Create as if not valid
+    if (mEnableCausticPhotonCollection && (!mEnablePhotonSplit || !clearBuffers)) { //If analytic and emissive are traced, build the AS on the second pass
+        if (!mPhotonAS.tlas.pTlas) {
+            mPhotonAS.update = false;
+            createAccelerationStructure(pRenderContext, mPhotonAS, 1, { mNumMaxPhotons[1] }, { mpCausticPhotonAABB->getGpuAddress() });
+        }
+        uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount.y) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons.y;
+        uint photonBuildSize = std::min(mNumMaxPhotons[1], currentPhotons);
+        buildAccelerationStructure(pRenderContext, mPhotonAS, { photonBuildSize });
+    }
+        
+    
 }
 
 void PhotonReSTIR::presamplePhotonLightsPass(RenderContext* pRenderContext, const RenderData& renderData)
