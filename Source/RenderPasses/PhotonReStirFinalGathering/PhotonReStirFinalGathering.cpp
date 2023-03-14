@@ -891,24 +891,24 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
 
     //Upload constant buffer only if options changed
-    if (mReuploadBuffers) {
-        //Fill flags
-        uint flags = 0;
-        if (mPhotonUseAlphaTest) flags |= 0x01;
-        if (mPhotonAdjustShadingNormal) flags |= 0x02;
-        if (mEnableCausticPhotonCollection) flags |= 0x04;
-        if (mGenerationDeltaRejection) flags |= 0x08;
-        if (!mpScene->useEmissiveLights() || !clearBuffers) flags |= 0x10;  //Analytic lights collect flag
+    
+    //Fill flags
+    uint flags = 0;
+    if (mPhotonUseAlphaTest) flags |= 0x01;
+    if (mPhotonAdjustShadingNormal) flags |= 0x02;
+    if (mEnableCausticPhotonCollection) flags |= 0x04;
+    if (mGenerationDeltaRejection) flags |= 0x08;
+    if (!mpScene->useEmissiveLights() || !clearBuffers) flags |= 0x10;  //Analytic lights collect flag
 
-        nameBuf = "CB";
-        var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
-        var[nameBuf]["gRejection"] = mPhotonRejection;
-        var[nameBuf]["gFlags"] = flags;
-        var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
-        var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
-        var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
-        var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
-    }
+    nameBuf = "CB";
+    var[nameBuf]["gMaxRecursion"] = mPhotonMaxBounces;
+    var[nameBuf]["gRejection"] = mPhotonRejection;
+    var[nameBuf]["gFlags"] = flags;
+    var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;    //Size of the Photon Culling buffer. 2^x
+    var[nameBuf]["gCausticsBounces"] = mMaxCausticBounces;
+    var[nameBuf]["gRayTMin"] = mPhotonRayTMin;
+    var[nameBuf]["gMinCosGenerate"] = mGenerateMinCos;
+    
 
     if(mpEmissiveLightSampler)
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
