@@ -111,8 +111,10 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     //Photon contribution
     sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
     let bsdf = gScene.materials.getBSDF(sd, lod);
-    float3 f_r = bsdf.eval(sd, pd.dir, rayData.sg); //right sign? 
-    rayData.radiance += f_r * pd.flux;
+    float3 f_r = bsdf.eval(sd, pd.dir, rayData.sg); //right sign?
+    float NdotL = saturate(dot(sd.N, pd.dir));
+    if(NdotL > 0)
+        rayData.radiance += (f_r * pd.flux)/NdotL;
 }
 
 //Checks if the ray start point is inside the sphere.
