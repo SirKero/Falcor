@@ -56,7 +56,7 @@ cbuffer Constant
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
     float gMatThreshold;               //Vpl radius
-    uint _pad;
+    float gAttenuationRadius;
 }
 
 struct LightSample{
@@ -102,8 +102,9 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     ls.dir = ls.dir/ sampleDistance;    //normalize
     
     ls.Li = luminance(vpl.flux);
-    float pdf = distSqr / max(FLT_MIN, saturate(dot(normalize(vpl.normal), -ls.dir)));
-    ls.Li /= pdf;
+    float distAttenuation = vplAttenuation(sampleDistance, gAttenuationRadius);
+    float cosTheta = saturate(dot(normalize(vpl.normal), -ls.dir));
+    ls.Li *= cosTheta * distAttenuation;
 
     return ls.Li > 0;   //true if sample is valid
 }

@@ -24,7 +24,9 @@ cbuffer PerFrame
     uint gFrameCount;       // Frame count since scene was loaded.
     float gCollectionRadius;
     float gHashScaleFactor; //Hash scale factor. 1/diameter
-    bool gDiffuseOnly;    
+    bool gDiffuseOnly;
+    float gAttenuationRadius;
+    uint3 _pad;
 }
 
 cbuffer Constant{
@@ -254,7 +256,7 @@ void rayGen()
 
         RayDesc tRay;
         tRay.Origin = sd.computeNewRayOrigin();
-        tRay.TMin = 0.001;
+        tRay.TMin = 0.0001;
         tRay.TMax = 1000.f;
         tRay.Direction = bsdfSample.wo;
     
@@ -267,8 +269,10 @@ void rayGen()
         if (validSample)
         {
             float distSqr = max(FLT_MIN, abs(traceData.distance * traceData.distance));
-            lightFactor = distSqr / max(FLT_MIN, traceData.NdotL); //Jacobian determinant
-            reservoir.targetPdf /= lightFactor; 
+            float cosTheta = max(FLT_MIN, traceData.NdotL);
+            lightFactor = distSqr / cosTheta; //Jacobian determinant
+            float distanceAttenuation = vplAttenuation(traceData.distance, gAttenuationRadius);
+            reservoir.targetPdf *= cosTheta * distanceAttenuation;
             
             reservoir.M = encodeNormal2x8(bsdfSample.wo); //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
             float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;

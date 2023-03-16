@@ -41,6 +41,7 @@ RWTexture2D<float4> gDebug;
 cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
+    float gAttenuationRadius;           //Current global photon radius
 }
 
 cbuffer Constant
@@ -77,9 +78,9 @@ void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float
     toLight = toLight/ distance;    //normalize
 
     Li = vpl.flux;
-    float pdf = distSqr / max(FLT_MIN, saturate(dot(normalize(vpl.normal), -toLight)));
-    Li /= pdf; //Cos Theta
-        
+    float distAttenuation = vplAttenuation(distance, gAttenuationRadius);
+    float cosTheta = saturate(dot(normalize(vpl.normal), -toLight));
+    Li *= cosTheta * distAttenuation; 
 }
 
 [numthreads(16, 16, 1)]

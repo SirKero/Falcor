@@ -367,7 +367,9 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
                 changed |= widget.var("Material Threshold", mMaterialThreshold, 0.0f, 1.0f, 0.0001f);
                 widget.tooltip("Maximus absolute difference between the Diffuse probabilitys of the surfaces. 1 = Disabled ; 0 = Same surface");
-                
+
+                changed |= widget.var("Sample Attenuation Radius", mSampleRadiusAttenuation, 0.0f, 500.f, 0.001f);
+                widget.tooltip("The radius that is used for the non-linear sample attenuation(2/(d^2+r^2+d*sqrt(d^2+r^2))). At r=0 this leads to the normal 1/d^2");
             }
         }
         if ((mResamplingMode & ResamplingMode::Temporal) > 0) {
@@ -816,6 +818,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var[nameBuf]["gCollectionRadius"] = mPhotonCollectRadius;
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]); //Take Global
     var[nameBuf]["gDiffuseOnly"] = mUseDiffuseOnlyShading;
+    var[nameBuf]["gAttenuationRadius"] = mSampleRadiusAttenuation;
 
     nameBuf = "Constant";
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
@@ -1183,6 +1186,7 @@ void PhotonReSTIRFinalGathering::generateAdditionalCandidates(RenderContext* pRe
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gMatThreshold"] = mMaterialThreshold;
+        var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation; //Attenuation radius
     }
 
 
@@ -1247,6 +1251,7 @@ void PhotonReSTIRFinalGathering::temporalResampling(RenderContext* pRenderContex
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gMatThreshold"] = mMaterialThreshold;
+        var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation; //Attenuation radius
     }
 
     //Execute
@@ -1314,6 +1319,7 @@ void PhotonReSTIRFinalGathering::spartialResampling(RenderContext* pRenderContex
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gMatThreshold"] = mMaterialThreshold;
+        var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation; //Attenuation radius
     }
 
     //Execute
@@ -1370,6 +1376,7 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
+    var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation;
     if (mReset || mReuploadBuffers || mBiasCorrectionChanged) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
@@ -1380,7 +1387,6 @@ void PhotonReSTIRFinalGathering::spartioTemporalResampling(RenderContext* pRende
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
         var[uniformName]["gMatThreshold"] = mMaterialThreshold;
         var[uniformName]["gDisocclusionBoostSamples"] = mDisocclusionBoostSamples;
-        var[uniformName]["gVplRadius"] = mPhotonCollectRadius;
     }
 
     //Execute
@@ -1448,6 +1454,7 @@ void PhotonReSTIRFinalGathering::finalShadingPass(RenderContext* pRenderContext,
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
+    var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation; //Attenuation radius
 
     if (mReset || mReuploadBuffers) {
         uniformName = "Constant";
