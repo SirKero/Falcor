@@ -125,8 +125,8 @@ bool getLightSample(in VPL vpl,in float3 worldPos, out LightSample ls, out float
     ls.dir = ls.dir/ sampleDistance;    //normalize
     
     ls.Li = luminance(vpl.flux);
-
-    ls.Li *= saturate(dot(normalize(vpl.normal), -ls.dir));
+    float pdf = distSqr / max(FLT_MIN, saturate(dot(normalize(vpl.normal), -ls.dir)));
+    ls.Li /= pdf;
     
     return ls.Li > 0;   //true if sample is valid
 }

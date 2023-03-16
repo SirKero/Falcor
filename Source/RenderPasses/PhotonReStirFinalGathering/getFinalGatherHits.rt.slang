@@ -266,8 +266,10 @@ void rayGen()
     
         if (validSample)
         {
-            reservoir.targetPdf *= traceData.NdotL; //Precalculate NdotL
-            lightFactor = traceData.NdotL;
+            float distSqr = max(FLT_MIN, abs(traceData.distance * traceData.distance));
+            lightFactor = distSqr / max(FLT_MIN, traceData.NdotL); //Jacobian determinant
+            reservoir.targetPdf /= lightFactor; 
+            
             reservoir.M = encodeNormal2x8(bsdfSample.wo); //Store approximate direction in M temporarily to get the correct surface normal on double sided materials
             float3 hitPos = tRay.Origin + tRay.Direction * traceData.distance;
     

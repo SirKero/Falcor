@@ -699,7 +699,7 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     }
 
     if (!mpLightFactor) {
-        mpLightFactor = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, ResourceFormat::R16Unorm, 1u, 1u, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpLightFactor = Texture::create2D(renderData.getDefaultTextureDims().x, renderData.getDefaultTextureDims().y, mJacobianResourceFormat, 1u, 1u, nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
         mpLightFactor->setName("PhotonReStir::LightFactor");
     }
 

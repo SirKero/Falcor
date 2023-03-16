@@ -72,12 +72,13 @@ void getEmissiveLight(uint idx,in float3 worldPos, out float distance ,out float
     VPL vpl = VPL(gPhotonLight[idx]);
     
     toLight = vpl.posW - worldPos;
-    float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
+    float distSqr = max(FLT_MIN, abs(dot(toLight, toLight))); // Clamp to avoid NaNs below
     distance = sqrt(distSqr);
     toLight = toLight/ distance;    //normalize
 
     Li = vpl.flux;
-    Li *= saturate(dot(normalize(vpl.normal), -toLight)); //Cos Theta
+    float pdf = distSqr / max(FLT_MIN, saturate(dot(normalize(vpl.normal), -toLight)));
+    Li /= pdf; //Cos Theta
         
 }
 

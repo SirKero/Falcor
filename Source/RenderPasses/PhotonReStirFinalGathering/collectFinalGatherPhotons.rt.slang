@@ -189,9 +189,9 @@ void rayGen()
         TraceRay(gPhotonAS, rayFlags, 1 /* instanceInclusionMask */, 0 /* hitIdx */, 0 /* rayType count */, 0 /* missIdx */, ray, rayData);
         float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius); //Get new flux
         
-        float lightFactor = gLightFactor[launchIndex];  //Take out the NdotL from the radiance estimate
+        float lightFactor = gLightFactor[launchIndex];  //Take out distance and cos (Jacobian determinant)
         if(lightFactor > 0)
-            radiance /= lightFactor;
+            radiance *= lightFactor;
         
         //ReSTIR Candidate
         uint lightIdx = index2Dto1D(launchIndex, launchDim.x);
