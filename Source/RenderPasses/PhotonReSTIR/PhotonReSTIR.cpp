@@ -337,6 +337,8 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
 
                 changed |= widget.var("Normal Threshold", mNormalThreshold, 0.0f, 1.0f, 0.0001f);
                 widget.tooltip("Maximum cosine of angle between normals. 1 = Exactly the same ; 0 = disabled");
+
+
             }
         }
         if ((mResamplingMode & ResamplingMode::Temporal) > 0) {
@@ -359,12 +361,12 @@ void PhotonReSTIR::renderUI(Gui::Widgets& widget)
         }
 
         if (auto group = widget.group("Misc")) {
+            changed |= widget.var("Sample Attenuation Radius", mSampleRadiusAttenuation, 0.0f, 500.f, 0.001f);
+            widget.tooltip("The radius that is used for the non-linear sample attenuation(2/(d^2+r^2+d*sqrt(d^2+r^2))). At r=0 this leads to the normal 1/d^2");
             changed |= widget.checkbox("Use Emissive Texture", mUseEmissiveTexture);
             widget.tooltip("Activate to use the Emissive texture in the final shading step. More correct but noisier");
             changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
             widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
-            changed |= widget.var("Geometry Term Band", mGeometryTermBand, 0.f, 1.f, 0.0000001f);
-            widget.tooltip("Discards samples with a very small distance. Adds a little bias but removes extremly bright spots at corners");
             mReset |= widget.checkbox("Use Diffuse Shading only", mUseDiffuseShadingOnly);
             widget.tooltip("Only uses diffuse shading for ReSTIR. Can be used if V-Buffer is traced until diffuse. Triggers Recompilation of shaders");
         }
@@ -979,8 +981,8 @@ void PhotonReSTIR::generateCandidatesPass(RenderContext* pRenderContext, const R
         var[uniformName]["gNumEmissiveSamples"] = mNumEmissiveCandidates;
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
         var[uniformName]["gTestVisibility"] = (mResamplingMode > 0) | !mUseFinalVisibilityRay; 
-        var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
         var[uniformName]["gPresampledPhotonLightBufferSize"] = mPresampledTitleSize;
+        var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation;
     }
 
     //Execute
@@ -1042,7 +1044,7 @@ void PhotonReSTIR::temporalResampling(RenderContext* pRenderContext, const Rende
         var[uniformName]["gMaxAge"] = mTemporalMaxAge;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
-        var[uniformName]["gGeometryTermBand"] = mGeometryTermBand;
+        var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation;
     }
 
     //Execute
@@ -1107,6 +1109,7 @@ void PhotonReSTIR::spartialResampling(RenderContext* pRenderContext, const Rende
         var[uniformName]["gSamplingRadius"] = mSamplingRadius;
         var[uniformName]["gDepthThreshold"] = mRelativeDepthThreshold;
         var[uniformName]["gNormalThreshold"] = mNormalThreshold;
+        var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation;
     }
 
     //Execute
@@ -1162,6 +1165,7 @@ void PhotonReSTIR::spartioTemporalResampling(RenderContext* pRenderContext, cons
     //Uniform
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
+    var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation;
     if (mReset || mReuploadBuffers || mBiasCorrectionChanged) {
         uniformName = "Constant";
         var[uniformName]["gFrameDim"] = renderData.getDefaultTextureDims();
@@ -1236,6 +1240,8 @@ void PhotonReSTIR::finalShadingPass(RenderContext* pRenderContext, const RenderD
     std::string uniformName = "PerFrame";
     var[uniformName]["gFrameCount"] = mFrameCount;
     var[uniformName]["gEnableCaustics"] = mEnableCausticPhotonCollection;
+    var[uniformName]["gAttenuationRadius"] = mSampleRadiusAttenuation;
+
     
     if (mReset || mReuploadBuffers) {
         uniformName = "Constant";

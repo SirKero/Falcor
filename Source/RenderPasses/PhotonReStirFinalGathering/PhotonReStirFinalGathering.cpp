@@ -367,9 +367,6 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
 
                 changed |= widget.var("Material Threshold", mMaterialThreshold, 0.0f, 1.0f, 0.0001f);
                 widget.tooltip("Maximus absolute difference between the Diffuse probabilitys of the surfaces. 1 = Disabled ; 0 = Same surface");
-
-                changed |= widget.var("Sample Attenuation Radius", mSampleRadiusAttenuation, 0.0f, 500.f, 0.001f);
-                widget.tooltip("The radius that is used for the non-linear sample attenuation(2/(d^2+r^2+d*sqrt(d^2+r^2))). At r=0 this leads to the normal 1/d^2");
             }
         }
         if ((mResamplingMode & ResamplingMode::Temporal) > 0) {
@@ -397,6 +394,8 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
         }
 
         if (auto group = widget.group("Misc")) {
+            changed |= widget.var("Sample Attenuation Radius", mSampleRadiusAttenuation, 0.0f, 500.f, 0.001f);
+            widget.tooltip("The radius that is used for the non-linear sample attenuation(2/(d^2+r^2+d*sqrt(d^2+r^2))). At r=0 this leads to the normal 1/d^2");
             changed |= widget.checkbox("Use Final Shading Visibility Ray", mUseFinalVisibilityRay);
             widget.tooltip("Enables a Visibility ray in final shading. Can reduce bias as Reservoir Visibility rays ignore opaque geometry");
             mReset |= widget.checkbox("Diffuse Shading Only", mUseDiffuseOnlyShading);

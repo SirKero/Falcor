@@ -55,8 +55,8 @@ cbuffer Constant
     uint gNumEmissiveSamples;       // Num emissive samples
     uint2 gFrameDim;                //Frame Dimensions for camera dir
     bool gTestVisibility;
-    float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
     uint2 gPresampledPhotonLightBufferSize;  //Presampled buffer dim. x = Title Count, y = Title Size.
+    float gAttenuationRadius; //Attenuation Radius
     uint _pad;
 }
 
@@ -123,13 +123,12 @@ bool generateSample(float rnd, const float3 surfacePosition,
     float distSqr= max(FLT_MIN, dot(toLight, toLight)); // Clamp to avoid NaNs below
     sampleDistance = sqrt(distSqr);     //Distance is needed for optinal visibility ray
     ls.dir = toLight/ sampleDistance;    //normalize
-    float cosTheta = dot(pl.normal, -ls.dir);
-    if(cosTheta <= 0 || sampleDistance < gGeometryTermBand || pl.valid == 0) return false;
 
-    float pdf = distSqr / max(FLT_MIN, cosTheta);
-    float Le = luminance(pl.flux);
-    
-    ls.Li = Le / pdf;
+    ls.Li = luminance(pl.flux);
+    float distAttenuation = vplAttenuation(sampleDistance, gAttenuationRadius);
+    float cosTheta = saturate(dot(normalize(pl.normal), -ls.dir));
+
+    ls.Li *= cosTheta * distAttenuation;
         
     return (ls.Li > 0.f);    //return true if valid sample
 }

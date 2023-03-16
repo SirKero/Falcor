@@ -50,7 +50,8 @@ static const uint kNeighOffsetMask = OFFSET_BUFFER_SIZE;
 cbuffer PerFrame
 {
     uint gFrameCount; //Current it for sample gen
-    uint3 pad;
+    float gAttenuationRadius; //Attenuation Radius
+    uint2 pad;
 }
 
 cbuffer Constant{
@@ -155,11 +156,11 @@ bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, ou
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    float cosTheta = dot(pl.normal, -ls.dir);
-    if(cosTheta <= 0) return false;
-    
-    float pdf = distSqr / max(FLT_MIN, cosTheta);
-    ls.Li = luminance(pl.flux.xyz) / pdf;
+    ls.Li = luminance(pl.flux);
+    float distAttenuation = vplAttenuation(sampleDistance, gAttenuationRadius);
+    float cosTheta = saturate(dot(normalize(pl.normal), -ls.dir));
+
+    ls.Li *= cosTheta * distAttenuation;
 
     return ls.Li > 0;   //true if sample is valid
 }

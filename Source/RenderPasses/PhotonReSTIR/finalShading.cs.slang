@@ -14,6 +14,7 @@ import Utils.Color.ColorHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Reservoir;
+import PhotonLight;
 
 Texture2D<uint4> gReservoir;
 
@@ -38,6 +39,8 @@ cbuffer PerFrame
 {
     uint gFrameCount;                   //Current it for sample gen
     bool gEnableCaustics;               //Enable caustics
+    float gAttenuationRadius;           //Attenuation Radius
+    uint _pad;
 }
 
 cbuffer Constant
@@ -85,10 +88,10 @@ void getEmissiveLight(uint2 idx,in float3 worldPos, out float distance ,out floa
     distance = sqrt(distSqr);
     toLight = toLight/ distance;    //normalize
 
-    float cosTheta = saturate(dot(photonNormal, -toLight));
-    
-    float pdf = distSqr / max(FLT_MIN, cosTheta);
-    Li = photonFlux / pdf;
+    float distAttenuation = vplAttenuation(distance, gAttenuationRadius);
+    float cosTheta = saturate(dot(normalize(photonNormal), -toLight));
+
+    Li = photonFlux * cosTheta * distAttenuation;
 }
 
 [numthreads(16, 16, 1)]

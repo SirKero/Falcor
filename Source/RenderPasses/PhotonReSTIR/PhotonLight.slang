@@ -47,3 +47,14 @@ struct PhotonData
         return data;
     }
 };
+
+// Nonsingular Point Light Attenuation by cem yuksel. Reduces bright spots near corners. Simplified version from website
+// http://www.cemyuksel.com/research/pointlightattenuation/
+//Inputs: Distance d and vpl radius r
+//Output: Attenuation
+float vplAttenuation(float d, float r)
+{
+    float drSq = d * d + r * r;
+    float denom = drSq + d * sqrt(drSq);
+    return 2.f / denom;
+}

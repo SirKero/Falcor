@@ -220,11 +220,12 @@ private:
     bool mUseEmissiveTexture = false;        //Use Emissive texture in final shading
     uint mBiasCorrectionMode = BiasCorrectionMode::Basic;   //Bias Correction Mode
     bool mUseFinalVisibilityRay = true;         //For optional visibility ray for each reservoir
-    float mGeometryTermBand = 0.0f;     //Rejects samples with a small distance due to infinetly large geometry term (Adds Bias)
     uint2 mPresampledTitleSize = uint2(128, 1024);
     uint2 mPresampledTitleSizeUI = mPresampledTitleSize;
     bool mPresampledTitleSizeChanged = true;
     bool mUseDiffuseShadingOnly = false;    //Use only diffuse shading for ReSTIR. Can be used if VBuffer is traced until diffuse hit
+    float mSampleRadiusAttenuation = 0.1f;
+
     //Photon
     bool mEnablePhotonSplit = false;               ///<Enables split between analytic and emissive
     float mPhotonSplitRatio = 0.5f;               ///< Percent of emissive photons 0 = 0%; 1. = 100%

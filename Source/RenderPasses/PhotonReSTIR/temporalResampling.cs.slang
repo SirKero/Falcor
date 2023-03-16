@@ -55,8 +55,8 @@ cbuffer Constant
     uint gMaxAge;
     float gDepthThreshold;          //Relative depth offset
     float gNormalThreshold;         //Maximum cosine between both Normals that is allowed
-    float gGeometryTermBand;        //Invalidates samples with very small distances (Adds Bias)
-    uint3 _pad;
+    float gAttenuationRadius; //Attenuation Radius
+    uint2 _pad;
 }
 
 struct LightSample{
@@ -140,11 +140,11 @@ bool getLightSample(in PhotonLight pl,in float3 worldPos, out LightSample ls, ou
     sampleDistance = sqrt(distSqr);
     ls.dir = ls.dir/ sampleDistance;    //normalize
 
-    float cosTheta = dot(pl.normal, -ls.dir);
-    if(cosTheta <= 0 || sampleDistance < gGeometryTermBand) return false;
-    
-    float pdf = distSqr / max(FLT_MIN, cosTheta);
-    ls.Li = luminance(pl.flux.xyz) / pdf;
+    ls.Li = luminance(pl.flux);
+    float distAttenuation = vplAttenuation(sampleDistance, gAttenuationRadius);
+    float cosTheta = saturate(dot(normalize(pl.normal), -ls.dir));
+
+    ls.Li *= cosTheta * distAttenuation;
 
     return ls.Li > 0;   //true if sample is valid
 }
