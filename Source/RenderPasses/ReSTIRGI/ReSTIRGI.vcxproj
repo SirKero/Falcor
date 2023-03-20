@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -11,11 +11,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{625AAE5D-5E0D-4232-916D-AA9210A0056D}</ProjectGuid>
+    <ProjectGuid>{459223DD-BEDF-46C7-BD56-206097804534}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>ReSTIRGI</RootNamespace>
+    <RootNamespace>PhotonReStirFinalGathering</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>ReSTIRGIPass</ProjectName>
+    <ProjectName>ReSTIRGI</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -25,21 +25,31 @@
     <Import Project="..\..\Falcor\Falcor.props" />
   </ImportGroup>
   <ItemGroup>
-    <ClCompile Include="ReSTIRGIPass.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="ReSTIRGIPass.h" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="..\..\Falcor\Falcor.vcxproj">
       <Project>{2c535635-e4c5-4098-a928-574f0e7cd5f9}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="FinalShading.cs.slang" />
-    <ShaderSource Include="InitialSampling.cs.slang" />
-    <ShaderSource Include="LoadShadingData.slang" />
-    <ShaderSource Include="PrepareSurfaceData.cs.slang" />
+    <ShaderSource Include="collectFinalGatherPhotons.rt.slang" />
+    <ShaderSource Include="debugPass.cs.slang" />
+    <ShaderSource Include="%28unused%29generateFinalGatheringCandidates.rt.slang" />
+    <ShaderSource Include="fillSurfaceInfo.cs.slang" />
+    <ShaderSource Include="finalShading.cs.slang" />
+    <ShaderSource Include="generatePhotons.rt.slang" />
+    <ShaderSource Include="generatePathSample.rt.slang" />
+    <ShaderSource Include="Hash.slang" />
+    <ShaderSource Include="Reservoir.slang" />
+    <ShaderSource Include="spartialResampling.cs.slang" />
+    <ShaderSource Include="spartioTemporalResampling.cs.slang" />
+    <ShaderSource Include="SurfaceData.slang" />
+    <ShaderSource Include="temporalResampling.cs.slang" />
+    <ShaderSource Include="VPLs.slang" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="ReSTIRGI.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ReSTIRGI.h" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
@@ -76,7 +86,6 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -95,7 +104,6 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>

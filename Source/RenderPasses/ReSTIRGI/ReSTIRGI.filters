@@ -1,0 +1,73 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="PhotonReStirFinalGathering.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="PhotonReStirFinalGathering.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ShaderSource Include="Reservoir.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="SurfaceData.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="VPLs.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="temporalResampling.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
+    <ShaderSource Include="spartioTemporalResampling.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
+    <ShaderSource Include="spartialResampling.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
+    <ShaderSource Include="fillSurfaceInfo.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
+    <ShaderSource Include="finalShading.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
+    <ShaderSource Include="%28unused%29generateFinalGatheringCandidates.rt.slang">
+      <Filter>Shader\Photon</Filter>
+    </ShaderSource>
+    <ShaderSource Include="generatePhotons.rt.slang">
+      <Filter>Shader\Photon</Filter>
+    </ShaderSource>
+    <ShaderSource Include="getFinalGatherHits.rt.slang">
+      <Filter>Shader\Photon</Filter>
+    </ShaderSource>
+    <ShaderSource Include="collectFinalGatherPhotons.rt.slang">
+      <Filter>Shader\Photon</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Hash.slang">
+      <Filter>Shader\Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="generateAdditionalCandidates.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
+    <ShaderSource Include="collectCausticPhotons.rt.slang">
+      <Filter>Shader\Photon</Filter>
+    </ShaderSource>
+    <ShaderSource Include="debugPass.cs.slang">
+      <Filter>Shader\Resampling</Filter>
+    </ShaderSource>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Shader">
+      <UniqueIdentifier>{c0328f5d-f8f0-410e-960d-71e3fa54f23f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader\Structs">
+      <UniqueIdentifier>{f0c87b93-e2ab-4b7b-b4e0-2c79db0a3276}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader\Photon">
+      <UniqueIdentifier>{54216768-aca3-4a12-9d4b-da4dda21032d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shader\Resampling">
+      <UniqueIdentifier>{a054bd10-47cf-4473-9aea-ea8c8939aed4}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

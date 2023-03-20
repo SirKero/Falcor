@@ -1,15 +1,61 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="ReSTIRGIPass.cpp" />
+    <ShaderSource Include="VPLs.slang">
+      <Filter>Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="SurfaceData.slang">
+      <Filter>Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Reservoir.slang">
+      <Filter>Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="Hash.slang">
+      <Filter>Structs</Filter>
+    </ShaderSource>
+    <ShaderSource Include="temporalResampling.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="spartialResampling.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="spartioTemporalResampling.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="generatePathSample.rt.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="%28unused%29generateFinalGatheringCandidates.rt.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="collectFinalGatherPhotons.rt.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="debugPass.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="fillSurfaceInfo.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="finalShading.cs.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
+    <ShaderSource Include="generatePhotons.rt.slang">
+      <Filter>Shader</Filter>
+    </ShaderSource>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ReSTIRGIPass.h" />
+    <Filter Include="Shader">
+      <UniqueIdentifier>{99549395-910d-410a-b3bc-7b95152aecc5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Structs">
+      <UniqueIdentifier>{480878d4-d0a1-49a4-8aef-bd2b76938807}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ShaderSource Include="FinalShading.cs.slang" />
-    <ShaderSource Include="LoadShadingData.slang" />
-    <ShaderSource Include="PrepareSurfaceData.cs.slang" />
-    <ShaderSource Include="InitialSampling.cs.slang" />
+    <ClCompile Include="ReSTIRGI.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="ReSTIRGI.h" />
   </ItemGroup>
 </Project>
