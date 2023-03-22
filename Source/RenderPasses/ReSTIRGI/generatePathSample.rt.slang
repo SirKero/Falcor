@@ -13,6 +13,8 @@ import Rendering.Lights.LightHelpers;
 import Utils.Math.PackedFormats;
 import Utils.Math.FormatConversion;
 import Utils.Color.ColorHelpers;
+import Rendering.Lights.EmissiveLightSampler;
+import Rendering.Lights.EmissiveLightSamplerHelpers;
 
 import Reservoir;
 import VPLs;
@@ -50,6 +52,13 @@ RWStructuredBuffer<PackedVPL> gLights;
     RWTexture2D<uint4> gReservoir;
 #endif
 
+cbuffer Light{
+    EmissiveLightSampler gEmissiveSampler;
+}
+
+static const bool kUseEmissiveLights = USE_EMISSIVE_LIGHT;
+static const bool kUseAnalyticLights = USE_ANALYTIC_LIGHT;
+
 struct TraceData
 {
     PackedHitInfo packedHitInfo; //< Reflection albedo of the current hit point
@@ -86,12 +95,10 @@ struct SphereAttribs
 };
 
 struct LightSample{
-    uint lightIdx;
-    float3 dir;
-    float Li;
-    float invSelectPdf;
-    float2 uv;
-    //Enum type later ? 
+    float3 posW;
+    float invSelectPDF;
+    float3 Li;
+    uint _pad;
 };
 
 uint index2Dto1D(uint2 idx, uint width){
@@ -111,7 +118,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 }
 
 
-bool sampleAnalyticLight(const float3 posW, inout SampleGenerator sg, out AnalyticLightSample ls, out float invSelectPdf)
+bool sampleAnalyticLight(const float3 posW, inout SampleGenerator sg, out LightSample ls)
 {
     //Get a light source and the radiance from it
     const uint lightCount = gScene.getLightCount();
@@ -125,18 +132,36 @@ bool sampleAnalyticLight(const float3 posW, inout SampleGenerator sg, out Analyt
     //Only Point(+ Spot) lights are supported (due to RTXDI and PhotonReSTIR)
     if (lightData.type != uint(LightType::Point))
         return false;
-    
-    sampleLight(posW, lightData, sg, ls);
-    invSelectPdf = lightCount;
+
+    AnalyticLightSample als;
+    sampleLight(posW, lightData, sg, als);
+    ls.invSelectPDF = lightCount;
+    ls.posW = als.posW;
+    ls.Li = als.Li * ls.invSelectPDF;
     
     return true;
 }
 
-void fillLightSample(HitInfo hitInfo, float3 view, in AnalyticLightSample ls, inout SampleGenerator sg, out VPL lightSample)
+bool sampleEmissiveLight(in const ShadingData sd, inout SampleGenerator sg, out LightSample ls)
+{ 
+    TriangleLightSample tls;
+    if (!gEmissiveSampler.sampleLight(sd.posW, sd.N, true, sg, tls))
+        return false;
+
+    if(tls.pdf <= 0)
+        return false;
+    
+    ls.invSelectPDF = 1 / tls.pdf;
+    ls.Li = tls.Le * ls.invSelectPDF;
+    ls.posW = tls.posW;
+
+    return true;
+}
+
+void fillLightSample(in const ShadingData sd, float3 view, in LightSample ls, inout SampleGenerator sg, out VPL lightSample)
 {
     //Calculate the brdf for the current hit and calculate the indirect light
     let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = loadShadingData(hitInfo, view, lod);
     let bsdf = gScene.materials.getBSDF(sd, lod);
 
     float3 toLight = ls.posW - sd.posW;
@@ -148,7 +173,7 @@ void fillLightSample(HitInfo hitInfo, float3 view, in AnalyticLightSample ls, in
     RayDesc tRay;
     tRay.Origin = sd.computeNewRayOrigin();
     tRay.TMin = 0.01;
-    tRay.TMax = dist;
+    tRay.TMax = dist * 0.99f;
     tRay.Direction = toLight;
     uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
     ShadowPayload shadowPayload;
@@ -296,18 +321,39 @@ void rayGen()
             validSample = traceData.distance > 0;
         }
 
-        AnalyticLightSample ls;
+        LightSample ls;
         
         if (validSample)
         {
-            float invSelectPdf = 1.f;
-            validSample = sampleAnalyticLight(sd.posW, traceData.sg, ls, invSelectPdf);
-            reservoir.weightSum *= invSelectPdf;
+            //Update shading data
+            hitInfo = HitInfo(traceData.packedHitInfo);
+            sd = loadShadingData(hitInfo, tRay.Direction, lod);
+
+            //Get emissive or analytic sample
+            float analyticPDF = kUseAnalyticLights ? 1.f : 0;
+            float emissivePDF = kUseEmissiveLights ? 1.f : 0;
+
+            analyticPDF /= analyticPDF + emissivePDF; //Normalize
+
+            if (sampleNext1D(traceData.sg) < analyticPDF)
+            {
+                float invSelect = 1.f / analyticPDF;
+                validSample = sampleAnalyticLight(sd.posW, traceData.sg, ls);
+                ls.Li *= invSelect;
+                //reservoir.weightSum *= ls.invSelectPDF * invSelect;
+            }
+            else
+            {
+                float invSelect = 1.f / (1.f - analyticPDF);
+                validSample = sampleEmissiveLight(sd, traceData.sg, ls);
+                ls.Li *= invSelect;
+                //reservoir.weightSum *= ls.invSelectPDF * invSelect;
+            }
         }
         
         if (validSample)
         {
-            fillLightSample(HitInfo(traceData.packedHitInfo), tRay.Direction, ls, traceData.sg, lightSample);
+            fillLightSample(sd, tRay.Direction, ls, traceData.sg, lightSample);
            
             float distSqr = max(FLT_MIN, abs(traceData.distance * traceData.distance));
             float cosTheta = max(FLT_MIN, traceData.NdotL);

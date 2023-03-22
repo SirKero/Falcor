@@ -339,6 +339,7 @@ bool ReSTIRGI::prepareLighting(RenderContext* pRenderContext)
     else {
         if (mpEmissiveLightSampler) {
             mpEmissiveLightSampler = nullptr;
+            mGeneratePathSample.pVars.reset();
             lightingChanged = true;
         }
     }
@@ -471,6 +472,9 @@ void ReSTIRGI::getFinalGatherHitPass(RenderContext* pRenderContext, const Render
 
     //Defines
     mGeneratePathSample.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
+    mGeneratePathSample.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
+    mGeneratePathSample.pProgram->addDefine("USE_ANALYTIC_LIGHT", mpScene->useAnalyticLights() ? "1" : "0");
+    
 
     if (!mGeneratePathSample.pVars) {
         FALCOR_ASSERT(mGeneratePathSample.pProgram);
@@ -478,6 +482,8 @@ void ReSTIRGI::getFinalGatherHitPass(RenderContext* pRenderContext, const Render
         // Configure program.
         mGeneratePathSample.pProgram->addDefines(mpSampleGenerator->getDefines());
         mGeneratePathSample.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        if (mpEmissiveLightSampler)
+            mGeneratePathSample.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
         // Create program variables for the current program.
         // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
         mGeneratePathSample.pVars = RtProgramVars::create(mGeneratePathSample.pProgram, mGeneratePathSample.pBindingTable);
@@ -489,6 +495,9 @@ void ReSTIRGI::getFinalGatherHitPass(RenderContext* pRenderContext, const Render
     FALCOR_ASSERT(mGeneratePathSample.pVars);
 
     auto var = mGeneratePathSample.pVars->getRootVar();
+
+    if (mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
     //Set Constant Buffers
     std::string nameBuf = "PerFrame";
@@ -507,7 +516,7 @@ void ReSTIRGI::getFinalGatherHitPass(RenderContext* pRenderContext, const Render
 
     var["gReservoir"] = mSampleBoosting > 0 ? mpReservoirBoostBuffer : mpReservoirBuffer[mFrameCount % 2];
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
-    var["gLights"] = mpPhotonLightBuffer[mFrameCount % 2];
+    var["gLights"] = mSampleBoosting > 0 ? mpPhotonLightBoostBuffer : mpPhotonLightBuffer[mFrameCount % 2];
 
     //Create dimensions based on the number of VPLs
     uint2 targetDim = renderData.getDefaultTextureDims();
