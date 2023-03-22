@@ -204,6 +204,9 @@ void ReSTIRGI::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
 
+    changed |= widget.slider("Sample Max Bounce", mSampleGenMaxBounces, 1u, 32u);
+
+
     if (auto group = widget.group("ReSTIR")) {
         changed |= widget.dropdown("ResamplingMode", kResamplingModeList, mResamplingMode);
         
@@ -509,6 +512,7 @@ void ReSTIRGI::getFinalGatherHitPass(RenderContext* pRenderContext, const Render
     var[nameBuf]["gUseAlphaTest"] = mPhotonUseAlphaTest;
     var[nameBuf]["gDeltaRejection"] = mGenerationDeltaRejection;
     var[nameBuf]["gCreateFallbackSample"] = mCreateFallbackFinalGatherSample;
+    var[nameBuf]["gMaxBounces"] = mSampleGenMaxBounces;
 
     var["gVBuffer"] = renderData[kInVBufferDesc.name]->asTexture();
     var["gView"] = renderData[kInViewDesc.name]->asTexture();

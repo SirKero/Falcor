@@ -209,6 +209,7 @@ private:
     //UI
     //
     //Resampling
+    uint mSampleGenMaxBounces = 1;
     uint mResamplingMode = ResamplingMode::SpartioTemporal;        //Resample Mode
     uint mSampleBoosting = 0;            // Number of initial candidates per pixel
     uint mTemporalMaxAge = 20;              // Max age of an temporal reservoir

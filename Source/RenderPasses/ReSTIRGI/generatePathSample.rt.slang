@@ -33,7 +33,7 @@ cbuffer Constant{
     bool gUseAlphaTest; //Alpha test
     bool gDeltaRejection;   //Accept every non delta surface as diffuse
     bool gCreateFallbackSample; //Creates a reference sample if current sample was invalid
-    uint _pad2;
+    uint gMaxBounces;
 }  
 
 // Inputs
@@ -62,8 +62,8 @@ static const bool kUseAnalyticLights = USE_ANALYTIC_LIGHT;
 struct TraceData
 {
     PackedHitInfo packedHitInfo; //< Reflection albedo of the current hit point
-    uint packedNormal; ///< Face normal encoded in 16 bit polar coordinates
-    float pDiffuseRef;
+    uint pathLength;
+    bool valid;
     float distance; ///< 
     float NdotL; ///< NdotL precalculated for targetPDF
 
@@ -77,9 +77,9 @@ struct TraceData
         d.NdotL = 0.f;
         d.packedHitInfo = {
         };
-        d.packedNormal = 0;
+        d.pathLength = 0;
         d.distance = -1;
-        d.pDiffuseRef = 0.f;
+        d.valid = true;
         return d;
     }
 };
@@ -158,7 +158,7 @@ bool sampleEmissiveLight(in const ShadingData sd, inout SampleGenerator sg, out 
     return true;
 }
 
-void fillLightSample(in const ShadingData sd, float3 view, in LightSample ls, inout SampleGenerator sg, out VPL lightSample)
+bool fillLightSample(in const ShadingData sd, float3 view, in LightSample ls, inout SampleGenerator sg, out float3 Li)
 {
     //Calculate the brdf for the current hit and calculate the indirect light
     let lod = ExplicitLodTextureSampler(0.f);
@@ -181,12 +181,23 @@ void fillLightSample(in const ShadingData sd, float3 view, in LightSample ls, in
 
     TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 1 /* hitIdx */, rayTypeCount, 1 /* missIdx */, tRay, shadowPayload);
 
-    lightSample.posW = sd.posW;
-    lightSample.normal = sd.N;
-    lightSample.valid = shadowPayload.shadowed ? false :true;
-    lightSample.flux = shadowPayload.shadowed ? 0.f : weight * ls.Li;
+    Li = shadowPayload.shadowed ? 0.f : max(0.0, weight * ls.Li);
+
+    return all(Li >= 0);
 }
 
+bool dispatchNewRay(float3 origin, float3 direction, inout TraceData rayData)
+{
+    RayDesc tRay;
+    tRay.Origin = origin;
+    tRay.TMin = 0.0001;
+    tRay.TMax = 1000.f;
+    tRay.Direction = direction;
+    
+    TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, rayData);
+
+    return rayData.valid;
+}
 
 [shader("miss")]
 void miss(inout TraceData rayData : SV_RayPayload)
@@ -231,6 +242,9 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
     triangleHit.barycentrics = attribs.barycentrics;
     VertexData v = getVertexData(triangleHit.instanceID, PrimitiveIndex(), attribs);
     const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+    bool validHit = true;
+    float NdotL = 0.f;
+    
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, incomingRayDir, lod);
         
@@ -238,25 +252,27 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
     let bsdf = gScene.materials.getBSDF(sd, lod);
     let bsdfProperties = bsdf.getProperties(sd);
     
-    //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
+        //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
     float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
 
-    //Accept all hits but reject if the surface is only specular
+        //Accept all hits but reject if the surface is only specular
     float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
 
-    bool validHit = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) > 0;
+    validHit = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) > 0;
+    validHit &= luminance(bsdfProperties.emission) <= 0; //Ignore emissive hits on first hit, as they are sampled by ReSTIR
+
+    NdotL = saturate(dot(sd.N, incomingRayDir));
     
-    validHit &= luminance(bsdfProperties.emission) <= 0; //Ignore emissive hits, as they are sampled by ReSTIR
+    
     
     if (validHit)
     {
         rayData.distance = RayTCurrent();
-        rayData.packedNormal = encodeNormal2x16(sd.N);
-        rayData.pDiffuseRef = pDiffuseRef;
+        rayData.pathLength += 1;
         rayData.packedHitInfo = HitInfo(triangleHit).getData();
-        rayData.NdotL = saturate(dot(sd.N, incomingRayDir));
+        rayData.NdotL = NdotL;
     }else{
-        rayData.distance = -1.f;
+        rayData.valid = false;
     }
 }
 
@@ -272,7 +288,7 @@ void rayGen()
     reservoir.M = 1;
     TraceData traceData = TraceData::create();
     float lightFactor = 1.f;    //Store NdotL in it later
-    VPL lightSample = { };
+    VPL pathLightSample = { };
     
     if (hitInfo.isValid())
     {
@@ -309,76 +325,113 @@ void rayGen()
     
         reservoir.weightSum = 1.f / bsdfSample.pdf; // 1/selectPDF
 
-        RayDesc tRay;
-        tRay.Origin = sd.computeNewRayOrigin();
-        tRay.TMin = 0.0001;
-        tRay.TMax = 1000.f;
-        tRay.Direction = bsdfSample.wo;
-    
-        if (validSample)
-        {
-            TraceRay(gScene.rtAccel, 0, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, tRay, traceData);
-            validSample = traceData.distance > 0;
-        }
-
-        LightSample ls;
+        float3 rayOrigin = sd.computeNewRayOrigin();
+        float3 rayDirection = bsdfSample.wo;
+        float3 radiance = float3(0);
+        float3 thp = float3(1);
+        float rayDistance = 1;
+        float cosTheta = 1;
         
-        if (validSample)
+        for (uint i = 0; i < gMaxBounces; i++)
         {
-            //Update shading data
-            hitInfo = HitInfo(traceData.packedHitInfo);
-            sd = loadShadingData(hitInfo, tRay.Direction, lod);
+            if(!validSample)
+                break;
+            
+            if (!dispatchNewRay(rayOrigin, rayDirection, traceData))
+            {
+                if(i== 0 && !traceData.valid)
+                    validSample = false;
+                break;
+            }
 
+            //Sample a light
+            LightSample ls = { };
+            HitInfo hitInfo = HitInfo(traceData.packedHitInfo);
+            ShadingData sd = loadShadingData(hitInfo, rayDirection, lod);
+            let bsdf = gScene.materials.getBSDF(sd, lod);
+            let bsdfProperties = bsdf.getProperties(sd);
+           
             //Get emissive or analytic sample
             float analyticPDF = kUseAnalyticLights ? 1.f : 0;
             float emissivePDF = kUseEmissiveLights ? 1.f : 0;
 
             analyticPDF /= analyticPDF + emissivePDF; //Normalize
 
+            bool validLightSample = true;
+            float invSelect;
             if (sampleNext1D(traceData.sg) < analyticPDF)
             {
-                float invSelect = 1.f / analyticPDF;
-                validSample = sampleAnalyticLight(sd.posW, traceData.sg, ls);
+                invSelect = 1.f / analyticPDF;
+                if (sampleAnalyticLight(sd.posW, traceData.sg, ls))
+                    validLightSample = false;
                 ls.Li *= invSelect;
                 //reservoir.weightSum *= ls.invSelectPDF * invSelect;
             }
             else
             {
-                float invSelect = 1.f / (1.f - analyticPDF);
-                validSample = sampleEmissiveLight(sd, traceData.sg, ls);
+                invSelect = 1.f / (1.f - analyticPDF);
+                if (!sampleEmissiveLight(sd, traceData.sg, ls))
+                    validLightSample = false;
                 ls.Li *= invSelect;
                 //reservoir.weightSum *= ls.invSelectPDF * invSelect;
             }
+            float3 Li = float3(0);
+            if (validLightSample)
+            {
+                ls.Li *= invSelect;
+                if (!fillLightSample(sd, rayDirection, ls, traceData.sg, Li))
+                    break;
+            }
+
+            //Update data for the first light sample
+            if (i == 0)
+            {
+                pathLightSample.posW = sd.posW;
+                pathLightSample.normal = sd.N;
+                rayDistance = traceData.distance;
+                cosTheta = max(FLT_MIN, traceData.NdotL);
+            }
+            
+            radiance += (Li + bsdfProperties.emission) * thp;
+                        
+            //Calculate next bounce
+            if (i + 1 < gMaxBounces)
+            {
+                if (!bsdf.sample(sd, traceData.sg, bsdfSample))
+                    break;
+                
+                thp *= bsdfSample.weight;
+                rayDirection = bsdfSample.wo;
+                rayOrigin = sd.computeNewRayOrigin();
+            }
+            
         }
+
+        pathLightSample.flux = radiance;
         
-        if (validSample)
+        if (validSample && !any(isnan(pathLightSample.flux)) && !any(isinf(pathLightSample.flux)))
         {
-            fillLightSample(sd, tRay.Direction, ls, traceData.sg, lightSample);
-           
-            float distSqr = max(FLT_MIN, abs(traceData.distance * traceData.distance));
-            float cosTheta = max(FLT_MIN, traceData.NdotL);
+            float distSqr = max(FLT_MIN, abs(rayDistance * rayDistance));
+            if (cosTheta > 0)
+                pathLightSample.flux *= distSqr / cosTheta; //Jacobian determinant
             
-            if (any(isnan(lightSample.flux)) || any(isinf(lightSample.flux)) || cosTheta <= 0)
-                lightSample.valid = false;
-            else
-                lightSample.flux *= distSqr / cosTheta; //Jacobian determinant
-            
-            float distanceAttenuation = vplAttenuation(traceData.distance, gAttenuationRadius);
-            float Li = luminance(lightSample.flux);
+            float distanceAttenuation = vplAttenuation(rayDistance, gAttenuationRadius);
+            float Li = luminance(pathLightSample.flux);
             reservoir.targetPdf *= Li * cosTheta * distanceAttenuation; //Jacobian determinant and Li
-            if (Li <= 0)
-                validSample = false;
+            if (Li > 0 && cosTheta > 0)
+                pathLightSample.valid = true;
         }
 
     
-        if (!validSample || !lightSample.valid)
+        if (!validSample || !pathLightSample.valid)
         {
             reservoir.weightSum = 0.f; //invalidate reseroir
+            pathLightSample.flux = float3(0);
         }
     }
         
     //Store data in buffers
-    gLights[index2Dto1D(launchIndex, launchDim.x)] = lightSample.pack();
+    gLights[index2Dto1D(launchIndex, launchDim.x)] = pathLightSample.pack();
     gSurfaceData[index2Dto1D(launchIndex, launchDim.x)] = surface.pack();
     #if USE_REDUCED_RESERVOIR_FORMAT
         gReservoir[launchIndex] = reservoir.packReduced();
