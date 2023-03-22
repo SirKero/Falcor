@@ -347,7 +347,8 @@ void rayGen()
             return;
     
         ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-        pls.flux /= lightDirPDF;
+        //pls.flux /= lightDirPDF;
+        pls.flux *= M_PI;   //Lambert Emitter
     }
 #endif    
 

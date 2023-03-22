@@ -190,8 +190,7 @@ void rayGen()
         float3 radiance = rayData.radiance / (M_PI * gPhotonRadius * gPhotonRadius); //Get new flux
         
         float lightFactor = gLightFactor[launchIndex];  //Take out distance and cos (Jacobian determinant)
-        if(lightFactor > 0)
-            radiance *= lightFactor;
+        radiance *= lightFactor;
         
         //ReSTIR Candidate
         uint lightIdx = index2Dto1D(launchIndex, launchDim.x);
