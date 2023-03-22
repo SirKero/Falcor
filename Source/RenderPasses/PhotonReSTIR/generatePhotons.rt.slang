@@ -246,7 +246,6 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
-    uint lobes = bsdf.getLobes(sd);
     let bsdfProperties = bsdf.getProperties(sd);
     bool hasDiffuseParts = luminance(bsdfProperties.diffuseReflectionAlbedo) > 0;
     
