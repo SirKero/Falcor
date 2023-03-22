@@ -237,6 +237,7 @@ void VBufferPM::execute(RenderContext* pRenderContext, const RenderData& renderD
         var[bufName]["gUseRandomPixelPosCamera"] = mCameraUseRandomSample;
         var[bufName]["gUseDeltaRejection"] = mUseDeltaRejection;
         var[bufName]["gForceMostProbablePath"] = mForceMostProbablePath;
+        var[bufName]["gDeltaRejDiffusePart"] = mDeltaRejectionDiffusePart;
     }
 
     // Bind Output Textures. These needs to be done per-frame as the buffers may change anytime.
@@ -319,11 +320,13 @@ void VBufferPM::renderUI(Gui::Widgets& widget)
     mOptionsChanged |= widget.checkbox("Stop on non delta materials", mUseDeltaRejection);
     widget.tooltip("The cutoff for Diffuse amd Specular Materials. If the material has no delta lobe, we stop tracing and accept the hit as diffuse");
 
-
-    if (!mUseDeltaRejection) {
-        mOptionsChanged |= widget.var("SpecRoughCutoff", mSpecRoughCutoff, 0.0f, 1.0f, 0.01f);
-        widget.tooltip("The cutoff for Diffuse amd Specular Materials. All Reflections above this threshold are considered diffuse, does not apply to transmissive materials.\n 0 - always take first hit (except for transmissive materials). \n 1 - Only use bsdf lobes");
+    if (mUseDeltaRejection) {
+        mOptionsChanged |= widget.checkbox("Stop require diffuse part", mDeltaRejectionDiffusePart);
+        widget.tooltip("Stops only on the material if the diffuse part is greater than 0");
     }
+
+    mOptionsChanged |= widget.var("SpecRoughCutoff", mSpecRoughCutoff, 0.0f, 1.0f, 0.01f);
+    widget.tooltip("The cutoff for Diffuse amd Specular Materials. All Reflections above this threshold are considered diffuse, does not apply to transmissive materials.\n 0 - always take first hit (except for transmissive materials). \n 1 - Only use bsdf lobes");
 
     mOptionsChanged |= widget.checkbox("Force most probable path", mForceMostProbablePath);
     widget.tooltip("Takes the most probable path between a delta refraction/reflection");

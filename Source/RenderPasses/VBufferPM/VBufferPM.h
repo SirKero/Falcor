@@ -103,6 +103,7 @@ private:
     bool                        mAdjustShadingNormals = true;                                   ///< Adjust shading normals.
     bool                        mComputeDOF = false;                                            ///< Adjust shading normals.
     bool                        mUseDeltaRejection = true;                                      ///< Delta rejection strategy for surfaces
+    bool                        mDeltaRejectionDiffusePart = false;                             ///< Only stops on non-delta materials with a diffuse part
     bool                        mForceMostProbablePath = false;                                  ///< Trace the most probable path between transmission and reflection
 
      // Runtime data

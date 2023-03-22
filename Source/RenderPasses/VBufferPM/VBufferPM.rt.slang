@@ -29,7 +29,7 @@ cbuffer CB
     bool gUseRandomPixelPosCamera;  //Uses a randomly generated pixel offset for camera direction sampeling instead of fixed jitter
     bool gUseDeltaRejection;        //Delta rejection
     bool gForceMostProbablePath;    //For delta reflections force the most probable path
-    uint _pad;
+    bool gDeltaRejDiffusePart;      //Stop delta rejections only if there is a diffuse part
 };
 
 // Outputs
@@ -345,8 +345,9 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
-
-    uint lobes = bsdf.getLobes(sd);
+    
+    bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
+    uint lobes = bsdfSample.lobe;
     
     //get material properties
     let bsdfProperties = bsdf.getProperties(sd);
@@ -359,19 +360,21 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     float rnd = sampleNext1D(rayData.sg);
     bool isDiffuse = true;
     
-    if (gUseDeltaRejection){ //Reject everything that is not delta
-        isDiffuse = (pDiffuseRef > 0) && ((lobes & (uint) LobeType::Delta) == 0);
+    if (gUseDeltaRejection && !gDeltaRejDiffusePart)
+    { //Reject everything that is not delta
+        isDiffuse = pReflection > 0 && bsdfSample.isLobe(LobeType::NonDeltaReflection);
+    }else if (gDeltaRejDiffusePart){
+        isDiffuse = pDiffuseRef > 0 && bsdfSample.isLobe(LobeType::NonDeltaReflection);
     }else{ //Spec roughness rejection
         isDiffuse = rnd <= pDiffuseRef; //Check if diffuse
-        isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
     }
-
+    isDiffuse |= (rnd <= pReflection) && (bsdfProperties.roughness >= gSpecularRougnessCutoff);
    
     // For glass in reflections, force guide paths to always follow transmission/reflection based on albedos.
     // This is pretty hacky but works best our of the possible options.
     // Stable guide buffers are a necessity.
-    bool isTracedFurther = !isDiffuse;
-    if (rayData.pathLength == 0 && isTracedFurther && gForceMostProbablePath)
+    bool isTransmissive = bsdfSample.isLobe(LobeType::Transmission);
+    if (rayData.pathLength == 0 && isTransmissive && gForceMostProbablePath)
     {
         if (bsdfProperties.isTransmissive && all(bsdfProperties.specularReflectionAlbedo <= bsdfProperties.specularTransmissionAlbedo))
         {
@@ -403,8 +406,6 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     }
     
     
-    bool valid = generateNewRay(sd, bsdf, sd.computeNewRayOrigin(), bsdfSample, rayData);
-
     //Write to FirstposW if it is a transmissive sample
     if (is_valid(gNRDFirstPosW) && rayData.pathLength == 0 && bsdfSample.isLobe(LobeType::Transmission))
     {

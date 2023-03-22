@@ -276,7 +276,6 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getBSDF(sd, lod);
-    uint lobes = bsdf.getLobes(sd);
     let bsdfProperties = bsdf.getProperties(sd);
     bool hasDiffuseParts = luminance(bsdfProperties.diffuseReflectionAlbedo) > 0;
     
@@ -292,7 +291,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     rayData.direction = bsdfSample.wo;
     rayData.isEmissive = luminance(bsdfProperties.emission) > 0;
     if (gFlags & (uint) GenerationFlags::DeltaRejection)
-        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Reflection) && (((lobes & (uint) LobeType::Delta) == 0) && hasDiffuseParts);
+        rayData.diffuseHit = bsdfSample.isLobe(LobeType::NonDeltaReflection) && hasDiffuseParts;
     else
         rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
 
