@@ -26,7 +26,9 @@ cbuffer PerFrame
     float gHashScaleFactor; //Hash scale factor. 1/diameter
     bool gDiffuseOnly;
     float gAttenuationRadius;
-    uint3 _pad;
+    float gHashScaleFactorCaustic;
+    uint gHashSizeCaustic;
+    uint _pad;
 }
 
 cbuffer Constant{
@@ -46,6 +48,7 @@ RWStructuredBuffer<PackedSurfaceData> gSurfaceData;
 RWTexture2D<PackedHitInfo> gFinalGatherHit;
 RWTexture2D<uint2> gFinalGatherExtraInfo;
 RWTexture2D<uint> gPhotonCullingMask;
+RWTexture2D<uint> gPhotonCullingCausticMask;
 RWTexture2D<float> gLightFactor;    //NdotL to take out of photon collect
 
 //Outputs
@@ -56,6 +59,7 @@ RWTexture2D<float> gLightFactor;    //NdotL to take out of photon collect
 #endif
 
 static const bool kUsePhotonCulling = USE_PHOTON_CULLING;
+static const bool kUsePhotonCullingCaustic = USE_PHOTON_CULLING_CAUSTIC;
 static const bool kAllowHitsInRadius = ALLOW_HITS_IN_RADIUS;    //Enables or disables hits inside of the collection radius
 
 struct TraceData{
@@ -111,8 +115,8 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-void cullingGetArrayOfCells(float3 position, out int3 outCells[8]){
-    float3 cell = (position.xyz * gHashScaleFactor);
+void cullingGetArrayOfCells(float3 position, float scaleFactor , out int3 outCells[8]){
+    float3 cell = (position.xyz * scaleFactor);
     float3 cellFloor = floor(cell);
     cell = abs(cell - cellFloor);
     //Get offset direction
@@ -135,13 +139,28 @@ void cullingGetArrayOfCells(float3 position, out int3 outCells[8]){
 void photonCulling(float3 hitPos){
     //Get the 7 nearest neighbors (photon can still be in it)
     int3 cells[8];
-    cullingGetArrayOfCells(hitPos, cells);
+    cullingGetArrayOfCells(hitPos, gHashScaleFactor, cells);
 
     //Insert them into the hash buffer
     [unroll]
     for(uint i=0; i<8; i++){
         uint h = hash(cells[i]) & (gHashSize - 1);    //calculateHash TODO: Test other hashes
         gPhotonCullingMask[ReSTIR_LinearIndexToZCurve(h)] = 1;
+    }
+}
+
+void photonCullingCaustic(float3 hitPos)
+{
+    //Get the 7 nearest neighbors (photon can still be in it)
+    int3 cells[8];
+    cullingGetArrayOfCells(hitPos, gHashScaleFactorCaustic ,cells);
+
+    //Insert them into the hash buffer
+    [unroll]
+    for (uint i = 0; i < 8; i++)
+    {
+        uint h = hash(cells[i]) & (gHashSizeCaustic - 1); //calculateHash TODO: Test other hashes
+        gPhotonCullingCausticMask[ReSTIR_LinearIndexToZCurve(h)] = 1;
     }
 }
 
@@ -226,11 +245,17 @@ void rayGen()
         let lod = ExplicitLodTextureSampler(0.f);
         ShadingData sd = loadShadingData(hitInfo, view, lod);
 
+        
+        if (kUsePhotonCullingCaustic)
+        {
+            photonCullingCaustic(sd.posW);
+        }
+        
         //The final gather hit is considered diffuse as the V-Buffer only stops on diffuse surfaces
-        if (gDiffuseOnly)
-            sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
-        else
-            sd.mtl.setActiveLobes((uint) LobeType::Reflection);
+            if (gDiffuseOnly)
+                sd.mtl.setActiveLobes((uint) LobeType::DiffuseReflection);
+            else
+                sd.mtl.setActiveLobes((uint) LobeType::Reflection);
 
         let bsdf = gScene.materials.getBSDF(sd, lod);
         let bsdfProperties = bsdf.getProperties(sd);

@@ -342,7 +342,16 @@ void PhotonReSTIRFinalGathering::renderUI(Gui::Widgets& widget)
             mPhotonCullingRebuildBuffer = widget.var("Culling Size Bytes", mCullingHashBufferSizeBits, 10u, 27u);
             widget.tooltip("Size of the culling buffer (2^x) and effective hash bytes used");
             changed |= mPhotonCullingRebuildBuffer;
-        } 
+        }
+
+        changed |= widget.checkbox("Use Photon Culling (Caustic)", mUsePhotonCullingCaustic);
+        widget.tooltip("Enabled culling of photon based on a hash grid. Photons are only stored on cells that are collected");
+        if (mSkipPhotonGeneration) mUsePhotonCullingCaustic = false;   //Disable culling if generation pass is skipped
+        if (mUsePhotonCullingCaustic) {
+            mPhotonCullingRebuildBufferCaustic = widget.var("Culling Size Bytes (Caustic)", mCullingHashBufferSizeBitsCaustic, 10u, 27u);
+            widget.tooltip("Size of the culling buffer (2^x) and effective hash bytes used");
+            changed |= mPhotonCullingRebuildBufferCaustic;
+        }
 
         changed |= widget.checkbox("Use Alpha Test", mPhotonUseAlphaTest);
         changed |= widget.checkbox("Adjust Shading Normal", mPhotonAdjustShadingNormal);
@@ -730,6 +739,20 @@ void PhotonReSTIRFinalGathering::prepareBuffers(RenderContext* pRenderContext, c
     if (!mUsePhotonCulling && mpPhotonCullingMask)
         mpPhotonCullingMask.reset();
 
+    //Photon Culling(Caustic)
+    if (mUsePhotonCullingCaustic && (!mpPhotonCullingMaskCaustic || mPhotonCullingRebuildBufferCaustic)) {
+        uint sizeCullingBuffer = 1 << mCullingHashBufferSizeBitsCaustic;
+        uint width, height, mipLevel;
+        computePdfTextureSize(sizeCullingBuffer, width, height, mipLevel);
+        mpPhotonCullingMaskCaustic = Texture::create2D(width, height, ResourceFormat::R8Uint, 1, 1,
+            nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpPhotonCullingMaskCaustic->setName("PhotonReStir::PhotonCullingCausticMask");
+    }
+
+    //Destroy culling buffer if photon culling is disabled
+    if (!mUsePhotonCullingCaustic && mpPhotonCullingMaskCaustic)
+        mpPhotonCullingMaskCaustic.reset();
+
     if (!mpCausticPhotonsFlux[0] || !mpCausticPhotonsFlux[1]) {
         for (uint i = 0; i < 2; i++) {
             mpCausticPhotonsFlux[i] = Texture::create2D(mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA16Float, 1, 1, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
@@ -778,6 +801,9 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     if (mUsePhotonCulling) {
         pRenderContext->clearUAV(mpPhotonCullingMask->getUAV().get(), uint4(0));
     }
+    if (mUsePhotonCullingCaustic) {
+        pRenderContext->clearUAV(mpPhotonCullingMaskCaustic->getUAV().get(), uint4(0));
+    }
 
     //Clear Reservoirs (Already done in passes)
     //pRenderContext->clearUAV(mpReservoirBuffer[mFrameCount % 2]->getUAV().get(), uint4(0));
@@ -790,6 +816,7 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 
     //Defines
     mGetFinalGatherHitPass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
+    mGetFinalGatherHitPass.pProgram->addDefine("USE_PHOTON_CULLING_CAUSTIC", mUsePhotonCullingCaustic ? "1" : "0");
     mGetFinalGatherHitPass.pProgram->addDefine("ALLOW_HITS_IN_RADIUS", mAllowFinalGatherPointsInRadius ? "1" : "0");
     mGetFinalGatherHitPass.pProgram->addDefine("USE_REDUCED_RESERVOIR_FORMAT", mUseReducedReservoirFormat ? "1" : "0");
 
@@ -818,6 +845,9 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]); //Take Global
     var[nameBuf]["gDiffuseOnly"] = mUseDiffuseOnlyShading;
     var[nameBuf]["gAttenuationRadius"] = mSampleRadiusAttenuation;
+    var[nameBuf]["gHashScaleFactorCaustic"] = 1.f / (2 * mPhotonCollectRadius[1]);;
+    var[nameBuf]["gHashSizeCaustic"] = 1 << mCullingHashBufferSizeBitsCaustic;
+
 
     nameBuf = "Constant";
     var[nameBuf]["gHashSize"] = 1 << mCullingHashBufferSizeBits;
@@ -833,6 +863,8 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
     var["gSurfaceData"] = mpSurfaceBuffer[mFrameCount % 2];
     var["gFinalGatherHit"] = mpFinalGatherHit;
     var["gPhotonCullingMask"] = mpPhotonCullingMask;
+    var["gPhotonCullingCausticMask"] = mpPhotonCullingMaskCaustic;
+
 
     var["gLightFactor"] = mpLightFactor;
 
@@ -842,6 +874,11 @@ void PhotonReSTIRFinalGathering::getFinalGatherHitPass(RenderContext* pRenderCon
 
     //Trace the photons
     mpScene->raytrace(pRenderContext, mGetFinalGatherHitPass.pProgram.get(), mGetFinalGatherHitPass.pVars, uint3(targetDim, 1));
+
+    if(mpPhotonCullingMask)
+        pRenderContext->uavBarrier(mpPhotonCullingMask.get());
+    if(mpPhotonCullingMaskCaustic)
+        pRenderContext->uavBarrier(mpPhotonCullingMaskCaustic.get());
 }
 
 
@@ -863,6 +900,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
     mPhotonGeneratePass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mPhotonGeneratePass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
+    mPhotonGeneratePass.pProgram->addDefine("USE_PHOTON_CULLING_CAUSTIC", mUsePhotonCullingCaustic ? "1" : "0");
 
     if (!mPhotonGeneratePass.pVars) {
         FALCOR_ASSERT(mPhotonGeneratePass.pProgram);
@@ -891,6 +929,9 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     var[nameBuf]["gFrameCount"] = mFrameCount;
     var[nameBuf]["gPhotonRadius"] = mPhotonCollectRadius;
     var[nameBuf]["gHashScaleFactor"] = 1.f / (2 * mPhotonCollectRadius[0]);  //Hash scale factor. 1/diameter. Global Radius is used
+    var[nameBuf]["gHashScaleFactorCaustic"] = 1.f / (2 * mPhotonCollectRadius[1]);  //Hash scale factor. 1/diameter. Global Radius is used
+    var[nameBuf]["gHashSizeCaustic"] = 1 << mCullingHashBufferSizeBitsCaustic;  //Hash scale factor. 1/diameter. Global Radius is used
+
 
     //Upload constant buffer only if options changed
     
@@ -922,6 +963,7 @@ void PhotonReSTIRFinalGathering::generatePhotonsPass(RenderContext* pRenderConte
     }
     var["gPhotonCounter"] = mpPhotonCounter;
     var["gPhotonCullingMask"] = mpPhotonCullingMask;
+    var["gPhotonCullingMaskCaustic"] = mpPhotonCullingMaskCaustic;
 
     // Get dimensions of ray dispatch.
     uint dispatchedPhotons = mNumDispatchedPhotons;

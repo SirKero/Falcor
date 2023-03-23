@@ -290,8 +290,11 @@ private:
 
     //Photon Culling
     bool mUsePhotonCulling = true;
-    uint mCullingHashBufferSizeBits = 22;   //Determines the size of the buffer 2^x.
+    uint mCullingHashBufferSizeBits = 21;   //Determines the size of the buffer 2^x.
     bool mPhotonCullingRebuildBuffer = true;   //Rebuilds buffer if size was changed
+    bool mUsePhotonCullingCaustic = true;
+    uint mCullingHashBufferSizeBitsCaustic = 21;   //Determines the size of the buffer 2^x.
+    bool mPhotonCullingRebuildBufferCaustic = true;   //Rebuilds buffer if size was changed
   
     //Runtime
     bool mReset = true;
@@ -338,6 +341,7 @@ private:
     Texture::SharedPtr mpPrevViewTex;      //If view texture is used, we store the last frame here
     Texture::SharedPtr mpFinalGatherHit;   //Hit info for the final gather
     Texture::SharedPtr mpPhotonCullingMask; //Mask for photon culling
+    Texture::SharedPtr mpPhotonCullingMaskCaustic; //Mask for photon culling caustics
     Texture::SharedPtr mpCausticPhotonsFlux[2];    //Flux onsurfaces for caustic photons
     Texture::SharedPtr mpLightFactor;
 

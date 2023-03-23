@@ -21,6 +21,9 @@ cbuffer PerFrame
     uint gFrameCount; // Frame count since scene was loaded.
     float2 gPhotonRadius; //Radius for the vpl collection
     float gHashScaleFactor; //Hash scale factor. 1/Radius
+    float gHashScaleFactorCaustic; //Hash scale factor. 1/Radius        
+    uint gHashSizeCaustic; //Size is always 2^x
+    uint2 _pad;
 }
 
 cbuffer CB
@@ -32,7 +35,7 @@ cbuffer CB
     int gCausticsBounces;    //Number of diffuse bounces allowed for caustic photons
     float gRayTMin;            //TMin for photon ray
     float gMinCosGenerate;      //Min cos where a direction is still valid
-    uint _pad;
+    uint _pad2;
 };
 
 #if USE_EMISSIVE_LIGHT  //Buffer is only valid if emissive light is enabled
@@ -46,6 +49,8 @@ RWStructuredBuffer<uint4> gPackedPhotonData[2];
 RWBuffer<uint> gPhotonCounter;
 RWTexture2D<float> gPhotonPdfTexture;
 Texture2D<uint>gPhotonCullingMask;
+Texture2D<uint> gPhotonCullingMaskCaustic;
+
 
 enum class GenerationFlags // : uint32_t
 {
@@ -59,6 +64,7 @@ enum class GenerationFlags // : uint32_t
 
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const uint kUsePhotonCulling = USE_PHOTON_CULLING;
+static const uint kUsePhotonCullingCaustic = USE_PHOTON_CULLING_CAUSTIC;
 static const uint kRayFlagTerminatedMiss = 1;
 static const uint kRayFlagTerminatedHit = 2;
 
@@ -218,13 +224,20 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
 }
 
 //True if a photon should be stored, false otherwise
-bool cullingTest(float3 origin)
+bool cullingTest(float3 origin, bool caustic)
 {       
     //Check if hash cell is set
-    int3 cell = int3(floor(origin * gHashScaleFactor));
-    uint h = hash(cell) & (gHashSize - 1);
+    float scaleFactor = caustic ? gHashScaleFactorCaustic : gHashScaleFactor;
+    int3 cell = int3(floor(origin * scaleFactor));
+    uint hashSize = caustic ? (gHashSizeCaustic - 1) : (gHashSize - 1);
+    uint h = hash(cell) & hashSize;
 
-    return gPhotonCullingMask[ReSTIR_LinearIndexToZCurve(h)] >= 1 ? true : false;
+    bool mask;
+    if(caustic)
+        mask = gPhotonCullingMaskCaustic[ReSTIR_LinearIndexToZCurve(h)];
+    else
+        mask = gPhotonCullingMask[ReSTIR_LinearIndexToZCurve(h)];
+    return mask >= 1 ? true : false;
 }
 
 [shader("miss")]
@@ -380,8 +393,8 @@ void rayGen()
         {
             uint photonType = storeAsCaustic ? 1 : 0; //Global = 0 or caustic = 1
             bool storePhoton = true;
-            if(kUsePhotonCulling && photonType == 0)
-                storePhoton = cullingTest(photonPos);
+            if ((kUsePhotonCulling && photonType == 0) || (kUsePhotonCullingCaustic && photonType == 1))
+                storePhoton = cullingTest(photonPos, photonType == 1);
             if(storePhoton){
                 uint photonIndex = 0;
                 if(photonType == 0)
