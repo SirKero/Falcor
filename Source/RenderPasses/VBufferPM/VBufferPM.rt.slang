@@ -190,9 +190,10 @@ void writeNRDDeltaTransmissionHit(const in uint2 pixel, const in float3 posW, co
     gNRDMask[pixel] = 0x01;
 }
 
-void writeMiss(uint2 pixel, bool miss = false)
+void writeMiss(uint2 pixel, float3 rayDir , bool miss = false)
 {
     gVBuffer[pixel] = { };
+    gViewWorld[pixel] = float4(rayDir, 1);
     gThp[pixel] = { };
     gEmissive[pixel] = { };
     if (is_valid(gLinDepth)) gLinDepth[pixel] = kDepthPathMiss;
@@ -511,7 +512,7 @@ void rayGen()
         //If ray is invalid return
         if (rayData.flags & (uint) Flags::Terminated){
             if(rayData.distance < 0)
-                writeMiss(launchIndex, (rayData.flags & (uint) Flags::Miss) > 0);
+                writeMiss(launchIndex, rayData.direction, (rayData.flags & (uint) Flags::Miss) > 0);
             break;
         }
            
