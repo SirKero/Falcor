@@ -15,7 +15,7 @@ def render_graph_FG_ReSTIR_NRD_DLSS():
     g.addPass(VBufferPM, 'VBufferPM')
     PhotonReSTIRFinalGathering = createPass('PhotonReSTIRFinalGathering')
     g.addPass(PhotonReSTIRFinalGathering, 'PhotonReSTIRFinalGathering')
-    RTXDIPass = createPass('RTXDIPass', {'options': RTXDIOptions(mode=RTXDIMode.SpatiotemporalResampling, presampledTileCount=128, presampledTileSize=1024, storeCompactLightInfo=True, localLightCandidateCount=24, infiniteLightCandidateCount=8, envLightCandidateCount=8, brdfCandidateCount=1, brdfCutoff=0.0, testCandidateVisibility=True, biasCorrection=RTXDIBiasCorrection.Basic, depthThreshold=0.10000000149011612, normalThreshold=0.5, samplingRadius=30.0, spatialSampleCount=1, spatialIterations=5, maxHistoryLength=20, boilingFilterStrength=0.0, rayEpsilon=0.0010000000474974513, useEmissiveTextures=False, enableVisibilityShortcut=False, enablePermutationSampling=False)})
+    RTXDIPass = createPass('RTXDIPass', {'options': RTXDIOptions(mode=RTXDIMode.SpatiotemporalResampling, presampledTileCount=128, presampledTileSize=1024, storeCompactLightInfo=True, localLightCandidateCount=32, infiniteLightCandidateCount=0, envLightCandidateCount=0, brdfCandidateCount=0, brdfCutoff=0.0, testCandidateVisibility=True, biasCorrection=RTXDIBiasCorrection.Basic, depthThreshold=0.10000000149011612, normalThreshold=0.5, samplingRadius=30.0, spatialSampleCount=1, spatialIterations=5, maxHistoryLength=20, boilingFilterStrength=0.0, rayEpsilon=0.0010000000474974513, useEmissiveTextures=False, enableVisibilityShortcut=False, enablePermutationSampling=False)})
     g.addPass(RTXDIPass, 'RTXDIPass')
     CompositeReStirNRD = createPass('CompositeReStirNRD')
     g.addPass(CompositeReStirNRD, 'CompositeReStirNRD')

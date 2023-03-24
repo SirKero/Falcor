@@ -292,7 +292,7 @@ private:
     bool mUsePhotonCulling = true;
     uint mCullingHashBufferSizeBits = 21;   //Determines the size of the buffer 2^x.
     bool mPhotonCullingRebuildBuffer = true;   //Rebuilds buffer if size was changed
-    bool mUsePhotonCullingCaustic = true;
+    bool mUsePhotonCullingCaustic = false;
     uint mCullingHashBufferSizeBitsCaustic = 21;   //Determines the size of the buffer 2^x.
     bool mPhotonCullingRebuildBufferCaustic = true;   //Rebuilds buffer if size was changed
   
