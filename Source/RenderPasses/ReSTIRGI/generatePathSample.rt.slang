@@ -359,15 +359,15 @@ void rayGen()
 
             bool validLightSample = true;
             float invSelect;
-            if (sampleNext1D(traceData.sg) < analyticPDF)
+            if (sampleNext1D(traceData.sg) <= analyticPDF)
             {
                 invSelect = 1.f / analyticPDF;
-                if (sampleAnalyticLight(sd.posW, traceData.sg, ls))
+                if (!sampleAnalyticLight(sd.posW, traceData.sg, ls))
                     validLightSample = false;
                 ls.Li *= invSelect;
                 //reservoir.weightSum *= ls.invSelectPDF * invSelect;
             }
-            else
+            else if (kUseEmissiveLights)
             {
                 invSelect = 1.f / (1.f - analyticPDF);
                 if (!sampleEmissiveLight(sd, traceData.sg, ls))
@@ -375,6 +375,11 @@ void rayGen()
                 ls.Li *= invSelect;
                 //reservoir.weightSum *= ls.invSelectPDF * invSelect;
             }
+            else //Should not happen
+            {
+                return;
+            }
+            
             float3 Li = float3(0);
             if (validLightSample)
             {
