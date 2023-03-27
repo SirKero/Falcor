@@ -8,7 +8,7 @@ def render_graph_PathTracer():
     loadRenderPassLibrary("ToneMapper.dll")
     PathTracer = createPass("PathTracer", {'samplesPerPixel': 1})
     g.addPass(PathTracer, "PathTracer")
-    VBufferRT = createPass("VBufferRT", {'samplePattern': SamplePattern.Stratified, 'sampleCount': 16, 'useAlphaTest': True})
+    VBufferRT = createPass("VBufferRT", {'samplePattern': SamplePattern.Stratified, 'sampleCount': 32, 'useAlphaTest': True})
     g.addPass(VBufferRT, "VBufferRT")
     AccumulatePass = createPass("AccumulatePass", {'enabled': True, 'precisionMode': AccumulatePrecision.Single})
     g.addPass(AccumulatePass, "AccumulatePass")
@@ -20,6 +20,7 @@ def render_graph_PathTracer():
     g.addEdge("PathTracer.color", "AccumulatePass.input")
     g.addEdge("AccumulatePass.output", "ToneMapper.src")
     g.markOutput("ToneMapper.dst")
+    g.markOutput("AccumulatePass.output")
     return g
 
 PathTracer = render_graph_PathTracer()
