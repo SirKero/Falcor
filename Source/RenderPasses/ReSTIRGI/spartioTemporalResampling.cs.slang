@@ -252,6 +252,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         bool vplValid = true;
         if(!vpl.valid){
             sampledReservoir.weightSum = 0;
+            //sampledReservoir.M = 0;
             vplValid = false;
         }
         

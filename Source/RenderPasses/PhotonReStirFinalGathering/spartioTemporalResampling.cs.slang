@@ -253,7 +253,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
 
         if(!vpl.valid){
             sampledReservoir.weightSum = 0;
-            sampledReservoir.M = 0;
+            //sampledReservoir.M = 0;
             vplValid = false;
         }
         
@@ -317,7 +317,7 @@ void main(uint2 dTid : SV_DispatchThreadID)
         if (ps > 0)
         {
             SceneRayQuery < 0 > rayQuery;
-            dist *= kRayEpsilon;
+            //dist *= kRayEpsilon;
             const Ray ray = Ray(biasSurface.posW, ls.dir, 0.0f, dist);
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_CULL_NON_OPAQUE, 0xff))
             {

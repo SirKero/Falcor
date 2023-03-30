@@ -181,7 +181,7 @@ void rayGen()
         ray.Origin = sd.posW;
         ray.TMin = 0.0;
         ray.TMax = 0.0001;
-        ray.Direction = sd.N; //Use as Normal
+        ray.Direction = sd.faceN; //Use as Normal
 
         //Closest hit shader can be skipped
         uint rayFlags = RAY_FLAG_SKIP_CLOSEST_HIT_SHADER | RAY_FLAG_SKIP_TRIANGLES;
@@ -208,8 +208,9 @@ void rayGen()
         photonLight.valid = vplValid;
 
     
-        if (!vplValid || Li <= 0)
+        if (!vplValid || Li < 0)
         {
+            r.M = 0;
             r.weightSum = 0.f;  //No contribution
         }
     }

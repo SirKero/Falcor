@@ -277,7 +277,7 @@ void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersecti
     float3 rayOrigin = sd.computeNewRayOrigin(!transmission); //false is for transmissions
     rayData.origin = rayOrigin;
     rayData.thp *= valid ? bsdfSample.weight: float3(0);
-    rayData.packedNormal = encodeNormal2x16(sd.N);
+    rayData.packedNormal = encodeNormal2x16(sd.faceN);
     rayData.direction = bsdfSample.wo;
     rayData.isEmissive = luminance(bsdfProperties.emission) > 0;
     if (gFlags & (uint) GenerationFlags::DeltaRejection)
