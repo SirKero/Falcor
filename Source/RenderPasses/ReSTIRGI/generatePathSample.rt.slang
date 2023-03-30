@@ -246,25 +246,25 @@ void closestHit(inout TraceData rayData : SV_RayPayload, BuiltInTriangleIntersec
     float NdotL = 0.f;
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, incomingRayDir, lod);
+    
+    BSDFSample bsdfSample;
+    let bsdf = gScene.materials.getBSDF(sd, lod);
+    let bsdfProperties = bsdf.getProperties(sd);
+    
+    //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
+    float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
+
+    //Accept all hits but reject if the surface is only specular
+    float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
+
+    validHit = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) > 0;
+    NdotL = saturate(dot(sd.N, incomingRayDir));
+    
     if (rayData.pathLength == 0)
     {
-        BSDFSample bsdfSample;
-        let bsdf = gScene.materials.getBSDF(sd, lod);
-        let bsdfProperties = bsdf.getProperties(sd);
-    
-        //All properties are guaranteed to be combined <= 1. Norm it to 1 to get the real diffuse Reflection probability
-        float3 norm = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo;
-
-        //Accept all hits but reject if the surface is only specular
-        float pDiffuseRef = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) / luminance(norm);
-
-        validHit = luminance(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo) > 0;
-    
         validHit &= luminance(bsdfProperties.emission) <= 0; //Ignore emissive hits on first hit, as they are sampled by ReSTIR
-
-        NdotL = saturate(dot(sd.N, incomingRayDir));
     }
-    
+        
     if (validHit)
     {
         rayData.distance = RayTCurrent();
@@ -407,7 +407,7 @@ void rayGen()
                 
                 thp *= bsdfSample.weight;
                 rayDirection = bsdfSample.wo;
-                rayOrigin = sd.computeNewRayOrigin(bsdfSample.isLobe(LobeType::Transmission));
+                rayOrigin = sd.computeNewRayOrigin();
             }
             
         }
@@ -432,6 +432,8 @@ void rayGen()
         {
             reservoir.weightSum = 0.f; //invalidate reseroir
             pathLightSample.flux = float3(0);
+            if(!validSample)
+                reservoir.M = 0;
         }
     }
         
