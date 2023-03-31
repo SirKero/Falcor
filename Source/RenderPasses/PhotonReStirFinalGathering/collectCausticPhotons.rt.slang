@@ -103,7 +103,7 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     ShadingData sd = loadShadingData(hit, WorldRayDirection(), lod);
     //Check for different surfaces
     
-    if (dot(pd.normal, sd.N) < 0.6)
+    if (dot(pd.normal, sd.faceN) < 0.6)
     {
         return;
     }
