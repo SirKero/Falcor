@@ -212,6 +212,10 @@ void AccumulatePass::execute(RenderContext* pRenderContext, const RenderData& re
     else if (resolutionMatch)
     {
         accumulate(pRenderContext, pSrc, pDst);
+        //Export image if desired
+        if (mUseExportImage && mStartExporting) {
+            exportImage(pRenderContext, pDst);
+        }
     }
     else
     {
@@ -285,6 +289,24 @@ void AccumulatePass::accumulate(RenderContext* pRenderContext, const Texture::Sh
     pRenderContext->dispatch(mpState.get(), mpVars.get(), numGroups);
 }
 
+void AccumulatePass::exportImage(RenderContext* pRenderContext, const Texture::SharedPtr& pDst) {
+    pRenderContext->uavBarrier(pDst.get());
+
+    if (mFolderPathStr.compare("") == 0) {
+        mStartExporting = false;
+        return;
+    }
+
+    std::string pathToFile = "";
+    pathToFile.append(mFolderPathStr);
+    pathToFile.append(mFileName);
+    pathToFile.append(std::to_string(mFrameCount));
+    pathToFile.append(".exr");
+    std::filesystem::path path = pathToFile;
+    pDst->captureToFile(0, 0, path, Bitmap::FileFormat::ExrFile, Bitmap::ExportFlags::None);
+
+}
+
 void AccumulatePass::renderUI(Gui::Widgets& widget)
 {
     // Controls for output size.
@@ -322,6 +344,15 @@ void AccumulatePass::renderUI(Gui::Widgets& widget)
         const std::string text = std::string("Frames accumulated ") + std::to_string(mFrameCount);
         widget.text(text);
     }
+
+    widget.checkbox("Use Export images", mUseExportImage);
+    if (mUseExportImage) {
+        //Export settings
+        widget.textbox("StorePath", mFolderPathStr);
+        widget.textbox("FileName", mFileName);
+        widget.checkbox("Start Exporting", mStartExporting);
+    }
+
 }
 
 void AccumulatePass::setScene(RenderContext* pRenderContext, const Scene::SharedPtr& pScene)
