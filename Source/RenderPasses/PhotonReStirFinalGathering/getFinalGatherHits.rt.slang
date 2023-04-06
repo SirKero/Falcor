@@ -282,7 +282,7 @@ void rayGen()
         RayDesc tRay;
         tRay.Origin = sd.computeNewRayOrigin();
         tRay.TMin = 0.0001;
-        tRay.TMax = 1000.f;
+        tRay.TMax = 10000.f;
         tRay.Direction = bsdfSample.wo;
     
         if (validSample)

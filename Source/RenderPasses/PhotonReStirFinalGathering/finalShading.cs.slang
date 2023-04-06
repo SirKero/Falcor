@@ -168,6 +168,8 @@ void main(uint2 dTid : SV_DispatchThreadID)
         diffuse += gCausticPhotons[dTid].xyz;   //Add to diffuse for it to work with NDR
     
     float3 outColor = diffuse+ specular;
+    if (any(isnan(outColor)) || any(isinf(outColor)))
+        return;
 
     //Debug
     float3 diffuseReflectance = bsdfProperties.diffuseReflectionAlbedo;
