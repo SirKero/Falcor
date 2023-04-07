@@ -101,8 +101,10 @@ protected:
     //Export
     bool                        mUseExportImage = false;            ///< Enable export of images
     bool                        mStartExporting = false;
+    std::vector<int>            mSkipItStart = {-1,-1,-1, -1};
+    std::vector<uint>           mSkipItCount = { 100, 50, 10 , 2 };
     std::string                 mFolderPathStr = "";
-    std::string                 mFileName = "img";
+    std::string                 mFileName = "img.";
 
     ResourceFormat              mOutputFormat = ResourceFormat::Unknown;                    ///< Output format (uses default when set to ResourceFormat::Unknown).
     RenderPassHelpers::IOSize   mOutputSizeSelection = RenderPassHelpers::IOSize::Default;  ///< Selected output size.

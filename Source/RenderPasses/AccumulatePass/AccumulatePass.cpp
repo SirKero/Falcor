@@ -26,6 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "AccumulatePass.h"
+#include <fmt/format.h>
 
 const RenderPass::Info AccumulatePass::kInfo { "AccumulatePass", "Temporal accumulation." };
 
@@ -297,10 +298,24 @@ void AccumulatePass::exportImage(RenderContext* pRenderContext, const Texture::S
         return;
     }
 
+    //Skip steps
+    bool skipped = false;
+    for (uint i = 0; i < mSkipItCount.size(); i++) {
+        if (mSkipItStart[i] < 0)
+            continue;
+
+        if (uint(mSkipItStart[i]) <= mFrameCount) {
+            if (mFrameCount % mSkipItCount[i] != 0) {
+                return;
+            }
+            break;
+        }
+    }
+
     std::string pathToFile = "";
     pathToFile.append(mFolderPathStr);
     pathToFile.append(mFileName);
-    pathToFile.append(std::to_string(mFrameCount));
+    pathToFile.append(fmt::format("{:0>5}", mFrameCount));
     pathToFile.append(".exr");
     std::filesystem::path path = pathToFile;
     pDst->captureToFile(0, 0, path, Bitmap::FileFormat::ExrFile, Bitmap::ExportFlags::None);
@@ -348,9 +363,17 @@ void AccumulatePass::renderUI(Gui::Widgets& widget)
     widget.checkbox("Use Export images", mUseExportImage);
     if (mUseExportImage) {
         //Export settings
-        widget.textbox("StorePath", mFolderPathStr);
-        widget.textbox("FileName", mFileName);
-        widget.checkbox("Start Exporting", mStartExporting);
+        widget.textbox("StorePath", mFolderPathStr, Gui::TextFlags::FitWindow);
+        widget.textbox("FileName", mFileName,Gui::TextFlags::FitWindow);
+
+        for (uint i = 0; i < mSkipItCount.size(); i++) {
+            std::string name = "Start" + std::to_string(mSkipItCount[i]) + "steps";
+            widget.var(name.c_str(), mSkipItStart[i], -1);
+        }
+
+        //Reset if export started
+        if(widget.checkbox("Start Exporting", mStartExporting))
+            reset();
     }
 
 }
