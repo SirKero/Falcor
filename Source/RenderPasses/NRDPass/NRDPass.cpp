@@ -112,14 +112,14 @@ NRDPass::NRDPass(ref<Device> pDevice, const Properties& props)
     mpDevice->requireD3D12();
 
     DefineList definesRelax;
-    definesRelax.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
-    definesRelax.add("NRD_USE_MATERIAL_ID", "0");
+    definesRelax.add("NRD_NORMAL_ENCODING", "2");
+    definesRelax.add("NRD_ROUGHNESS_ENCODING", "1");
     definesRelax.add("NRD_METHOD", "0"); // NRD_METHOD_RELAX_DIFFUSE_SPECULAR
     mpPackRadiancePassRelax = ComputePass::create(mpDevice, kShaderPackRadiance, "main", definesRelax);
 
     DefineList definesReblur;
-    definesReblur.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
-    definesReblur.add("NRD_USE_MATERIAL_ID", "0");
+    definesReblur.add("NRD_NORMAL_ENCODING", "2");
+    definesReblur.add("NRD_ROUGHNESS_ENCODING", "1");
     definesReblur.add("NRD_METHOD", "1"); // NRD_METHOD_REBLUR_DIFFUSE_SPECULAR
     mpPackRadiancePassReblur = ComputePass::create(mpDevice, kShaderPackRadiance, "main", definesReblur);
 
@@ -129,9 +129,9 @@ NRDPass::NRDPass(ref<Device> pDevice, const Properties& props)
     mRelaxDiffuseSpecularSettings.diffuseMaxFastAccumulatedFrameNum = 2;
     mRelaxDiffuseSpecularSettings.specularMaxFastAccumulatedFrameNum = 2;
     mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction = 0.8f;
-    mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius = 32.0f;
-    mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping = false;
-    mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix = 4;
+    //mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius = 32.0f;               //TODO
+    //mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping = false;   //TODO
+    //mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix = 4;              //TODO
     mRelaxDiffuseSpecularSettings.spatialVarianceEstimationHistoryThreshold = 4;
     mRelaxDiffuseSpecularSettings.atrousIterationNum = 6;
     mRelaxDiffuseSpecularSettings.depthThreshold = 0.02f;
@@ -142,8 +142,8 @@ NRDPass::NRDPass(ref<Device> pDevice, const Properties& props)
     mRelaxDiffuseSettings.prepassBlurRadius = 16.0f;
     mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum = 2;
     mRelaxDiffuseSettings.diffuseLobeAngleFraction = 0.8f;
-    mRelaxDiffuseSettings.disocclusionFixMaxRadius = 32.0f;
-    mRelaxDiffuseSettings.disocclusionFixNumFramesToFix = 4;
+    //mRelaxDiffuseSettings.disocclusionFixMaxRadius = 32.0f;   //TODO
+    //mRelaxDiffuseSettings.disocclusionFixNumFramesToFix = 4;  //TODO
     mRelaxDiffuseSettings.spatialVarianceEstimationHistoryThreshold = 4;
     mRelaxDiffuseSettings.atrousIterationNum = 6;
     mRelaxDiffuseSettings.depthThreshold = 0.02f;
@@ -176,23 +176,23 @@ NRDPass::NRDPass(ref<Device> pDevice, const Properties& props)
             else if (key == kDiffuseLobeAngleFraction) mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction = value;
             else if (key == kSpecularLobeAngleFraction) mRelaxDiffuseSpecularSettings.specularLobeAngleFraction = value;
             else if (key == kRoughnessFraction) mRelaxDiffuseSpecularSettings.roughnessFraction = value;
-            else if (key == kDiffuseHistoryRejectionNormalThreshold) mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold = value;
+            //else if (key == kDiffuseHistoryRejectionNormalThreshold) mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold = value;    //TODO
             else if (key == kSpecularVarianceBoost) mRelaxDiffuseSpecularSettings.specularVarianceBoost = value;
             else if (key == kSpecularLobeAngleSlack) mRelaxDiffuseSpecularSettings.specularLobeAngleSlack = value;
-            else if (key == kDisocclusionFixEdgeStoppingNormalPower) mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower = value;
-            else if (key == kDisocclusionFixMaxRadius) mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius = value;
-            else if (key == kDisocclusionFixNumFramesToFix) mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix = value;
+            //else if (key == kDisocclusionFixEdgeStoppingNormalPower) mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower = value;    //TODO
+            //else if (key == kDisocclusionFixMaxRadius) mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius = value;                                ////TODO
+            //else if (key == kDisocclusionFixNumFramesToFix) mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix = value;                      //TODO
             else if (key == kHistoryClampingColorBoxSigmaScale) mRelaxDiffuseSpecularSettings.historyClampingColorBoxSigmaScale = value;
             else if (key == kSpatialVarianceEstimationHistoryThreshold) mRelaxDiffuseSpecularSettings.spatialVarianceEstimationHistoryThreshold = value;
             else if (key == kAtrousIterationNum) mRelaxDiffuseSpecularSettings.atrousIterationNum = value;
-            else if (key == kMinLuminanceWeight) mRelaxDiffuseSpecularSettings.minLuminanceWeight = value;
+            //else if (key == kMinLuminanceWeight) mRelaxDiffuseSpecularSettings.minLuminanceWeight = value;            //TODO
             else if (key == kDepthThreshold) mRelaxDiffuseSpecularSettings.depthThreshold = value;
             else if (key == kLuminanceEdgeStoppingRelaxation) mRelaxDiffuseSpecularSettings.luminanceEdgeStoppingRelaxation = value;
             else if (key == kNormalEdgeStoppingRelaxation) mRelaxDiffuseSpecularSettings.normalEdgeStoppingRelaxation = value;
             else if (key == kRoughnessEdgeStoppingRelaxation) mRelaxDiffuseSpecularSettings.roughnessEdgeStoppingRelaxation = value;
             else if (key == kEnableAntiFirefly) mRelaxDiffuseSpecularSettings.enableAntiFirefly = value;
             else if (key == kEnableReprojectionTestSkippingWithoutMotion) mRelaxDiffuseSpecularSettings.enableReprojectionTestSkippingWithoutMotion = value;
-            else if (key == kEnableSpecularVirtualHistoryClamping) mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping = value;
+            //else if (key == kEnableSpecularVirtualHistoryClamping) mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping = value;    //TODO
             else if (key == kEnableRoughnessEdgeStopping) mRelaxDiffuseSpecularSettings.enableRoughnessEdgeStopping = value;
             else if (key == kEnableMaterialTestForDiffuse) mRelaxDiffuseSpecularSettings.enableMaterialTestForDiffuse = value;
             else if (key == kEnableMaterialTestForSpecular) mRelaxDiffuseSpecularSettings.enableMaterialTestForSpecular = value;
@@ -208,10 +208,10 @@ NRDPass::NRDPass(ref<Device> pDevice, const Properties& props)
             else if (key == kDiffuseMaxFastAccumulatedFrameNum) mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum = value;
             else if (key == kDiffusePhiLuminance) mRelaxDiffuseSettings.diffusePhiLuminance = value;
             else if (key == kDiffuseLobeAngleFraction) mRelaxDiffuseSettings.diffuseLobeAngleFraction = value;
-            else if (key == kDiffuseHistoryRejectionNormalThreshold) mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold = value;
-            else if (key == kDisocclusionFixEdgeStoppingNormalPower) mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower = value;
-            else if (key == kDisocclusionFixMaxRadius) mRelaxDiffuseSettings.disocclusionFixMaxRadius = value;
-            else if (key == kDisocclusionFixNumFramesToFix) mRelaxDiffuseSettings.disocclusionFixNumFramesToFix = value;
+            //else if (key == kDiffuseHistoryRejectionNormalThreshold) mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold = value;    //TODO
+            //else if (key == kDisocclusionFixEdgeStoppingNormalPower) mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower = value;    //TODO
+            //else if (key == kDisocclusionFixMaxRadius) mRelaxDiffuseSettings.disocclusionFixMaxRadius = value;                                //TODO
+            //else if (key == kDisocclusionFixNumFramesToFix) mRelaxDiffuseSettings.disocclusionFixNumFramesToFix = value;                      //TODO
             else if (key == kHistoryClampingColorBoxSigmaScale) mRelaxDiffuseSettings.historyClampingColorBoxSigmaScale = value;
             else if (key == kSpatialVarianceEstimationHistoryThreshold) mRelaxDiffuseSettings.spatialVarianceEstimationHistoryThreshold = value;
             else if (key == kAtrousIterationNum) mRelaxDiffuseSettings.atrousIterationNum = value;
@@ -261,23 +261,23 @@ Properties NRDPass::getProperties() const
         props[kDiffuseLobeAngleFraction] = mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction;
         props[kSpecularLobeAngleFraction] = mRelaxDiffuseSpecularSettings.specularLobeAngleFraction;
         props[kRoughnessFraction] = mRelaxDiffuseSpecularSettings.roughnessFraction;
-        props[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold;
+        //props[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold;    //TODO
         props[kSpecularVarianceBoost] = mRelaxDiffuseSpecularSettings.specularVarianceBoost;
         props[kSpecularLobeAngleSlack] = mRelaxDiffuseSpecularSettings.specularLobeAngleSlack;
-        props[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower;
-        props[kDisocclusionFixMaxRadius] = mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius;
-        props[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix;
+        //props[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower;    //TODO
+        //props[kDisocclusionFixMaxRadius] = mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius;                                //TODO
+        //props[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix;                      //TODO
         props[kHistoryClampingColorBoxSigmaScale] = mRelaxDiffuseSpecularSettings.historyClampingColorBoxSigmaScale;
         props[kSpatialVarianceEstimationHistoryThreshold] = mRelaxDiffuseSpecularSettings.spatialVarianceEstimationHistoryThreshold;
         props[kAtrousIterationNum] = mRelaxDiffuseSpecularSettings.atrousIterationNum;
-        props[kMinLuminanceWeight] = mRelaxDiffuseSpecularSettings.minLuminanceWeight;
+        //props[kMinLuminanceWeight] = mRelaxDiffuseSpecularSettings.minLuminanceWeight;                                    //TODO
         props[kDepthThreshold] = mRelaxDiffuseSpecularSettings.depthThreshold;
         props[kLuminanceEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.luminanceEdgeStoppingRelaxation;
         props[kNormalEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.normalEdgeStoppingRelaxation;
         props[kRoughnessEdgeStoppingRelaxation] = mRelaxDiffuseSpecularSettings.roughnessEdgeStoppingRelaxation;
         props[kEnableAntiFirefly] = mRelaxDiffuseSpecularSettings.enableAntiFirefly;
         props[kEnableReprojectionTestSkippingWithoutMotion] = mRelaxDiffuseSpecularSettings.enableReprojectionTestSkippingWithoutMotion;
-        props[kEnableSpecularVirtualHistoryClamping] = mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping;
+        //props[kEnableSpecularVirtualHistoryClamping] = mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping;            //TODO
         props[kEnableRoughnessEdgeStopping] = mRelaxDiffuseSpecularSettings.enableRoughnessEdgeStopping;
         props[kEnableMaterialTestForDiffuse] = mRelaxDiffuseSpecularSettings.enableMaterialTestForDiffuse;
         props[kEnableMaterialTestForSpecular] = mRelaxDiffuseSpecularSettings.enableMaterialTestForSpecular;
@@ -289,10 +289,10 @@ Properties NRDPass::getProperties() const
         props[kDiffuseMaxFastAccumulatedFrameNum] = mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum;
         props[kDiffusePhiLuminance] = mRelaxDiffuseSettings.diffusePhiLuminance;
         props[kDiffuseLobeAngleFraction] = mRelaxDiffuseSettings.diffuseLobeAngleFraction;
-        props[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold;
-        props[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower;
-        props[kDisocclusionFixMaxRadius] = mRelaxDiffuseSettings.disocclusionFixMaxRadius;
-        props[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSettings.disocclusionFixNumFramesToFix;
+        //props[kDiffuseHistoryRejectionNormalThreshold] = mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold;    //TODO
+        //props[kDisocclusionFixEdgeStoppingNormalPower] = mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower;    //TODO
+        //props[kDisocclusionFixMaxRadius] = mRelaxDiffuseSettings.disocclusionFixMaxRadius;                                //TODO
+        //props[kDisocclusionFixNumFramesToFix] = mRelaxDiffuseSettings.disocclusionFixNumFramesToFix;                      //TODO
         props[kHistoryClampingColorBoxSigmaScale] = mRelaxDiffuseSettings.historyClampingColorBoxSigmaScale;
         props[kSpatialVarianceEstimationHistoryThreshold] = mRelaxDiffuseSettings.spatialVarianceEstimationHistoryThreshold;
         props[kAtrousIterationNum] = mRelaxDiffuseSettings.atrousIterationNum;
@@ -448,13 +448,13 @@ void NRDPass::renderUI(Gui::Widgets& widget)
             group.slider("Diffuse max accumulated frames", mRelaxDiffuseSpecularSettings.diffuseMaxAccumulatedFrameNum, 0u, nrd::RELAX_MAX_HISTORY_FRAME_NUM);
             group.slider("Diffuse responsive max accumulated frames", mRelaxDiffuseSpecularSettings.diffuseMaxFastAccumulatedFrameNum, 0u, nrd::RELAX_MAX_HISTORY_FRAME_NUM);
             group.slider("Specular variance boost", mRelaxDiffuseSpecularSettings.specularVarianceBoost, 0.0f, 8.0f, false, "%.1f");
-            group.slider("Diffuse history rejection normal threshold", mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold, 0.0f, 1.0f, false, "%.2f");
+            //group.slider("Diffuse history rejection normal threshold", mRelaxDiffuseSpecularSettings.diffuseHistoryRejectionNormalThreshold, 0.0f, 1.0f, false, "%.2f");      //TODO
             group.checkbox("Reprojection test skipping without motion", mRelaxDiffuseSpecularSettings.enableReprojectionTestSkippingWithoutMotion);
-            group.checkbox("Specular virtual history clamping", mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping);
+            //group.checkbox("Specular virtual history clamping", mRelaxDiffuseSpecularSettings.enableSpecularVirtualHistoryClamping);                      //TODO
             group.text("Disocclusion fix:");
-            group.slider("Edge stopping normal power", mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower, 0.0f, 128.0f, false, "%.1f");
-            group.slider("Max kernel radius", mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius, 0.0f, 100.0f, false, "%.0f");
-            group.slider("Frames to fix", (uint32_t&)mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix, 0u, 100u);
+            //group.slider("Edge stopping normal power", mRelaxDiffuseSpecularSettings.disocclusionFixEdgeStoppingNormalPower, 0.0f, 128.0f, false, "%.1f");        //TODO
+            //group.slider("Max kernel radius", mRelaxDiffuseSpecularSettings.disocclusionFixMaxRadius, 0.0f, 100.0f, false, "%.0f");           //TODO
+            //group.slider("Frames to fix", (uint32_t&)mRelaxDiffuseSpecularSettings.disocclusionFixNumFramesToFix, 0u, 100u);                  //TODO
             group.text("History clamping & antilag:");
             group.slider("Color clamping sigma", mRelaxDiffuseSpecularSettings.historyClampingColorBoxSigmaScale, 0.0f, 10.0f, false, "%.1f");
             group.text("Spatial variance estimation:");
@@ -465,7 +465,7 @@ void NRDPass::renderUI(Gui::Widgets& widget)
             group.slider("A-trous iterations", (uint32_t&)mRelaxDiffuseSpecularSettings.atrousIterationNum, 2u, 8u);
             group.slider("Specular luminance weight (sigma scale)", mRelaxDiffuseSpecularSettings.specularPhiLuminance, 0.0f, 10.0f, false, "%.1f");
             group.slider("Diffuse luminance weight (sigma scale)", mRelaxDiffuseSpecularSettings.diffusePhiLuminance, 0.0f, 10.0f, false, "%.1f");
-            group.slider("Min luminance weight", mRelaxDiffuseSpecularSettings.minLuminanceWeight, 0.0f, 1.0f, false, "%.2f");
+            //group.slider("Min luminance weight", mRelaxDiffuseSpecularSettings.minLuminanceWeight, 0.0f, 1.0f, false, "%.2f");                        //TODO
             group.slider("Depth weight (relative fraction)", mRelaxDiffuseSpecularSettings.depthThreshold, 0.0f, 0.05f, false, "%.2f");
             group.slider("Roughness weight (relative fraction)", mRelaxDiffuseSpecularSettings.roughnessFraction, 0.0f, 2.0f, false, "%.2f");
             group.slider("Diffuse lobe angle fraction", mRelaxDiffuseSpecularSettings.diffuseLobeAngleFraction, 0.0f, 2.0f, false, "%.1f");
@@ -494,12 +494,12 @@ void NRDPass::renderUI(Gui::Widgets& widget)
             group.text("Reprojection:");
             group.slider("Diffuse max accumulated frames", mRelaxDiffuseSettings.diffuseMaxAccumulatedFrameNum, 0u, nrd::RELAX_MAX_HISTORY_FRAME_NUM);
             group.slider("Diffuse responsive max accumulated frames", mRelaxDiffuseSettings.diffuseMaxFastAccumulatedFrameNum, 0u, nrd::RELAX_MAX_HISTORY_FRAME_NUM);
-            group.slider("Diffuse history rejection normal threshold", mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold, 0.0f, 1.0f, false, "%.2f");
+            //group.slider("Diffuse history rejection normal threshold", mRelaxDiffuseSettings.diffuseHistoryRejectionNormalThreshold, 0.0f, 1.0f, false, "%.2f");      //TODO
             group.checkbox("Reprojection test skipping without motion", mRelaxDiffuseSettings.enableReprojectionTestSkippingWithoutMotion);
             group.text("Disocclusion fix:");
-            group.slider("Edge stopping normal power", mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower, 0.0f, 128.0f, false, "%.1f");
-            group.slider("Max kernel radius", mRelaxDiffuseSettings.disocclusionFixMaxRadius, 0.0f, 100.0f, false, "%.0f");
-            group.slider("Frames to fix", (uint32_t&)mRelaxDiffuseSettings.disocclusionFixNumFramesToFix, 0u, 100u);
+            //group.slider("Edge stopping normal power", mRelaxDiffuseSettings.disocclusionFixEdgeStoppingNormalPower, 0.0f, 128.0f, false, "%.1f");                    //TODO
+            //group.slider("Max kernel radius", mRelaxDiffuseSettings.disocclusionFixMaxRadius, 0.0f, 100.0f, false, "%.0f");                                           //TODO
+            //group.slider("Frames to fix", (uint32_t&)mRelaxDiffuseSettings.disocclusionFixNumFramesToFix, 0u, 100u);                                                  //TODO
             group.text("History clamping & antilag:");
             group.slider("Color clamping sigma", mRelaxDiffuseSettings.historyClampingColorBoxSigmaScale, 0.0f, 10.0f, false, "%.1f");
             group.text("Spatial variance estimation:");
@@ -526,13 +526,14 @@ void NRDPass::renderUI(Gui::Widgets& widget)
         if (auto group = widget.group("ReBLUR Diffuse/Specular"))
         {
             const float kEpsilon = 0.0001f;
+            /* //TODO
             if (auto group2 = group.group("Specular lobe trimming"))
             {
                 group2.slider("A", mReblurSettings.specularLobeTrimmingParameters.A, -256.0f, 256.0f, false, "%.2f");
                 group2.slider("B", mReblurSettings.specularLobeTrimmingParameters.B, kEpsilon, 256.0f, false, "%.2f");
                 group2.slider("C", mReblurSettings.specularLobeTrimmingParameters.C, 1.0f, 256.0f, false, "%.2f");
             }
-
+            */
             if (auto group2 = group.group("Hit distance"))
             {
                 group2.slider("A", mReblurSettings.hitDistanceParameters.A, -256.0f, 256.0f, false, "%.2f");
@@ -561,16 +562,16 @@ void NRDPass::renderUI(Gui::Widgets& widget)
 
             group.slider("Max accumulated frame num", mReblurSettings.maxAccumulatedFrameNum, 0u, nrd::REBLUR_MAX_HISTORY_FRAME_NUM);
             group.slider("Blur radius", mReblurSettings.blurRadius, 0.0f, 256.0f, false, "%.2f");
-            group.slider("Min converged state base radius scale", mReblurSettings.minConvergedStateBaseRadiusScale, 0.0f, 1.0f, false, "%.2f");
-            group.slider("Max adaptive radius scale", mReblurSettings.maxAdaptiveRadiusScale, 0.0f, 10.0f, false, "%.2f");
+            //group.slider("Min converged state base radius scale", mReblurSettings.minConvergedStateBaseRadiusScale, 0.0f, 1.0f, false, "%.2f");   //TODO
+            //group.slider("Max adaptive radius scale", mReblurSettings.maxAdaptiveRadiusScale, 0.0f, 10.0f, false, "%.2f");                    //TODO
             group.slider("Normal weight (fraction of lobe)", mReblurSettings.lobeAngleFraction, 0.0f, 1.0f, false, "%.2f");
             group.slider("Roughness weight (fraction)", mReblurSettings.roughnessFraction, 0.0f, 1.0f, false, "%.2f");
             group.slider("Responsive accumulation roughness threshold", mReblurSettings.responsiveAccumulationRoughnessThreshold, 0.0f, 1.0f, false, "%.2f");
             group.slider("Stabilization strength", mReblurSettings.stabilizationStrength, 0.0f, 1.0f, false, "%.2f");
-            group.slider("History fix strength", mReblurSettings.historyFixStrength, 0.0f, 1.0f, false, "%.2f");
+            //group.slider("History fix strength", mReblurSettings.historyFixStrength, 0.0f, 1.0f, false, "%.2f");                      //TODO
             group.slider("Plane distance sensitivity", mReblurSettings.planeDistanceSensitivity, kEpsilon, 16.0f, false, "%.3f");
-            group.slider("Input mix", mReblurSettings.inputMix, 0.0f, 1.0f, false, "%.2f");
-            group.slider("Residual noise level", mReblurSettings.residualNoiseLevel, 0.01f, 0.1f, false, "%.2f");
+            //group.slider("Input mix", mReblurSettings.inputMix, 0.0f, 1.0f, false, "%.2f");                                            //TODO
+            //group.slider("Residual noise level", mReblurSettings.residualNoiseLevel, 0.01f, 0.1f, false, "%.2f");                     //TODO
             group.checkbox("Antifirefly", mReblurSettings.enableAntiFirefly);
             group.checkbox("Reference accumulation", mReblurSettings.enableReferenceAccumulation);
             group.checkbox("Performance mode", mReblurSettings.enablePerformanceMode);
@@ -636,7 +637,7 @@ static ResourceFormat getFalcorFormat(nrd::Format format)
     case nrd::Format::RG16_SINT:            return ResourceFormat::RG16Int;
     case nrd::Format::RG16_SFLOAT:          return ResourceFormat::RG16Float;
     case nrd::Format::RGBA16_UNORM:         return ResourceFormat::RGBA16Unorm;
-    case nrd::Format::RGBA16_SNORM:         return ResourceFormat::Unknown; // Not defined in Falcor
+    case nrd::Format::RGBA16_SNORM:         return ResourceFormat::RGBA16Snorm;
     case nrd::Format::RGBA16_UINT:          return ResourceFormat::RGBA16Uint;
     case nrd::Format::RGBA16_SINT:          return ResourceFormat::RGBA16Int;
     case nrd::Format::RGBA16_SFLOAT:        return ResourceFormat::RGBA16Float;
@@ -661,18 +662,18 @@ static ResourceFormat getFalcorFormat(nrd::Format format)
     }
 }
 
-static nrd::Method getNrdMethod(NRDPass::DenoisingMethod denoisingMethod)
+static nrd::Denoiser getNrdDenoiser(NRDPass::DenoisingMethod denoisingMethod)
 {
     switch (denoisingMethod)
     {
-    case NRDPass::DenoisingMethod::RelaxDiffuseSpecular:    return nrd::Method::RELAX_DIFFUSE_SPECULAR;
-    case NRDPass::DenoisingMethod::RelaxDiffuse:            return nrd::Method::RELAX_DIFFUSE;
-    case NRDPass::DenoisingMethod::ReblurDiffuseSpecular:   return nrd::Method::REBLUR_DIFFUSE_SPECULAR;
-    case NRDPass::DenoisingMethod::SpecularReflectionMv:    return nrd::Method::SPECULAR_REFLECTION_MV;
-    case NRDPass::DenoisingMethod::SpecularDeltaMv:         return nrd::Method::SPECULAR_DELTA_MV;
+    case NRDPass::DenoisingMethod::RelaxDiffuseSpecular: return nrd::Denoiser::RELAX_DIFFUSE_SPECULAR;
+    case NRDPass::DenoisingMethod::RelaxDiffuse:         return nrd::Denoiser::RELAX_DIFFUSE;
+    case NRDPass::DenoisingMethod::ReblurDiffuseSpecular:return nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
+    case NRDPass::DenoisingMethod::SpecularReflectionMv: return nrd::Denoiser::SPECULAR_REFLECTION_MV;
+    case NRDPass::DenoisingMethod::SpecularDeltaMv:      return nrd::Denoiser::SPECULAR_DELTA_MV;
     default:
         FALCOR_UNREACHABLE();
-        return nrd::Method::RELAX_DIFFUSE_SPECULAR;
+        return nrd::Denoiser::RELAX_DIFFUSE_SPECULAR;
     }
 }
 
@@ -688,23 +689,25 @@ static void copyMatrix(float* dstMatrix, const float4x4& srcMatrix)
 void NRDPass::reinit()
 {
     // Create a new denoiser instance.
-    mpDenoiser = nullptr;
+    //mpDenoiser = nullptr;
+    if (mpInstance)
+        nrd::DestroyInstance(*mpInstance);      //TODO check if this works
 
     const nrd::LibraryDesc& libraryDesc = nrd::GetLibraryDesc();
 
-    const nrd::MethodDesc methods[] =
-    {
-        { getNrdMethod(mDenoisingMethod), uint16_t(mScreenSize.x), uint16_t(mScreenSize.y) }
+    //Get the Denoiser description. As only one denoiser is used per pass, the only Identifier is 0 
+    const nrd::DenoiserDesc denoiser[] = {
+        {0 /*Identifier*/, getNrdDenoiser(mDenoisingMethod), uint16_t(mScreenSize.x), uint16_t(mScreenSize.y)}
     };
 
-    nrd::DenoiserCreationDesc denoiserCreationDesc;
-    denoiserCreationDesc.memoryAllocatorInterface.Allocate = nrdAllocate;
-    denoiserCreationDesc.memoryAllocatorInterface.Reallocate = nrdReallocate;
-    denoiserCreationDesc.memoryAllocatorInterface.Free = nrdFree;
-    denoiserCreationDesc.requestedMethodNum = 1;
-    denoiserCreationDesc.requestedMethods = methods;
+    nrd::InstanceCreationDesc instanceCreationDesc;
+    instanceCreationDesc.memoryAllocatorInterface.Allocate = nrdAllocate;
+    instanceCreationDesc.memoryAllocatorInterface.Reallocate = nrdReallocate;
+    instanceCreationDesc.memoryAllocatorInterface.Free = nrdFree;
+    instanceCreationDesc.denoisersNum = 1;
+    instanceCreationDesc.denoisers = denoiser;
 
-    nrd::Result res = nrd::CreateDenoiser(denoiserCreationDesc, mpDenoiser);
+    nrd::Result res = nrd::CreateInstance(instanceCreationDesc, mpInstance);
 
     if (res != nrd::Result::SUCCESS) throw RuntimeError("NRDPass: Failed to create NRD denoiser");
 
@@ -721,44 +724,44 @@ void NRDPass::createPipelines()
     mpRootSignatures.clear();
 
     // Get denoiser desc for currently initialized denoiser implementation.
-    const nrd::DenoiserDesc& denoiserDesc = nrd::GetDenoiserDesc(*mpDenoiser);
+    const nrd::InstanceDesc& instanceDesc = nrd::GetInstanceDesc(*mpInstance);
 
     // Create samplers descriptor layout and set.
     D3D12DescriptorSetLayout SamplersDescriptorSetLayout;
 
-    for (uint32_t j = 0; j < denoiserDesc.staticSamplerNum; j++)
+    for (uint32_t j = 0; j < instanceDesc.samplersNum; j++)
     {
-        SamplersDescriptorSetLayout.addRange(ShaderResourceType::Sampler, denoiserDesc.staticSamplers[j].registerIndex, 1);
+        SamplersDescriptorSetLayout.addRange(ShaderResourceType::Sampler, instanceDesc.samplersBaseRegisterIndex + j, 1);
     }
     mpSamplersDescriptorSet = D3D12DescriptorSet::create(mpDevice, SamplersDescriptorSetLayout, D3D12DescriptorSetBindingUsage::ExplicitBind);
 
     // Set sampler descriptors right away.
-    for (uint32_t j = 0; j < denoiserDesc.staticSamplerNum; j++)
+    for (uint32_t j = 0; j < instanceDesc.samplersNum; j++)
     {
         mpSamplersDescriptorSet->setSampler(0, j, mpSamplers[j].get());
     }
 
     // Go over NRD passes and creating descriptor sets, root signatures and PSOs for each.
-    for (uint32_t i = 0; i < denoiserDesc.pipelineNum; i++)
+    for (uint32_t i = 0; i < instanceDesc.pipelinesNum; i++)
     {
-        const nrd::PipelineDesc& nrdPipelineDesc = denoiserDesc.pipelines[i];
-        const nrd::ComputeShader& nrdComputeShader = nrdPipelineDesc.computeShaderDXIL;
+        const nrd::PipelineDesc& nrdPipelineDesc = instanceDesc.pipelines[i];
+        const nrd::ComputeShaderDesc& nrdComputeShader = nrdPipelineDesc.computeShaderDXIL;  //TODO unused? 
 
         // Initialize descriptor set.
         D3D12DescriptorSetLayout CBVSRVUAVdescriptorSetLayout;
 
         // Add constant buffer to descriptor set.
-        CBVSRVUAVdescriptorSetLayout.addRange(ShaderResourceType::Cbv, denoiserDesc.constantBufferDesc.registerIndex, 1);
+        CBVSRVUAVdescriptorSetLayout.addRange(ShaderResourceType::Cbv, instanceDesc.constantBufferRegisterIndex, 1);
 
-        for (uint32_t j = 0; j < nrdPipelineDesc.descriptorRangeNum; j++)
+        for (uint32_t j = 0; j < nrdPipelineDesc.resourceRangesNum; j++)
         {
-            const nrd::DescriptorRangeDesc& nrdDescriptorRange = nrdPipelineDesc.descriptorRanges[j];
+            const nrd::ResourceRangeDesc& nrdResourceRange = nrdPipelineDesc.resourceRanges[j];
 
-            ShaderResourceType descriptorType = nrdDescriptorRange.descriptorType == nrd::DescriptorType::TEXTURE ?
-                ShaderResourceType::TextureSrv :
+            ShaderResourceType descriptorType = nrdResourceRange.descriptorType == nrd::DescriptorType::TEXTURE ?
+                ShaderResourceType::TextureSrv:
                 ShaderResourceType::TextureUav;
 
-            CBVSRVUAVdescriptorSetLayout.addRange(descriptorType, nrdDescriptorRange.baseRegisterIndex, nrdDescriptorRange.descriptorNum);
+            CBVSRVUAVdescriptorSetLayout.addRange(descriptorType, nrdResourceRange.baseRegisterIndex, nrdResourceRange.descriptorsNum);
         }
 
         mCBVSRVUAVdescriptorSetLayouts.push_back(CBVSRVUAVdescriptorSetLayout);
@@ -783,8 +786,8 @@ void NRDPass::createPipelines()
             programDesc.setCompilerFlags(Program::CompilerFlags::MatrixLayoutColumnMajor);
             DefineList defines;
             defines.add("NRD_COMPILER_DXC");
-            defines.add("NRD_USE_OCT_NORMAL_ENCODING", "1");
-            defines.add("NRD_USE_MATERIAL_ID", "0");
+            defines.add("NRD_NORMAL_ENCODING", "2");
+            defines.add("NRD_ROUGHNESS_ENCODING", "1");
             ref<ComputePass> pPass = ComputePass::create(mpDevice, programDesc, defines);
 
             ref<ComputeProgram> pProgram = pPass->getProgram();
@@ -811,17 +814,17 @@ void NRDPass::createResources()
     mpTransientTextures.clear();
     mpConstantBuffer = nullptr;
 
-    const nrd::DenoiserDesc& denoiserDesc = nrd::GetDenoiserDesc(*mpDenoiser);
-    const uint32_t poolSize = denoiserDesc.permanentPoolSize + denoiserDesc.transientPoolSize;
+    const nrd::InstanceDesc& instanceDesc = nrd::GetInstanceDesc(*mpInstance);
+    const uint32_t poolSize = instanceDesc.permanentPoolSize + instanceDesc.transientPoolSize;
 
     // Create samplers.
-    for (uint32_t i = 0; i < denoiserDesc.staticSamplerNum; i++)
+    for (uint32_t i = 0; i < instanceDesc.samplersNum; i++)
     {
-        const nrd::StaticSamplerDesc& nrdStaticsampler = denoiserDesc.staticSamplers[i];
+        const nrd::Sampler& nrdSampler = instanceDesc.samplers[i];
         Sampler::Desc samplerDesc;
         samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Point);
 
-        if (nrdStaticsampler.sampler == nrd::Sampler::NEAREST_CLAMP || nrdStaticsampler.sampler == nrd::Sampler::LINEAR_CLAMP)
+        if (nrdSampler == nrd::Sampler::NEAREST_CLAMP || nrdSampler == nrd::Sampler::LINEAR_CLAMP)
         {
             samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
         }
@@ -830,7 +833,7 @@ void NRDPass::createResources()
             samplerDesc.setAddressingMode(Sampler::AddressMode::Mirror, Sampler::AddressMode::Mirror, Sampler::AddressMode::Mirror);
         }
 
-        if (nrdStaticsampler.sampler == nrd::Sampler::NEAREST_CLAMP || nrdStaticsampler.sampler == nrd::Sampler::NEAREST_MIRRORED_REPEAT)
+        if (nrdSampler == nrd::Sampler::NEAREST_CLAMP || nrdSampler == nrd::Sampler::NEAREST_MIRRORED_REPEAT)
         {
             samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
         }
@@ -845,12 +848,12 @@ void NRDPass::createResources()
     // Texture pool.
     for (uint32_t i = 0; i < poolSize; i++)
     {
-        const bool isPermanent = (i < denoiserDesc.permanentPoolSize);
+        const bool isPermanent = (i < instanceDesc.permanentPoolSize);
 
         // Get texture desc.
         const nrd::TextureDesc& nrdTextureDesc = isPermanent
-            ? denoiserDesc.permanentPool[i]
-            : denoiserDesc.transientPool[i - denoiserDesc.permanentPoolSize];
+            ? instanceDesc.permanentPool[i]
+            : instanceDesc.transientPool[i - instanceDesc.permanentPoolSize];
 
         // Create texture.
         ResourceFormat textureFormat = getFalcorFormat(nrdTextureDesc.format);
@@ -870,7 +873,7 @@ void NRDPass::createResources()
     // Constant buffer.
     mpConstantBuffer = Buffer::create(
         mpDevice,
-        denoiserDesc.constantBufferDesc.maxDataSize,
+        instanceDesc.constantBufferMaxDataSize,
         ResourceBindFlags::Constant,
         Buffer::CpuAccess::Write,
         nullptr);
@@ -898,7 +901,7 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
             mpPackRadiancePassRelax->execute(pRenderContext, uint3(mScreenSize.x, mScreenSize.y, 1u));
         }
 
-        nrd::SetMethodSettings(*mpDenoiser, nrd::Method::RELAX_DIFFUSE_SPECULAR, static_cast<void*>(&mRelaxDiffuseSpecularSettings));
+        nrd::SetDenoiserSettings(*mpInstance, 0 /*Identifier*/, static_cast<void*>(&mRelaxDiffuseSpecularSettings));
     }
     else if (mDenoisingMethod == DenoisingMethod::RelaxDiffuse)
     {
@@ -912,7 +915,7 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
             mpPackRadiancePassRelax->execute(pRenderContext, uint3(mScreenSize.x, mScreenSize.y, 1u));
         }
 
-        nrd::SetMethodSettings(*mpDenoiser, nrd::Method::RELAX_DIFFUSE, static_cast<void*>(&mRelaxDiffuseSettings));
+        nrd::SetDenoiserSettings(*mpInstance, 0 /*Identifier*/, static_cast<void*>(&mRelaxDiffuseSettings));
     }
     else if (mDenoisingMethod == DenoisingMethod::ReblurDiffuseSpecular)
     {
@@ -930,17 +933,17 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
             mpPackRadiancePassReblur->execute(pRenderContext, uint3(mScreenSize.x, mScreenSize.y, 1u));
         }
 
-        nrd::SetMethodSettings(*mpDenoiser, nrd::Method::REBLUR_DIFFUSE_SPECULAR, static_cast<void*>(&mReblurSettings));
+        nrd::SetDenoiserSettings(*mpInstance, 0 /*Identifier*/, static_cast<void*>(&mReblurSettings));
     }
     else if (mDenoisingMethod == DenoisingMethod::SpecularReflectionMv)
     {
         nrd::SpecularReflectionMvSettings specularReflectionMvSettings;
-        nrd::SetMethodSettings(*mpDenoiser, nrd::Method::SPECULAR_REFLECTION_MV, static_cast<void*>(&specularReflectionMvSettings));
+        nrd::SetDenoiserSettings(*mpInstance, 0 , static_cast<void*>(&specularReflectionMvSettings));
     }
     else if (mDenoisingMethod == DenoisingMethod::SpecularDeltaMv)
     {
         nrd::SpecularDeltaMvSettings specularDeltaMvSettings;
-        nrd::SetMethodSettings(*mpDenoiser, nrd::Method::SPECULAR_DELTA_MV, static_cast<void*>(&specularDeltaMvSettings));
+        nrd::SetDenoiserSettings(*mpInstance, 0, static_cast<void*>(&specularDeltaMvSettings));
     }
     else
     {
@@ -973,10 +976,16 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
     mPrevProjMatrix = projMatrix;
     mFrameIndex++;
 
+    //Set common Settings
+    nrd::Result result = nrd::SetCommonSettings(*mpInstance, mCommonSettings);
+    FALCOR_ASSERT(result == nrd::Result::SUCCESS);
+
     // Run NRD dispatches.
+    const nrd::Identifier identifiers[1] = {0}; // Only one Denoiser is used per pass
+    uint32_t identifiersNum = 1;
     const nrd::DispatchDesc* dispatchDescs = nullptr;
     uint32_t dispatchDescNum = 0;
-    nrd::Result result = nrd::GetComputeDispatches(*mpDenoiser, mCommonSettings, dispatchDescs, dispatchDescNum);
+    result = nrd::GetComputeDispatches(*mpInstance, identifiers, identifiersNum, dispatchDescs, dispatchDescNum);
     FALCOR_ASSERT(result == nrd::Result::SUCCESS);
 
     for (uint32_t i = 0; i < dispatchDescNum; i++)
@@ -992,8 +1001,8 @@ void NRDPass::executeInternal(RenderContext* pRenderContext, const RenderData& r
 
 void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderData, const nrd::DispatchDesc& dispatchDesc)
 {
-    const nrd::DenoiserDesc& denoiserDesc = nrd::GetDenoiserDesc(*mpDenoiser);
-    const nrd::PipelineDesc& pipelineDesc = denoiserDesc.pipelines[dispatchDesc.pipelineIndex];
+    const nrd::InstanceDesc& instanceDesc = nrd::GetInstanceDesc(*mpInstance);
+    const nrd::PipelineDesc& pipelineDesc = instanceDesc.pipelines[dispatchDesc.pipelineIndex];
 
     // Set root signature.
     mpRootSignatures[dispatchDesc.pipelineIndex]->bindForCompute(pRenderContext);
@@ -1006,23 +1015,23 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
 
     // Set CBV.
     mpCBV = D3D12ConstantBufferView::create(mpDevice, mpConstantBuffer);
-    CBVSRVUAVDescriptorSet->setCbv(0 /* NB: range #0 is CBV range */, denoiserDesc.constantBufferDesc.registerIndex, mpCBV.get());
+    CBVSRVUAVDescriptorSet->setCbv(0 /* NB: range #0 is CBV range */, instanceDesc.constantBufferRegisterIndex, mpCBV.get());
 
     uint32_t resourceIndex = 0;
-    for (uint32_t descriptorRangeIndex = 0; descriptorRangeIndex < pipelineDesc.descriptorRangeNum; descriptorRangeIndex++)
+    for (uint32_t resourceRangeIndex = 0; resourceRangeIndex < pipelineDesc.resourceRangesNum; resourceRangeIndex++)
     {
-        const nrd::DescriptorRangeDesc& nrdDescriptorRange = pipelineDesc.descriptorRanges[descriptorRangeIndex];
+        const nrd::ResourceRangeDesc& nrdResourceRange = pipelineDesc.resourceRanges[resourceRangeIndex];
 
-        for (uint32_t descriptorOffset = 0; descriptorOffset < nrdDescriptorRange.descriptorNum; descriptorOffset++)
+        for (uint32_t resourceOffset = 0; resourceOffset < nrdResourceRange.descriptorsNum; resourceOffset++)
         {
-            FALCOR_ASSERT(resourceIndex < dispatchDesc.resourceNum);
-            const nrd::Resource& resource = dispatchDesc.resources[resourceIndex];
+            FALCOR_ASSERT(resourceIndex < dispatchDesc.resourcesNum);
+            const nrd::ResourceDesc& resourceDesc = dispatchDesc.resources[resourceIndex];
 
-            FALCOR_ASSERT(resource.stateNeeded == nrdDescriptorRange.descriptorType);
+            FALCOR_ASSERT(resourceDesc.stateNeeded == nrdResourceRange.descriptorType);
 
             ref<Texture> texture;
 
-            switch (resource.type)
+            switch (resourceDesc.type)
             {
             case nrd::ResourceType::IN_MV:
                 texture = renderData.getTexture(kInputMotionVectors);
@@ -1061,10 +1070,10 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
                 texture = renderData.getTexture(kOutputDeltaMotionVectors);
                 break;
             case nrd::ResourceType::TRANSIENT_POOL:
-                texture = mpTransientTextures[resource.indexInPool];
+                texture = mpTransientTextures[resourceDesc.indexInPool];
                 break;
             case nrd::ResourceType::PERMANENT_POOL:
-                texture = mpPermanentTextures[resource.indexInPool];
+                texture = mpPermanentTextures[resourceDesc.indexInPool];
                 break;
             default:
                 FALCOR_ASSERT(!"Unavailable resource type");
@@ -1074,30 +1083,31 @@ void NRDPass::dispatch(RenderContext* pRenderContext, const RenderData& renderDa
             FALCOR_ASSERT(texture);
 
             // Set up resource barriers.
-            Resource::State newState = resource.stateNeeded == nrd::DescriptorType::TEXTURE ? Resource::State::ShaderResource : Resource::State::UnorderedAccess;
-            for (uint16_t mip = 0; mip < resource.mipNum; mip++)
+            Resource::State newState = resourceDesc.stateNeeded == nrd::DescriptorType::TEXTURE ? Resource::State::ShaderResource
+                                                                                                : Resource::State::UnorderedAccess;
+            for (uint16_t mip = 0; mip < resourceDesc.mipNum; mip++)
             {
-                const ResourceViewInfo viewInfo = ResourceViewInfo(resource.mipOffset + mip, 1, 0, 1);
+                const ResourceViewInfo viewInfo = ResourceViewInfo(resourceDesc.mipOffset + mip, 1, 0, 1);
                 pRenderContext->resourceBarrier(texture.get(), newState, &viewInfo);
             }
 
             // Set the SRV and UAV descriptors.
-            if (nrdDescriptorRange.descriptorType == nrd::DescriptorType::TEXTURE)
+            if (nrdResourceRange.descriptorType == nrd::DescriptorType::TEXTURE)
             {
-                ref<ShaderResourceView> pSRV = texture->getSRV(resource.mipOffset, resource.mipNum, 0, 1);
-                CBVSRVUAVDescriptorSet->setSrv(descriptorRangeIndex + 1 /* NB: range #0 is CBV range */, nrdDescriptorRange.baseRegisterIndex + descriptorOffset, pSRV.get());
+                ref<ShaderResourceView> pSRV = texture->getSRV(resourceDesc.mipOffset, resourceDesc.mipNum, 0, 1);
+                CBVSRVUAVDescriptorSet->setSrv(resourceRangeIndex + 1 /* NB: range #0 is CBV range */, nrdResourceRange.baseRegisterIndex + resourceOffset, pSRV.get());
             }
             else
             {
-                ref<UnorderedAccessView> pUAV = texture->getUAV(resource.mipOffset, 0, 1);
-                CBVSRVUAVDescriptorSet->setUav(descriptorRangeIndex + 1 /* NB: range #0 is CBV range */, nrdDescriptorRange.baseRegisterIndex + descriptorOffset, pUAV.get());
+                ref<UnorderedAccessView> pUAV = texture->getUAV(resourceDesc.mipOffset, 0, 1);
+                CBVSRVUAVDescriptorSet->setUav(resourceRangeIndex + 1 /* NB: range #0 is CBV range */, nrdResourceRange.baseRegisterIndex + resourceOffset, pUAV.get());
             }
 
             resourceIndex++;
         }
     }
 
-    FALCOR_ASSERT(resourceIndex == dispatchDesc.resourceNum);
+    FALCOR_ASSERT(resourceIndex == dispatchDesc.resourcesNum);
 
     // Set descriptor sets.
     mpSamplersDescriptorSet->bindForCompute(pRenderContext, mpRootSignatures[dispatchDesc.pipelineIndex].get(), 0);

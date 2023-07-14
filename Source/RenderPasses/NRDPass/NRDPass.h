@@ -83,7 +83,8 @@ private:
     void executeInternal(RenderContext* pRenderContext, const RenderData& renderData);
     void dispatch(RenderContext* pRenderContext, const RenderData& renderData, const nrd::DispatchDesc& dispatchDesc);
 
-    nrd::Denoiser* mpDenoiser = nullptr;
+    //nrd::Denoiser* mpDenoiser = nullptr;
+    nrd::Instance* mpInstance = nullptr;
 
     bool mEnabled = true;
     DenoisingMethod mDenoisingMethod = DenoisingMethod::RelaxDiffuseSpecular;
