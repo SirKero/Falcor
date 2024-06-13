@@ -98,11 +98,7 @@ RenderPassReflection ShadowPass::reflect(const CompileData& compileData)
     // Define our input/output channels.
     addRenderPassInputs(reflector, kInputChannels);
 
-    //Set starting size
-    if (mOutputSize.x == 0 && mOutputSize.y == 0)
-        mOutputSize = compileData.defaultTexDims;
-
-    addRenderPassOutputs(reflector, kOutputChannels, ResourceBindFlags::UnorderedAccess, mOutputSize);
+    addRenderPassOutputs(reflector, kOutputChannels, ResourceBindFlags::UnorderedAccess);
 
     return reflector;
 }
@@ -122,12 +118,6 @@ void ShadowPass::execute(RenderContext* pRenderContext, const RenderData& render
     //TODO add a dict flag
     // Check if Input Size matches the output size
     const auto inTex = renderData.getTexture(kInputChannels[0].name);
-    if (mOutputSize.x != inTex->getWidth() || mOutputSize.y != inTex->getHeight())
-    {
-        mOutputSize = uint2(inTex->getWidth(), inTex->getHeight());
-        requestRecompile();
-        return;
-    }
 
     //Clear Outputs Lamda
     auto clearOutputs = [&]()
@@ -159,7 +149,7 @@ void ShadowPass::execute(RenderContext* pRenderContext, const RenderData& render
             return;
 
     //Handle hybrid mask textures
-    handleHybridMaskData(pRenderContext, mOutputSize, mpScene->getLightCount());
+    handleHybridMaskData(pRenderContext, renderData.getDefaultTextureDims(), mpScene->getLightCount());
  
     shade(pRenderContext, renderData);
     mFrameCount++;
@@ -240,14 +230,14 @@ void ShadowPass::shade(RenderContext* pRenderContext, const RenderData& renderDa
     }
 
     // Get dimensions of ray dispatch.
-    const uint2 targetDim = mOutputSize;
+    const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     // Bind Resources
     auto var = mShadowTracer.pVars->getRootVar();
 
     // Set Shadow Map per Iteration Shader Data
-    mpShadowMap->setShaderDataAndBindBlock(var, mOutputSize);
+    mpShadowMap->setShaderDataAndBindBlock(var, targetDim);
     mpSampleGenerator->setShaderData(var);
 
     var["CB"]["gFrameCount"] = mFrameCount;
@@ -395,7 +385,7 @@ void ShadowPass::handleHybridMaskData(RenderContext* pRenderContext,uint2 screen
 
         if (mpHybridMask[0]) // testing one texture for this is sufficent
         {
-            if (mpHybridMask[0]->getWidth() != mOutputSize.x || mpHybridMask[0]->getHeight() != mOutputSize.y)
+            if (mpHybridMask[0]->getWidth() != screenDims.x || mpHybridMask[0]->getHeight() != screenDims.y)
                 sizeChanged = true;
         }
 
