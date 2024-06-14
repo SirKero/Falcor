@@ -10,6 +10,7 @@ This project was implemented using NVIDIA's Falcor rendering framework. See [REA
 You can download the executable demo from the [Releases Page](), or build the project by following the instructions in [Building Falcor](#building-falcor) or the build instructions in the original [readme](README_Falcor.md).
 
 Teaser:
+
 [<img src="http://i.ytimg.com/vi/i-c-BwPM_Qg/maxresdefault.jpg" width="500">](https://youtu.be/i-c-BwPM_Qg)
 
 ## Contents:
@@ -36,68 +37,68 @@ Controls:
 - `F6` - Toggels Graphs UI menu (Enabled by default)
 
 UI:
+
 ![](docs/images/GitUI.png)
 
 How to add the temporal mask as a debug window:
 
+![](docs/images/GitDebugWindow.png)
 
 ## Additional Videos
 
 ### Bistro
 
-[<img src="http://i.ytimg.com/vi/sWEYIxme968/maxresdefault.jpg" width="500">](https://youtu.be/i-c-BwPM_Qg)
+[<img src="http://i.ytimg.com/vi/ysGlQ_99fAQ/maxresdefault.jpg" width="500">](https://youtu.be/ysGlQ_99fAQ)
 
 Shading:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
+- Leak Tracing (LtEVSM): https://youtu.be/ysGlQ_99fAQ
+- Ray Shadows: https://youtu.be/YRsDtrLxz3M
 
 Shadow only:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
+- Leak Tracing (LtEVSM): https://youtu.be/vFqeVWm9IQs
+- Ray Shadows: https://youtu.be/d5-mf5GyK4o
 
-Leak Tracing Mask:  https://www.youtube.com/
+Leak Tracing Mask:  https://youtu.be/JIExRzhsg1I
 
 ### EmeraldSquare
 
-[![YouTube](http://i.ytimg.com/vi/i-c-BwPM_Qg/maxresdefault.jpg)](https://youtu.be/i-c-BwPM_Qg)
+[<img src="http://i.ytimg.com/vi/8qCPabjGv80/maxresdefault.jpg" width="500">](https://youtu.be/8qCPabjGv80)
 
 Shading:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
+- Leak Tracing (LtEVSM): https://youtu.be/8qCPabjGv80
+- Ray Shadows: https://youtu.be/vdDjck3hqd8
 
 Shadow only:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
+- Leak Tracing (LtEVSM): https://youtu.be/y4AmguwgOoI
+- Ray Shadows: https://youtu.be/SPUPvuxlfvw
 
-Leak Tracing Mask:  https://www.youtube.com/
+Leak Tracing Mask:  https://youtu.be/5Q4tDJcg7LM
 
 ### Low Poly MedievalCity
-
-[![YouTube](http://i.ytimg.com/vi/sWEYIxme968/hqdefault.jpg)]()
-
-Shading:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
-
-Shadow only:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
-
-Leak Tracing Mask:  https://www.youtube.com/
-
-### Forest
-[![YouTube](http://i.ytimg.com/vi/sWEYIxme968/hqdefault.jpg)]()
+[<img src="http://i.ytimg.com/vi/l2NFJPCo7Xs/maxresdefault.jpg" width="500">](https://youtu.be/l2NFJPCo7Xs)
 
 Shading:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
+- Leak Tracing (LtEVSM): https://youtu.be/l2NFJPCo7Xs
+- Ray Shadows: https://youtu.be/c4FQuiKmEbk
 
 Shadow only:
-- Leak Tracing (LtEVSM): https://www.youtube.com/
-- Ray Shadows: https://www.youtube.com/
+- Leak Tracing (LtEVSM): https://youtu.be/5iubBUVoPWo
+- Ray Shadows: https://youtu.be/rG6i6qF7_Mw
 
-Leak Tracing Mask:  https://www.youtube.com/
+Leak Tracing Mask: https://youtu.be/9AQAXAAY8_4
 
+### Forest (Camera 1 / Camera 2)
+[<img src="http://i.ytimg.com/vi/rWpflDw3y0U/maxresdefault.jpg" width="500">](https://youtu.be/rWpflDw3y0U)
+
+Shading:
+- Leak Tracing (LtEVSM): https://youtu.be/rWpflDw3y0U / https://youtu.be/7ypJuqsQh1w
+- Ray Shadows: https://youtu.be/dd5rUf4-nak / https://youtu.be/5l9eG2qmoAY
+
+Shadow only:
+- Leak Tracing (LtEVSM): https://youtu.be/V95WBmbbLh4 / https://youtu.be/Wj9UMnTY03M
+- Ray Shadows: https://youtu.be/F4ykAtW5pag / https://youtu.be/GqOVZushV-A
+
+Leak Tracing Mask: https://youtu.be/P7VCv-3lfZw / https://youtu.be/1Bbo2nPRSEE
 
 ## Falcor Prerequisites
 - Windows 10 version 20H2 (October 2020 Update) or newer, OS build revision .789 or newer
