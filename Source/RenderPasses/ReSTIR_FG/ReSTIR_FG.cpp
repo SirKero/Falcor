@@ -303,7 +303,7 @@ void ReSTIR_FG::renderUI(Gui::Widgets& widget)
             group.tooltip("Material only counts as diffuse if the mean diffuse part is over this value");
         }
         group.checkbox("Show Debug Path Mask", mDebugSpecularTraceMask);
-        group.tooltip("Shows a mask which path is used for which pixel. TODO Color Codings");
+        group.tooltip("Shows a mask which path is used for which pixel.) \n Blue: First hit is diffuse \n Red: DI and FG evaluated on the same surface \n Green: DI and FG evaluated on different surfaces.");
     }
 
     //Photon Mapping Options
