@@ -115,7 +115,6 @@ void ShadowPass::execute(RenderContext* pRenderContext, const RenderData& render
         mOptionsChanged = false;
     }
 
-    //TODO add a dict flag
     // Check if Input Size matches the output size
     const auto inTex = renderData.getTexture(kInputChannels[0].name);
 
@@ -211,12 +210,12 @@ void ShadowPass::shade(RenderContext* pRenderContext, const RenderData& renderDa
     mShadowTracer.pProgram->addDefine("DEBUG_LIGHT_INDEX", std::to_string(mLTTDebugLight));
     mShadowTracer.pProgram->addDefine("SHADOW_ONLY", mShadowOnly ? "1" : "0");
     mShadowTracer.pProgram->addDefine("SHADOW_MIPS_ENABLED", mpShadowMap->getMipMapsEnabled() ? "1" : "0");
-    mShadowTracer.pProgram->addDefine("HYBRID_USE_BLENDING", mEnableHybridRTBlend ? "1" : "0");
+    mShadowTracer.pProgram->addDefine("LTT_USE_BLENDING", mEnableHybridRTBlend ? "1" : "0");
     mShadowTracer.pProgram->addDefine(
-        "HYBRID_BLENDING_RANGE", "float2(" + std::to_string(mHybridRTBlend.x) + "," + std::to_string(mHybridRTBlend.y) + ")"
+        "LTT_BLENDING_RANGE", "float2(" + std::to_string(mHybridRTBlend.x) + "," + std::to_string(mHybridRTBlend.y) + ")"
     );
     mShadowTracer.pProgram->addDefine("DEBUG_STOCH_CASC_ENABLED", useStochCascLevel ? "1" : "0");
-    mShadowTracer.pProgram->addDefine("HYBRID_ALPHA_ONLY", mpShadowMap->getRenderDoubleSidedOnly() ? "1" : "0");
+    mShadowTracer.pProgram->addDefine("LTT_ALPHA_ONLY", mpShadowMap->getRenderDoubleSidedOnly() ? "1" : "0");
 
     mShadowTracer.pProgram->addDefines(mpShadowMap->getDefines());
     mShadowTracer.pProgram->addDefines(hybridMaskDefines());
@@ -310,7 +309,6 @@ void ShadowPass::renderUI(Gui::Widgets& widget)
         {
             group.separator();
             changed |= mpShadowMap->renderUILeakTracing(group, mShadowMode == SPShadowMode::LeakTracing);
-            //changed |= mpShadowMap->renderUI(group);
             group.separator();
         }
             
