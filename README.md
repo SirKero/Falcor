@@ -13,7 +13,7 @@ You can download the executable demo from the [Releases Page](), or build the pr
 
 Teaser:
 
-[<img src="http://i.ytimg.com/vi/i-c-BwPM_Qg/maxresdefault.jpg" width="500">](https://youtu.be/i-c-BwPM_Qg)
+[<img src="http://i.ytimg.com/vi/i-c-BwPM_Qg/maxresdefault.jpg" width="700">](https://youtu.be/i-c-BwPM_Qg)
 
 ## Contents:
 
