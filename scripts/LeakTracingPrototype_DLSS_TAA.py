@@ -24,6 +24,7 @@ def render_graph_LeakTracingPrototype():
     g.add_edge('ShadowPass.color', 'TAA.colorIn')
     g.add_edge('GBufferRaster.mvec', 'TAA.motionVecs')
     g.mark_output('DLSSPass.output')
+    g.mark_output('ShadowPass.color')
     g.mark_output('TAA.colorOut')
     return g
 
