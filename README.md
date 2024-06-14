@@ -1,5 +1,7 @@
 # Real-Time Pixel-Perfect Hard Shadows with Leak Tracing
-![](docs/images/teaserLeakTracing.png)
+
+<img src="docs/images/teaserLeakTracing.png" width="1100">
+
 ## Introduction
 This repository contains the source code and an interactive demo for the soon-to-be-published EGSR paper.
 
