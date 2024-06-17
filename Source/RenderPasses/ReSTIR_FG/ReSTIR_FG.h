@@ -263,7 +263,7 @@ private:
     ResamplingMode mCausticResamplingMode = ResamplingMode::SpartioTemporal;
     uint mCausticResamplingConfidenceCap = 20;
     uint mCausticResamplingSpatialSamples = 1;
-    float mCausticResamplingSpatialRadius = 2.5f;
+    float mCausticResamplingSpatialRadius = 4.f;
     bool mCausticResamplingForFGDirect = true;
 
     bool mUseStochasticCollect = true;                     //Stochastic collect using reservoir sampling.

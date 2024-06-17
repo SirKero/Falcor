@@ -18,11 +18,14 @@ Teaser:
 ## Contents:
 
 * [Demo usage](#demo-usage)
+* [Testing with more Scenes](#testing-with-more-scenes)
 * [Falcor Prerequisites](#falcor-prerequisites)
 * [Building Falcor](#building-falcor)
 
 ## Demo usage
-TODO Scenes
+After downloading the demo from the release page, you can execute it using either the `ReSTIRFGDemo[SceneName].bat` file or the `ReSTIRFGDemoNRD[SceneName].bat` file. We have provided two scenes in the `Model` folder. For more scenes, see the [Testing with more Scenes](#testing-with-more-scenes) section.
+
+To change the settings of our algorithm, navigate to the `ReSTIR_FG` group in the UI. In addition to `ReSTIR FG`, we have implemented `Final Gather` and `ReSTIR GI`, which can be switched in the UI. For more information about a setting, hover over the `(?)`.
 
 Controls:
 - `WASD` - Camera movement
@@ -33,9 +36,26 @@ Controls:
 - `F9` - Opens the time menu. Animation and camera path speed can be changed here (Scale).
 - `F6` - Toggels Graphs UI menu (Enabled by default)
 
-UI:
+Note: We use the Lambertian diffuse BRDF to enable direct comparison with the [ReSTIR PT](https://github.com/DQLin/ReSTIR_PT) and [Suffix ReSTIR](https://github.com/NVlabs/conditional-restir-prototype) prototypes. To switch to Falcors's default diffuse BRDF, disable `ReSTIR_FG -> Material Options -> Use Lambertian Diffuse BRDF`.
 
-![](docs/images/GitUI.png)
+## Testing with more Scenes
+Testing with other scenes is possible. The following points should be noted when loading other scenes:
+- Load the `ReSTIR_FG` renderscript:
+    - Using the `.bat` file (`ReSTIRFGDemo_NoScene.bat`)
+    - Directly in Mogwai with `File->Load Script`. The render pass scripts are in the `scripts` folder.
+- ReSTIR FG supports emissive materials and analytic point/spot lights. Photons are not distributed from environment maps or directional lights.
+- We automatically set the radius depending on the scene extent. This is not optimal and may require manual adjustments. Too large radii can cause performance issues, while too small radii can cause correlations.
+
+Falcor supports a variety of scene types:
+- Falcor's `.pyscene` format ([more details](docs/usage/scene-formats.md))
+    - e.g., [NVIDIA ORCA](https://developer.nvidia.com/orca)
+- FBX and GLTF files
+    - Often need manual adjustments for emissive and glass materials.
+- Many PBRT V4 files:
+    - e.g., [Benedikt Bitterli's Rendering Resources](https://benedikt-bitterli.me/resources/) or [PBRTv4 scenes repo](https://github.com/mmp/pbrt-v4-scenes)
+    - May require manual adjustments of materials, as not all materials match Falcor's material model.
+
+We may add additional `.pyscenes` for some of these scenes in the future.
 
 ## Falcor Prerequisites
 - Windows 10 version 20H2 (October 2020 Update) or newer, OS build revision .789 or newer
