@@ -603,6 +603,9 @@ void ReSTIR_FG::renderUI(Gui::Widgets& widget)
         group.tooltip("Stores the Sample generator state and uses them for the next pass instead of generating a new one");
     }
 
+    if (mpScene)
+        widget.text(std::to_string(length(mpScene->getSceneBounds().extent())));
+
     mOptionsChanged |= changed;
 }
 
@@ -626,7 +629,8 @@ void ReSTIR_FG::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene
     if (mpScene)
     {
         const auto& bounds= mpScene->getSceneBounds();
-        mPhotonFirstHitGuard = math::length(bounds.extent()) * 0.01f;   //Init to 1% of scene size
+        const float sceneExtend = math::length(bounds.extent());
+        mPhotonFirstHitGuard = sceneExtend * 0.01f;   //Init to 1% of scene size
 
         if (mpScene->hasGeometryType(Scene::GeometryType::Custom))
         {
@@ -635,8 +639,13 @@ void ReSTIR_FG::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene
 
         prepareRayTracingShaders(pRenderContext);
 
-        //Approximate Radius
-        float startRadius = length(bounds.extent()) * 0.0015f;
+        //Expermental approximate Radius
+        float startRadius = sceneExtend;
+        if (sceneExtend < 50.f)
+            startRadius *= 0.0015f;
+        else
+            startRadius *= 0.00075f;
+        
         mPhotonCollectionRadiusStart = float2(startRadius, startRadius / 4.0f);
         mPhotonCollectRadius = mPhotonCollectionRadiusStart;
     }
