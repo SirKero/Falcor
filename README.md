@@ -42,7 +42,8 @@ Note: We use the Lambertian diffuse BRDF to enable direct comparison with the [R
 Testing with other scenes is possible. The following points should be noted when loading other scenes:
 - Load the `ReSTIR_FG` renderscript:
     - Using the `.bat` file (`ReSTIRFGDemo_NoScene.bat`)
-    - Directly in Mogwai with `File->Load Script`. The render pass scripts are in the `scripts` folder.
+    - Directly in Mogwai with `File->Load Script`. The render pass scripts are in the `scripts` folder (`Data/scripts` in demo).
+- A scene can be loaded in Mogwai with `File->Load Scene`.
 - ReSTIR FG supports emissive materials and analytic point/spot lights. Photons are not distributed from environment maps or directional lights.
 - We automatically set the radius depending on the scene extent. This is not optimal and may require manual adjustments. Too large radii can cause performance issues, while too small radii can cause correlations.
 
