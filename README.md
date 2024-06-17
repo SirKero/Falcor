@@ -48,11 +48,11 @@ Testing with other scenes is possible. The following points should be noted when
 
 Falcor supports a variety of scene types:
 - Falcor's `.pyscene` format ([more details](docs/usage/scene-formats.md))
-    - e.g., [NVIDIA ORCA](https://developer.nvidia.com/orca)
+    - e.g. [NVIDIA ORCA](https://developer.nvidia.com/orca)
 - FBX and GLTF files
     - Often need manual adjustments for emissive and glass materials.
 - Many PBRT V4 files:
-    - e.g., [Benedikt Bitterli's Rendering Resources](https://benedikt-bitterli.me/resources/) or [PBRTv4 scenes repo](https://github.com/mmp/pbrt-v4-scenes)
+    - e.g. [Benedikt Bitterli's Rendering Resources](https://benedikt-bitterli.me/resources/) or [PBRTv4 scenes repo](https://github.com/mmp/pbrt-v4-scenes)
     - May require manual adjustments of materials, as not all materials match Falcor's material model.
 
 We may add additional `.pyscenes` for some of these scenes in the future.
