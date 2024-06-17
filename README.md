@@ -23,7 +23,7 @@ Teaser:
 * [Building Falcor](#building-falcor)
 
 ## Demo usage
-After downloading the demo from the release page, you can execute it using either the `ReSTIRFGDemo[SceneName].bat` file or the `ReSTIRFGDemoNRD[SceneName].bat` file. We have provided two scenes in the `Model` folder. For more scenes, see the [Testing with more Scenes](#testing-with-more-scenes) section.
+After downloading the demo from the release page, you can execute it using either the `ReSTIRFGDemo_[SceneName].bat` file or the `ReSTIRFGDemoNRD_[SceneName].bat` file. We have provided two scenes in the `Model` folder. For more scenes, see the [Testing with more Scenes](#testing-with-more-scenes) section.
 
 To change the settings of our algorithm, navigate to the `ReSTIR_FG` group in the UI. In addition to `ReSTIR FG`, we have implemented `Final Gather` and `ReSTIR GI`, which can be switched in the UI. For more information about a setting, hover over the `(?)`.
 
