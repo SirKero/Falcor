@@ -1,0 +1,14 @@
+# Load scene
+sceneBuilder.importScene("CornelBoxPaper.gltf")
+
+#Set emissive materials right	
+for m in sceneBuilder.materials:
+	m.emissiveFactor *= 1000
+
+glas = sceneBuilder.getMaterial('Glas')
+glas.baseColor = float4(0,0,0,1)
+glas.roughness = 0.0
+glas.metallic = 0.0
+glas.indexOfRefraction = 1.55
+glas.specularTransmission = 1
+glas.doubleSided = True
