@@ -107,21 +107,21 @@ private:
     bool mUseImportanceSampling = true; ///< Use importance sampling for materials.
     bool mUseRussianRoulettePath = false;   ///< Russian Roulett to abort the path early
     bool mUseRussianRouletteForAlpha = false; ///< Use Russian Roulette for transparent materials
-    ShadowEvalMode mShadowEvaluationMode = ShadowEvalMode::AVSM;
+    ShadowEvalMode mShadowEvaluationMode = ShadowEvalMode::Accel;
 
     // Runtime data Tracer
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     bool mDebugFrameCount = false;
     bool mOptionsChanged = false;
     ref<Sampler> mpPointSampler;
-    std::vector<uint> mAccelShadowNumPoints;
-    uint mAccelShadowMaxNumPoints = 0;
 
     //Configuration Shadow Map
-    bool mGenAVSM = true;
-    bool mGenStochSM = true;
-    bool mGenTmpStochSM = true;
-    bool mGenAccelShadow = true;
+    struct{
+        bool avsm = false;
+        bool stochSM = false;
+        bool tmpStochSM = false;
+        bool accelShadow = false;
+    }mGenInactive;
     bool mAVSMRebuildProgram = false;
     bool mAVSMTexResChanged = false;
     bool mAVSMUsePCF = false;
@@ -136,6 +136,9 @@ private:
     uint mNumberAVSMSamples = 8;    //< k for AVSM
 
     //Accel shadow settings
+    static const uint mAccelApproxNumElementsPerPixel = 4u;
+    std::vector<uint> mAccelShadowNumPoints;
+    uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;
 

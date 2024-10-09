@@ -287,7 +287,7 @@ void TransparencyPathTracer::generateAVSM(RenderContext* pRenderContext, const R
     }
     
     //Abort if disabled
-    if (!mGenAVSM)
+    if (!mGenInactive.avsm && mShadowEvaluationMode != ShadowEvalMode::AVSM)
         return;
 
     // Defines
@@ -419,7 +419,7 @@ void TransparencyPathTracer::generateStochasticSM(RenderContext* pRenderContext,
     }
 
     //Abort early if disabled
-    if (!mGenStochSM)
+    if (!mGenInactive.stochSM && mShadowEvaluationMode != ShadowEvalMode::StochSM)
         return;
 
      // Defines
@@ -553,7 +553,7 @@ void TransparencyPathTracer::generateTmpStochSM(RenderContext* pRenderContext, c
     }
 
     // Abort early if disabled
-    if (!mGenStochSM)
+    if (!mGenInactive.tmpStochSM && mShadowEvaluationMode != ShadowEvalMode::TmpStochSM)
         return;
 
     // Defines
@@ -648,16 +648,15 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     // TODO MIPS and check formats
     {
         uint numBuffers = lights.size();
-        const uint approxNumElementsPerPixel = 8u;
 
         if (mAccelShadowAABB.empty())
         {
             mAccelShadowAABB.resize(numBuffers);
-            mAccelShadowMaxNumPoints = mSMSize * mSMSize * approxNumElementsPerPixel;
+            mAccelShadowMaxNumPoints = mSMSize * mSMSize * mAccelApproxNumElementsPerPixel;
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowAABB[i] = Buffer::createStructured(
-                    mpDevice, sizeof(AABB), mSMSize * mSMSize * approxNumElementsPerPixel,
+                    mpDevice, sizeof(AABB), mSMSize * mSMSize * mAccelApproxNumElementsPerPixel,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowAABB[i]->setName("AccelShadowAABB_" + std::to_string(i));
@@ -688,7 +687,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
                     Buffer::CpuAccess::Read, &initData, false
                 );
                 mAccelShadowCounterCPU[i]->setName("AccelShadowAABBCounterCPU_" + std::to_string(i));
-                mAccelShadowNumPoints[i] = mSMSize * mSMSize * approxNumElementsPerPixel;
+                mAccelShadowNumPoints[i] = mSMSize * mSMSize * mAccelApproxNumElementsPerPixel;
             }
         }
         if (mAccelShadowData.empty())
@@ -697,7 +696,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(float2), mSMSize * mSMSize * approxNumElementsPerPixel,
+                    mpDevice, sizeof(float2), mSMSize * mSMSize * mAccelApproxNumElementsPerPixel,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));
@@ -710,7 +709,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
             std::vector<uint64_t> aabbGPUAddress;
             for (uint i = 0; i < numBuffers; i++)
             {
-                aabbCount.push_back(mSMSize * mSMSize * approxNumElementsPerPixel);
+                aabbCount.push_back(mSMSize * mSMSize * mAccelApproxNumElementsPerPixel);
                 aabbGPUAddress.push_back(mAccelShadowAABB[i]->getGpuAddress());
             }
             mpShadowAccelerationStrucure = std::make_unique<CustomAccelerationStructure>(mpDevice, aabbCount, aabbGPUAddress);
@@ -718,7 +717,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     }
 
     // Abort early if disabled
-    if (!mGenAccelShadow)
+    if (!mGenInactive.accelShadow && mShadowEvaluationMode != ShadowEvalMode::Accel)
         return;
 
     //Clear Counter
@@ -726,6 +725,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         pRenderContext->clearUAV(mAccelShadowCounter[i]->getUAV(0u, 1u).get(), uint4(0));
 
     // Defines
+    mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mSMSize * mSMSize * mAccelApproxNumElementsPerPixel));
     mGenAccelShadowPip.pProgram->addDefine("AVSM_DEPTH_BIAS", std::to_string(mDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("AVSM_NORMAL_DEPTH_BIAS", std::to_string(mNormalDepthBias));
 
@@ -1304,9 +1304,15 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
     dirty |= widget.checkbox("Use importance sampling", mUseImportanceSampling);
     widget.tooltip("Use importance sampling for materials", true);
 
-    dirty |= widget.checkbox("Generate Adaptive Volumetric Shadow Maps (AVSM)", mGenAVSM);
-    dirty |= widget.checkbox("Generate Stochastic Shadow Maps", mGenStochSM);
-    dirty |= widget.checkbox("Generate (Test) Shadow Maps", mGenTmpStochSM);
+    if (auto group = widget.group("Generate inactive pass"))
+    {
+        group.text("Generates the pass even if the mode is inactive");
+        dirty |= group.checkbox("Adaptive Volumetric Shadow Maps (AVSM)", mGenInactive.avsm);
+        dirty |= group.checkbox("Stochastic Shadow Maps", mGenInactive.stochSM);
+        dirty |= group.checkbox("Tmp Stochastic Shadow Maps", mGenInactive.tmpStochSM);
+        dirty |= group.checkbox("Accel Shadow Maps", mGenInactive.accelShadow);
+    }
+    
     dirty |= widget.dropdown("Shadow Render Mode", mShadowEvaluationMode);
 
     if (auto group = widget.group("Deep Shadow Maps Settings"))
@@ -1342,6 +1348,28 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
     {
         if (auto group = widget.group("Accel Shadow Settings"))
         {
+            if (mpScene)
+            {
+                if (auto group2 = group.group("Current size info:"))
+                {
+                    for (uint i = 0; i < mpScene->getLightCount(); i++)
+                    {
+                        if (i > 0)
+                            group2.separator();
+                        group2.text(mpScene->getLight(i)->getName());
+                        group2.text("Elements:        " + std::to_string(mAccelShadowMaxNumPoints));
+                        std::string accelMem = std::to_string((mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f);
+                        group2.text("AABB Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
+                        group2.text("Data Memory:      TBD"); //TODO 
+                        group2.text("Needed Elements: " + std::to_string(uint(mAccelShadowNumPoints[i] * mAccelShadowOverestimation)) + " (" + std::to_string(mAccelShadowNumPoints[i]) + ")");
+                        std::string neededMem = std::to_string((mAccelShadowNumPoints[i] * mAccelShadowOverestimation * sizeof(AABB)) / 1e6f);
+                        std::string fillRate = std::to_string(((mAccelShadowNumPoints[i] * mAccelShadowOverestimation) / float(mAccelShadowMaxNumPoints)) * 100.f);
+                        group2.text("Needed AABB Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" + fillRate.substr(0, fillRate.find(".") + 2) + "%)");
+                        group2.text("Needed Data Memory:    TBD");
+                    }
+                    group2.separator();
+                }
+            }
             group.checkbox("Use CPU Counter optimization", mAccelShadowUseCPUCounterOptimization);
             group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size.");
             if (mAccelShadowUseCPUCounterOptimization)

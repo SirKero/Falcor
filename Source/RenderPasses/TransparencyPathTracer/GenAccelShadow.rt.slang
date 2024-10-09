@@ -14,7 +14,10 @@ import Utils.Geometry.GeometryHelpers;
 #define NUM_LIGHTS 1
 #endif
 
-#define MAX_IDX 512 * 512 * 16
+//Maximum index 
+#ifndef MAX_IDX
+#define MAX_IDX 1
+#endif
 
 /** Payload for shadow ray.
 */
