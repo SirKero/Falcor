@@ -645,7 +645,6 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     auto& lights = mpScene->getLights();
 
     // Create / Destroy resources
-    // TODO MIPS and check formats
     {
         uint numBuffers = lights.size();
 
@@ -683,7 +682,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowCounterCPU[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), 1u, ResourceBindFlags::UnorderedAccess,
+                    mpDevice, sizeof(uint), 1u, ResourceBindFlags::None,
                     Buffer::CpuAccess::Read, &initData, false
                 );
                 mAccelShadowCounterCPU[i]->setName("AccelShadowAABBCounterCPU_" + std::to_string(i));
@@ -731,6 +730,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mSMSize * mSMSize * mAccelApproxNumElementsPerPixel));
     mGenAccelShadowPip.pProgram->addDefine("AVSM_DEPTH_BIAS", std::to_string(mDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("AVSM_NORMAL_DEPTH_BIAS", std::to_string(mNormalDepthBias));
+    mGenAccelShadowPip.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -756,6 +756,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
+        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection; 
         var["CB"]["gView"] = mShadowMapMVP[i].view;
 
         var["gAABB"] = mAccelShadowAABB[i];
@@ -1611,4 +1612,5 @@ void TransparencyPathTracer::LightMVP::calculate(ref<Light> light, float2 nearFa
     projection = math::perspective(data.openingAngle * 2, 1.f, nearFar.x, nearFar.y);
     viewProjection = math::mul(projection, view);
     invViewProjection = math::inverse(viewProjection);
+    invProjection = math::inverse(projection);
 }

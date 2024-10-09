@@ -69,6 +69,17 @@ public:
         {ShadowEvalMode::Accel, "Accel"}
     });
 
+    enum class ShadowAccelMode : uint
+    {
+        ShadowMap3D = 0u,
+        FittedBoxes = 1u,
+    };
+
+    FALCOR_ENUM_INFO(ShadowAccelMode,{
+        {ShadowAccelMode::ShadowMap3D, "3DShadowMap"},
+        {ShadowAccelMode::FittedBoxes, "FittedBoxes"},
+    });
+
 private:
     struct LightMVP
     {
@@ -78,6 +89,7 @@ private:
         float4x4 projection = float4x4();
         float4x4 viewProjection = float4x4();
         float4x4 invViewProjection = float4x4();
+        float4x4 invProjection = float4x4();
 
         void calculate(ref<Light> light, float2 nearFar);
     };
@@ -138,6 +150,7 @@ private:
     //Accel shadow settings
     static const uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
+    ShadowAccelMode mAccelMode = ShadowAccelMode::ShadowMap3D;
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;
@@ -202,3 +215,4 @@ private:
 };
 
 FALCOR_ENUM_REGISTER(TransparencyPathTracer::ShadowEvalMode);
+FALCOR_ENUM_REGISTER(TransparencyPathTracer::ShadowAccelMode);

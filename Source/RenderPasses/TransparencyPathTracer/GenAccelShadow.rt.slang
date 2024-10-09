@@ -19,6 +19,13 @@ import Utils.Geometry.GeometryHelpers;
 #define MAX_IDX 1
 #endif
 
+#define ACCEL_MODE_SHADOW3D 0
+#define ACCEL_MODE_FITTEDBOXES 1
+
+#ifndef ACCEL_MODE
+#define ACCEL_MODE ACCEL_MODE_SHADOW3D
+#endif
+
 /** Payload for shadow ray.
 */
 struct RayData
@@ -26,14 +33,14 @@ struct RayData
     float dist;
     float depth;
     float currentTransmittance;
-    float totalTransmittance;
+    float depthRange;
 
 
     __init() {
         this.dist = -1.0;
         this.depth = 1.0;
         this.currentTransmittance = 1.0;
-        this.totalTransmittance = 1.0;
+        this.depthRange = 0.0;
     }
 };
 
@@ -46,6 +53,7 @@ cbuffer CB
     uint2 _pad;
     float4x4 gViewProj;    // View Projection for current light
     float4x4 gInvViewProj; // Inverse view projection
+    float4x4 gInvProj;
     float4x4 gView;
 }
 
@@ -110,16 +118,46 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
 
-    rayData.currentTransmittance = rayData.totalTransmittance * (1.0 - sd.opacity);
-    // float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
-    //  rayData.depth = posH.w; // Linear depth
-    // float normalBias = (1.0 - abs(dot(WorldRayDirection(), sd.faceN))) * kNormalBias;
-    // rayData.depth = rayData.depth + (kDepthBias * gFar) + (normalBias * gFar);
-    rayData.depth = -1.0 * mul(gView, float4(sd.posW, 1.f)).z;
-    //float normalBias = (1.0 - abs(dot(WorldRayDirection(), sd.faceN))) * kNormalBias;
-    //rayData.depth = rayData.depth + (kDepthBias * gFar) + (normalBias * gFar);
+    rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - sd.opacity);
+    float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
+    rayData.depth = posH.w; // Linear depth
+    float3 posView = mul(gView, float4(sd.posW, 1.f)).xyz;
+    //rayData.depth = -1.0 * posView.z; //same as above
+    //  float normalBias = (1.0 - abs(dot(WorldRayDirection(), sd.faceN))) * kNormalBias;
+    //  rayData.depth = rayData.depth + (kDepthBias * gFar) + (normalBias * gFar);
 
-     //Add bias to depth
+    //Get the for corners of the pixel to approximate the size of the 3D pixel
+    uint2 pixel = DispatchRaysIndex().xy;
+    const uint2 frameDim = DispatchRaysDimensions().xy;
+    float2 relFramePosCorners[4];
+    relFramePosCorners[0] = float2(pixel) / frameDim;
+    relFramePosCorners[1] = float2(pixel + uint2(1, 0)) / frameDim;
+    relFramePosCorners[2] = float2(pixel + uint2(0,1)) / frameDim;
+    relFramePosCorners[3] = float2(pixel + uint2(1, 1)) / frameDim;
+    //From [0,1] to [-1,1]
+    for (uint i = 0; i < 4; i++) {
+        relFramePosCorners[i] = relFramePosCorners[i] * 2.0 - 1.0;
+        relFramePosCorners[i].y *= -1.f;
+    }
+    float3 corners[4];
+    posH.z /= posH.w; // Get depth
+    //To view space
+    for (uint i = 0; i < 4; i++) {
+        float4 corner = mul(gInvProj, float4(relFramePosCorners[i], posH.z, 1.0));
+        corners[i] = corner.xyz / corner.w;
+    }
+    // View normal
+    float3 normalView = normalize(mul(gView, float4(sd.faceN, 0)).xyz);
+    // Plane equation d
+    float d = -1.0 * dot(posView, normalView);
+    float maxDepth = rayData.depth;
+
+    for (uint i = 0; i < 4; i++) {
+        float cornerDepth = (-d - (normalView.x * corners[i].x) - (normalView.y * corners[i].y)) / normalView.z; //Negative due to view space
+        maxDepth = max(abs(cornerDepth), maxDepth);
+    }
+
+    rayData.depthRange = max(maxDepth - rayData.depth,1e-2); //TODO test
     
     rayData.dist = RayTCurrent();
 }
@@ -154,12 +192,11 @@ void rayGen()
     RayData rayData = RayData();
     bool useRayTracing = true;
     float lastMinDepth = 0.0;
-    float lastTransmittance = 1.0;
+    float2 lastTransmittances = float2(1.0);
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing ; i++) {
         rayData.depth = -1;
         rayData.dist = -1;
-        rayData.currentTransmittance = 0.0;
 
         //Trace ray
         uint rayFlags = 0;
@@ -184,15 +221,15 @@ void rayGen()
                 return;
 
             gAABB[insertIdx] = AABB(minPoint, maxPoint);
-            gData[insertIdx] = float2(lastTransmittance , rayData.totalTransmittance); // Transmittance last sample
+            gData[insertIdx] = float2(lastTransmittances.y, lastTransmittances.x); // Transmittance last sample
 
         }
         // Update for next iteration
         if (rayData.dist > 0) {
             ray.TMin = rayData.dist;
             lastMinDepth = rayData.depth;
-            lastTransmittance = rayData.totalTransmittance;
-            rayData.totalTransmittance = rayData.currentTransmittance;
+            lastTransmittances.y = lastTransmittances.x;
+            lastTransmittances.x = rayData.currentTransmittance;
         }
            
     }
@@ -208,6 +245,6 @@ void rayGen()
             return;
 
         gAABB[insertIdx] = AABB(minPoint, maxPoint);
-        gData[insertIdx] = float2(rayData.totalTransmittance, rayData.totalTransmittance); // Transmittance last sample
+        gData[insertIdx] = float2(lastTransmittances.x, lastTransmittances.x); // Transmittance last sample
     }
 }

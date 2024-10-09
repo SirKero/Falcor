@@ -686,7 +686,7 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
 
     float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
     // float dist = distance(posW, lightPosW);
-    float dist = -1.0 * mul(gShadowMapView[lightIdx], float4(posW, 1.0)).z;
+    float dist = shadowPos.w;
 
     AccelShadowRayData rayData = AccelShadowRayData();
     rayData.linZ = dist;
