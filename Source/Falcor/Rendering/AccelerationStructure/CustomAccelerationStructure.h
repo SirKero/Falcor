@@ -39,8 +39,35 @@ namespace Falcor
 class FALCOR_API CustomAccelerationStructure
 {
 public:
-    CustomAccelerationStructure(ref<Device> pDevice, const uint64_t aabbCount, const uint64_t aabbGpuAddress);
-    CustomAccelerationStructure(ref<Device> pDevice, const std::vector<uint64_t>& aabbCount, const std::vector<uint64_t>& aabbGpuAddress);
+    enum class BuildMode : uint
+    {
+        None = 0u,
+        FastBuild = 1u,
+        FastTrace = 2u,
+    };
+
+    enum class UpdateMode : uint
+    {
+        None = 0u,
+        TLASOnly = 1u,
+        BLASOnly = 2u,
+        All = 3u
+    };
+
+    CustomAccelerationStructure(
+        ref<Device> pDevice,
+        const uint64_t aabbCount,
+        const uint64_t aabbGpuAddress,
+        const BuildMode buildMode = BuildMode::None,
+        const UpdateMode updateMode = UpdateMode::None
+    );
+    CustomAccelerationStructure(
+        ref<Device> pDevice,
+        const std::vector<uint64_t>& aabbCount,
+        const std::vector<uint64_t>& aabbGpuAddress,
+        const BuildMode buildMode = BuildMode::None,
+        const UpdateMode updateMode = UpdateMode::None
+    );
 
     ~CustomAccelerationStructure();
 
@@ -94,6 +121,8 @@ private:
 
     struct TLASData
     {
+        RtAccelerationStructureBuildInputs buildInputs;
+
         ref<Buffer> pTlas;
         ref<RtAccelerationStructure> pTlasObject; //<API Object
         ref<Buffer> pInstanceDescs;               ///< Buffer holding instance descs for the TLAS.
@@ -101,8 +130,9 @@ private:
 
     ref<Device> mpDevice; // Pointer to the Device
 
-    bool mFastBuild = false; // TODO add functions to set these parameters
-    bool mUpdate = false;
+    BuildMode mBuildMode = BuildMode::None;
+    UpdateMode mUpdateMode = UpdateMode::None;
+    bool mAccelerationStructureWasBuild = false;    //To check if update can be performed
     size_t mNumberBlas = 0;
     size_t mBlasScratchMaxSize = 0;
 

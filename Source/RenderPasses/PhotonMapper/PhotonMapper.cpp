@@ -422,7 +422,10 @@ void PhotonMapper::prepareAccelerationStructure()
         std::vector<uint64_t> aabbCount = {mNumMaxPhotons[0], mNumMaxPhotons[1]};
         std::vector<uint64_t> aabbGPUAddress = {
             mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()};
-        mpPhotonAS = std::make_unique<CustomAccelerationStructure>(mpDevice, aabbCount, aabbGPUAddress);
+        mpPhotonAS = std::make_unique<CustomAccelerationStructure>(
+            mpDevice, aabbCount, aabbGPUAddress, CustomAccelerationStructure::BuildMode::FastBuild,
+            CustomAccelerationStructure::UpdateMode::TLASOnly
+        );
     }
 }
 

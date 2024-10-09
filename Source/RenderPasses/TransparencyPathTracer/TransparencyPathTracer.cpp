@@ -712,7 +712,10 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
                 aabbCount.push_back(mSMSize * mSMSize * mAccelApproxNumElementsPerPixel);
                 aabbGPUAddress.push_back(mAccelShadowAABB[i]->getGpuAddress());
             }
-            mpShadowAccelerationStrucure = std::make_unique<CustomAccelerationStructure>(mpDevice, aabbCount, aabbGPUAddress);
+            mpShadowAccelerationStrucure = std::make_unique<CustomAccelerationStructure>(
+                mpDevice, aabbCount, aabbGPUAddress, CustomAccelerationStructure::BuildMode::None,
+                CustomAccelerationStructure::UpdateMode::TLASOnly
+            );
         }
     }
 

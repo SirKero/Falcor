@@ -35,13 +35,22 @@
 
 namespace Falcor
 {
-    CustomAccelerationStructure::CustomAccelerationStructure(ref<Device> pDevice, const uint64_t aabbCount, const uint64_t aabbGpuAddress)
+CustomAccelerationStructure::CustomAccelerationStructure(
+    ref<Device> pDevice,
+    const uint64_t aabbCount,
+    const uint64_t aabbGpuAddress,
+    const BuildMode buildMode,
+    const UpdateMode updateMode
+)
     {
         mpDevice = pDevice;
         if (!mpDevice->isFeatureSupported(Device::SupportedFeatures::Raytracing))
         {
             throw std::exception("Raytracing is not supported by the current device");
         }
+
+        mBuildMode = buildMode;
+        mUpdateMode = updateMode;
 
         const std::vector count = {aabbCount};
         const std::vector gpuAddress = {aabbGpuAddress};
@@ -52,7 +61,9 @@ namespace Falcor
     CustomAccelerationStructure::CustomAccelerationStructure(
         ref<Device> pDevice,
         const std::vector<uint64_t>& aabbCount,
-        const std::vector<uint64_t>& aabbGpuAddress
+        const std::vector<uint64_t>& aabbGpuAddress,
+        const BuildMode buildMode,
+        const UpdateMode updateMode
     )
     {
         mpDevice = pDevice;
@@ -60,6 +71,9 @@ namespace Falcor
         {
             throw std::exception("Raytracing is not supported by the current device");
         }
+
+        mBuildMode = buildMode;
+        mUpdateMode = updateMode;
 
         createAccelerationStructure(aabbCount, aabbGpuAddress);
     }
@@ -104,6 +118,7 @@ namespace Falcor
 
         createBottomLevelAS(aabbCount, aabbGpuAddress);
         createTopLevelAS();
+        mAccelerationStructureWasBuild = false;
     }
 
     void CustomAccelerationStructure::clearData()
@@ -155,13 +170,17 @@ namespace Falcor
             inputs.kind = RtAccelerationStructureKind::BottomLevel;
             inputs.descCount = 1;
             inputs.geometryDescs = &blas.geomDescs;
+            inputs.flags = RtAccelerationStructureBuildFlags::None;
 
             // Build option flags
-            // TODO Check for performance if neither is activated
-            inputs.flags = mFastBuild ? RtAccelerationStructureBuildFlags::PreferFastBuild : RtAccelerationStructureBuildFlags::PreferFastTrace;
-            if (mUpdate)
-                inputs.flags |= RtAccelerationStructureBuildFlags::AllowUpdate;
+            if (mBuildMode == BuildMode::FastBuild)
+                inputs.flags |= RtAccelerationStructureBuildFlags::PreferFastBuild;
+            else if (mBuildMode == BuildMode::FastTrace)
+                inputs.flags |= RtAccelerationStructureBuildFlags::PreferFastTrace;
 
+            if (mUpdateMode == UpdateMode::BLASOnly || (mUpdateMode == UpdateMode::All))
+                inputs.flags |= RtAccelerationStructureBuildFlags::AllowUpdate;
+                
             // Get prebuild Info
             blas.prebuildInfo = RtAccelerationStructure::getPrebuildInfo(mpDevice.get(), inputs);
 
@@ -212,10 +231,19 @@ namespace Falcor
             mInstanceDesc.push_back(desc);
         }
 
-        RtAccelerationStructureBuildInputs inputs = {};
+        auto& inputs = mTlas.buildInputs;
+        inputs = {};
         inputs.kind = RtAccelerationStructureKind::TopLevel;
         inputs.descCount = (uint32_t)mNumberBlas;
-        inputs.flags = RtAccelerationStructureBuildFlags::None; // TODO Check performance for Fast Trace or Fast Update
+        inputs.flags = RtAccelerationStructureBuildFlags::None;
+
+        if (mBuildMode == BuildMode::FastBuild)
+            inputs.flags |= RtAccelerationStructureBuildFlags::PreferFastBuild;
+        else if (mBuildMode == BuildMode::FastTrace)
+            inputs.flags |= RtAccelerationStructureBuildFlags::PreferFastTrace;
+
+        if (mUpdateMode == UpdateMode::TLASOnly || (mUpdateMode == UpdateMode::All))
+            inputs.flags |= RtAccelerationStructureBuildFlags::AllowUpdate;
 
         // Prebuild
         mTlasPrebuildInfo = RtAccelerationStructure::getPrebuildInfo(mpDevice.get(), inputs);
@@ -253,6 +281,7 @@ namespace Falcor
 
         buildBottomLevelAS(pRenderContext, aabbCount, updateAABBCount);
         buildTopLevelAS(pRenderContext);
+        mAccelerationStructureWasBuild = true;
     }
 
     void CustomAccelerationStructure::buildBottomLevelAS(
@@ -280,6 +309,9 @@ namespace Falcor
             asDesc.scratchData = mBlasScratch->getGpuAddress();
             asDesc.dest = mBlasObjects[i].get();
 
+            if (mAccelerationStructureWasBuild && (mUpdateMode == UpdateMode::BLASOnly || (mUpdateMode == UpdateMode::All)))
+                asDesc.inputs.flags |= RtAccelerationStructureBuildFlags::PerformUpdate;
+
             // Build the acceleration structure
             pRenderContext->buildAccelerationStructure(asDesc, 0, nullptr);
 
@@ -292,20 +324,14 @@ namespace Falcor
     {
         FALCOR_PROFILE(pRenderContext, "buildCustomTlas");
 
-        RtAccelerationStructureBuildInputs inputs = {};
-        inputs.kind = RtAccelerationStructureKind::TopLevel;
-        inputs.descCount = (uint32_t)mInstanceDesc.size();
-        // Update Flag could be set for TLAS. This made no real time difference in our test so it is left out. Updating could reduce the memory
-        // of the TLAS scratch buffer a bit
-        inputs.flags = mFastBuild ? RtAccelerationStructureBuildFlags::PreferFastBuild : RtAccelerationStructureBuildFlags::PreferFastTrace;
-        if (mUpdate)
-            inputs.flags |= RtAccelerationStructureBuildFlags::AllowUpdate;
-
         RtAccelerationStructure::BuildDesc asDesc = {};
-        asDesc.inputs = inputs;
+        asDesc.inputs = mTlas.buildInputs;
         asDesc.inputs.instanceDescs = mTlas.pInstanceDescs->getGpuAddress();
         asDesc.scratchData = mTlasScratch->getGpuAddress();
         asDesc.dest = mTlas.pTlasObject.get();
+
+        if (mAccelerationStructureWasBuild && (mUpdateMode == UpdateMode::TLASOnly || (mUpdateMode == UpdateMode::All)))
+            asDesc.inputs.flags |= RtAccelerationStructureBuildFlags::PerformUpdate;
 
         // Create TLAS
         if (mTlas.pInstanceDescs)
