@@ -102,6 +102,7 @@ private:
     void generateAccelShadow(RenderContext* pRenderContext, const RenderData& renderData);
     void traceScene(RenderContext* pRenderContext, const RenderData& renderData);
     void prepareVars();
+    void debugShowShadowAccel(RenderContext* pRenderContext, const RenderData& renderData);
     void renderDebugGraph(const ImVec2& size);
     void prepareDebugBuffers(RenderContext* pRenderContext);
     void generateDebugRefFunction(RenderContext* pRenderContext, const RenderData& renderData);
@@ -154,6 +155,15 @@ private:
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;
+
+    struct
+    {
+        bool enable = false;
+        uint selectedLight = 0;
+        uint steps = 512;
+        float near = 0.1f;
+        float far = 100.f;
+    }mAccelDebugShowAS;
 
     //Runtime Data DeepSM
     std::vector<LightMVP> mShadowMapMVP;
@@ -211,6 +221,7 @@ private:
     RayTracingPipeline mGenStochSMPip;    //Stochastic baised SM
     RayTracingPipeline mGenTmpStochSMPip;   //Temporal Stochastic baised SM
     RayTracingPipeline mGenAccelShadowPip;     //Acceleration structure based
+    RayTracingPipeline mDebugShowAccelPip;      //Shows the accel in world space
     RayTracingPipeline mDebugGetRefFunction;
 };
 

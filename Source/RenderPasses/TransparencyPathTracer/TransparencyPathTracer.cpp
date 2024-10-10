@@ -44,6 +44,7 @@ namespace
     const std::string kShaderStochSMRay = kShaderFolder + "GenStochasticSM.rt.slang";
     const std::string kShaderTemporalStochSMRay = kShaderFolder + "GenTmpStochSM.rt.slang";
     const std::string kShaderAccelShadowRay = kShaderFolder + "GenAccelShadow.rt.slang";
+    const std::string kShaderDebugShowShadowAccel = kShaderFolder + "DebugShowShadowAccel.rt.slang";
 
     //RT shader constant settings
     const uint kMaxPayloadSizeBytes = 20u;
@@ -51,6 +52,8 @@ namespace
     const uint kMaxPayloadSizeAVSMPerK = 8u;
 
     const std::string kInputVBuffer = "vbuffer";
+    const std::string kOutputColor = "outColor";
+    const std::string kOutputDebug = "outDebug";
 
     const ChannelList kInputChannels = {
         {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
@@ -58,7 +61,8 @@ namespace
     };
 
     const ChannelList kOutputChannels = {
-        {"color", "gOutputColor", "Output color (sum of direct and indirect)", false, ResourceFormat::RGBA32Float},
+        {kOutputColor, "gOutputColor", "Output color (sum of direct and indirect)", false, ResourceFormat::RGBA32Float},
+        {kOutputDebug, "gDebugOut", "Output debug tex (sum of direct and indirect)", true, ResourceFormat::RGBA32Float},
     };
 
     const Gui::DropdownList kSMResolutionDropdown = {
@@ -173,6 +177,8 @@ void TransparencyPathTracer::execute(RenderContext* pRenderContext, const Render
     
 
     traceScene(pRenderContext, renderData);
+
+    debugShowShadowAccel(pRenderContext, renderData);
 
     generateDebugRefFunction(pRenderContext, renderData);
 
@@ -871,8 +877,7 @@ void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const Ren
     };
     for (auto channel : kInputChannels)
         bind(channel);
-    for (auto channel : kOutputChannels)
-        bind(channel);
+    var["gOutputColor"] = renderData.getTexture(kOutputColor);
 
     //Bind graph debug buffers
     if (mGraphFunctionDatas.size() >= 2)
@@ -889,6 +894,79 @@ void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const Ren
 
     // Spawn the rays.
     mpScene->raytrace(pRenderContext, mTracer.pProgram.get(), mTracer.pVars, uint3(targetDim, 1));
+}
+
+void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext, const RenderData& renderData) {
+
+    if (mShadowEvaluationMode != ShadowEvalMode::Accel)
+        return;
+
+    FALCOR_PROFILE(pRenderContext, "ShowAccel");
+
+    if (!mDebugShowAccelPip.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderDebugShowShadowAccel);
+        desc.setMaxPayloadSize(96u); //
+                                                                                   //(4) + align(4)
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1u);
+
+        mDebugShowAccelPip.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mDebugShowAccelPip.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen"));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        sbt->setHitGroup(0, 0, desc.addHitGroup("closestHit", "anyHit", "intersection"));
+       
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add("AVSM_K", std::to_string(mNumberAVSMSamples));
+        defines.add(mpSampleGenerator->getDefines());
+
+        mDebugShowAccelPip.pProgram = RtProgram::create(mpDevice, desc, defines);
+    }
+
+    // Create Program Vars
+    if (!mDebugShowAccelPip.pVars)
+    {
+        mDebugShowAccelPip.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        mDebugShowAccelPip.pVars = RtProgramVars::create(mpDevice, mDebugShowAccelPip.pProgram, mDebugShowAccelPip.pBindingTable);
+        mpSampleGenerator->setShaderData(mDebugShowAccelPip.pVars->getRootVar());
+    }
+
+    FALCOR_ASSERT(mDebugShowAccelPip.pVars);
+
+    
+    // Bind Utility
+    auto var = mDebugShowAccelPip.pVars->getRootVar();
+    var["CB"]["gSMSize"] = mSMSize;
+    var["CB"]["gNear"] = mNearFar.x;
+    var["CB"]["gFar"] = mNearFar.y;
+    var["CB"]["gSelectedLight"] = mAccelDebugShowAS.selectedLight;
+    var["CB"]["gStep"] = mAccelDebugShowAS.steps;
+    var["CB"]["gMinDist"] = mAccelDebugShowAS.near;
+    var["CB"]["gMaxDist"] = mAccelDebugShowAS.far;
+    var["CB"]["gViewProj"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].viewProjection;
+
+    var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
+    //var["gShadowCounter"] = mAccelShadowCounter[mAccelDebugSelectedLight];
+    var["gShadowData"] = mAccelShadowData[mAccelDebugShowAS.selectedLight];
+    mpShadowAccelerationStrucure->bindTlas(var, "gShadowAS");
+
+    //Bind Debug out tex
+    var["gOutputDebug"] = renderData.getTexture(kOutputDebug);
+    var["gOutputColor"] = renderData.getTexture(kOutputColor); //Bind color tex for blending? 
+
+    // Get dimensions of ray dispatch.
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    // Spawn the rays.
+    mpScene->raytrace(pRenderContext, mDebugShowAccelPip.pProgram.get(), mDebugShowAccelPip.pVars, uint3(targetDim, 1));
+
 }
 
 void TransparencyPathTracer::prepareDebugBuffers(RenderContext* pRenderContext) {
@@ -1381,6 +1459,19 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
             if (mAccelShadowUseCPUCounterOptimization)
             {
                 group.var("CPU Counter overestimation", mAccelShadowOverestimation, 1.0f, 2.0f, 0.001f);
+            }
+
+            if (auto group2 = group.group("Debug"))
+            {
+                group2.checkbox("Enable", mAccelDebugShowAS.enable);
+                if (mAccelDebugShowAS.enable && mpScene)
+                {
+                    if (mpScene->getLightCount() > 1)
+                        group2.slider("Selected Light", mAccelDebugShowAS.selectedLight, 0u, mpScene->getLightCount() - 1);
+                    group2.var("Steps", mAccelDebugShowAS.steps, 32u, 16384u);
+                    group2.var("Camera Near", mAccelDebugShowAS.near, mpScene->getCamera()->getNearPlane(), mpScene->getCamera()->getFarPlane(), 0.1f );
+                    group2.var("Camera Far", mAccelDebugShowAS.far, mpScene->getCamera()->getNearPlane(), mpScene->getCamera()->getFarPlane(), 0.1f );
+                }
             }
 
         }
