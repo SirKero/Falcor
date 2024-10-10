@@ -153,11 +153,11 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     float maxDepth = rayData.depth;
 
     for (uint i = 0; i < 4; i++) {
-        float cornerDepth = (-d - (normalView.x * corners[i].x) - (normalView.y * corners[i].y)) / normalView.z; //Negative due to view space
+        float cornerDepth = (-d - (normalView.x * corners[i].x) - (normalView.y * corners[i].y)) / (normalView.z + 1e-10); //Negative due to view space
         maxDepth = max(abs(cornerDepth), maxDepth);
     }
 
-    rayData.depthRange = max(maxDepth - rayData.depth,1e-2); //TODO test
+    rayData.depthRange = max(maxDepth - rayData.depth,1e-8); //TODO test
     
     rayData.dist = RayTCurrent();
 }
@@ -202,10 +202,13 @@ void rayGen()
         uint rayFlags = 0;
         TraceRay(gScene.rtAccel, rayFlags, kShadowRayInstanceMask /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
+    #if ACCEL_MODE  == ACCEL_MODE_SHADOW3D
+
         // A miss or opaque object ends the ray
         if (i == 0 && rayData.dist < 0)
             return;
 
+        //End ray tracing for the next frame
         if (rayData.currentTransmittance <= kMinOpacity || rayData.dist < 0) {
             useRayTracing = false;
         }
@@ -231,13 +234,46 @@ void rayGen()
             lastTransmittances.y = lastTransmittances.x;
             lastTransmittances.x = rayData.currentTransmittance;
         }
-           
+
+    #else // ACCEL_MODE == ACCEL_MODE_FITTEDBOXES
+
+        // A miss or opaque object ends the ray
+        if (i == 0 && rayData.dist < 0)
+            return;
+
+        //End ray tracing for the next frame
+        if (rayData.currentTransmittance <= kMinOpacity || rayData.dist < 0) {
+            useRayTracing = false;
+        }
+
+        if (rayData.dist > 0) {
+            // Write output
+            float3 minPoint = float3(pixel.x, pixel.y, rayData.depth - rayData.depthRange * 1.0);
+            float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, rayData.depth + rayData.depthRange * 1.0);
+
+            uint insertIdx = 0;
+            InterlockedAdd(gCounter[0], 1u, insertIdx);
+            if (insertIdx > MAX_IDX)
+                return;
+
+            gAABB[insertIdx] = AABB(minPoint, maxPoint);
+            gData[insertIdx] = float2(-1.0, lastTransmittances.x); // Transmittance last sample
+
+        }
+        // Update for next iteration
+        if (rayData.dist > 0) {
+            ray.TMin = rayData.dist;
+            lastMinDepth = rayData.depth + rayData.depthRange;
+            lastTransmittances.y = lastTransmittances.x;
+            lastTransmittances.x = rayData.currentTransmittance;
+        }
+    #endif
     }
 
     // Insert last element
     if (lastMinDepth < gFar) {
-        float3 minPoint = float3(pixel.x + 0.1, pixel.y + 0.1, lastMinDepth);
-        float3 maxPoint = float3(pixel.x + 0.9, pixel.y + 0.9, gFar);
+        float3 minPoint = float3(pixel.x, pixel.y, lastMinDepth);
+        float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, gFar);
 
         uint insertIdx = 0;
         InterlockedAdd(gCounter[0], 1u, insertIdx);

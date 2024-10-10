@@ -814,6 +814,7 @@ void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const Ren
     mTracer.pProgram->addDefine("SHADOW_EVAL_MODE", std::to_string((uint)mShadowEvaluationMode));
     mTracer.pProgram->addDefine("USE_AVSM_PCF", mAVSMUsePCF ? "1" : "0");
     mTracer.pProgram->addDefine("USE_AVSM_INTERPOLATION", mAVSMUseInterpolation ? "1" : "0");
+    mTracer.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     mTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
@@ -1352,6 +1353,7 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
     {
         if (auto group = widget.group("Accel Shadow Settings"))
         {
+            group.dropdown("Accel Mode", mAccelMode);
             if (mpScene)
             {
                 if (auto group2 = group.group("Current size info:"))

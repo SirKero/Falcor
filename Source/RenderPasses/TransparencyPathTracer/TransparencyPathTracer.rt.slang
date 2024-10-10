@@ -60,6 +60,14 @@ import SharedTypes;
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
 #endif
 
+// Accel Modes
+#define ACCEL_MODE_SHADOW3D 0
+#define ACCEL_MODE_FITTEDBOXES 1
+
+#ifndef ACCEL_MODE
+#define ACCEL_MODE ACCEL_MODE_SHADOW3D
+#endif
+
 cbuffer CB
 {
     uint        gFrameCount;        // Frame count since scene was loaded.
@@ -159,12 +167,13 @@ struct AccelShadowRayData {
     float visibility;
     uint count;
     float linZ;
-    uint _pad;
+    float normalizationFactor;
 
     __init() {
         this.visibility = 0.0;
         this.count = 0;
         this.linZ = 0.0;
+        this.normalizationFactor = 0.0;
     }
 }
 struct AccelShadowAttribs {
@@ -703,6 +712,11 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
 
     if (rayData.count == 0)
         rayData.visibility = 1.0;
+#if ACCEL_MODE == ACCEL_MODE_FITTEDBOXES
+    else {
+        rayData.visibility /= rayData.normalizationFactor;
+    }
+#endif
 
     return rayData.visibility;
 }
@@ -1115,8 +1129,17 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
 
     float2 shadowData = gAccelShadowData[InstanceIndex()][PrimitiveIndex()];
     float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
+#if ACCEL_MODE == ACCEL_MODE_SHADOW3D
     float vis = lerp(shadowData.x, shadowData.y, t);
     rayData.visibility = max(rayData.visibility, vis);
+#else
+    float factor = 1.0 - t;
+    if (shadowData.x > 0) {
+        factor = 1.0;
+    } 
+    rayData.visibility += shadowData.y * factor;
+    rayData.normalizationFactor += factor;
+#endif
 
     rayData.count++;
     IgnoreHit();
