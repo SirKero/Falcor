@@ -18,8 +18,10 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
-    float gNormalizedPixelArea;
     uint2 gFrameDim;
+    float gNormalizedPixelArea;
+    float2 gPixelWidthHeight;
+    float gProjectedFocalLength;
 }
 
 cbuffer CB
@@ -287,7 +289,7 @@ void handleHit(inout RayData rayData, inout PathData pathData)
     //Adjust shading normals if desired
 
     uint hints = 0;
-    if (gFlags & (uint) GenerationFlags::AdjShadingNormals)
+    //if (gFlags & (uint) GenerationFlags::AdjShadingNormals)
     {
         hints |= (uint) MaterialInstanceHints::AdjustShadingNormal;
     }
@@ -383,11 +385,10 @@ float getNormalizedPixelSize(uint2 frameDim, float fovY, float aspect)
     return wPix * hPix * 1000.f;
 }
 
-float getCosThetaP(float2 pixelPos, uint2 frameDim, float focalDistance)
+float getCosThetaP(float2 pixelPos)
 {
-    float3 focalDir = normalize(float3(floor(0.5 * frameDim) + 0.5, -focalDistance));
-    float3 projectedPixelDir = normalize(float3(pixelPos, focalDistance));
-    return dot(focalDir, projectedPixelDir);
+    float3 projectedPixelDir = normalize(float3(pixelPos, -gProjectedFocalLength));
+    return dot(float3(0.f, 0.f, 1.f), projectedPixelDir);
 }
 
 [shader("raygeneration")]
@@ -465,6 +466,7 @@ void rayGen()
         float4 cameraPos = mul(gScene.camera.getViewProj(), float4(photonPos,1));
         cameraPos /= cameraPos.w;
         cameraPos.y *= -1;
+        float2 pixelDir = (cameraPos.xy * 0.5 * gFrameDim + 0.5) * gPixelWidthHeight * gProjectedFocalLength;
         cameraPos.xy = cameraPos.xy * 0.5 + 0.5; //UV from [-1,1] to [0,1]
         bool validReprojection = true;
         if (any(cameraPos.xy < 0) || any(cameraPos.xy > 1) || cameraPos.z < 0 || cameraPos.z > 1)
@@ -495,13 +497,11 @@ void rayGen()
             InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
             if (photonIndex <= kPhotonBufferSize)
             {
-                float4 focalPos = mul(gScene.camera.getViewProj(), float4(0.f, 0.f, 10000.f, 1.f));
-                float focalDistance = length(focalPos / focalPos.w);
                 float2 screenPos = floor(cameraPos.xy * gFrameDim) + 0.5f;
                 AABB photonAABB = AABB(float3(screenPos - 0.4, -0.4), float3(screenPos + 0.4, 0.4));
                 gLightTraceAABB[photonIndex] = photonAABB;
-                //gLightTraceData[photonIndex] = float4(10000 * photon.flux / (distToCamera * distToCamera),1);
-                gLightTraceData[photonIndex] = float4(photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(screenPos, gFrameDim, focalDistance),3)) ,1);
+                gLightTraceData[photonIndex] = float4(photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(pixelDir),3)) ,1);
+                //gLightTraceData[photonIndex] = float4(float3(pow(getCosThetaP(pixelDir),3),1.f,1.f),1);
             }
         }
 
