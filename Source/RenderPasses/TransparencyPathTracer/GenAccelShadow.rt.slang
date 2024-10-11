@@ -59,7 +59,7 @@ cbuffer CB
 
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
-RWStructuredBuffer<float2> gData;
+RWStructuredBuffer<float4> gData;
 
 static const float kDepthBias = AVSM_DEPTH_BIAS;
 static const float kNormalBias = AVSM_NORMAL_DEPTH_BIAS;
@@ -192,6 +192,7 @@ void rayGen()
     RayData rayData = RayData();
     bool useRayTracing = true;
     float lastMinDepth = 0.0;
+    float lastDepthRange = 0.0;
     float2 lastTransmittances = float2(1.0);
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing ; i++) {
@@ -224,7 +225,7 @@ void rayGen()
                 return;
 
             gAABB[insertIdx] = AABB(minPoint, maxPoint);
-            gData[insertIdx] = float2(lastTransmittances.y, lastTransmittances.x); // Transmittance last sample
+            gData[insertIdx] = float4(lastTransmittances.y, lastTransmittances.x,0,0); // Transmittance last sample
 
         }
         // Update for next iteration
@@ -246,10 +247,10 @@ void rayGen()
             useRayTracing = false;
         }
 
-        if (rayData.dist > 0) {
+        if (rayData.dist > 0 && i>0) {
             // Write output
-            float3 minPoint = float3(pixel.x, pixel.y, rayData.depth - rayData.depthRange * 1.0);
-            float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, rayData.depth + rayData.depthRange * 1.0);
+            float3 minPoint = float3(pixel.x, pixel.y, lastMinDepth - lastDepthRange);
+            float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
 
             uint insertIdx = 0;
             InterlockedAdd(gCounter[0], 1u, insertIdx);
@@ -257,21 +258,23 @@ void rayGen()
                 return;
 
             gAABB[insertIdx] = AABB(minPoint, maxPoint);
-            gData[insertIdx] = float2(-1.0, lastTransmittances.x); // Transmittance last sample
+            gData[insertIdx] = float4(lastDepthRange * 2, lastTransmittances.y, lastTransmittances.x, 0); // Transmittance last sample
 
         }
         // Update for next iteration
         if (rayData.dist > 0) {
             ray.TMin = rayData.dist;
-            lastMinDepth = rayData.depth + rayData.depthRange;
+            lastMinDepth = rayData.depth;
+            lastDepthRange = rayData.depthRange;
             lastTransmittances.y = lastTransmittances.x;
             lastTransmittances.x = rayData.currentTransmittance;
         }
     #endif
     }
 
-    // Insert last element
-    if (lastMinDepth < gFar) {
+// Insert last element
+#if ACCEL_MODE == ACCEL_MODE_SHADOW3D
+    if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
         float3 minPoint = float3(pixel.x, pixel.y, lastMinDepth);
         float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, gFar);
 
@@ -281,6 +284,20 @@ void rayGen()
             return;
 
         gAABB[insertIdx] = AABB(minPoint, maxPoint);
-        gData[insertIdx] = float2(lastTransmittances.x, lastTransmittances.x); // Transmittance last sample
+        gData[insertIdx] = float4(lastTransmittances.x, lastTransmittances.x,0,0); // Transmittance last sample
     }
+#else // ACCEL_MODE == ACCEL_MODE_FITTEDBOXES
+    if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
+        float3 minPoint = float3(pixel.x, pixel.y, lastMinDepth - lastDepthRange);
+        float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, max(lastMinDepth + lastDepthRange, gFar));
+
+        uint insertIdx = 0;
+        InterlockedAdd(gCounter[0], 1u, insertIdx);
+        if (insertIdx > MAX_IDX)
+            return;
+
+        gAABB[insertIdx] = AABB(minPoint, maxPoint);
+        gData[insertIdx] = float4(lastDepthRange * 2, lastTransmittances.y, lastTransmittances.x, 0); // Transmittance last sample
+    }
+#endif
 }

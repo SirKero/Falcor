@@ -48,7 +48,7 @@ cbuffer CB
 
 RaytracingAccelerationStructure gShadowAS;
 StructuredBuffer<AABB> gShadowAABB;
-StructuredBuffer<float2> gShadowData;
+StructuredBuffer<float4> gShadowData;
 
 // Outputs
 Texture2D<float4> gOutputColor;
@@ -129,10 +129,10 @@ void anyHit(inout RayData rayData, Attribs attribs)
     if (rayData.linZ > rangeZ.y || rayData.linZ < rangeZ.x || !aabb.contains(WorldRayOrigin()))
         IgnoreHit();
 
-    float2 shadowData = gShadowData[PrimitiveIndex()];
+    float4 shadowData = gShadowData[PrimitiveIndex()];
 
     rayData.primIndex = PrimitiveIndex();
-    rayData.vis = shadowData.y;
+    rayData.vis = shadowData.z;
     rayData.hit = true;
     AcceptHitAndEndSearch();
 }

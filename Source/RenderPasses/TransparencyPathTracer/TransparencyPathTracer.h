@@ -151,7 +151,7 @@ private:
     //Accel shadow settings
     static const uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
-    ShadowAccelMode mAccelMode = ShadowAccelMode::ShadowMap3D;
+    ShadowAccelMode mAccelMode = ShadowAccelMode::FittedBoxes;
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;

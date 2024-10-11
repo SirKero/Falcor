@@ -107,7 +107,7 @@ Texture2D<float4> gTmpStochTransmittance[COUNT_SM];
 
 RaytracingAccelerationStructure gShadowAS;
 StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
-StructuredBuffer<float2> gAccelShadowData[COUNT_LIGHTS];
+StructuredBuffer<float4> gAccelShadowData[COUNT_LIGHTS];
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
@@ -1127,17 +1127,23 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
     if (rayData.linZ > rangeZ.y || rayData.linZ < rangeZ.x)
         IgnoreHit();
 
-    float2 shadowData = gAccelShadowData[InstanceIndex()][PrimitiveIndex()];
-    float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
+    float4 shadowData = gAccelShadowData[InstanceIndex()][PrimitiveIndex()];
 #if ACCEL_MODE == ACCEL_MODE_SHADOW3D
+    // Shadow Data is x-> transparency before depth, y -> transparency after depth
+    float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
     float vis = lerp(shadowData.x, shadowData.y, t);
     rayData.visibility = max(rayData.visibility, vis);
 #else
-    float factor = 1.0 - t;
-    if (shadowData.x > 0) {
-        factor = 1.0;
-    } 
-    rayData.visibility += shadowData.y * factor;
+    //Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
+    rangeZ.y = min(rangeZ.y, rangeZ.x + shadowData.x);
+    float vis = shadowData.z;
+    float factor = 1.0;
+    //in first box
+    if (rayData.linZ < rangeZ.y) {
+        factor = 1.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
+        vis = shadowData.y;
+    }
+    rayData.visibility += vis * factor;
     rayData.normalizationFactor += factor;
 #endif
 
