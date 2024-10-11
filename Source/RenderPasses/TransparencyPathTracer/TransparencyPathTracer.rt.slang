@@ -62,7 +62,7 @@ import SharedTypes;
 
 // Accel Modes
 #define ACCEL_MODE_SHADOW3D 0
-#define ACCEL_MODE_FITTEDBOXES 1
+#define ACCEL_MODE_NORMALOFFSET 1
 
 #ifndef ACCEL_MODE
 #define ACCEL_MODE ACCEL_MODE_SHADOW3D
@@ -693,7 +693,8 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
         return 0.0;
     
 
-    float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
+    //float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
+    float2 shadowPixel = shadowPos.xy * gSMSize;
     // float dist = distance(posW, lightPosW);
     float dist = shadowPos.w;
 
@@ -712,7 +713,7 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
 
     if (rayData.count == 0)
         rayData.visibility = 1.0;
-#if ACCEL_MODE == ACCEL_MODE_FITTEDBOXES
+#if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     else {
         rayData.visibility /= rayData.normalizationFactor;
     }
@@ -1133,7 +1134,7 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
     float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
     float vis = lerp(shadowData.x, shadowData.y, t);
     rayData.visibility = max(rayData.visibility, vis);
-#else
+#else //ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     //Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
     rangeZ.y = min(rangeZ.y, rangeZ.x + shadowData.x);
     float vis = shadowData.z;

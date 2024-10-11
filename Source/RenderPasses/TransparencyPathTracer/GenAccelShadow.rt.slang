@@ -20,7 +20,7 @@ import Utils.Geometry.GeometryHelpers;
 #endif
 
 #define ACCEL_MODE_SHADOW3D 0
-#define ACCEL_MODE_FITTEDBOXES 1
+#define ACCEL_MODE_NORMALOFFSET 1
 
 #ifndef ACCEL_MODE
 #define ACCEL_MODE ACCEL_MODE_SHADOW3D
@@ -64,6 +64,13 @@ RWStructuredBuffer<float4> gData;
 static const float kDepthBias = AVSM_DEPTH_BIAS;
 static const float kNormalBias = AVSM_NORMAL_DEPTH_BIAS;
 static const float kMinOpacity = 1e-7;
+static const float kPixelOffset = 0.5;
+
+static const float2 kMSAAPattern[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
+                                         float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
+                                         float2(-0.125, 0.375), float2(0.0, -0.4375),   float2(-0.25, 0.375),     float2(-0.375, 0.25),
+                                         float2(-0.5, 0.0),      float2(0.4375, -0.25),    float2(0.375, 0.4375), float2(-0.4375, -0.5)
+                                       };
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -127,13 +134,13 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     //  rayData.depth = rayData.depth + (kDepthBias * gFar) + (normalBias * gFar);
 
     //Get the for corners of the pixel to approximate the size of the 3D pixel
-    uint2 pixel = DispatchRaysIndex().xy;
+    float2 pixel = float2(DispatchRaysIndex().xy) + 0.5;
     const uint2 frameDim = DispatchRaysDimensions().xy;
     float2 relFramePosCorners[4];
-    relFramePosCorners[0] = float2(pixel) / frameDim;
-    relFramePosCorners[1] = float2(pixel + uint2(1, 0)) / frameDim;
-    relFramePosCorners[2] = float2(pixel + uint2(0,1)) / frameDim;
-    relFramePosCorners[3] = float2(pixel + uint2(1, 1)) / frameDim;
+    relFramePosCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
+    relFramePosCorners[1] = (pixel + float2(kPixelOffset, -kPixelOffset)) / frameDim;
+    relFramePosCorners[2] = (pixel + float2(-kPixelOffset, kPixelOffset)) / frameDim;
+    relFramePosCorners[3] = (pixel + float2(kPixelOffset, kPixelOffset)) / frameDim;
     //From [0,1] to [-1,1]
     for (uint i = 0; i < 4; i++) {
         relFramePosCorners[i] = relFramePosCorners[i] * 2.0 - 1.0;
@@ -151,13 +158,15 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     // Plane equation d
     float d = -1.0 * dot(posView, normalView);
     float maxDepth = rayData.depth;
+    float minDepth = rayData.depth;
 
     for (uint i = 0; i < 4; i++) {
         float cornerDepth = (-d - (normalView.x * corners[i].x) - (normalView.y * corners[i].y)) / (normalView.z + 1e-10); //Negative due to view space
         maxDepth = max(abs(cornerDepth), maxDepth);
+        minDepth = min(abs(cornerDepth), minDepth);
     }
 
-    rayData.depthRange = max(maxDepth - rayData.depth,1e-8); //TODO test
+    rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-8); //TODO test
     
     rayData.dist = RayTCurrent();
 }
@@ -170,8 +179,8 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
-
-    float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % MSAA_SAMPLES];
+    
+    float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / frameDim;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
@@ -216,8 +225,8 @@ void rayGen()
 
         if (rayData.dist > 0 && i > 0) {
             // Write output
-            float3 minPoint = float3(pixel.x + 0.1, pixel.y + 0.1, lastMinDepth);
-            float3 maxPoint = float3(pixel.x + 0.9, pixel.y + 0.9, rayData.depth);
+            float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth);
+            float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, rayData.depth);
 
             uint insertIdx = 0;
             InterlockedAdd(gCounter[0], 1u, insertIdx);
@@ -236,7 +245,7 @@ void rayGen()
             lastTransmittances.x = rayData.currentTransmittance;
         }
 
-    #else // ACCEL_MODE == ACCEL_MODE_FITTEDBOXES
+    #else // ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
 
         // A miss or opaque object ends the ray
         if (i == 0 && rayData.dist < 0)
@@ -249,8 +258,8 @@ void rayGen()
 
         if (rayData.dist > 0 && i>0) {
             // Write output
-            float3 minPoint = float3(pixel.x, pixel.y, lastMinDepth - lastDepthRange);
-            float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
+            float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
+            float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
 
             uint insertIdx = 0;
             InterlockedAdd(gCounter[0], 1u, insertIdx);
@@ -275,8 +284,8 @@ void rayGen()
 // Insert last element
 #if ACCEL_MODE == ACCEL_MODE_SHADOW3D
     if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
-        float3 minPoint = float3(pixel.x, pixel.y, lastMinDepth);
-        float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, gFar);
+        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth);
+        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, gFar);
 
         uint insertIdx = 0;
         InterlockedAdd(gCounter[0], 1u, insertIdx);
@@ -286,10 +295,10 @@ void rayGen()
         gAABB[insertIdx] = AABB(minPoint, maxPoint);
         gData[insertIdx] = float4(lastTransmittances.x, lastTransmittances.x,0,0); // Transmittance last sample
     }
-#else // ACCEL_MODE == ACCEL_MODE_FITTEDBOXES
+#else // ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
-        float3 minPoint = float3(pixel.x, pixel.y, lastMinDepth - lastDepthRange);
-        float3 maxPoint = float3(pixel.x + 1.0, pixel.y + 1.0, max(lastMinDepth + lastDepthRange, gFar));
+        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
+        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, gFar));
 
         uint insertIdx = 0;
         InterlockedAdd(gCounter[0], 1u, insertIdx);

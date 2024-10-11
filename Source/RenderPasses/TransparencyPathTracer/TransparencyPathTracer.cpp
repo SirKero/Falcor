@@ -943,7 +943,8 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
 
     FALCOR_ASSERT(mDebugShowAccelPip.pVars);
 
-    
+    mDebugShowAccelPip.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
+
     // Bind Utility
     auto var = mDebugShowAccelPip.pVars->getRootVar();
     var["CB"]["gSMSize"] = mSMSize;

@@ -72,12 +72,12 @@ public:
     enum class ShadowAccelMode : uint
     {
         ShadowMap3D = 0u,
-        FittedBoxes = 1u,
+        NormalOffset = 1u,
     };
 
     FALCOR_ENUM_INFO(ShadowAccelMode,{
         {ShadowAccelMode::ShadowMap3D, "3DShadowMap"},
-        {ShadowAccelMode::FittedBoxes, "FittedBoxes"},
+        {ShadowAccelMode::NormalOffset, "NormalOffset"},
     });
 
 private:
@@ -151,7 +151,7 @@ private:
     //Accel shadow settings
     static const uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
-    ShadowAccelMode mAccelMode = ShadowAccelMode::FittedBoxes;
+    ShadowAccelMode mAccelMode = ShadowAccelMode::NormalOffset;
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;

@@ -16,12 +16,14 @@ struct RayData
     bool hit;
     float vis;
     uint primIndex;
+    float normalizationFactor;
 
     __init() {
         linZ = 0;
         hit = false;
         vis = 0.0;
         primIndex = 0;
+        normalizationFactor = 0.0;
     }
 };
 
@@ -45,6 +47,14 @@ cbuffer CB
 
 #define VIS_MODE_VISIBILITY 0
 #define VIS_MODE_AABBINDEX 1
+
+// Accel Modes
+#define ACCEL_MODE_SHADOW3D 0
+#define ACCEL_MODE_NORMALOFFSET 1
+
+#ifndef ACCEL_MODE
+#define ACCEL_MODE ACCEL_MODE_SHADOW3D
+#endif
 
 RaytracingAccelerationStructure gShadowAS;
 StructuredBuffer<AABB> gShadowAABB;
@@ -132,9 +142,25 @@ void anyHit(inout RayData rayData, Attribs attribs)
     float4 shadowData = gShadowData[PrimitiveIndex()];
 
     rayData.primIndex = PrimitiveIndex();
-    rayData.vis = shadowData.z;
-    rayData.hit = true;
-    AcceptHitAndEndSearch();
+    rayData.hit |= true;
+
+#if ACCEL_MODE == ACCEL_MODE_SHADOW3D
+    // Shadow Data is x-> transparency before depth, y -> transparency after depth
+    float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
+    float vis = lerp(shadowData.x, shadowData.y, t);
+    rayData.vis = max(rayData.vis, vis);
+#else
+    rangeZ.y = min(rangeZ.y, rangeZ.x + shadowData.x);
+    float vis = shadowData.z;
+    float factor = 1.0;
+    // in first box
+    if (rayData.linZ < rangeZ.y) {
+        factor = 1.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
+        vis = shadowData.y;
+    }
+    rayData.vis += vis * factor;
+    rayData.normalizationFactor += factor;
+#endif
 }
 
 //
@@ -220,6 +246,9 @@ void rayGen()
         TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 0 /* hitIdx */, 1, 0 /* missIdx */, ray, rayData);
 
         if (rayData.hit) {
+        #if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
+            rayData.vis /= rayData.normalizationFactor;
+        #endif
             if(gVisMode == VIS_MODE_VISIBILITY)
                 color = getColorHeatMap(rayData.vis);
             else
