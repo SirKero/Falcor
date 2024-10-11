@@ -161,8 +161,11 @@ private:
         bool enable = false;
         uint selectedLight = 0;
         uint steps = 512;
-        float near = 0.1f;
-        float far = 100.f;
+        float near = 0.5f;
+        float far = 10.f;
+        float blendT = 0.2f;
+        uint visMode = 0;
+        bool stopGeneration = false;
     }mAccelDebugShowAS;
 
     //Runtime Data DeepSM

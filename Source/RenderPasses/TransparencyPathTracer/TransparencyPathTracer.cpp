@@ -76,6 +76,8 @@ namespace
     const Gui::DropdownList kAVSMRejectionMode = {{0, "TriangleArea"}, {1, "RectangeArea"}, {2, "Height"}, {3, "HeightErrorHeuristic"}
     };
 
+    const Gui::DropdownList kAccelDebugVisModes = {{0, "Transparency (Heatmap)"}, {1, "AABB index"}};
+
     //UI Graph
     // Colorblind friendly palette.
     const std::vector<uint32_t> kColorPalette = {
@@ -94,7 +96,7 @@ namespace
 
     const uint32_t kHighlightColor = IM_COL32(0xff, 0x7f, 0x00, 0xcf);
     const uint32_t kTransparentWhiteColor = IM_COL32(0xff, 0xff, 0xff, 76);
-    }
+}
 
 
 TransparencyPathTracer::TransparencyPathTracer(ref<Device> pDevice, const Properties& props)
@@ -178,8 +180,10 @@ void TransparencyPathTracer::execute(RenderContext* pRenderContext, const Render
 
     traceScene(pRenderContext, renderData);
 
-    debugShowShadowAccel(pRenderContext, renderData);
+    if (mAccelDebugShowAS.enable)
+        debugShowShadowAccel(pRenderContext, renderData);
 
+    
     generateDebugRefFunction(pRenderContext, renderData);
 
     if (!mDebugFrameCount)
@@ -725,7 +729,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     }
 
     // Abort early if disabled
-    if (!mGenInactive.accelShadow && mShadowEvaluationMode != ShadowEvalMode::Accel)
+    if (!mGenInactive.accelShadow && mShadowEvaluationMode != ShadowEvalMode::Accel || (mAccelDebugShowAS.enable && mAccelDebugShowAS.stopGeneration))
         return;
 
     //Clear Counter
@@ -949,6 +953,8 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
     var["CB"]["gStep"] = mAccelDebugShowAS.steps;
     var["CB"]["gMinDist"] = mAccelDebugShowAS.near;
     var["CB"]["gMaxDist"] = mAccelDebugShowAS.far;
+    var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
+    var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
     var["CB"]["gViewProj"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].viewProjection;
 
     var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
@@ -1471,6 +1477,10 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
                     group2.var("Steps", mAccelDebugShowAS.steps, 32u, 16384u);
                     group2.var("Camera Near", mAccelDebugShowAS.near, mpScene->getCamera()->getNearPlane(), mpScene->getCamera()->getFarPlane(), 0.1f );
                     group2.var("Camera Far", mAccelDebugShowAS.far, mpScene->getCamera()->getNearPlane(), mpScene->getCamera()->getFarPlane(), 0.1f );
+                    group2.var("Blend with Output", mAccelDebugShowAS.blendT, 0.f, 1.f, 0.001f);
+                    if (group2.dropdown("Mode", kAccelDebugVisModes, mAccelDebugShowAS.visMode))
+                        mAccelDebugShowAS.stopGeneration = mAccelDebugShowAS.visMode == 1 ? true : mAccelDebugShowAS.stopGeneration;
+                    group2.checkbox("Stop Generation", mAccelDebugShowAS.stopGeneration);
                 }
             }
 

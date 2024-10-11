@@ -14,10 +14,14 @@ struct RayData
 {
     float linZ;
     bool hit;
+    float vis;
+    uint primIndex;
 
     __init() {
         linZ = 0;
         hit = false;
+        vis = 0.0;
+        primIndex = 0;
     }
 };
 
@@ -33,20 +37,45 @@ cbuffer CB
     uint        gSelectedLight; //Selected light
     uint        gStep;  //Number of steps
     float       gMinDist; //Tmin
-    float       gMaxDist; //TMax
+    float       gMaxDist;       // TMax
+    float       gBlendT;
+    uint        gVisMode;       //Vizualization mode  
     float4x4    gViewProj; // View Projection for current light
 }
+
+#define VIS_MODE_VISIBILITY 0
+#define VIS_MODE_AABBINDEX 1
 
 RaytracingAccelerationStructure gShadowAS;
 StructuredBuffer<AABB> gShadowAABB;
 StructuredBuffer<float2> gShadowData;
 
 // Outputs
-RWTexture2D<float4> gOutputColor;
+Texture2D<float4> gOutputColor;
 RWTexture2D<float4> gOutputDebug;
 
 static const float kMinOpacity = 1e-7;
 
+//Heatmap
+static const float4 kHMInferno[8] = {
+    float4(5, 3, 30, 0.0),
+    float4(40, 11, 84, 0.14),
+    float4(101, 21, 110, 0.29),
+    float4(159, 42, 99, 0.43),
+    float4(212, 72, 66, 0.57),
+    float4(245, 125, 21, 0.71),
+    float4(250, 193, 39, 0.86),
+    float4(252, 255, 164, 1.0),
+};
+
+//Color map
+static const float3 kColorMap[21] = {
+        float3(230, 25, 75),   float3(60, 180, 75),   float3(255, 225, 25), float3(0, 130, 200),   float3(245, 130, 48),
+        float3(145, 30, 180), float3(70, 240, 240),  float3(240, 50, 230),  float3(210, 245, 60), float3(250, 190, 212),
+        float3(0, 128, 128),   float3(220, 190, 255), float3(170, 110, 40),  float3(255, 250, 200), float3(128, 0, 0),
+        float3(170, 255, 195), float3(128, 128, 0),   float3(255, 215, 180), float3(0, 0, 128),     float3(128, 128, 128),
+        float3(255, 255, 255),
+};
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -64,6 +93,20 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
 
     return sd;
+}
+
+float3 getColorHeatMap(float t) {
+    float4 c1 = kHMInferno[0];
+    float4 c2 = kHMInferno[1];
+    [unroll]
+    for (uint i = 1; i < 8; i++) {
+        c2 = kHMInferno[i];
+        if (t < c2.w)
+            break;
+        c1 = c2;
+    }
+    float3 c = lerp(c1.rgb / 255.0, c2.rgb / 255.0, (t - c1.w) / max(c2.w - c1.w, 0.0001));
+    return c;
 }
 
 //Shaders
@@ -86,6 +129,10 @@ void anyHit(inout RayData rayData, Attribs attribs)
     if (rayData.linZ > rangeZ.y || rayData.linZ < rangeZ.x || !aabb.contains(WorldRayOrigin()))
         IgnoreHit();
 
+    float2 shadowData = gShadowData[PrimitiveIndex()];
+
+    rayData.primIndex = PrimitiveIndex();
+    rayData.vis = shadowData.y;
     rayData.hit = true;
     AcceptHitAndEndSearch();
 }
@@ -139,7 +186,7 @@ void rayGen()
     camRay.tMin = gMinDist;
     camRay.tMax = gMaxDist;
 
-    float3 color = float3(0);
+    float3 color = gVisMode == VIS_MODE_VISIBILITY ? float3(0, 0.2, 0) : float3(0);
 
     float3 posW = camRay.origin + camRay.dir * camRay.tMin;
     float stepSize = (camRay.tMax - camRay.tMin) / float(gStep);
@@ -173,11 +220,16 @@ void rayGen()
         TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 0 /* hitIdx */, 1, 0 /* missIdx */, ray, rayData);
 
         if (rayData.hit) {
-            color = float3(1);
+            if(gVisMode == VIS_MODE_VISIBILITY)
+                color = getColorHeatMap(rayData.vis);
+            else
+                color = kColorMap[rayData.primIndex % 21] / 255.0;
             break;
         }
     }
 
+    float3 outColor = gOutputColor[pixel].xyz;
+
+    color = lerp(color, outColor, gBlendT);
     gOutputDebug[pixel] = float4(color, 1.0);
-    //gOutputColor[pixel] += float4(color, 0.0); 
 }
