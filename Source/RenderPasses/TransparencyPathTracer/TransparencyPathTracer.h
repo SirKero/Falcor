@@ -90,6 +90,7 @@ private:
         float4x4 viewProjection = float4x4();
         float4x4 invViewProjection = float4x4();
         float4x4 invProjection = float4x4();
+        float4x4 invView = float4x4();
 
         void calculate(ref<Light> light, float2 nearFar);
     };
@@ -226,6 +227,16 @@ private:
     RayTracingPipeline mGenAccelShadowPip;     //Acceleration structure based
     RayTracingPipeline mDebugShowAccelPip;      //Shows the accel in world space
     RayTracingPipeline mDebugGetRefFunction;
+
+    // Rasterization resources
+    struct
+    {
+        ref<GraphicsState> pState;
+        ref<GraphicsProgram> pProgram;
+        ref<GraphicsVars> pVars;
+        ref<Fbo> pFBO;
+        ref<Texture> pDepth;
+    } mRasterShowAccelPass;
 };
 
 FALCOR_ENUM_REGISTER(TransparencyPathTracer::ShadowEvalMode);

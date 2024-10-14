@@ -45,6 +45,7 @@ namespace
     const std::string kShaderTemporalStochSMRay = kShaderFolder + "GenTmpStochSM.rt.slang";
     const std::string kShaderAccelShadowRay = kShaderFolder + "GenAccelShadow.rt.slang";
     const std::string kShaderDebugShowShadowAccel = kShaderFolder + "DebugShowShadowAccel.rt.slang";
+    const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //RT shader constant settings
     const uint kMaxPayloadSizeBytes = 20u;
@@ -126,7 +127,8 @@ RenderPassReflection TransparencyPathTracer::reflect(const CompileData& compileD
 
     // Define our input/output channels.
     addRenderPassInputs(reflector, kInputChannels);
-    addRenderPassOutputs(reflector, kOutputChannels);
+    //addRenderPassOutputs(reflector, kOutputChannels);
+    addRenderPassOutputs(reflector, kOutputChannels, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget);
 
     return reflector;
 }
@@ -907,6 +909,75 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
 
     FALCOR_PROFILE(pRenderContext, "ShowAccel");
 
+    const uint2 dims = renderData.getDefaultTextureDims();
+    if (!mRasterShowAccelPass.pDepth || math::any(uint2(mRasterShowAccelPass.pDepth->getWidth(), mRasterShowAccelPass.pDepth->getHeight()) != dims)) {
+        mRasterShowAccelPass.pDepth =
+            Texture::create2D(mpDevice, dims.x, dims.y, ResourceFormat::D32Float, 1u, 1u, nullptr, ResourceBindFlags::DepthStencil);
+        mRasterShowAccelPass.pDepth->setName("DebugRasterDepth");
+    }
+
+    //Init Program
+    if (!mRasterShowAccelPass.pProgram){
+        //Init program
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderDebugShowShadowAccelRaster).vsEntry("vsMain").psEntry("psMain").gsEntry("gsMain");
+        desc.setShaderModel("6_6");
+
+        auto defines = mpScene->getSceneDefines();
+        // Create Program and state
+        mRasterShowAccelPass.pProgram = GraphicsProgram::create(mpDevice, desc, defines);
+        mRasterShowAccelPass.pState = GraphicsState::create(mpDevice);
+
+        //Set state
+        mRasterShowAccelPass.pState->setProgram(mRasterShowAccelPass.pProgram);
+        mRasterShowAccelPass.pState->setVao(Vao::create(Vao::Topology::TriangleList));
+
+        //Set raster state
+        RasterizerState::Desc rsDesc;
+        rsDesc.setCullMode(RasterizerState::CullMode::None);
+        rsDesc.setFillMode(RasterizerState::FillMode::Solid);
+        mRasterShowAccelPass.pState->setRasterizerState(RasterizerState::create(rsDesc));
+
+        mRasterShowAccelPass.pFBO = Fbo::create(mpDevice);
+    }
+
+    //Set draw target
+    ref<Texture> debugOut = renderData.getTexture(kOutputDebug);
+    mRasterShowAccelPass.pFBO->attachColorTarget(debugOut, 0);
+    mRasterShowAccelPass.pFBO->attachDepthStencilTarget(mRasterShowAccelPass.pDepth);
+    pRenderContext->clearFbo(mRasterShowAccelPass.pFBO.get(), float4(0,0,0,1), 1.0, 0);
+    mRasterShowAccelPass.pState->setFbo(mRasterShowAccelPass.pFBO);
+
+    //Runtime Defines
+    //mRasterShowAccelPass.pProgram->addDefine();
+
+    //Vars
+    if (!mRasterShowAccelPass.pVars)
+        mRasterShowAccelPass.pVars = GraphicsVars::create(mpDevice, mRasterShowAccelPass.pProgram.get());
+
+    auto var = mRasterShowAccelPass.pVars->getRootVar();
+
+    var["gScene"] = mpScene->getParameterBlock();
+    var["CB"]["gSMSize"] = mSMSize;
+    var["CB"]["gNear"] = mNearFar.x;
+    var["CB"]["gFar"] = mNearFar.y;
+    var["CB"]["gSelectedLight"] = mAccelDebugShowAS.selectedLight;
+    var["CB"]["gStep"] = mAccelDebugShowAS.steps;
+    var["CB"]["gMinDist"] = mAccelDebugShowAS.near;
+    var["CB"]["gMaxDist"] = mAccelDebugShowAS.far;
+    var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
+    var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
+    var["CB"]["gInvView"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invView;
+    var["CB"]["gInvProj"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invProjection;
+
+    var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
+    var["gShadowCounter"] = mAccelShadowCounter[mAccelDebugShowAS.selectedLight];
+    var["gShadowData"] = mAccelShadowData[mAccelDebugShowAS.selectedLight];
+    var["gOutputColor"] = renderData.getTexture(kOutputColor); //For blending
+
+    pRenderContext->draw(mRasterShowAccelPass.pState.get(), mRasterShowAccelPass.pVars.get(), mAccelShadowMaxNumPoints * 3, 0);
+
+    /*
     if (!mDebugShowAccelPip.pProgram)
     {
         RtProgram::Desc desc;
@@ -973,7 +1044,7 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
 
     // Spawn the rays.
     mpScene->raytrace(pRenderContext, mDebugShowAccelPip.pProgram.get(), mDebugShowAccelPip.pVars, uint3(targetDim, 1));
-
+    */
 }
 
 void TransparencyPathTracer::prepareDebugBuffers(RenderContext* pRenderContext) {
@@ -1717,4 +1788,5 @@ void TransparencyPathTracer::LightMVP::calculate(ref<Light> light, float2 nearFa
     viewProjection = math::mul(projection, view);
     invViewProjection = math::inverse(viewProjection);
     invProjection = math::inverse(projection);
+    invView = math::inverse(view);
 }
