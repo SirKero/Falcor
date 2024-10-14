@@ -251,6 +251,23 @@ void LightTrace::prepareRayTracingShaders(RenderContext* pRenderContext)
     mCollectPhotonPass.initRTCollectionProgram(mpDevice, mpScene, kShaderCollectPhotons, kMaxPayloadBytes, globalTypeConformances);
 }
 
+float getNormalizedPixelSize(uint2 frameDim, float fovY, float aspect)
+{
+    float h = tan(fovY / 2.f) * 2.f;
+    float w = h * aspect;
+    float wPix = w / frameDim.x;
+    float hPix = h / frameDim.y;
+    return wPix * hPix;
+}
+float2 getPixelWidthHeight(uint2 frameDim, float fovY, float aspect)
+{
+    float h = tan(fovY / 2.f) * 2.f;
+    float w = h * aspect;
+    float wPix = w / frameDim.x;
+    float hPix = h / frameDim.y;
+    return float2(wPix, hPix);
+}
+
 void LightTrace::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers)
 {
     FALCOR_PROFILE(pRenderContext, "PhotonGeneration");
@@ -280,9 +297,14 @@ void LightTrace::generatePhotonsPass(RenderContext* pRenderContext, const Render
     // Set constants (uniforms).
     //
     // PerFrame Constant Buffer
+    uint2 frameDim = renderData.getDefaultTextureDims();
     std::string nameBuf = "PerFrame";
     var[nameBuf]["gFrameCount"] = mFrameCount;
-
+    const auto& cameraData = mpScene->getCamera()->getData();
+    var[nameBuf]["gNormalizedPixelArea"] = getNormalizedPixelSize(frameDim, focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight), cameraData.aspectRatio);
+    var[nameBuf]["gPixelWidthHeight"] = getPixelWidthHeight(frameDim, focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight), cameraData.aspectRatio);
+    var[nameBuf]["gProjectedFocalLength"] = math::mul(cameraData.projMat, float4(0.f, 0.f, cameraData.focalLength, 1.f)).w;
+    var[nameBuf]["gFrameDim"] = frameDim; 
     // Upload constant buffer only if options changed
 
     // Fill flags

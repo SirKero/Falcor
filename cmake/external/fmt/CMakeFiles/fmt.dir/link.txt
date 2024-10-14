@@ -1,0 +1,2 @@
+C:/Strawberry/c/bin/ar.exe qc libfmt.a CMakeFiles/fmt.dir/src/format.cc.obj CMakeFiles/fmt.dir/src/os.cc.obj
+C:/Strawberry/c/bin/ranlib.exe libfmt.a

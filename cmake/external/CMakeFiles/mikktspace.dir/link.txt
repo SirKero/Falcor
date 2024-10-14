@@ -1,0 +1,2 @@
+C:/Strawberry/c/bin/ar.exe qc libmikktspace.a CMakeFiles/mikktspace.dir/mikktspace/mikktspace.c.obj
+C:/Strawberry/c/bin/ranlib.exe libmikktspace.a
