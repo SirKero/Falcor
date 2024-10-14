@@ -140,6 +140,9 @@ void anyHit(inout RayData rayData, Attribs attribs)
         IgnoreHit();
 
     float4 shadowData = gShadowData[PrimitiveIndex()];
+    //if (rayData.linZ > rangeZ.x + shadowData.x)
+    //    IgnoreHit();
+
 
     rayData.primIndex = PrimitiveIndex();
     rayData.hit |= true;
@@ -150,13 +153,16 @@ void anyHit(inout RayData rayData, Attribs attribs)
     float vis = lerp(shadowData.x, shadowData.y, t);
     rayData.vis = max(rayData.vis, vis);
 #else
-    rangeZ.y = min(rangeZ.y, rangeZ.x + shadowData.x);
+    rangeZ.y = rangeZ.x + shadowData.x;
     float vis = shadowData.z;
     float factor = 1.0;
     // in first box
     if (rayData.linZ < rangeZ.y) {
         factor = 1.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
         vis = shadowData.y;
+    } else if (rayData.linZ < rangeZ.y + shadowData.x) {
+        float t = saturate((rayData.linZ - (rangeZ.x + shadowData.x)) / ((rangeZ.y+shadowData.x) - (rangeZ.x + shadowData.x)));
+        float vis = lerp(shadowData.y, shadowData.z, t);
     }
     rayData.vis += vis * factor;
     rayData.normalizationFactor += factor;

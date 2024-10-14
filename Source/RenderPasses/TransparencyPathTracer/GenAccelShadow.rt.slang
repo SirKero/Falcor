@@ -136,6 +136,8 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     //Get the for corners of the pixel to approximate the size of the 3D pixel
     float2 pixel = float2(DispatchRaysIndex().xy) + 0.5;
     const uint2 frameDim = DispatchRaysDimensions().xy;
+
+    //TODO this does not seem completly right (depth too small or too big)
     float2 relFramePosCorners[4];
     relFramePosCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
     relFramePosCorners[1] = (pixel + float2(kPixelOffset, -kPixelOffset)) / frameDim;
@@ -154,7 +156,8 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
         corners[i] = corner.xyz / corner.w;
     }
     // View normal
-    float3 normalView = normalize(mul(gView, float4(sd.faceN, 0)).xyz);
+    float3 faceN = sd.frontFacing ? sd.faceN : -sd.faceN;
+    float3 normalView = normalize(mul(gView, float4(faceN, 0)).xyz);
     // Plane equation d
     float d = -1.0 * dot(posView, normalView);
     float maxDepth = rayData.depth;

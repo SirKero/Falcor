@@ -1136,14 +1136,22 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
     rayData.visibility = max(rayData.visibility, vis);
 #else //ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     //Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
-    rangeZ.y = min(rangeZ.y, rangeZ.x + shadowData.x);
+    rangeZ.y = rangeZ.x + shadowData.x;
     float vis = shadowData.z;
     float factor = 1.0;
     //in first box
     if (rayData.linZ < rangeZ.y) {
-        factor = 1.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
+        factor = min(1.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 0.1);
+        //factor = 0;
         vis = shadowData.y;
     }
+    /*
+    else if (rayData.linZ < rangeZ.y + shadowData.x) {
+        float t = saturate((rayData.linZ - (rangeZ.x + shadowData.x)) / ((rangeZ.y + shadowData.x) - (rangeZ.x + shadowData.x)));
+        vis = lerp(shadowData.y, shadowData.z, t);
+        //factor = 0;
+    }
+    */
     rayData.visibility += vis * factor;
     rayData.normalizationFactor += factor;
 #endif
