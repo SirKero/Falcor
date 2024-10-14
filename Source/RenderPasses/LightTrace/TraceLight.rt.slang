@@ -18,6 +18,10 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 cbuffer PerFrame
 {
     uint gFrameCount; // Frame count since scene was loaded.
+    uint2 gFrameDim;
+    float gNormalizedPixelArea;
+    float2 gPixelWidthHeight;
+    float gProjectedFocalLength;
 }
 
 cbuffer CB
@@ -54,35 +58,49 @@ static const uint kRayFlagTerminatedMiss = 1;
 static const uint kRayFlagTerminatedHit = 2;
 
 
-
 /** Payload for scatter ray (80B).
 */
 struct RayData
 {
+    PackedHitInfo hit;
+    uint _pad;
+    bool terminated; ///< Set to true when path is terminated.
+
+    static RayData create()
+    {
+        RayData d;
+        d.hit = {};
+        d.terminated = false;
+        return d;
+    }
+};
+
+struct PathData
+{
     float3 thp; ///< Current path throughput. This is updated at each path vertex.
     uint packedNormal; ///< Face normal encoded in 16 bit polar coordinates
-    float3 origin; ///< Next path segment origin.
-    uint terminated; ///< Set to true when path is terminated.
-    float3 direction; ///< Next path segment direction.
+    float3 origin;     ///< Next path segment origin.
+    float3 direction;  ///< Next path segment direction.
+    float3 reprojection_brdf;
+    float reprojection_pdf;
     bool diffuseHit; ///< saves if the his is diffuse
     bool isEmissive; ///<If the hit is emissive
 
     SampleGenerator sg; ///< Per-ray state for the sample generator (up to 16B).
 
-    /** Create ray payload with default parameters.
-    */
-    static RayData create()
+    static PathData create()
     {
-        RayData d;
-        d.terminated = 0;
+        PathData d;
         d.packedNormal = 0;
         d.thp = float3(1);
         d.origin = float3(0);
         d.direction = float3(0);
+        d.reprojection_brdf = float3(0);
+        d.reprojection_pdf = 0.f;
         d.isEmissive = false;
         return d;
     }
-};
+}
 
 struct ShadowData
 {
@@ -217,6 +235,106 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
     return true;
 }
 
+ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const float3 rayDir, const ITextureSampler lod)
+{
+    VertexData v = {};
+    uint materialID = {};
+
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_TRIANGLE_MESH)
+    if (hit.getType() == HitType::Triangle)
+    {
+        const TriangleHit triangleHit = hit.getTriangleHit();
+        v = gScene.getVertexData(triangleHit);
+        materialID = gScene.getMaterialID(triangleHit.instanceID);
+    }
+#endif
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_DISPLACED_TRIANGLE_MESH)
+    if (hit.getType() == HitType::DisplacedTriangle)
+    {
+        const DisplacedTriangleHit displacedTriangleHit = hit.getDisplacedTriangleHit();
+        v = gScene.getVertexData(displacedTriangleHit, -rayDir);
+        materialID = gScene.getMaterialID(displacedTriangleHit.instanceID);
+    }
+#endif
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_CURVE)
+    if (hit.getType() == HitType::Curve)
+    {
+        const CurveHit curveHit = hit.getCurveHit();
+        v = gScene.getVertexDataFromCurve(curveHit);
+        materialID = gScene.getMaterialID(curveHit.instanceID);
+    }
+#endif
+#if SCENE_HAS_GEOMETRY_TYPE(GEOMETRY_TYPE_SDF_GRID)
+    if (hit.getType() == HitType::SDFGrid)
+    {
+        const SDFGridHit sdfGridHit = hit.getSDFGridHit();
+        v = gScene.getVertexDataFromSDFGrid(sdfGridHit, rayOrigin, rayDir);
+        materialID = gScene.getMaterialID(sdfGridHit.instanceID);
+    }
+#endif
+
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+
+    return sd;
+}
+void handleHit(inout RayData rayData, inout PathData pathData)
+{
+    // Evaluate Falcor's material parameters at the hit point.
+    let lod = ExplicitLodTextureSampler(0.f);
+    HitInfo hit = HitInfo(rayData.hit);
+    if (!hit.isValid())
+    {
+        rayData.terminated = true;
+        return;
+    }
+    const bool isCurveHit = hit.getType() == HitType::Curve;
+    ShadingData sd = loadShadingData(hit, pathData.origin, pathData.direction, lod);
+    //Adjust shading normals if desired
+
+    uint hints = 0;
+    //if (gFlags & (uint) GenerationFlags::AdjShadingNormals)
+    {
+        hints |= (uint) MaterialInstanceHints::AdjustShadingNormal;
+    }
+    
+    BSDFSample bsdfSample;
+    let bsdf = gScene.materials.getMaterialInstance(sd, lod, hints);
+    let bsdfProperties = bsdf.getProperties(sd);
+    bool hasDiffuseParts = (gFlags & (uint) GenerationFlags::DeltaRejReqDiff) ?
+    luminance(bsdfProperties.diffuseReflectionAlbedo) > 0 : true;
+
+    bool valid = bsdf.sample(sd, pathData.sg, bsdfSample, true /*ImportanceSampling*/);
+    
+    bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+    float3 rayOrigin ; //false is for transmissions
+    if (isCurveHit) {
+        rayOrigin = sd.posW - sd.curveRadius * sd.frame.N;
+    }
+    else {
+        rayOrigin = sd.computeNewRayOrigin(!transmission);
+    }
+    pathData.origin = rayOrigin;
+    pathData.thp *= valid ? bsdfSample.weight : float3(0);
+    //if throughput is 0, return
+    if (!valid || all(pathData.thp <= 0))
+        rayData.terminated |= kRayFlagTerminatedHit;
+    pathData.packedNormal = encodeNormal2x16(sd.faceN);
+    pathData.direction = bsdfSample.wo;
+    pathData.isEmissive = luminance(bsdfProperties.emission) > 0;
+    if (gFlags & (uint) GenerationFlags::DeltaRejection)
+        pathData.diffuseHit = bsdfSample.isLobe(LobeType::NonDeltaReflection) && hasDiffuseParts;
+    else
+        pathData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
+    float3 camera_direction = normalize(gScene.camera.getPosition() - rayOrigin); 
+    float NdotL = saturate(dot(bsdfProperties.guideNormal, camera_direction));
+    if(NdotL > 0){
+        pathData.reprojection_brdf = bsdf.eval(sd, camera_direction, pathData.sg);
+    }
+    else {
+        pathData.reprojection_brdf = float3(1.0f);
+    }
+    pathData.reprojection_pdf = bsdf.evalPdf(sd, camera_direction);
+}
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
 {
@@ -232,47 +350,11 @@ void shadowMiss(inout ShadowData shadowData : SV_RayPayload)
 [shader("closesthit")]
 void closestHit(inout RayData rayData : SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs : SV_IntersectionAttributes)
 {
-    const float3 incomingRayDir = -WorldRayDirection();
-    // Evaluate Falcor's material parameters at the hit point.
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, incomingRayDir, lod);
-
-    //Adjust shading normals if desired
-
-    uint hints = 0;
-    if (gFlags & (uint) GenerationFlags::AdjShadingNormals)
-    {
-        hints |= (uint) MaterialInstanceHints::AdjustShadingNormal;
-    }
-    
-    BSDFSample bsdfSample;
-    let bsdf = gScene.materials.getMaterialInstance(sd, lod, hints);
-    let bsdfProperties = bsdf.getProperties(sd);
-    bool hasDiffuseParts = (gFlags & (uint) GenerationFlags::DeltaRejReqDiff) ?
-    luminance(bsdfProperties.diffuseReflectionAlbedo) > 0 : true;
-
-    bool valid = bsdf.sample(sd, rayData.sg, bsdfSample, true /*ImportanceSampling*/);
-
-    float3 thpStart = rayData.thp;
-    
-    bool transmission = bsdfSample.isLobe(LobeType::Transmission);
-    float3 rayOrigin = sd.computeNewRayOrigin(!transmission); //false is for transmissions
-    rayData.origin = rayOrigin;
-    rayData.thp *= valid ? bsdfSample.weight : float3(0);
-    rayData.packedNormal = encodeNormal2x16(sd.faceN);
-    rayData.direction = bsdfSample.wo;
-    rayData.isEmissive = luminance(bsdfProperties.emission) > 0;
-    if (gFlags & (uint) GenerationFlags::DeltaRejection)
-        rayData.diffuseHit = bsdfSample.isLobe(LobeType::NonDeltaReflection) && hasDiffuseParts;
-    else
-        rayData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
-    
-    //if throughput is 0, return
-    if (!valid || all(rayData.thp <= 0))
-        rayData.terminated |= kRayFlagTerminatedHit;
+    TriangleHit triangleHit;
+    triangleHit.instanceID = getGeometryInstanceID();
+    triangleHit.primitiveIndex = PrimitiveIndex();
+    triangleHit.barycentrics = attribs.barycentrics;
+    rayData.hit = HitInfo(triangleHit).getData();
 }
 
 //Use anyhit for alpha test if activated
@@ -307,6 +389,12 @@ void shadowAnyHit(inout ShadowData shadowData : SV_RayPayload, BuiltInTriangleIn
     }
 }
 
+float getCosThetaP(float2 pixelPos)
+{
+    float3 projectedPixelDir = normalize(float3(pixelPos, -gProjectedFocalLength));
+    return dot(float3(0.f, 0.f, 1.f), projectedPixelDir);
+}
+
 [shader("raygeneration")]
 void rayGen()
 {
@@ -315,7 +403,8 @@ void rayGen()
 
      // Prepare ray payload.
     RayData rayData = RayData.create();
-    rayData.sg = SampleGenerator(launchIndex, gFrameCount + 1 * 13);
+    PathData pathData = PathData.create();
+    pathData.sg = SampleGenerator(launchIndex, gFrameCount + 1 * 13);
 
     RayDesc ray;
     PhotonLightSample pls;
@@ -325,18 +414,18 @@ void rayGen()
 #endif
     {   //Analytic light sample
         float3 sampleDir;
-        if (!createLightSampleAnalytic(rayData.sg, pls, sampleDir))
+        if (!createLightSampleAnalytic(pathData.sg, pls, sampleDir))
             return;
     
         ray.Direction = sampleDir;
     }
 #if USE_EMISSIVE_LIGHT  
     else { //Emissive light sample
-        if (!createLightSample(rayData.sg, pls))
+        if (!createLightSample(pathData.sg, pls))
             return;
     
         float lightDirPDF = 1.0;
-        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(rayData.sg), lightDirPDF);
+        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(pathData.sg), lightDirPDF);
 
         if (lightDirPDF <= 0.f)
             return;
@@ -345,13 +434,15 @@ void rayGen()
         //pls.flux /= lightDirPDF;
         pls.flux *= M_PI;   //Lambert Emitter
     }
-#endif    
+#endif
     pls.flux /= launchDim.x * launchDim.y; //Division through all dipatched photons
 
     ray.Origin = pls.posW;
     ray.TMin = 0.001f;
     ray.TMax = 10000.f;
-    
+
+    pathData.direction = ray.Direction;
+    pathData.origin = ray.Origin;
     //create photon
     float3 photonPos = float3(0);
     PhotonInfo photon;
@@ -364,21 +455,22 @@ void rayGen()
         
     //recursion where the photons are shot
     for (uint i = 0; i < gMaxRecursion && !rayData.terminated; i++)
-    {        
-        photon.flux = pls.flux * rayData.thp;
+    {
+        photon.flux = pls.flux * pathData.thp;
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
-
+        handleHit(rayData, pathData);
          //Stop if a light source was hit
-        if (rayData.isEmissive || (rayData.terminated & kRayFlagTerminatedMiss > 0))
+        if (pathData.isEmissive || (rayData.terminated & kRayFlagTerminatedMiss > 0))
             break;
 
-        photonPos = rayData.origin;
+        photonPos = pathData.origin;
         photon.dir = ray.Direction;
 
         //Check if the point is visible for the camera
         float4 cameraPos = mul(gScene.camera.getViewProj(), float4(photonPos,1));
         cameraPos /= cameraPos.w;
         cameraPos.y *= -1;
+        float2 pixelDir = (floor(cameraPos.xy * 0.5 * gFrameDim) + 0.5) * gPixelWidthHeight * gProjectedFocalLength;
         cameraPos.xy = cameraPos.xy * 0.5 + 0.5; //UV from [-1,1] to [0,1]
         bool validReprojection = true;
         if (any(cameraPos.xy < 0) || any(cameraPos.xy > 1) || cameraPos.z < 0 || cameraPos.z > 1)
@@ -401,39 +493,38 @@ void rayGen()
             shadowData.shadowed = true;
 
             TraceRay(gScene.rtAccel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff /* instanceInclusionMask */, 1 /* hitIdx */, rayTypeCount, 1 /* missIdx */, shadowRay, shadowData);
-
             reprojectionVisible = !shadowData.shadowed;
         }
-
         //Store in AABB
         if(validReprojection && reprojectionVisible){
             uint photonIndex = 0;
             InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
             if (photonIndex <= kPhotonBufferSize)
             {
-                float2 screenPos = floor(cameraPos.xy * float2(1920,1080)) + 0.5f;
+                float2 screenPos = floor(cameraPos.xy * gFrameDim) + 0.5f;
                 AABB photonAABB = AABB(float3(screenPos - 0.4, -0.4), float3(screenPos + 0.4, 0.4));
                 gLightTraceAABB[photonIndex] = photonAABB;
-                gLightTraceData[photonIndex] = float4(10000 * photon.flux / (distToCamera * distToCamera),1);
+                gLightTraceData[photonIndex] = float4(photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(pixelDir),3)) ,1);
+                //gLightTraceData[photonIndex] = float4(float3(pow(getCosThetaP(pixelDir),3), 0.0f, 0.0f) ,1);
             }
         }
 
         //Russian Roulette
-        const float rrVal = luminance(rayData.thp);
+        const float rrVal = luminance(pathData.thp);
         const float prob = max(0.f, 1.f - rrVal);
-        float rnd = sampleNext1D(rayData.sg);
+        float rnd = sampleNext1D(pathData.sg);
         if (rnd < prob)
         {
             break; //Photon is absorbed
         }
         else
         {
-            rayData.thp /= (1.f - prob);
+            pathData.thp /= (1.f - prob);
         }
                         
         //update ray for next iteration
-        ray.Origin = rayData.origin;
-        ray.Direction = rayData.direction;
+        ray.Origin = pathData.origin;
+        ray.Direction = pathData.direction;
     }
     
 }

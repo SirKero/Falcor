@@ -1,0 +1,1 @@
+{ "standardsearchpath" : { "media" : "${FALCOR_MEDIA_FOLDERS}", "mdl" : "${FALCOR_MDL_PATHS}" }}
