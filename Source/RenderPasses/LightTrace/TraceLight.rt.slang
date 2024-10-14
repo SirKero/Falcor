@@ -82,6 +82,7 @@ struct PathData
     float3 origin;     ///< Next path segment origin.
     float3 direction;  ///< Next path segment direction.
     float3 reprojection_brdf;
+    float reprojection_pdf;
     bool diffuseHit; ///< saves if the his is diffuse
     bool isEmissive; ///<If the hit is emissive
 
@@ -94,6 +95,8 @@ struct PathData
         d.thp = float3(1);
         d.origin = float3(0);
         d.direction = float3(0);
+        d.reprojection_brdf = float3(0);
+        d.reprojection_pdf = 0.f;
         d.isEmissive = false;
         return d;
     }
@@ -276,7 +279,6 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayOrigin, const flo
 }
 void handleHit(inout RayData rayData, inout PathData pathData)
 {
-    const float3 incomingRayDir = -WorldRayDirection();
     // Evaluate Falcor's material parameters at the hit point.
     let lod = ExplicitLodTextureSampler(0.f);
     HitInfo hit = HitInfo(rayData.hit);
@@ -285,6 +287,7 @@ void handleHit(inout RayData rayData, inout PathData pathData)
         rayData.terminated = true;
         return;
     }
+    const bool isCurveHit = hit.getType() == HitType::Curve;
     ShadingData sd = loadShadingData(hit, pathData.origin, pathData.direction, lod);
     //Adjust shading normals if desired
 
@@ -301,13 +304,20 @@ void handleHit(inout RayData rayData, inout PathData pathData)
     luminance(bsdfProperties.diffuseReflectionAlbedo) > 0 : true;
 
     bool valid = bsdf.sample(sd, pathData.sg, bsdfSample, true /*ImportanceSampling*/);
-
-    float3 thpStart = pathData.thp;
     
     bool transmission = bsdfSample.isLobe(LobeType::Transmission);
-    float3 rayOrigin = sd.computeNewRayOrigin(!transmission); //false is for transmissions
+    float3 rayOrigin ; //false is for transmissions
+    if (isCurveHit) {
+        rayOrigin = sd.posW - sd.curveRadius * sd.frame.N;
+    }
+    else {
+        rayOrigin = sd.computeNewRayOrigin(!transmission);
+    }
     pathData.origin = rayOrigin;
     pathData.thp *= valid ? bsdfSample.weight : float3(0);
+    //if throughput is 0, return
+    if (!valid || all(pathData.thp <= 0))
+        rayData.terminated |= kRayFlagTerminatedHit;
     pathData.packedNormal = encodeNormal2x16(sd.faceN);
     pathData.direction = bsdfSample.wo;
     pathData.isEmissive = luminance(bsdfProperties.emission) > 0;
@@ -315,12 +325,15 @@ void handleHit(inout RayData rayData, inout PathData pathData)
         pathData.diffuseHit = bsdfSample.isLobe(LobeType::NonDeltaReflection) && hasDiffuseParts;
     else
         pathData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
-    
     float3 camera_direction = normalize(gScene.camera.getPosition() - rayOrigin); 
-    pathData.reprojection_brdf = bsdf.eval(sd, camera_direction, pathData.sg);
-    //if throughput is 0, return
-    if (!valid || all(pathData.thp <= 0))
-        rayData.terminated |= kRayFlagTerminatedHit;
+    float NdotL = saturate(dot(bsdfProperties.guideNormal, camera_direction));
+    if(NdotL > 0){
+        pathData.reprojection_brdf = bsdf.eval(sd, camera_direction, pathData.sg);
+    }
+    else {
+        pathData.reprojection_brdf = float3(1.0f);
+    }
+    pathData.reprojection_pdf = bsdf.evalPdf(sd, camera_direction);
 }
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
@@ -374,15 +387,6 @@ void shadowAnyHit(inout ShadowData shadowData : SV_RayPayload, BuiltInTriangleIn
         if (gScene.materials.alphaTest(v, materialID, 0.f))
             IgnoreHit();
     }
-}
-
-float getNormalizedPixelSize(uint2 frameDim, float fovY, float aspect)
-{
-    float h = tan(fovY / 2.f) * 2.f;
-    float w = h * aspect;
-    float wPix = w / frameDim.x;
-    float hPix = h / frameDim.y;
-    return wPix * hPix * 1000.f;
 }
 
 float getCosThetaP(float2 pixelPos)
@@ -466,7 +470,7 @@ void rayGen()
         float4 cameraPos = mul(gScene.camera.getViewProj(), float4(photonPos,1));
         cameraPos /= cameraPos.w;
         cameraPos.y *= -1;
-        float2 pixelDir = (cameraPos.xy * 0.5 * gFrameDim + 0.5) * gPixelWidthHeight * gProjectedFocalLength;
+        float2 pixelDir = (floor(cameraPos.xy * 0.5 * gFrameDim) + 0.5) * gPixelWidthHeight * gProjectedFocalLength;
         cameraPos.xy = cameraPos.xy * 0.5 + 0.5; //UV from [-1,1] to [0,1]
         bool validReprojection = true;
         if (any(cameraPos.xy < 0) || any(cameraPos.xy > 1) || cameraPos.z < 0 || cameraPos.z > 1)
@@ -501,7 +505,7 @@ void rayGen()
                 AABB photonAABB = AABB(float3(screenPos - 0.4, -0.4), float3(screenPos + 0.4, 0.4));
                 gLightTraceAABB[photonIndex] = photonAABB;
                 gLightTraceData[photonIndex] = float4(photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(pixelDir),3)) ,1);
-                //gLightTraceData[photonIndex] = float4(float3(pow(getCosThetaP(pixelDir),3),1.f,1.f),1);
+                //gLightTraceData[photonIndex] = float4(float3(pow(getCosThetaP(pixelDir),3), 0.0f, 0.0f) ,1);
             }
         }
 
