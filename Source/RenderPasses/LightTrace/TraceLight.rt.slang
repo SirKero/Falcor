@@ -325,6 +325,7 @@ void handleHit(inout RayData rayData, inout PathData pathData)
         pathData.diffuseHit = bsdfSample.isLobe(LobeType::NonDeltaReflection) && hasDiffuseParts;
     else
         pathData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
+    /*
     float3 camera_direction = normalize(gScene.camera.getPosition() - rayOrigin); 
     float NdotL = saturate(dot(bsdfProperties.guideNormal, camera_direction));
     if(NdotL > 0){
@@ -334,7 +335,21 @@ void handleHit(inout RayData rayData, inout PathData pathData)
         pathData.reprojection_brdf = float3(1.0f);
     }
     pathData.reprojection_pdf = bsdf.evalPdf(sd, camera_direction);
+    */
 }
+
+void getReprojectionBRDF(const in RayData rayData, float3 cameraDirection, inout PathData pathData) {
+    let lod = ExplicitLodTextureSampler(0.f);
+    HitInfo hit = HitInfo(rayData.hit); //Hit is assumed valid, as this is called after handle hit
+
+    ShadingData sd = loadShadingData(hit, pathData.origin, cameraDirection, lod);  //Shading data for view from camera
+
+    uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+    let mi = gScene.materials.getMaterialInstance(sd, lod, hints); // Material instance is created for the camera hit
+    pathData.reprojection_brdf = mi.eval(sd, -pathData.direction, pathData.sg); // Valid due to Helmholtz reciprocity
+    pathData.reprojection_pdf = mi.evalPdf(sd, -pathData.direction);
+}
+
 [shader("miss")]
 void miss(inout RayData rayData : SV_RayPayload)
 {
@@ -487,7 +502,8 @@ void rayGen()
             shadowRay.Origin = photonPos;
             shadowRay.TMin = 0;
             shadowRay.TMax = distToCamera;
-            shadowRay.Direction = pointToCamera / shadowRay.TMax;
+            pointToCamera /= distToCamera; //Normalize
+            shadowRay.Direction = pointToCamera;
 
             ShadowData shadowData;
             shadowData.shadowed = true;
@@ -501,6 +517,7 @@ void rayGen()
             InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
             if (photonIndex <= kPhotonBufferSize)
             {
+                getReprojectionBRDF(rayData, pointToCamera, pathData);
                 float2 screenPos = floor(cameraPos.xy * gFrameDim) + 0.5f;
                 AABB photonAABB = AABB(float3(screenPos - 0.4, -0.4), float3(screenPos + 0.4, 0.4));
                 gLightTraceAABB[photonIndex] = photonAABB;
