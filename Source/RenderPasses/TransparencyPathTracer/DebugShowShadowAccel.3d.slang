@@ -13,9 +13,8 @@ cbuffer CB
     float       gNear;          //Near Plane
     float       gFar;           //Far Plane
     uint        gSelectedLight; //Selected light
-    uint        gStep;  //Number of steps
-    float       gMinDist; //Tmin
-    float       gMaxDist;       // TMax
+    uint2       gCullMin;       //XY culling min
+    uint2       gCullMax;       //XY culling max
     float       gBlendT;
     uint        gVisMode;       //Vizualization mode
     float4x4    gInvView;        // Inverse View
@@ -40,6 +39,9 @@ StructuredBuffer<float4> gShadowData;
 Texture2D<float4> gOutputColor;
 
 static const float kMinOpacity = 1e-7;
+
+// Sampler
+SamplerState gPointSampler;
 
 //Heatmap
 static const float4 kHMInferno[8] = {
@@ -69,6 +71,20 @@ struct GsOut
     nointerpolation uint boxIdx : AABB_IDX;
 };
 
+float3 getColorHeatMap(float t) {
+    float4 c1 = kHMInferno[0];
+    float4 c2 = kHMInferno[1];
+    [unroll]
+    for (uint i = 1; i < 8; i++) {
+        c2 = kHMInferno[i];
+        if (t < c2.w)
+            break;
+        c1 = c2;
+    }
+    float3 c = lerp(c1.rgb / 255.0, c2.rgb / 255.0, (t - c1.w) / max(c2.w - c1.w, 0.0001));
+    return c;
+}
+
 /** Null vertex shader. We'll do all the work in the geometry shader.
  */
 void vsMain()
@@ -80,15 +96,34 @@ void vsMain()
     pixel shader execution per texel. The vertex positions are passed on to the pixel shader.
     Non-textured emissives are culled.
 */
-[maxvertexcount(14)]
+[maxvertexcount(24)]
 void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 {
     const uint count = gShadowCounter[0]; // Get the valid number of aabbs
-    if (aabbIdx >= count)
+    if (aabbIdx == count) {
+        float3 ndc[3];
+        ndc[0] = float3(-1., -1., 1.0 - 1e-3);
+        ndc[1] = float3(3., -1., 1.0 - 1e-3);
+        ndc[2] = float3(-1., 3., 1.0 - 1e-3);
+        GsOut screenQuad[3];
+        for (uint i = 0; i < 3; i++) {
+
+            screenQuad[i].posH = float4(ndc[i], 1.);
+            screenQuad[i].transparency = -1.0;
+            screenQuad[i].boxIdx = aabbIdx;
+            outStream.Append(screenQuad[i]);
+
+        }
+        outStream.RestartStrip(); 
+            
+        return;
+    }
+    if (aabbIdx > count)
         return;
 
-    // Get AABB
+    // Get AABB and Data
     AABB aabb = gShadowAABB[aabbIdx];
+    float4 data = gShadowData[aabbIdx];
 
     // Define the 8 corners of the AABB
     float3 points[8] = {
@@ -106,38 +141,78 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
     GsOut vert[8];
     for (uint i = 0; i < 8; i++) {
         float2 ndc = (2.0 * points[i].xy / gSMSize) - 1.0;
+        ndc.y *= -1.0;
         float4 rayDir = mul(gInvProj, float4(ndc, 1.0, 1.0));
         rayDir.xyz /= rayDir.w;
         rayDir.xyz = normalize(rayDir.xyz);
         float3 posView = rayDir.xyz * points[i].z;
         float4 worldPos = mul(gInvView, float4(posView, 1.0));
         vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
-        vert[i].transparency = 1.0;
+    #if ACCEL_MODE == ACCEL_MODE_SHADOW3D
+        vert[i].transparency = i < 4 ? data.x : data.y;
+    #else // ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
+        vert[i].transparency = i < 4 ? data.y : data.z; //TODO 
+    #endif
         vert[i].boxIdx = aabbIdx;
     }
 
+    //Output all 6 faces of the Cube
+    //Front
     outStream.Append(vert[0]);
-    outStream.Append(vert[1]);
     outStream.Append(vert[3]);
+    outStream.Append(vert[1]);
+    outStream.Append(vert[2]);
+    outStream.RestartStrip();
+
+    //Right
+    outStream.Append(vert[1]);
+    outStream.Append(vert[2]);
+    outStream.Append(vert[5]);
+    outStream.Append(vert[6]);
+    outStream.RestartStrip();
+
+    //Back
+    outStream.Append(vert[5]);
+    outStream.Append(vert[6]);
+    outStream.Append(vert[4]);
+    outStream.Append(vert[7]);
+    outStream.RestartStrip();
+    
+    //Left
+    outStream.Append(vert[4]);
+    outStream.Append(vert[7]);
+    outStream.Append(vert[0]);
+    outStream.Append(vert[3]);
+    outStream.RestartStrip();
+    
+    // Top
+    outStream.Append(vert[3]);
+    outStream.Append(vert[7]);
     outStream.Append(vert[2]);
     outStream.Append(vert[6]);
-    outStream.Append(vert[7]);
-    outStream.Append(vert[3]);
+    outStream.RestartStrip();
+    
+    // Bottom
     outStream.Append(vert[0]);
     outStream.Append(vert[4]);
-    outStream.Append(vert[5]);
     outStream.Append(vert[1]);
-    outStream.Append(vert[2]);
-    outStream.Append(vert[6]);
     outStream.Append(vert[5]);
-
     outStream.RestartStrip();
 }
 
 /** Pixel shader.
  */
 float4 psMain(GsOut gsIn) : SV_Target {
-    float3 outColor = kColorMap[gsIn.boxIdx % 21] / 255.0;
-    // return (float4(gsIn.posH.xyz,1));
+    float3 boxColor;
+    if (gVisMode == VIS_MODE_VISIBILITY) {
+        boxColor = getColorHeatMap(saturate(gsIn.transparency));
+    } else { // (gVisMode == VIS_MODE_AABBINDEX)
+        boxColor = kColorMap[gsIn.boxIdx % 21] / 255.0;
+    }
+    float3 inColor = gOutputColor[uint2(gsIn.posH.xy)].xyz;
+    float3 outColor = lerp(boxColor, inColor, gBlendT);
+    if (gsIn.transparency < 0)
+        outColor = inColor;
+
     return (float4(outColor,1));
 }

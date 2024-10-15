@@ -213,7 +213,7 @@ void rayGen()
 
         //Trace ray
         uint rayFlags = 0;
-        TraceRay(gScene.rtAccel, rayFlags, kShadowRayInstanceMask /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
     #if ACCEL_MODE  == ACCEL_MODE_SHADOW3D
 

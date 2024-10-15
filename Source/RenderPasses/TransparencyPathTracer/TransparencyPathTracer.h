@@ -161,9 +161,8 @@ private:
     {
         bool enable = false;
         uint selectedLight = 0;
-        uint steps = 512;
-        float near = 0.5f;
-        float far = 10.f;
+        uint2 cullMin = uint2(0);
+        uint2 cullMax = uint2(4096);
         float blendT = 0.2f;
         uint visMode = 0;
         bool stopGeneration = false;
@@ -225,7 +224,6 @@ private:
     RayTracingPipeline mGenStochSMPip;    //Stochastic baised SM
     RayTracingPipeline mGenTmpStochSMPip;   //Temporal Stochastic baised SM
     RayTracingPipeline mGenAccelShadowPip;     //Acceleration structure based
-    RayTracingPipeline mDebugShowAccelPip;      //Shows the accel in world space
     RayTracingPipeline mDebugGetRefFunction;
 
     // Rasterization resources
