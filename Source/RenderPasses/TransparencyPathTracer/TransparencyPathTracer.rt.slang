@@ -1125,7 +1125,7 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
     // Get data
     AABB aabb = gShadowAABBs[InstanceIndex()][PrimitiveIndex()];
     float2 rangeZ = float2(aabb.minPoint.z, aabb.maxPoint.z);
-    if (rayData.linZ > rangeZ.y || rayData.linZ < rangeZ.x)
+    if (rayData.linZ > rangeZ.y || rayData.linZ < rangeZ.x || !aabb.contains(WorldRayOrigin()))
         IgnoreHit();
 
     float4 shadowData = gAccelShadowData[InstanceIndex()][PrimitiveIndex()];
@@ -1141,9 +1141,10 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
     float factor = 1.0;
     //in first box
     if (rayData.linZ < rangeZ.y) {
-        factor = min(1.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 0.1);
-        //factor = 0;
+        // factor = max(2.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 1.0);
+        factor = rayData.linZ - rangeZ.x;
         vis = shadowData.y;
+        //TODO stochastic approach? 
     }
     /*
     else if (rayData.linZ < rangeZ.y + shadowData.x) {
