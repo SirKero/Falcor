@@ -111,6 +111,15 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
     if (gScene.materials.alphaTest(v, materialID, 0.f, kMinOpacity)) IgnoreHit();
 }
 
+bool intersectPlane(const float3 N, const float3 p, const float3 ray, out float t) {
+    t = 0.0;
+    float denom = dot(N, ray);
+    if (abs(denom) > 1e-10) {
+        t = dot(p, N) / denom;
+        return t >= 0;
+    }
+    return false;
+}
 
 [shader("closesthit")]
 void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs)
@@ -138,26 +147,40 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     const uint2 frameDim = DispatchRaysDimensions().xy;
 
     //TODO this does not seem completly right (depth too small or too big)
-    float2 relFramePosCorners[4];
-    relFramePosCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
-    relFramePosCorners[1] = (pixel + float2(kPixelOffset, -kPixelOffset)) / frameDim;
-    relFramePosCorners[2] = (pixel + float2(-kPixelOffset, kPixelOffset)) / frameDim;
-    relFramePosCorners[3] = (pixel + float2(kPixelOffset, kPixelOffset)) / frameDim;
+    float2 ndcCorners[4];
+    ndcCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
+    ndcCorners[1] = (pixel + float2(kPixelOffset, -kPixelOffset)) / frameDim;
+    ndcCorners[2] = (pixel + float2(-kPixelOffset, kPixelOffset)) / frameDim;
+    ndcCorners[3] = (pixel + float2(kPixelOffset, kPixelOffset)) / frameDim;
     //From [0,1] to [-1,1]
+    [unroll]
     for (uint i = 0; i < 4; i++) {
-        relFramePosCorners[i] = relFramePosCorners[i] * 2.0 - 1.0;
-        relFramePosCorners[i].y *= -1.f;
+        ndcCorners[i] = ndcCorners[i] * 2.0 - 1.0;
+        ndcCorners[i].y *= -1.f;
     }
-    float3 corners[4];
-    posH.z /= posH.w; // Get depth
+    float3 rayDir[4];
     //To view space
     for (uint i = 0; i < 4; i++) {
-        float4 corner = mul(gInvProj, float4(relFramePosCorners[i], posH.z, 1.0));
-        corners[i] = corner.xyz / corner.w;
+        rayDir[i] = mul(gInvProj, float4(ndcCorners[i], 1.0, 1.0)).xyz;
+        // rayDir[i].xyz /= rayDir[i].z; // Normalize z
+        rayDir[i] = normalize(rayDir[i]);
     }
     // View normal
     float3 faceN = sd.frontFacing ? sd.faceN : -sd.faceN;
     float3 normalView = normalize(mul(gView, float4(faceN, 0)).xyz);
+
+    float maxDepth = rayData.depth;
+    float minDepth = rayData.depth;
+    for (uint i = 0; i < 4; i++) {
+        float t;
+        if (intersectPlane(normalView, posView, rayDir[i], t)) {
+            float3 hitView = rayDir[i] * t;
+            maxDepth = max(maxDepth, -hitView.z);
+            minDepth = min(minDepth, -hitView.z);
+        }
+    }
+
+    /*
     // Plane equation d
     float d = -1.0 * dot(posView, normalView);
     float maxDepth = rayData.depth;
@@ -168,7 +191,7 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
         maxDepth = max(abs(cornerDepth), maxDepth);
         minDepth = min(abs(cornerDepth), minDepth);
     }
-
+    */
     rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-8); //TODO test
     
     rayData.dist = RayTCurrent();
