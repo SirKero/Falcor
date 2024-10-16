@@ -92,6 +92,7 @@ namespace
     const std::string kPropsCausticResamplingMode = "CausticResamplingMode";
     const std::string kPropsEnableDynamicDispatch = "EnableDynamicDispatch";
     const std::string kPropsNumDispatchedPhotons = "NumDispatchedPhotons";
+    const std::string kPropsUseLambertianDiffuseBRDF = "UseLambertianDiffuseBRDF";
 
     //UI Dropdowns
     const Gui::DropdownList kResamplingModeList{
@@ -200,6 +201,8 @@ void ReSTIR_FG::parseProperties(const Properties& props)
             mUseDynamicPhotonDispatchCount = value;
         else if (key == kPropsNumDispatchedPhotons)
             mNumDispatchedPhotons = value;
+        else if (key == kPropsUseLambertianDiffuseBRDF)
+            mUseLambertianDiffuse = value;
         else
             logWarning("Unknown property '{}' in ReSTIR_FG properties.", key);
 
@@ -227,6 +230,7 @@ Properties ReSTIR_FG::getProperties() const
     props[kPropsCausticResamplingMode] = (uint)mCausticResamplingMode;
     props[kPropsEnableDynamicDispatch] = mUseDynamicPhotonDispatchCount;
     props[kPropsNumDispatchedPhotons] = mNumDispatchedPhotons;
+    props[kPropsUseLambertianDiffuseBRDF] = mUseLambertianDiffuse;
 
     return props;
 }

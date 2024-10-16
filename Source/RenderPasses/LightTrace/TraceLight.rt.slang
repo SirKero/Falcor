@@ -300,6 +300,7 @@ void handleHit(inout RayData rayData, inout PathData pathData)
     BSDFSample bsdfSample;
     let bsdf = gScene.materials.getMaterialInstance(sd, lod, hints);
     let bsdfProperties = bsdf.getProperties(sd);
+
     bool hasDiffuseParts = (gFlags & (uint) GenerationFlags::DeltaRejReqDiff) ?
     luminance(bsdfProperties.diffuseReflectionAlbedo) > 0 : true;
 
@@ -325,29 +326,30 @@ void handleHit(inout RayData rayData, inout PathData pathData)
         pathData.diffuseHit = bsdfSample.isLobe(LobeType::NonDeltaReflection) && hasDiffuseParts;
     else
         pathData.diffuseHit = bsdfSample.isLobe(LobeType::Diffuse) && !transmission;
+
     /*
     float3 camera_direction = normalize(gScene.camera.getPosition() - rayOrigin); 
     float NdotL = saturate(dot(bsdfProperties.guideNormal, camera_direction));
-    if(NdotL > 0){
-        pathData.reprojection_brdf = bsdf.eval(sd, camera_direction, pathData.sg);
-    }
-    else {
-        pathData.reprojection_brdf = float3(1.0f);
-    }
+    pathData.reprojection_brdf = bsdf.eval(sd, camera_direction, pathData.sg);
     pathData.reprojection_pdf = bsdf.evalPdf(sd, camera_direction);
     */
 }
 
-void getReprojectionBRDF(const in RayData rayData, float3 cameraDirection, inout PathData pathData) {
+void getReprojectionBRDF(const in RayData rayData, float3 cameraDirection, float3 reprojectedDirection, inout PathData pathData) {
     let lod = ExplicitLodTextureSampler(0.f);
-    HitInfo hit = HitInfo(rayData.hit); //Hit is assumed valid, as this is called after handle hit
+    HitInfo hit = HitInfo(rayData.hit);
+    if (!hit.isValid()) return; //Should not happen
 
     ShadingData sd = loadShadingData(hit, pathData.origin, cameraDirection, lod);  //Shading data for view from camera
 
     uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
     let mi = gScene.materials.getMaterialInstance(sd, lod, hints); // Material instance is created for the camera hit
-    pathData.reprojection_brdf = mi.eval(sd, -pathData.direction, pathData.sg); // Valid due to Helmholtz reciprocity
-    pathData.reprojection_pdf = mi.evalPdf(sd, -pathData.direction);
+    let miProperties = mi.getProperties(sd);
+    float NdotV = saturate(dot(miProperties.guideNormal, sd.V));
+    float NdotL = saturate(dot(miProperties.guideNormal, reprojectedDirection));
+    float3 brdf = (mi.eval(sd, reprojectedDirection, pathData.sg) / NdotL) * NdotV;
+    pathData.reprojection_brdf = max(0,brdf); // Valid due to Helmholtz reciprocity
+    pathData.reprojection_pdf = mi.evalPdf(sd, -reprojectedDirection);
 }
 
 [shader("miss")]
@@ -517,7 +519,7 @@ void rayGen()
             InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
             if (photonIndex <= kPhotonBufferSize)
             {
-                getReprojectionBRDF(rayData, pointToCamera, pathData);
+                getReprojectionBRDF(rayData, pointToCamera, ray.Direction, pathData);
                 float2 screenPos = floor(cameraPos.xy * gFrameDim) + 0.5f;
                 AABB photonAABB = AABB(float3(screenPos - 0.4, -0.4), float3(screenPos + 0.4, 0.4));
                 gLightTraceAABB[photonIndex] = photonAABB;
@@ -529,7 +531,7 @@ void rayGen()
         //Russian Roulette
         const float rrVal = luminance(pathData.thp);
         const float prob = max(0.f, 1.f - rrVal);
-        float rnd = sampleNext1D(pathData.sg);
+        float rnd = (rayData.terminated & kRayFlagTerminatedHit) ? -1.0 : sampleNext1D(pathData.sg);
         if (rnd < prob)
         {
             break; //Photon is absorbed
