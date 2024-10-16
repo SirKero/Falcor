@@ -6,6 +6,7 @@ import Utils.Math.PackedFormats;
 import Utils.Math.FormatConversion;
 import Utils.Math.MathHelpers;
 import Utils.Sampling.SampleGenerator;
+import Utils.Geometry.GeometryHelpers;
 import Scene.Material.ShadingUtils;
 import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
@@ -143,39 +144,39 @@ float3 fromLocalToWorld(const in float3 normal, float3 w)
     return w.x * tangent + w.y * bitangent + w.z * normal;
 }
 
-#if USE_EMISSIVE_LIGHT  //Function is only valid if the emissive sampler is set
-bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
-
+#if USE_EMISSIVE_LIGHT // Function is only valid if the emissive sampler is set
+bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
+    pls = {};
     if (gScene.lightCollection.isEmpty())
         return false;
 
-    //Randomly pick a triangle out of the global list with uniform probability
+    // Randomly pick a triangle out of the global list with uniform probability
     const uint triangleCount = gScene.lightCollection.triangleCount;
     // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
     uint triangleIndex = min((uint)(sampleNext1D(sg) * triangleCount), triangleCount - 1);
 
     uint2 packed = gEmissiveSampler._emissivePower.triangleAliasTable[triangleIndex];
     float threshold = f16tof32(packed.x >> 16u);
-    uint  selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
-    uint  selectBelow = packed.y & 0xFFFFFFu;
+    uint selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
+    uint selectBelow = packed.y & 0xFFFFFFu;
 
     // Test the threshold in the current table entry; pick one of the two options
     triangleIndex = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
 
     float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * gEmissiveSampler._emissivePower.invWeightsSum;
-    
+
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
     const float3 barycentrics = sample_triangle(sampleNext2D(sg));
     pls.posW = tri.getPosition(barycentrics);
     pls.normal = tri.normal;
 
-    //Get Flux
+    // Get Flux
     float2 uv = tri.getTexCoord(barycentrics);
     pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
-    
 
-    //Check if the material is double sided (infinetly thin)
+    // Check if the material is double sided (infinetly thin)
     MaterialHeader mltHeader = gScene.materials.getMaterialHeader(tri.materialID);
+
     // If the material is double sided, randomly flip the normal
     /*
     if (mltHeader.isDoubleSided())
@@ -186,6 +187,7 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
     }
     */
 
+    pls.posW = computeRayOrigin(pls.posW, pls.normal);
     pls.flux /= triangleSelectionPdf;
 
     return true;
@@ -194,15 +196,17 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
 
 bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample pls, out float3 sampledDir)
 {
+    pls = {};
+    sampledDir = float3(0);
     const uint lightCount = gScene.getLightCount();
     if (lightCount == 0)
         return false;
-    //Uniformly sample one of the analytic lights
+    // Uniformly sample one of the analytic lights
     float rndLightIdx = float(lightCount) * sampleNext1D(sg);
     uint lightIdx = min(uint(floor(rndLightIdx)), lightCount - 1);
     LightData lightData = gScene.getLight(lightIdx);
 
-    //Only Point(+ Spot) lights are supported (due to RTXDI)
+    // Only Point(+ Spot) lights are supported (due to RTXDI)
     if (lightData.type != uint(LightType::Point))
         return false;
     float invLightPdf;
@@ -210,27 +214,27 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
     float3 rnd = sampleNext3D(sg);
     rnd.z = 0;
     float spotAngle = lightData.cosOpeningAngle;
-    if (lightData.openingAngle < M_2PI) //If the opening angle is smaller than 2PI it is a spotlight
+    if (lightData.openingAngle < M_2PI) // If the opening angle is smaller than 2PI it is a spotlight
     {
         spotAngle = cos(lightData.openingAngle - lightData.penumbraAngle * rnd.z);
         woLocal = sample_cone(rnd.xy, spotAngle);
     }
-    else //Pointlight
+    else // Pointlight
     {
         woLocal = sample_sphere(rnd.xy);
     }
     invLightPdf = M_2PI * (1.f - spotAngle);
-    
+
     if (invLightPdf <= 0.f)
         return false;
 
-    invLightPdf *= lightCount; //Take the select pdf into account
-    
-    //Fill the photon light struct
+    invLightPdf *= lightCount; // Take the select pdf into account
+
+    // Fill the photon light struct
     pls.posW = lightData.posW;
     pls.normal = lightData.dirW;
     pls.flux = lightData.intensity * invLightPdf;
-    
+
     sampledDir = fromLocalToWorld(pls.normal, woLocal);
     return true;
 }
@@ -418,41 +422,43 @@ void rayGen()
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
 
-     // Prepare ray payload.
-    RayData rayData = RayData.create();
-    PathData pathData = PathData.create();
-    pathData.sg = SampleGenerator(launchIndex, gFrameCount + 1 * 13);
+    SampleGenerator lightSg = SampleGenerator(launchIndex, gFrameCount + 5 * 13); // Sample Generator for the light sample
 
     RayDesc ray;
     PhotonLightSample pls;
 
 #if USE_EMISSIVE_LIGHT
-    if (gFlags & (uint) GenerationFlags::AnalyticLight)
+    if (gFlags & (uint)GenerationFlags::AnalyticLight)
 #endif
-    {   //Analytic light sample
+    { // Analytic light sample
         float3 sampleDir;
-        if (!createLightSampleAnalytic(pathData.sg, pls, sampleDir))
+        if (!createLightSampleAnalytic(lightSg, pls, sampleDir))
             return;
-    
+
         ray.Direction = sampleDir;
     }
-#if USE_EMISSIVE_LIGHT  
-    else { //Emissive light sample
-        if (!createLightSample(pathData.sg, pls))
+#if USE_EMISSIVE_LIGHT
+    else { // Emissive light sample
+        if (!createLightSample(lightSg, pls))
             return;
-    
+
         float lightDirPDF = 1.0;
-        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(pathData.sg), lightDirPDF);
+        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(lightSg), lightDirPDF);
 
         if (lightDirPDF <= 0.f)
             return;
-    
+
         ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-        //pls.flux /= lightDirPDF;
-        pls.flux *= M_PI;   //Lambert Emitter
+        pls.flux *= M_PI; // Lambert Emitter
     }
 #endif
-    pls.flux /= launchDim.x * launchDim.y; //Division through all dipatched photons
+
+    pls.flux /= launchDim.x * launchDim.y; // Division through all dipatched photons
+
+    // Prepare ray payload.
+    RayData rayData = RayData.create();
+    PathData pathData = PathData.create();
+    pathData.sg = lightSg;
 
     ray.Origin = pls.posW;
     ray.TMin = 0.001f;

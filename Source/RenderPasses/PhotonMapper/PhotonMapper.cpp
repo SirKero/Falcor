@@ -73,7 +73,7 @@ PhotonMapper::PhotonMapper(ref<Device> pDevice, const Properties& props)
     // TODO Handle Properties
 
     // Create sample generator.
-    mpSampleGenerator = SampleGenerator::create(mpDevice, mpSampleGenerator);
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
 }
 
 Properties PhotonMapper::getProperties() const
