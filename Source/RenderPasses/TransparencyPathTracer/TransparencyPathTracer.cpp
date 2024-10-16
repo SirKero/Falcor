@@ -76,7 +76,7 @@ namespace
     const Gui::DropdownList kAVSMRejectionMode = {{0, "TriangleArea"}, {1, "RectangeArea"}, {2, "Height"}, {3, "HeightErrorHeuristic"}
     };
 
-    const Gui::DropdownList kAccelDebugVisModes = {{0, "Transparency (Heatmap)"}, {1, "AABB index"}};
+    const Gui::DropdownList kAccelDebugVisModes = {{0, "Transparency (Heatmap)"}, {1, "AABB index"}, {2, "NormalBoxVis"}};
 
     //UI Graph
     // Colorblind friendly palette.
@@ -962,8 +962,8 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
     var["CB"]["gNear"] = mNearFar.x;
     var["CB"]["gFar"] = mNearFar.y;
     var["CB"]["gSelectedLight"] = mAccelDebugShowAS.selectedLight;
-    var["CB"]["gCullMin"] = mAccelDebugShowAS.cullMin;
-    var["CB"]["gCullMax"] = mAccelDebugShowAS.cullMax;
+    var["CB"]["gCullMin"] = float3(mAccelDebugShowAS.clipX.x, mAccelDebugShowAS.clipY.x, mAccelDebugShowAS.clipZ.x);
+    var["CB"]["gCullMax"] = float3(mAccelDebugShowAS.clipX.y, mAccelDebugShowAS.clipY.y, mAccelDebugShowAS.clipZ.y);
     var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
     var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
     var["CB"]["gInvView"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invView;
@@ -1478,8 +1478,10 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
                 {
                     if (mpScene->getLightCount() > 1)
                         group2.slider("Selected Light", mAccelDebugShowAS.selectedLight, 0u, mpScene->getLightCount() - 1);
-                    //group2.var("Camera Near", mAccelDebugShowAS.near, mpScene->getCamera()->getNearPlane(), mpScene->getCamera()->getFarPlane(), 0.1f );
-                    //group2.var("Camera Far", mAccelDebugShowAS.far, mpScene->getCamera()->getNearPlane(), mpScene->getCamera()->getFarPlane(), 0.1f );
+                    group2.var("Clip X", mAccelDebugShowAS.clipX, 0.f, float(mSMSize), 0.1f);
+                    group2.var("Clip Y", mAccelDebugShowAS.clipY, 0.f, float(mSMSize), 0.1f);
+                    group2.var("Clip Z", mAccelDebugShowAS.clipZ, -FLT_MAX, FLT_MAX, 0.1f);
+
                     group2.var("Blend with Output", mAccelDebugShowAS.blendT, 0.f, 1.f, 0.001f);
                     if (group2.dropdown("Mode", kAccelDebugVisModes, mAccelDebugShowAS.visMode))
                         mAccelDebugShowAS.stopGeneration = mAccelDebugShowAS.visMode == 1 ? true : mAccelDebugShowAS.stopGeneration;

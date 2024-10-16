@@ -161,8 +161,9 @@ private:
     {
         bool enable = false;
         uint selectedLight = 0;
-        uint2 cullMin = uint2(0);
-        uint2 cullMax = uint2(4096);
+        float2 clipX = float2(0, 4096);
+        float2 clipY = float2(0, 4096);
+        float2 clipZ = float2(-10000.f, 10000.f);
         float blendT = 0.2f;
         uint visMode = 0;
         bool stopGeneration = false;

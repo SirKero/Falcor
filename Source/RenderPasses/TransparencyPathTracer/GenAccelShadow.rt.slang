@@ -127,9 +127,9 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
 
     rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - sd.opacity);
     float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
-    rayData.depth = posH.w; // Linear depth
+    //rayData.depth = posH.w; // Linear depth
     float3 posView = mul(gView, float4(sd.posW, 1.f)).xyz;
-    //rayData.depth = -1.0 * posView.z; //same as above
+    rayData.depth = -1.0 * posView.z; //same as above
     //  float normalBias = (1.0 - abs(dot(WorldRayDirection(), sd.faceN))) * kNormalBias;
     //  rayData.depth = rayData.depth + (kDepthBias * gFar) + (normalBias * gFar);
 
@@ -213,7 +213,7 @@ void rayGen()
 
         //Trace ray
         uint rayFlags = 0;
-        TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, rayFlags, 0xff /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
     #if ACCEL_MODE  == ACCEL_MODE_SHADOW3D
 
