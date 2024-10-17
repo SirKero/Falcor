@@ -344,14 +344,14 @@ void getReprojectionBRDF(const in RayData rayData, float3 cameraDirection, float
     HitInfo hit = HitInfo(rayData.hit);
     if (!hit.isValid()) return; //Should not happen
 
-    ShadingData sd = loadShadingData(hit, pathData.origin, cameraDirection, lod);  //Shading data for view from camera
+    ShadingData sd = loadShadingData(hit, pathData.origin, -cameraDirection, lod);  //Shading data for view from camera
 
     uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
     let mi = gScene.materials.getMaterialInstance(sd, lod, hints); // Material instance is created for the camera hit
     let miProperties = mi.getProperties(sd);
     float NdotV = saturate(dot(miProperties.guideNormal, sd.V));
-    float NdotL = saturate(dot(miProperties.guideNormal, reprojectedDirection));
-    float3 brdf = (mi.eval(sd, reprojectedDirection, pathData.sg) / NdotL) * NdotV;
+    float NdotL = saturate(dot(miProperties.guideNormal, -reprojectedDirection));
+    float3 brdf = (mi.eval(sd, -reprojectedDirection, pathData.sg) / NdotL) * NdotV;
     pathData.reprojection_brdf = max(0,brdf); // Valid due to Helmholtz reciprocity
     pathData.reprojection_pdf = mi.evalPdf(sd, -reprojectedDirection);
 }
