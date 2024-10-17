@@ -78,6 +78,8 @@ namespace
 
     const Gui::DropdownList kAccelDebugVisModes = {{0, "Transparency (Heatmap)"}, {1, "AABB index"}, {2, "NormalBoxVis"}};
 
+    const Gui::DropdownList kAccelDataFormat= {{1, "Uint"}, {2, "Uint2"}, {4, "Uint4"}};
+
     //UI Graph
     // Colorblind friendly palette.
     const std::vector<uint32_t> kColorPalette = {
@@ -649,9 +651,12 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         defines.add(mpScene->getSceneDefines());
         defines.add("AVSM_K", std::to_string(mNumberAVSMSamples));
         defines.add(mpSampleGenerator->getDefines());
+        defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
 
         mGenAccelShadowPip.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
+
+    // TODO rebuild data buffer on changing the format
 
     auto& lights = mpScene->getLights();
 
@@ -742,6 +747,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     mGenAccelShadowPip.pProgram->addDefine("AVSM_DEPTH_BIAS", std::to_string(mDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("AVSM_NORMAL_DEPTH_BIAS", std::to_string(mNormalDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
+    mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -826,6 +832,7 @@ void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const Ren
     mTracer.pProgram->addDefine("USE_AVSM_PCF", mAVSMUsePCF ? "1" : "0");
     mTracer.pProgram->addDefine("USE_AVSM_INTERPOLATION", mAVSMUseInterpolation ? "1" : "0");
     mTracer.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
+    mTracer.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     mTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
@@ -924,6 +931,7 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
 
         auto defines = mpScene->getSceneDefines();
         defines.add("ACCEL_MODE", std::to_string((uint)mAccelMode));
+        defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
         // Create Program and state
         mRasterShowAccelPass.pProgram = GraphicsProgram::create(mpDevice, desc, defines);
         mRasterShowAccelPass.pState = GraphicsState::create(mpDevice);
@@ -950,6 +958,7 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
 
     //Runtime Defines
     mRasterShowAccelPass.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
+    mRasterShowAccelPass.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
 
     //Vars
     if (!mRasterShowAccelPass.pVars)
@@ -1471,6 +1480,8 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
                 group.var("CPU Counter overestimation", mAccelShadowOverestimation, 1.0f, 2.0f, 0.001f);
             }
 
+            group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
+            group.tooltip("Data formats; For more info see AccelShadowData.slang");
             if (auto group2 = group.group("Debug"))
             {
                 group2.checkbox("Enable", mAccelDebugShowAS.enable);

@@ -8,6 +8,7 @@ target_sources(TransparencyPathTracer PRIVATE
 	GenStochasticSM.rt.slang
 	GenTmpStochSM.rt.slang
 	GenAccelShadow.rt.slang
+	AccelShadowData.slang
 	GenDebugRefFunction.rt.slang
 	DebugShowShadowAccel.3d.slang
     SharedTypes.slang

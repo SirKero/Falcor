@@ -25,6 +25,7 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
+#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -60,13 +61,6 @@ import SharedTypes;
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
 #endif
 
-// Accel Modes
-#define ACCEL_MODE_SHADOW3D 0
-#define ACCEL_MODE_NORMALOFFSET 1
-
-#ifndef ACCEL_MODE
-#define ACCEL_MODE ACCEL_MODE_SHADOW3D
-#endif
 
 cbuffer CB
 {
@@ -107,7 +101,7 @@ Texture2D<float4> gTmpStochTransmittance[COUNT_SM];
 
 RaytracingAccelerationStructure gShadowAS;
 StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
-StructuredBuffer<float4> gAccelShadowData[COUNT_LIGHTS];
+StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
@@ -715,7 +709,7 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
         rayData.visibility = 1.0;
 #if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     else {
-        rayData.visibility /= rayData.normalizationFactor;
+        rayData.visibility /= max(rayData.normalizationFactor, 1e-8);
     }
 #endif
 
@@ -1128,22 +1122,22 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
     if (rayData.linZ > rangeZ.y || rayData.linZ < rangeZ.x || !aabb.contains(WorldRayOrigin()))
         IgnoreHit();
 
-    float4 shadowData = gAccelShadowData[InstanceIndex()][PrimitiveIndex()];
+    AccelShadowData shadowData = AccelShadowData(gAccelShadowData[InstanceIndex()][PrimitiveIndex()]);
 #if ACCEL_MODE == ACCEL_MODE_SHADOW3D
     // Shadow Data is x-> transparency before depth, y -> transparency after depth
     float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
-    float vis = lerp(shadowData.x, shadowData.y, t);
+    float vis = lerp(shadowData.transparencyStart, shadowData.transparencyEnd, t);
     rayData.visibility = max(rayData.visibility, vis);
 #else //ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     //Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
-    rangeZ.y = rangeZ.x + shadowData.x;
-    float vis = shadowData.z;
+    rangeZ.y = rangeZ.x + shadowData.firstBoxRange;
+    float vis = shadowData.transparencyEnd;
     float factor = 1.0;
     //in first box
     if (rayData.linZ < rangeZ.y) {
         // factor = max(2.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 1.0);
         factor = rayData.linZ - rangeZ.x;
-        vis = shadowData.y;
+        vis = shadowData.transparencyStart;
         //TODO stochastic approach? 
     }
     /*

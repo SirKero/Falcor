@@ -156,6 +156,7 @@ private:
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;
+    uint mAccelDataFormatSize = 4; //
 
     struct
     {

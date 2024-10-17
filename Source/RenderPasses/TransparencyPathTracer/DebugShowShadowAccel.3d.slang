@@ -1,3 +1,4 @@
+#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -25,18 +26,10 @@ cbuffer CB
 #define VIS_MODE_AABBINDEX 1
 #define VIS_MODE_FRONTBACKBOX 2
 
-// Accel Modes
-#define ACCEL_MODE_SHADOW3D 0
-#define ACCEL_MODE_NORMALOFFSET 1
-
-#ifndef ACCEL_MODE
-#define ACCEL_MODE ACCEL_MODE_SHADOW3D
-#endif
-
 //Inputs
 StructuredBuffer<AABB> gShadowAABB;
 Buffer<uint> gShadowCounter;
-StructuredBuffer<float4> gShadowData;
+StructuredBuffer<SHADOW_DATA_FORMAT> gShadowData;
 Texture2D<float4> gOutputColor;
 
 static const float kMinOpacity = 1e-7;
@@ -195,16 +188,16 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 
     // Get AABB and Data
     AABB aabb = gShadowAABB[aabbIdx];
-    float4 data = gShadowData[aabbIdx];
+    AccelShadowData shadowData = AccelShadowData(gShadowData[aabbIdx]);
 
     #if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     AABB shadowAABB = aabb;
     for (uint box = 0; box < 2; box++) {
         if (box == 0) {
-            aabb.maxPoint.z = shadowAABB.minPoint.z + data.x;
+            aabb.maxPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange;
         } else {
             aabb = shadowAABB;
-            aabb.minPoint.z = shadowAABB.minPoint.z + data.x + 1e-10;
+            aabb.minPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange + 1e-10;
         }
         // Cull AABB
         if (!cullAABB(aabb))
@@ -239,10 +232,10 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
             float4 worldPos = mul(gInvView, float4(posView, 1.0));
             vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
         #if ACCEL_MODE == ACCEL_MODE_SHADOW3D
-            vert[i].transparency = i < 4 ? data.x : data.y;
+            vert[i].transparency = i < 4 ? shadowData.transparencyStart : shadowData.transparencyEnd;
             vert[i].boxIdx = aabbIdx;
         #else // ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
-            vert[i].transparency = box == 0 ? data.y : data.z; // TODO
+            vert[i].transparency = box == 0 ? shadowData.transparencyStart : shadowData.transparencyEnd; // TODO
             vert[i].boxIdx = gVisMode == VIS_MODE_FRONTBACKBOX ? box :  aabbIdx;
         #endif            
         }

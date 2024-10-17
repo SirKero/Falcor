@@ -1,3 +1,4 @@
+#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -19,12 +20,6 @@ import Utils.Geometry.GeometryHelpers;
 #define MAX_IDX 1
 #endif
 
-#define ACCEL_MODE_SHADOW3D 0
-#define ACCEL_MODE_NORMALOFFSET 1
-
-#ifndef ACCEL_MODE
-#define ACCEL_MODE ACCEL_MODE_SHADOW3D
-#endif
 
 /** Payload for shadow ray.
 */
@@ -59,7 +54,7 @@ cbuffer CB
 
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
-RWStructuredBuffer<float4> gData;
+RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 
 static const float kDepthBias = AVSM_DEPTH_BIAS;
 static const float kNormalBias = AVSM_NORMAL_DEPTH_BIAS;
@@ -114,7 +109,7 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
 bool intersectPlane(const float3 N, const float3 p, const float3 ray, out float t) {
     t = 0.0;
     float denom = dot(N, ray);
-    if (abs(denom) > 1e-10) {
+    if (abs(denom) > 1e-4) {
         t = dot(p, N) / denom;
         return t >= 0;
     }
@@ -172,7 +167,7 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     float maxDepth = rayData.depth;
     float minDepth = rayData.depth;
     for (uint i = 0; i < 4; i++) {
-        float t;
+        float t = 0;
         if (intersectPlane(normalView, posView, rayDir[i], t)) {
             float3 hitView = rayDir[i] * t;
             maxDepth = max(maxDepth, -hitView.z);
@@ -197,6 +192,16 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     rayData.dist = RayTCurrent();
 }
 
+void writeData(const uint index, const AccelShadowData shadowData) {
+    #if SHADOW_DATA_FORMAT_SIZE == 1
+        gData[index] = shadowData.packAsUint();
+    #elif SHADOW_DATA_FORMAT_SIZE == 2
+        gData[index] = shadowData.packAsUint2(); // Transmittance last sample
+    #elif SHADOW_DATA_FORMAT_SIZE == 4
+        gData[index] = shadowData.packAsUint4(); // Transmittance last sample
+    #endif
+}
+
 //
 // Shader entry point for ray generation shader.
 //
@@ -205,8 +210,8 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
-    
-    float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
+
+    float2 pixelSample = pixel + 0.5; // + kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / frameDim;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
@@ -236,7 +241,7 @@ void rayGen()
 
         //Trace ray
         uint rayFlags = 0;
-        TraceRay(gScene.rtAccel, rayFlags, 0xff /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, rayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
     #if ACCEL_MODE  == ACCEL_MODE_SHADOW3D
 
@@ -260,8 +265,7 @@ void rayGen()
                 return;
 
             gAABB[insertIdx] = AABB(minPoint, maxPoint);
-            gData[insertIdx] = float4(lastTransmittances.y, lastTransmittances.x,0,0); // Transmittance last sample
-
+            writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x));
         }
         // Update for next iteration
         if (rayData.dist > 0) {
@@ -293,8 +297,7 @@ void rayGen()
                 return;
 
             gAABB[insertIdx] = AABB(minPoint, maxPoint);
-            gData[insertIdx] = float4(lastDepthRange * 2, lastTransmittances.y, lastTransmittances.x, 0); // Transmittance last sample
-
+            writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
         }
         // Update for next iteration
         if (rayData.dist > 0) {
@@ -319,7 +322,7 @@ void rayGen()
             return;
 
         gAABB[insertIdx] = AABB(minPoint, maxPoint);
-        gData[insertIdx] = float4(lastTransmittances.x, lastTransmittances.x,0,0); // Transmittance last sample
+        writeData(insertIdx, AccelShadowData(lastTransmittances.x, lastTransmittances.x));
     }
 #else // ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
@@ -332,7 +335,7 @@ void rayGen()
             return;
 
         gAABB[insertIdx] = AABB(minPoint, maxPoint);
-        gData[insertIdx] = float4(lastDepthRange * 2, lastTransmittances.y, lastTransmittances.x, 0); // Transmittance last sample
+        writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
     }
 #endif
 }
