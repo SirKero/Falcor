@@ -158,6 +158,7 @@ private:
     float mAccelShadowOverestimation = 1.1f;
     uint mAccelDataFormatSize = 4; //Size of the data struct for the accel data
     bool mRebuildAccelDataBuffer = true;
+    bool mAccelUsePCF = false;
 
     struct
     {

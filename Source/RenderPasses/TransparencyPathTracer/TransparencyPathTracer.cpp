@@ -47,7 +47,7 @@ namespace
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //RT shader constant settings
-    const uint kMaxPayloadSizeBytes = 20u;
+    const uint kMaxPayloadSizeBytes = 32u;
     const uint kMaxRecursionDepth = 1u;
     const uint kMaxPayloadSizeAVSMPerK = 8u;
 
@@ -657,6 +657,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         defines.add("AVSM_K", std::to_string(mNumberAVSMSamples));
         defines.add(mpSampleGenerator->getDefines());
         defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+        defines.add("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
 
         mGenAccelShadowPip.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -753,6 +754,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     mGenAccelShadowPip.pProgram->addDefine("AVSM_NORMAL_DEPTH_BIAS", std::to_string(mNormalDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+    mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -838,6 +840,7 @@ void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const Ren
     mTracer.pProgram->addDefine("USE_AVSM_INTERPOLATION", mAVSMUseInterpolation ? "1" : "0");
     mTracer.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
     mTracer.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+    mTracer.pProgram->addDefine("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     mTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
@@ -1487,6 +1490,7 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
 
             mRebuildAccelDataBuffer |= group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
             group.tooltip("Data formats; For more info see AccelShadowData.slang");
+            group.checkbox("Use PCF", mAccelUsePCF);
             if (auto group2 = group.group("Debug"))
             {
                 group2.checkbox("Enable", mAccelDebugShowAS.enable);
@@ -1658,7 +1662,7 @@ void TransparencyPathTracer::setScene(RenderContext* pRenderContext, const ref<S
             desc.addShaderModules(mpScene->getShaderModules());
             desc.addShaderLibrary(kShaderFile);
             desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
-            desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+            desc.setMaxAttributeSize(std::max(16u, mpScene->getRaytracingMaxAttributeSize()));
             desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
 
             mTracer.pBindingTable = RtBindingTable::create(3, 3, mpScene->getGeometryCount());

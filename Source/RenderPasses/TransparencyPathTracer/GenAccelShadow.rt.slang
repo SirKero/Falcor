@@ -59,7 +59,7 @@ RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 static const float kDepthBias = AVSM_DEPTH_BIAS;
 static const float kNormalBias = AVSM_NORMAL_DEPTH_BIAS;
 static const float kMinOpacity = 1e-7;
-static const float kPixelOffset = 0.5;
+static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; //Either 0.5(Normal) or 1.0(PCF)
 
 static const float2 kMSAAPattern[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
                                          float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
