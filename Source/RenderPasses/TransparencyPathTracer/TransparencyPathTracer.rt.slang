@@ -159,13 +159,13 @@ struct TransparencyRayData {
  */
 struct AccelShadowRayData {
     float visibility;
-    uint count;
+    float hitDepth;
     float linZ;
     float normalizationFactor;
 
     __init() {
         this.visibility = 0.0;
-        this.count = 0;
+        this.hitDepth = -1.0;
         this.linZ = 0.0;
         this.normalizationFactor = 0.0;
     }
@@ -687,8 +687,8 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
         return 0.0;
     
 
-    //float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
-    float2 shadowPixel = shadowPos.xy * gSMSize;
+    float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
+    //float2 shadowPixel = shadowPos.xy * gSMSize;
     // float dist = distance(posW, lightPosW);
     float dist = shadowPos.w;
 
@@ -705,7 +705,7 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
     uint instanceMask = 1 << lightIdx;
     TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 2 /* hitIdx */, 1, 2 /* missIdx */, ray, rayData);
 
-    if (rayData.count == 0)
+    if (rayData.hitDepth <= 0.0)
         rayData.visibility = 1.0;
 #if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     else {
@@ -1128,15 +1128,20 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
     float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
     float vis = lerp(shadowData.transparencyStart, shadowData.transparencyEnd, t);
     rayData.visibility = max(rayData.visibility, vis);
+    rayData.hitDepth = 1.0; // Used for valid hit
 #else //ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     //Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
     rangeZ.y = rangeZ.x + shadowData.firstBoxRange;
     float vis = shadowData.transparencyEnd;
     float factor = 1.0;
+    float middleDepth = (rangeZ.x + rangeZ.y) / 2.0;
     //in first box
     if (rayData.linZ < rangeZ.y) {
         // factor = max(2.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 1.0);
-        factor = rayData.linZ - rangeZ.x;
+
+        // factor = rayData.linZ - rangeZ.x;
+        factor = 1.0 / abs(middleDepth - rayData.linZ);
+
         vis = shadowData.transparencyStart;
         //TODO stochastic approach? 
     }
@@ -1147,11 +1152,23 @@ void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelSha
         //factor = 0;
     }
     */
+    
+    float distMiddleToLinZ = abs(middleDepth - rayData.linZ);
+    distMiddleToLinZ = middleDepth;
+    
+    if (rayData.hitDepth < 0 || distMiddleToLinZ < rayData.hitDepth) {
+        rayData.visibility = vis;
+        rayData.normalizationFactor = 1.0;
+        rayData.hitDepth = distMiddleToLinZ;
+    }
+    /*
     rayData.visibility += vis * factor;
     rayData.normalizationFactor += factor;
+    rayData.hitDepth = 1.0;
+    */
+
 #endif
 
-    rayData.count++;
     IgnoreHit();
 }
 

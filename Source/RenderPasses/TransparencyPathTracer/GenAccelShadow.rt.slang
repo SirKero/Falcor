@@ -175,19 +175,9 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
         }
     }
 
-    /*
-    // Plane equation d
-    float d = -1.0 * dot(posView, normalView);
-    float maxDepth = rayData.depth;
-    float minDepth = rayData.depth;
 
-    for (uint i = 0; i < 4; i++) {
-        float cornerDepth = (-d - (normalView.x * corners[i].x) - (normalView.y * corners[i].y)) / (normalView.z + 1e-10); //Negative due to view space
-        maxDepth = max(abs(cornerDepth), maxDepth);
-        minDepth = min(abs(cornerDepth), minDepth);
-    }
-    */
-    rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-8); //TODO test
+
+    rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-4);
     
     rayData.dist = RayTCurrent();
 }
@@ -211,7 +201,7 @@ void rayGen()
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
 
-    float2 pixelSample = pixel + 0.5; // + kMSAAPattern[gFrameCount % 16];
+    float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / frameDim;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
