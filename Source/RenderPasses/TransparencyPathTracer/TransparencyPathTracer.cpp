@@ -622,8 +622,13 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     if (mAVSMTexResChanged)
     {
         mAccelShadowAABB.clear();
-        mAccelShadowData.clear();
         mpShadowAccelerationStrucure.reset();
+    }
+
+    if (mRebuildAccelDataBuffer || mAVSMTexResChanged)
+    {
+        mAccelShadowData.clear();
+        mRebuildAccelDataBuffer = false;
     }
 
     // Create AVSM trace program
@@ -711,7 +716,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(float4), mSMSize * mSMSize * mAccelApproxNumElementsPerPixel,
+                    mpDevice, sizeof(uint) * mAccelDataFormatSize, mSMSize * mSMSize * mAccelApproxNumElementsPerPixel,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));
@@ -1480,7 +1485,7 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
                 group.var("CPU Counter overestimation", mAccelShadowOverestimation, 1.0f, 2.0f, 0.001f);
             }
 
-            group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
+            mRebuildAccelDataBuffer |= group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
             group.tooltip("Data formats; For more info see AccelShadowData.slang");
             if (auto group2 = group.group("Debug"))
             {

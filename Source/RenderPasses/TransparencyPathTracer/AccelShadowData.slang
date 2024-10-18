@@ -106,8 +106,8 @@ struct AccelShadowData {
 
     [mutating]
     void unpack(uint data) {
-        this.transparencyStart = (data & 0xFF) / 255.0;
-        this.transparencyEnd = ((data >> 8) & 0xFF) / 255.0;
+        this.transparencyStart = float(data & 0xFF) / 255.0;
+        this.transparencyEnd = float((data >> 8) & 0xFF) / 255.0;
         this.firstBoxRange = f16tof32((data >> 16) & 0xFFFF);
     }
 
@@ -139,7 +139,7 @@ struct AccelShadowData {
     uint packAsUint() {
         uint data = 0;
         data |= uint(round(this.transparencyStart * 255.0)) & 0xFF;
-        data |= (uint(round(this.transparencyStart * 255.0)) & 0xFF) << 8;
+        data |= (uint(round(this.transparencyEnd * 255.0)) & 0xFF) << 8;
         data |= f32tof16(this.firstBoxRange) << 16;
         return data;
     }
