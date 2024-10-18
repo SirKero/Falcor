@@ -47,7 +47,8 @@ namespace
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //RT shader constant settings
-    const uint kMaxPayloadSizeBytes = 32u;
+    const uint kMaxPayloadSizeBytes = 20u;
+    const uint kMaxPayloadSizeByterWithAccel = 32u;
     const uint kMaxRecursionDepth = 1u;
     const uint kMaxPayloadSizeAVSMPerK = 8u;
 
@@ -821,6 +822,51 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
 
 void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "Trace Scene");
+
+    if (mResetTracePass) {
+        mTracer.resetPip();
+        mResetTracePass = false;
+    }
+       
+
+    // Create scene ray tracing program.
+    if(!mTracer.pProgram){
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderFile);
+        
+        if (mAccelUseRayTracingInline){
+            desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+            desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
+        }else{
+            desc.setMaxAttributeSize(std::max(16u, mpScene->getRaytracingMaxAttributeSize()));
+            desc.setMaxPayloadSize(kMaxPayloadSizeByterWithAccel);
+        }
+
+        desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+        uint rayTypeCount = mAccelUseRayTracingInline ? 2 : 3;
+        mTracer.pBindingTable = RtBindingTable::create(rayTypeCount, rayTypeCount, mpScene->getGeometryCount());
+        auto& sbt = mTracer.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen"));
+        sbt->setMiss(0, desc.addMiss("alphaMiss"));
+        sbt->setMiss(1, desc.addMiss("shadowMiss"));
+        if (!mAccelUseRayTracingInline)
+            sbt->setMiss(2, desc.addMiss("shadowAccelMiss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(
+                0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("alphaClosestHit", "alphaAnyHit")
+            );
+            sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("", "shadowAnyHit"));
+            if (!mAccelUseRayTracingInline)
+                sbt->setHitGroup(2, 0, desc.addHitGroup("", "shadowAccelAnyHit", "shadowAccelIntersection"));
+        }
+
+        mTracer.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+    } 
+
     auto& lights = mpScene->getLights();
     // Specialize program.
     // These defines should not modify the program vars. Do not trigger program vars re-creation.
@@ -841,6 +887,7 @@ void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const Ren
     mTracer.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
     mTracer.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     mTracer.pProgram->addDefine("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
+    mTracer.pProgram->addDefine("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     mTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
@@ -1491,6 +1538,7 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
             mRebuildAccelDataBuffer |= group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
             group.tooltip("Data formats; For more info see AccelShadowData.slang");
             group.checkbox("Use PCF", mAccelUsePCF);
+            mResetTracePass |= group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
             if (auto group2 = group.group("Debug"))
             {
                 group2.checkbox("Enable", mAccelDebugShowAS.enable);
@@ -1654,35 +1702,7 @@ void TransparencyPathTracer::setScene(RenderContext* pRenderContext, const ref<S
         if (pScene->hasGeometryType(Scene::GeometryType::Custom))
         {
             logWarning("MinimalPathTracer: This render pass does not support custom primitives.");
-        }
-
-        // Create scene ray tracing program.
-        {
-            RtProgram::Desc desc;
-            desc.addShaderModules(mpScene->getShaderModules());
-            desc.addShaderLibrary(kShaderFile);
-            desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
-            desc.setMaxAttributeSize(std::max(16u, mpScene->getRaytracingMaxAttributeSize()));
-            desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
-
-            mTracer.pBindingTable = RtBindingTable::create(3, 3, mpScene->getGeometryCount());
-            auto& sbt = mTracer.pBindingTable;
-            sbt->setRayGen(desc.addRayGen("rayGen"));
-            sbt->setMiss(0, desc.addMiss("alphaMiss"));
-            sbt->setMiss(1, desc.addMiss("shadowMiss"));
-            sbt->setMiss(2, desc.addMiss("shadowAccelMiss"));
-
-            if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
-            {
-                sbt->setHitGroup(
-                    0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("alphaClosestHit", "alphaAnyHit")
-                );
-                sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("", "shadowAnyHit"));
-                sbt->setHitGroup(2, 0, desc.addHitGroup("", "shadowAccelAnyHit", "shadowAccelIntersection"));
-            }
-
-            mTracer.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
-        }        
+        }       
     }
 }
 

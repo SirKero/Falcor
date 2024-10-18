@@ -127,6 +127,7 @@ private:
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     bool mDebugFrameCount = false;
     bool mOptionsChanged = false;
+    bool mResetTracePass = false;
     ref<Sampler> mpPointSampler;
 
     //Configuration Shadow Map
@@ -159,6 +160,7 @@ private:
     uint mAccelDataFormatSize = 4; //Size of the data struct for the accel data
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;
+    bool mAccelUseRayTracingInline = true;
 
     struct
     {
@@ -221,6 +223,12 @@ private:
         ref<RtProgram> pProgram;
         ref<RtBindingTable> pBindingTable;
         ref<RtProgramVars> pVars;
+
+        void resetPip() {
+            pProgram.reset();
+            pBindingTable.reset();
+            pVars.reset();
+        }
     };
 
     RayTracingPipeline mTracer;
