@@ -28,6 +28,7 @@
 #include "TransparencyPathTracer.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
+#include "Utils/Math/FalcorMath.h"
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
@@ -617,6 +618,36 @@ void TransparencyPathTracer::generateTmpStochSM(RenderContext* pRenderContext, c
     }
 }
 
+std::array<float4,4> getFrustumPlanes(ref<Scene> pScene)
+{
+    const CameraData& data = pScene->getCamera()->getData();
+    const float fovY = focalLengthToFovY(data.focalLength, data.frameHeight);
+    const float3 camU = normalize(data.cameraU);
+    const float3 camV = normalize(data.cameraV);
+    const float3 camW = normalize(data.cameraW);
+
+    const float halfVSide = data.farZ * math::tan(fovY * 0.5f);
+    const float halfHSide = halfVSide * data.aspectRatio;
+    const float3 frontTimesFar = camW * data.farZ;
+
+    // Frustum Planes. Data struct xyz = N ; w = distance
+    std::array<float4, 4> frustumPlanes;
+    // Top
+    float3 N = math::normalize(math::cross(camU, frontTimesFar - camV * halfVSide));
+    frustumPlanes[0] = float4(N, math::dot(N, data.posW));
+    // Bottom
+    N = math::normalize(math::cross(frontTimesFar + camV * halfVSide, camU));
+    frustumPlanes[1] = float4(N, math::dot(N, data.posW));
+    // Left
+    N = math::normalize(math::cross(camV, frontTimesFar + camU * halfHSide));
+    frustumPlanes[2] = float4(N, math::dot(N, data.posW));
+    // Right
+    N = math::normalize(math::cross(frontTimesFar - camU * halfHSide, camV));
+    frustumPlanes[3] = float4(N, math::dot(N, data.posW));
+
+    return frustumPlanes;
+}
+
 void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "Generate Shadow Acceleration Structure");
 
@@ -638,7 +669,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kShaderAccelShadowRay);
-        desc.setMaxPayloadSize(96u); //
+        desc.setMaxPayloadSize(20u); //
                                                                                    //(4) + align(4)
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1u);
@@ -756,6 +787,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
+    mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -781,8 +813,12 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
-        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection; 
+        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
+        var["CB"]["gInvView"] = mShadowMapMVP[i].invView;
         var["CB"]["gView"] = mShadowMapMVP[i].view;
+        std::array<float4,4> planes = getFrustumPlanes(mpScene);
+        for (uint j = 0; j < 4; j++)
+            var["CB"]["gFrustumPlanes"][j] = planes[j];
 
         var["gAABB"] = mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[i];
@@ -1537,6 +1573,8 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
 
             mRebuildAccelDataBuffer |= group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
             group.tooltip("Data formats; For more info see AccelShadowData.slang");
+            group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
+            group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
             group.checkbox("Use PCF", mAccelUsePCF);
             mResetTracePass |= group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
             if (auto group2 = group.group("Debug"))

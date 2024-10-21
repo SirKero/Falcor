@@ -161,6 +161,7 @@ private:
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
+    bool mAccelUseFrustumCulling = true;
 
     struct
     {
