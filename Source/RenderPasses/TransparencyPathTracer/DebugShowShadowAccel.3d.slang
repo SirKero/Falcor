@@ -164,7 +164,7 @@ void verticesToCube(const in GsOut[8] vert, inout TriangleStream<GsOut> outStrea
 #endif
 void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 {
-    const uint count = gShadowCounter[0]; // Get the valid number of aabbs
+    const uint count = gShadowCounter[gSelectedLight]; // Get the valid number of aabbs
     if (aabbIdx == count) {
         float3 ndc[3];
         ndc[0] = float3(-1., -1., 1.0 - 1e-3);

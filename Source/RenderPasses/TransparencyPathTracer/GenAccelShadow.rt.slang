@@ -47,7 +47,8 @@ cbuffer CB
     float3 gLightPos; // Current Light Position
     float gNear;
     float gFar;
-    uint2 _pad;
+    uint gLightIdx;     //LightIndex
+    uint _pad;
     float4x4 gViewProj;    // View Projection for current light
     float4x4 gInvViewProj; // Inverse view projection
     float4x4 gInvProj;
@@ -306,7 +307,7 @@ void rayGen()
             #endif
                 {
                     uint insertIdx = 0;
-                    InterlockedAdd(gCounter[0], 1u, insertIdx);
+                    InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
                     if (insertIdx > MAX_IDX)
                         return;
 
@@ -344,7 +345,7 @@ void rayGen()
             #endif
                 {
                     uint insertIdx = 0;
-                    InterlockedAdd(gCounter[0], 1u, insertIdx);
+                    InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
                     if (insertIdx > MAX_IDX)
                         return;
             
@@ -375,7 +376,7 @@ void rayGen()
         #endif
             {
                 uint insertIdx = 0;
-                InterlockedAdd(gCounter[0], 1u, insertIdx);
+                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
                 if (insertIdx > MAX_IDX)
                     return;
 
@@ -394,7 +395,7 @@ void rayGen()
         #endif
             {
                 uint insertIdx = 0;
-                InterlockedAdd(gCounter[0], 1u, insertIdx);
+                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
                 if (insertIdx > MAX_IDX)
                     return;
 

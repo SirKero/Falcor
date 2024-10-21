@@ -112,6 +112,9 @@ private:
     // Internal state
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
+    ref<GpuFence> mpFence;                  ///< Fence for CPU/GPU syncs
+    static const uint kFramesInFlight = 3;  ///< Number of frames in flight for GPU/CPU sync
+    uint mStagingCount = 0;
 
     // Configuration Tracer
     TPTLightSampleMode mLightSampleMode = TPTLightSampleMode::RIS;
@@ -153,6 +156,7 @@ private:
     //Accel shadow settings
     static const uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
+    std::vector<uint64_t> mAccelFenceWaitValues; //Fence values forCounter sync
     ShadowAccelMode mAccelMode = ShadowAccelMode::NormalOffset;
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;

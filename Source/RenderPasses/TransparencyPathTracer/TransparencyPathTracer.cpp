@@ -111,6 +111,10 @@ TransparencyPathTracer::TransparencyPathTracer(ref<Device> pDevice, const Proper
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
 
+    //Create Fence
+    mpFence = GpuFence::create(mpDevice);
+    FALCOR_ASSERT(mpFence);
+
     // Create sampler.
     Sampler::Desc samplerDesc;
     samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
@@ -618,8 +622,9 @@ void TransparencyPathTracer::generateTmpStochSM(RenderContext* pRenderContext, c
     }
 }
 
-std::array<float4,4> getFrustumPlanes(ref<Scene> pScene)
+std::array<float4,4> getCameraFrustumPlanes(ref<Scene> pScene)
 {
+    //TODO add motion prediction
     const CameraData& data = pScene->getCamera()->getData();
     const float fovY = focalLengthToFovY(data.focalLength, data.frameHeight);
     const float3 camU = normalize(data.cameraU);
@@ -715,33 +720,34 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
                 mAccelShadowAABB[i]->setName("AccelShadowAABB_" + std::to_string(i));
             }
         }
+        //Counter
         if (mAccelShadowCounter.empty())
         {
-            mAccelShadowCounter.resize(numBuffers);
+            mAccelShadowCounter.resize(kFramesInFlight);
+            mAccelShadowCounterCPU.resize(kFramesInFlight);
+            mAccelFenceWaitValues.resize(kFramesInFlight);
+            mAccelShadowNumPoints.resize(numBuffers);
+
             uint initData = 0;
-            for (uint i = 0; i < numBuffers; i++)
+            for (uint i = 0; i < kFramesInFlight; i++)
             {
                 mAccelShadowCounter[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), 1u, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                    mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                     Buffer::CpuAccess::None, &initData, false
                 );
                 mAccelShadowCounter[i]->setName("AccelShadowAABBCounter_" + std::to_string(i));
-            }
-        }
-        if (mAccelShadowCounterCPU.empty())
-        {
-            mAccelShadowCounterCPU.resize(numBuffers);
-            mAccelShadowNumPoints.resize(numBuffers);
-            uint initData = 0;
-            for (uint i = 0; i < numBuffers; i++)
-            {
+
                 mAccelShadowCounterCPU[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), 1u, ResourceBindFlags::None,
-                    Buffer::CpuAccess::Read, &initData, false
+                    mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::None, Buffer::CpuAccess::Read, &initData, false
                 );
                 mAccelShadowCounterCPU[i]->setName("AccelShadowAABBCounterCPU_" + std::to_string(i));
-                mAccelShadowNumPoints[i] = mSMSize * mSMSize * mAccelApproxNumElementsPerPixel;
+
+                mAccelFenceWaitValues[i] = 0;
             }
+         
+            for (uint i=0; i<numBuffers; i++)
+                mAccelShadowNumPoints[i] = mSMSize * mSMSize * mAccelApproxNumElementsPerPixel;
+
         }
         if (mAccelShadowData.empty())
         {
@@ -776,9 +782,10 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     if (!mGenInactive.accelShadow && mShadowEvaluationMode != ShadowEvalMode::Accel || (mAccelDebugShowAS.enable && mAccelDebugShowAS.stopGeneration))
         return;
 
+    uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount :  0; //For sync if optimization is used
+
     //Clear Counter
-    for (uint i = 0; i < mAccelShadowCounter.size(); i++)
-        pRenderContext->clearUAV(mAccelShadowCounter[i]->getUAV(0u, 1u).get(), uint4(0));
+    pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, lights.size()).get(), uint4(0));
 
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mSMSize * mSMSize * mAccelApproxNumElementsPerPixel));
@@ -811,17 +818,18 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         var["CB"]["gLightPos"] = mShadowMapMVP[i].pos;
         var["CB"]["gNear"] = mNearFar.x;
         var["CB"]["gFar"] = mNearFar.y;
+        var["CB"]["gLightIdx"] = i;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
         var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
         var["CB"]["gInvView"] = mShadowMapMVP[i].invView;
         var["CB"]["gView"] = mShadowMapMVP[i].view;
-        std::array<float4,4> planes = getFrustumPlanes(mpScene);
+        std::array<float4,4> planes = getCameraFrustumPlanes(mpScene); //Get Top,Bottom,Left,Right Camera frustum plane
         for (uint j = 0; j < 4; j++)
             var["CB"]["gFrustumPlanes"][j] = planes[j];
 
         var["gAABB"] = mAccelShadowAABB[i];
-        var["gCounter"] = mAccelShadowCounter[i];
+        var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mAccelShadowData[i];
 
         // Get dimensions of ray dispatch.
@@ -830,6 +838,28 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
 
         // Spawn the rays.
         mpScene->raytrace(pRenderContext, mGenAccelShadowPip.pProgram.get(), mGenAccelShadowPip.pVars, uint3(targetDim, 1));
+    }
+
+    // Sync Photon copy data TODO better handling (less delay?)
+    if (mAccelShadowUseCPUCounterOptimization)
+    {
+        // Copy to CPU
+        uint numLights = lights.size();
+        pRenderContext->copyBufferRegion(
+            mAccelShadowCounterCPU[mStagingCount].get(), 0, mAccelShadowCounter[mStagingCount].get(), 0, sizeof(uint32_t) * numLights
+        );
+        pRenderContext->flush();
+        // Frame in flight for the counter
+        mAccelFenceWaitValues[mStagingCount] = mpFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
+        mStagingCount = (mStagingCount + 1) % kFramesInFlight;
+
+        uint64_t& fenceWaitVal = mAccelFenceWaitValues[mStagingCount];
+        // Wait for the GPU to finish the frame
+        mpFence->syncCpu(fenceWaitVal);
+
+        void* data = mAccelShadowCounterCPU[mStagingCount]->map(Buffer::MapType::Read);
+        std::memcpy(mAccelShadowNumPoints.data(), data, sizeof(uint) * numLights);
+        mAccelShadowCounterCPU[mStagingCount]->unmap();
     }
 
     //Build the Acceleration structure
@@ -842,18 +872,6 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         aabbCount.push_back(numPoints);
     }
     mpShadowAccelerationStrucure->update(pRenderContext, aabbCount);
-
-    //Handle photon counter
-    if (mAccelShadowUseCPUCounterOptimization)
-    {
-        for (uint i = 0; i < lights.size(); i++)
-        {
-            pRenderContext->copyBufferRegion(mAccelShadowCounterCPU[i].get(), 0, mAccelShadowCounter[i].get(), 0, sizeof(uint32_t));
-            void* data = mAccelShadowCounterCPU[i]->map(Buffer::MapType::Read);
-            std::memcpy(&mAccelShadowNumPoints[i], data, sizeof(uint));
-            mAccelShadowCounterCPU[i]->unmap();
-        }
-    }
 }
 
 void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const RenderData& renderData) {
@@ -1055,6 +1073,11 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
     if (!mRasterShowAccelPass.pVars)
         mRasterShowAccelPass.pVars = GraphicsVars::create(mpDevice, mRasterShowAccelPass.pProgram.get());
 
+    uint frameInFlight = 0;
+    // Staging count was increased at the end of the generation code, so take one less
+    if (mAccelShadowUseCPUCounterOptimization)
+        frameInFlight = mStagingCount == 0 ? kFramesInFlight - 1 : mStagingCount - 1; 
+
     auto var = mRasterShowAccelPass.pVars->getRootVar();
 
     var["gScene"] = mpScene->getParameterBlock();
@@ -1072,7 +1095,7 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
     var["gPointSampler"] = mpPointSampler;
 
     var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
-    var["gShadowCounter"] = mAccelShadowCounter[mAccelDebugShowAS.selectedLight];
+    var["gShadowCounter"] = mAccelShadowCounter[frameInFlight];
     var["gShadowData"] = mAccelShadowData[mAccelDebugShowAS.selectedLight];
     var["gOutputColor"] = renderData.getTexture(kOutputColor); //For blending
 
