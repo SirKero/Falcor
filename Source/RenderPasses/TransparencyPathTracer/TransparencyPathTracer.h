@@ -112,6 +112,9 @@ private:
     // Internal state
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
+    ref<GpuFence> mpFence;                  ///< Fence for CPU/GPU syncs
+    static const uint kFramesInFlight = 3;  ///< Number of frames in flight for GPU/CPU sync
+    uint mStagingCount = 0;
 
     // Configuration Tracer
     TPTLightSampleMode mLightSampleMode = TPTLightSampleMode::RIS;
@@ -127,6 +130,7 @@ private:
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     bool mDebugFrameCount = false;
     bool mOptionsChanged = false;
+    bool mResetTracePass = false;
     ref<Sampler> mpPointSampler;
 
     //Configuration Shadow Map
@@ -152,10 +156,16 @@ private:
     //Accel shadow settings
     static const uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
+    std::vector<uint64_t> mAccelFenceWaitValues; //Fence values forCounter sync
     ShadowAccelMode mAccelMode = ShadowAccelMode::NormalOffset;
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;
+    uint mAccelDataFormatSize = 4; //Size of the data struct for the accel data
+    bool mRebuildAccelDataBuffer = true;
+    bool mAccelUsePCF = false;
+    bool mAccelUseRayTracingInline = true;
+    bool mAccelUseFrustumCulling = true;
 
     struct
     {
@@ -218,6 +228,12 @@ private:
         ref<RtProgram> pProgram;
         ref<RtBindingTable> pBindingTable;
         ref<RtProgramVars> pVars;
+
+        void resetPip() {
+            pProgram.reset();
+            pBindingTable.reset();
+            pVars.reset();
+        }
     };
 
     RayTracingPipeline mTracer;

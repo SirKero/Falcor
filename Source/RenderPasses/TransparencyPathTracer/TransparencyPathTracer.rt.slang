@@ -25,6 +25,7 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
+#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -60,13 +61,10 @@ import SharedTypes;
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
 #endif
 
-// Accel Modes
-#define ACCEL_MODE_SHADOW3D 0
-#define ACCEL_MODE_NORMALOFFSET 1
-
-#ifndef ACCEL_MODE
-#define ACCEL_MODE ACCEL_MODE_SHADOW3D
+#ifndef SHADOW_ACCEL_PCF
+#define SHADOW_ACCEL_PCF 0
 #endif
+
 
 cbuffer CB
 {
@@ -107,7 +105,7 @@ Texture2D<float4> gTmpStochTransmittance[COUNT_SM];
 
 RaytracingAccelerationStructure gShadowAS;
 StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
-StructuredBuffer<float4> gAccelShadowData[COUNT_LIGHTS];
+StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
@@ -134,8 +132,11 @@ static const bool kUseAlphaRussianRoulette = USE_RUSSIAN_ROULETTE_FOR_ALPHA;
 static const bool kUsePathRussianRoulette = USE_RUSSIAN_ROULETTE_PATH;
 static const bool kUsePCF = USE_AVSM_PCF;
 static const bool kAVSMUseInterpolation = USE_AVSM_INTERPOLATION;
+static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;
 
 static const float kMinOpacity = 1e-7;
+
+static const bool kUseNormalizationFactor = false; //TODO make toggable
 
 /** Payload for shadow ray. (4B)
 */
@@ -163,21 +164,33 @@ struct TransparencyRayData {
 
 /** Payload for Accel Shadow
  */
+#if (ACCEL_MODE == ACCEL_MODE_NORMALOFFSET) && SHADOW_ACCEL_PCF
+struct AccelShadowRayData {
+    float4 visibility;
+    float4 hitDepth;
+
+    __init() {
+        this.visibility = float4(0.0);
+        this.hitDepth = float4(-1.0);
+    }
+}
+#else
 struct AccelShadowRayData {
     float visibility;
-    uint count;
-    float linZ;
-    float normalizationFactor;
+    float hitDepth;
 
     __init() {
         this.visibility = 0.0;
-        this.count = 0;
-        this.linZ = 0.0;
-        this.normalizationFactor = 0.0;
+        this.hitDepth = -1.0;
     }
 }
+#endif
+
 struct AccelShadowAttribs {
-    uint _pad;
+    float2 rangeZ;
+#if (ACCEL_MODE == ACCEL_MODE_NORMALOFFSET) && SHADOW_ACCEL_PCF
+    float2 pixel;
+#endif
 }
 /** Struct with data for the current path
 */
@@ -680,6 +693,90 @@ float evalTmpStochSM(uint lightIdx, float3 posW) {
     return shadow;
 }
 
+inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const AccelShadowData shadowData, const AccelShadowAttribs attribs, const float3 origin){
+
+    const float linZ = origin.z;
+    const float2 rangeZ = attribs.rangeZ;
+
+    #if ACCEL_MODE == ACCEL_MODE_SHADOW3D
+        // Shadow Data is x-> transparency before depth, y -> transparency after depth
+        float t = saturate((linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
+        float vis = lerp(shadowData.transparencyStart, shadowData.transparencyEnd, t);
+        rayData.visibility = max(rayData.visibility, vis);
+        rayData.hitDepth = 1.0; // Used for valid hit
+    #else //ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
+        //Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
+        rangeZ.y = rangeZ.x + shadowData.firstBoxRange;
+        float vis = shadowData.transparencyEnd;
+        float factor = 1.0;
+        float middleDepth = (rangeZ.x + rangeZ.y) / 2.0;
+        //in first box
+        if (linZ < rangeZ.y) {
+            // factor = max(2.0 - saturate((linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 1.0);
+
+            // factor = linZ - rangeZ.x;
+            factor = 1.0 / abs(middleDepth - linZ); // TODO stochastic approach?
+
+            vis = shadowData.transparencyStart;
+       
+        }
+        float distMiddleToLinZ = abs(middleDepth - linZ);
+        distMiddleToLinZ = middleDepth;
+        #if SHADOW_ACCEL_PCF
+            uint index = 3;
+            float2 pixelDiff = attribs.pixel - origin.xy;
+            if(pixelDiff.x > 0 &&  pixelDiff.y < 0)
+                index = 2;
+            else if(pixelDiff.x > 0 &&  pixelDiff.y > 0)
+                index = 1;
+            else if (pixelDiff.x < 0 &&  pixelDiff.y > 0)
+                index = 0;
+
+            if (kUseNormalizationFactor) {
+                rayData.visibility[index] += vis * factor;
+                rayData.hitDepth[index] = max(rayData.hitDepth[index], 0.0) + factor;
+            }
+            else if (rayData.hitDepth[index] < 0 || distMiddleToLinZ < rayData.hitDepth[index]) {
+                rayData.visibility[index] = vis;
+                rayData.hitDepth[index] = distMiddleToLinZ;
+            }
+        #else
+            if (kUseNormalizationFactor) {
+                rayData.visibility += vis * factor;
+                rayData.hitDepth = max(rayData.hitDepth, 0.0) + factor;
+            }
+            else if (rayData.hitDepth < 0 || distMiddleToLinZ < rayData.hitDepth) {
+                rayData.visibility = vis;
+                rayData.hitDepth = distMiddleToLinZ;
+            }
+        #endif // SHADOW_ACCEL_PCF
+    #endif
+}
+
+void traceAccelShadowInline(inout AccelShadowRayData rayData, uint lightIdx , const RayDesc ray){
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+    uint rayFlags = 0;
+    uint instanceMask = 1 << lightIdx;
+    rayQuery.TraceRayInline(gShadowAS,rayFlags,instanceMask,ray);
+
+    //Start tracing
+    while(rayQuery.Proceed()){
+        AABB aabb = gShadowAABBs[rayQuery.CandidateInstanceIndex()][rayQuery.CandidatePrimitiveIndex()];
+        AccelShadowAttribs attribs = {};
+        attribs.rangeZ = float2(aabb.minPoint.z, aabb.maxPoint.z);
+        #if (ACCEL_MODE == ACCEL_MODE_NORMALOFFSET) && SHADOW_ACCEL_PCF
+            attribs.pixel = (aabb.minPoint.xy + aabb.maxPoint.xy)/2.0 ; //Pixel center
+        #endif
+
+        //Check if hit is valid
+        if (!aabb.contains(ray.Origin))
+            continue;
+
+        AccelShadowData shadowData = AccelShadowData(gAccelShadowData[rayQuery.CandidateInstanceIndex()][rayQuery.CandidatePrimitiveIndex()]);
+        handelAccelShadowHit(rayData, shadowData, attribs, ray.Origin);
+    }
+}
+
 float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
     float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
     shadowPos.xyz /= shadowPos.w;
@@ -691,16 +788,19 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
     // Check if inside
     if (any(shadowPos.xyz < 0.0) || any(shadowPos.xyz > 1.0))
         return 0.0;
-    
 
-    //float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
-    float2 shadowPixel = shadowPos.xy * gSMSize;
+#if (ACCEL_MODE == ACCEL_MODE_NORMALOFFSET) && SHADOW_ACCEL_PCF
+    float2 gatherUV;
+    float4 w = getGatherWeights(shadowPos.xy, gSMSize, gatherUV);
+    float2 shadowPixel = gatherUV.xy * gSMSize;
+#else
+    float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
+#endif
+    //float2 shadowPixel = shadowPos.xy * gSMSize;
     // float dist = distance(posW, lightPosW);
     float dist = shadowPos.w;
 
     AccelShadowRayData rayData = AccelShadowRayData();
-    rayData.linZ = dist;
-    rayData.visibility = 0.0;
     RayDesc ray;
     ray.Origin = float3(shadowPixel.x, shadowPixel.y, dist);
     ray.Direction = float3(0,0,-1);
@@ -709,17 +809,36 @@ float evalAccelShadow(uint lightIdx, float3 posW, float3 lightPosW) {
 
     uint rayFlags = 0;
     uint instanceMask = 1 << lightIdx;
-    TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 2 /* hitIdx */, 1, 2 /* missIdx */, ray, rayData);
+    if(kAccelUseRayInline)
+        traceAccelShadowInline(rayData, lightIdx, ray);
+    else
+        TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 2 /* hitIdx */, 1, 2 /* missIdx */, ray, rayData);
+    
+    float visibility = 0;
+#if (ACCEL_MODE == ACCEL_MODE_NORMALOFFSET) && SHADOW_ACCEL_PCF
 
-    if (rayData.count == 0)
-        rayData.visibility = 1.0;
-#if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
-    else {
-        rayData.visibility /= rayData.normalizationFactor;
+    for(uint i=0; i<4; i++){
+        if (rayData.hitDepth[i] <= 0.0)
+            visibility += w[i] * 1.0;
+        else{
+            if(kUseNormalizationFactor)
+                rayData.visibility[i] /= max(rayData.hitDepth[i], 1e-8);
+            visibility += w[i] * rayData.visibility[i];
+        }
     }
+#else
+    if (rayData.hitDepth <= 0.0)
+        visibility = 1.0;
+    #if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
+        else {
+            if(kUseNormalizationFactor)
+                rayData.visibility /= max(rayData.hitDepth, 1e-8);
+            visibility = rayData.visibility;
+        }
+    #endif
 #endif
 
-    return rayData.visibility;
+    return visibility;
 }
 
 /** Samples a light index either uniform or with RIS (Good if a couple lights are used that dont overlap each other)
@@ -1122,49 +1241,21 @@ void shadowAnyHit(inout ShadowRayData rayData, BuiltInTriangleIntersectionAttrib
 [shader("anyhit")]
 void shadowAccelAnyHit(inout AccelShadowRayData rayData: SV_RayPayload, AccelShadowAttribs attribs: SV_IntersectionAttributes)
 {
-    // Get data
-    AABB aabb = gShadowAABBs[InstanceIndex()][PrimitiveIndex()];
-    float2 rangeZ = float2(aabb.minPoint.z, aabb.maxPoint.z);
-    if (rayData.linZ > rangeZ.y || rayData.linZ < rangeZ.x || !aabb.contains(WorldRayOrigin()))
-        IgnoreHit();
-
-    float4 shadowData = gAccelShadowData[InstanceIndex()][PrimitiveIndex()];
-#if ACCEL_MODE == ACCEL_MODE_SHADOW3D
-    // Shadow Data is x-> transparency before depth, y -> transparency after depth
-    float t = saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x));
-    float vis = lerp(shadowData.x, shadowData.y, t);
-    rayData.visibility = max(rayData.visibility, vis);
-#else //ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
-    //Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
-    rangeZ.y = rangeZ.x + shadowData.x;
-    float vis = shadowData.z;
-    float factor = 1.0;
-    //in first box
-    if (rayData.linZ < rangeZ.y) {
-        // factor = max(2.0 - saturate((rayData.linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 1.0);
-        factor = rayData.linZ - rangeZ.x;
-        vis = shadowData.y;
-        //TODO stochastic approach? 
-    }
-    /*
-    else if (rayData.linZ < rangeZ.y + shadowData.x) {
-        float t = saturate((rayData.linZ - (rangeZ.x + shadowData.x)) / ((rangeZ.y + shadowData.x) - (rangeZ.x + shadowData.x)));
-        vis = lerp(shadowData.y, shadowData.z, t);
-        //factor = 0;
-    }
-    */
-    rayData.visibility += vis * factor;
-    rayData.normalizationFactor += factor;
-#endif
-
-    rayData.count++;
+    AccelShadowData shadowData = AccelShadowData(gAccelShadowData[InstanceIndex()][PrimitiveIndex()]);
+    handelAccelShadowHit(rayData, shadowData, attribs, WorldRayOrigin());
     IgnoreHit();
 }
 
 [shader("intersection")]
 void shadowAccelIntersection() {
+    AABB aabb = gShadowAABBs[InstanceIndex()][PrimitiveIndex()];
     AccelShadowAttribs attribs = {};
-    ReportHit(RayTCurrent(), 0, attribs);
+    attribs.rangeZ = float2(aabb.minPoint.z, aabb.maxPoint.z);
+#if (ACCEL_MODE == ACCEL_MODE_NORMALOFFSET) && SHADOW_ACCEL_PCF
+    attribs.pixel = (aabb.minPoint.xy + aabb.maxPoint.xy)/2.0 ; //Pixel center
+#endif
+    if (aabb.contains(WorldRayOrigin()))
+        ReportHit(RayTCurrent(), 0, attribs);
 }
 
 //

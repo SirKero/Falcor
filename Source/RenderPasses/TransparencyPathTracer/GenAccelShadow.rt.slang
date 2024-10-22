@@ -1,3 +1,4 @@
+#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -19,11 +20,8 @@ import Utils.Geometry.GeometryHelpers;
 #define MAX_IDX 1
 #endif
 
-#define ACCEL_MODE_SHADOW3D 0
-#define ACCEL_MODE_NORMALOFFSET 1
-
-#ifndef ACCEL_MODE
-#define ACCEL_MODE ACCEL_MODE_SHADOW3D
+#ifndef ACCEL_USE_FRUSTUM_CULLING
+#define ACCEL_USE_FRUSTUM_CULLING 0
 #endif
 
 /** Payload for shadow ray.
@@ -34,7 +32,6 @@ struct RayData
     float depth;
     float currentTransmittance;
     float depthRange;
-
 
     __init() {
         this.dist = -1.0;
@@ -50,21 +47,24 @@ cbuffer CB
     float3 gLightPos; // Current Light Position
     float gNear;
     float gFar;
-    uint2 _pad;
+    uint gLightIdx;     //LightIndex
+    uint _pad;
     float4x4 gViewProj;    // View Projection for current light
     float4x4 gInvViewProj; // Inverse view projection
     float4x4 gInvProj;
+    float4x4 gInvView;
     float4x4 gView;
+    float4 gFrustumPlanes[4]; //Top, Bottom, Left, Right Planes of frustum
 }
 
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
-RWStructuredBuffer<float4> gData;
+RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 
 static const float kDepthBias = AVSM_DEPTH_BIAS;
 static const float kNormalBias = AVSM_NORMAL_DEPTH_BIAS;
 static const float kMinOpacity = 1e-7;
-static const float kPixelOffset = 0.5;
+static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; //Either 0.5(Normal) or 1.0(PCF)
 
 static const float2 kMSAAPattern[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
                                          float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
@@ -114,7 +114,7 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
 bool intersectPlane(const float3 N, const float3 p, const float3 ray, out float t) {
     t = 0.0;
     float denom = dot(N, ray);
-    if (abs(denom) > 1e-10) {
+    if (abs(denom) > 1e-4) {
         t = dot(p, N) / denom;
         return t >= 0;
     }
@@ -146,7 +146,8 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     float2 pixel = float2(DispatchRaysIndex().xy) + 0.5;
     const uint2 frameDim = DispatchRaysDimensions().xy;
 
-    //TODO this does not seem completly right (depth too small or too big)
+#if ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
+    //Estimate the size of the currently hit plane for the pixel
     float2 ndcCorners[4];
     ndcCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
     ndcCorners[1] = (pixel + float2(kPixelOffset, -kPixelOffset)) / frameDim;
@@ -172,29 +173,75 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     float maxDepth = rayData.depth;
     float minDepth = rayData.depth;
     for (uint i = 0; i < 4; i++) {
-        float t;
+        float t = 0;
         if (intersectPlane(normalView, posView, rayDir[i], t)) {
             float3 hitView = rayDir[i] * t;
             maxDepth = max(maxDepth, -hitView.z);
             minDepth = min(minDepth, -hitView.z);
         }
     }
+    rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-4);
+#endif
 
-    /*
-    // Plane equation d
-    float d = -1.0 * dot(posView, normalView);
-    float maxDepth = rayData.depth;
-    float minDepth = rayData.depth;
-
-    for (uint i = 0; i < 4; i++) {
-        float cornerDepth = (-d - (normalView.x * corners[i].x) - (normalView.y * corners[i].y)) / (normalView.z + 1e-10); //Negative due to view space
-        maxDepth = max(abs(cornerDepth), maxDepth);
-        minDepth = min(abs(cornerDepth), minDepth);
-    }
-    */
-    rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-8); //TODO test
-    
     rayData.dist = RayTCurrent();
+}
+
+void writeData(const uint index, const AccelShadowData shadowData) {
+    #if SHADOW_DATA_FORMAT_SIZE == 1
+        gData[index] = shadowData.packAsUint();
+    #elif SHADOW_DATA_FORMAT_SIZE == 2
+        gData[index] = shadowData.packAsUint2(); // Transmittance last sample
+    #elif SHADOW_DATA_FORMAT_SIZE == 4
+        gData[index] = shadowData.packAsUint4(); // Transmittance last sample
+    #endif
+}
+
+//Checks if any part of the AABB is in front of the plane
+//Assumes everything is in World space
+bool isInFrontOfPlane(const float3 planeN, const float planeDist, const AABB aabb) {
+    float3 c = aabb.center();
+    float3 e = aabb.maxPoint - c; // Positive extends
+    // Compute the projection interval radius of b onto L(t) = b.c + t * p.n
+    float r = dot(e, abs(planeN));
+
+    //A intersection would be if the signed distance is between [-r, r], but we only want to check if
+    //any part of the box is in front of the plane, hence we test if the distance is [-inf, -r]
+    return -r <= (dot(planeN, c) - planeDist);
+}
+
+//Checks if the AABB is inside of the cameras frustum
+bool aabbIsVisible(AABB aabb, uint2 smSize){
+    // Convert to World space AABB
+    float3 points[8] = {
+        aabb.minPoint,
+        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.minPoint.z),
+        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
+        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
+        float3(aabb.minPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
+        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
+        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
+        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
+    };
+    AABB aabbWorld = AABB(float3(FLT_MAX), float3(-FLT_MAX));
+    [unroll]
+    for (uint i = 0; i < 8; i++) {
+        float2 ndc = (2.0 * points[i].xy / smSize) - 1.0;
+        ndc.y *= -1.0;
+        float4 rayDir = mul(gInvProj, float4(ndc, 1.0, 1.0));
+        rayDir.xyz /= rayDir.z;                       // Normalize z
+        float3 posView = rayDir.xyz * (-points[i].z); // view is negative Z
+        float4 worldPos = mul(gInvView, float4(posView, 1.0));
+        aabbWorld.minPoint = min(aabbWorld.minPoint, worldPos.xyz);
+        aabbWorld.maxPoint = max(aabbWorld.maxPoint, worldPos.xyz);
+    }
+
+    bool visible = true;
+    [unroll]
+    for (uint i = 0; i < 4; i++) {
+        visible &= isInFrontOfPlane(gFrustumPlanes[i].xyz, gFrustumPlanes[i].w, aabbWorld);
+    }
+
+    return visible;
 }
 
 //
@@ -205,7 +252,7 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
-    
+
     float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / frameDim;
@@ -236,7 +283,7 @@ void rayGen()
 
         //Trace ray
         uint rayFlags = 0;
-        TraceRay(gScene.rtAccel, rayFlags, 0xff /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, rayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
     #if ACCEL_MODE  == ACCEL_MODE_SHADOW3D
 
@@ -254,14 +301,19 @@ void rayGen()
             float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth);
             float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, rayData.depth);
 
-            uint insertIdx = 0;
-            InterlockedAdd(gCounter[0], 1u, insertIdx);
-            if (insertIdx > MAX_IDX)
-                return;
+            AABB aabb = AABB(minPoint, maxPoint);
+            #if ACCEL_USE_FRUSTUM_CULLING
+                if (aabbIsVisible(aabb, frameDim))
+            #endif
+                {
+                    uint insertIdx = 0;
+                    InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                    if (insertIdx > MAX_IDX)
+                        return;
 
-            gAABB[insertIdx] = AABB(minPoint, maxPoint);
-            gData[insertIdx] = float4(lastTransmittances.y, lastTransmittances.x,0,0); // Transmittance last sample
-
+                    gAABB[insertIdx] = aabb;
+                    writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x));
+                }
         }
         // Update for next iteration
         if (rayData.dist > 0) {
@@ -287,14 +339,19 @@ void rayGen()
             float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
             float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
 
-            uint insertIdx = 0;
-            InterlockedAdd(gCounter[0], 1u, insertIdx);
-            if (insertIdx > MAX_IDX)
-                return;
-
-            gAABB[insertIdx] = AABB(minPoint, maxPoint);
-            gData[insertIdx] = float4(lastDepthRange * 2, lastTransmittances.y, lastTransmittances.x, 0); // Transmittance last sample
-
+            AABB aabb = AABB(minPoint, maxPoint);
+            #if ACCEL_USE_FRUSTUM_CULLING
+                if (aabbIsVisible(aabb, frameDim))
+            #endif
+                {
+                    uint insertIdx = 0;
+                    InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                    if (insertIdx > MAX_IDX)
+                        return;
+            
+                    gAABB[insertIdx] = aabb;
+                    writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
+                }
         }
         // Update for next iteration
         if (rayData.dist > 0) {
@@ -313,26 +370,38 @@ void rayGen()
         float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth);
         float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, gFar);
 
-        uint insertIdx = 0;
-        InterlockedAdd(gCounter[0], 1u, insertIdx);
-        if (insertIdx > MAX_IDX)
-            return;
+        AABB aabb = AABB(minPoint, maxPoint);
+        #if ACCEL_USE_FRUSTUM_CULLING
+            if (aabbIsVisible(aabb, frameDim))
+        #endif
+            {
+                uint insertIdx = 0;
+                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                if (insertIdx > MAX_IDX)
+                    return;
 
-        gAABB[insertIdx] = AABB(minPoint, maxPoint);
-        gData[insertIdx] = float4(lastTransmittances.x, lastTransmittances.x,0,0); // Transmittance last sample
+                gAABB[insertIdx] = aabb;
+                writeData(insertIdx, AccelShadowData(lastTransmittances.x, lastTransmittances.x));
+            }
     }
 #else // ACCEL_MODE == ACCEL_MODE_NORMALOFFSET
     if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
         float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
         float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, gFar));
 
-        uint insertIdx = 0;
-        InterlockedAdd(gCounter[0], 1u, insertIdx);
-        if (insertIdx > MAX_IDX)
-            return;
+        AABB aabb = AABB(minPoint, maxPoint);
+        #if ACCEL_USE_FRUSTUM_CULLING
+            if (aabbIsVisible(aabb, frameDim))
+        #endif
+            {
+                uint insertIdx = 0;
+                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                if (insertIdx > MAX_IDX)
+                    return;
 
-        gAABB[insertIdx] = AABB(minPoint, maxPoint);
-        gData[insertIdx] = float4(lastDepthRange * 2, lastTransmittances.y, lastTransmittances.x, 0); // Transmittance last sample
+                gAABB[insertIdx] = aabb;
+                writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
+            }
     }
 #endif
 }

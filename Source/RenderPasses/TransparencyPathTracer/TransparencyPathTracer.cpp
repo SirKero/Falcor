@@ -28,6 +28,7 @@
 #include "TransparencyPathTracer.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
+#include "Utils/Math/FalcorMath.h"
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
@@ -48,6 +49,7 @@ namespace
 
     //RT shader constant settings
     const uint kMaxPayloadSizeBytes = 20u;
+    const uint kMaxPayloadSizeByterWithAccel = 32u;
     const uint kMaxRecursionDepth = 1u;
     const uint kMaxPayloadSizeAVSMPerK = 8u;
 
@@ -78,6 +80,8 @@ namespace
 
     const Gui::DropdownList kAccelDebugVisModes = {{0, "Transparency (Heatmap)"}, {1, "AABB index"}, {2, "NormalBoxVis"}};
 
+    const Gui::DropdownList kAccelDataFormat= {{1, "Uint"}, {2, "Uint2"}, {4, "Uint4"}};
+
     //UI Graph
     // Colorblind friendly palette.
     const std::vector<uint32_t> kColorPalette = {
@@ -106,6 +110,10 @@ TransparencyPathTracer::TransparencyPathTracer(ref<Device> pDevice, const Proper
     // Create a sample generator.
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
+
+    //Create Fence
+    mpFence = GpuFence::create(mpDevice);
+    FALCOR_ASSERT(mpFence);
 
     // Create sampler.
     Sampler::Desc samplerDesc;
@@ -614,14 +622,50 @@ void TransparencyPathTracer::generateTmpStochSM(RenderContext* pRenderContext, c
     }
 }
 
+std::array<float4,4> getCameraFrustumPlanes(ref<Scene> pScene)
+{
+    //TODO add motion prediction
+    const CameraData& data = pScene->getCamera()->getData();
+    const float fovY = focalLengthToFovY(data.focalLength, data.frameHeight);
+    const float3 camU = normalize(data.cameraU);
+    const float3 camV = normalize(data.cameraV);
+    const float3 camW = normalize(data.cameraW);
+
+    const float halfVSide = data.farZ * math::tan(fovY * 0.5f);
+    const float halfHSide = halfVSide * data.aspectRatio;
+    const float3 frontTimesFar = camW * data.farZ;
+
+    // Frustum Planes. Data struct xyz = N ; w = distance
+    std::array<float4, 4> frustumPlanes;
+    // Top
+    float3 N = math::normalize(math::cross(camU, frontTimesFar - camV * halfVSide));
+    frustumPlanes[0] = float4(N, math::dot(N, data.posW));
+    // Bottom
+    N = math::normalize(math::cross(frontTimesFar + camV * halfVSide, camU));
+    frustumPlanes[1] = float4(N, math::dot(N, data.posW));
+    // Left
+    N = math::normalize(math::cross(camV, frontTimesFar + camU * halfHSide));
+    frustumPlanes[2] = float4(N, math::dot(N, data.posW));
+    // Right
+    N = math::normalize(math::cross(frontTimesFar - camU * halfHSide, camV));
+    frustumPlanes[3] = float4(N, math::dot(N, data.posW));
+
+    return frustumPlanes;
+}
+
 void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "Generate Shadow Acceleration Structure");
 
     if (mAVSMTexResChanged)
     {
         mAccelShadowAABB.clear();
-        mAccelShadowData.clear();
         mpShadowAccelerationStrucure.reset();
+    }
+
+    if (mRebuildAccelDataBuffer || mAVSMTexResChanged)
+    {
+        mAccelShadowData.clear();
+        mRebuildAccelDataBuffer = false;
     }
 
     // Create AVSM trace program
@@ -630,7 +674,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kShaderAccelShadowRay);
-        desc.setMaxPayloadSize(96u); //
+        desc.setMaxPayloadSize(20u); //
                                                                                    //(4) + align(4)
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1u);
@@ -649,9 +693,13 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         defines.add(mpScene->getSceneDefines());
         defines.add("AVSM_K", std::to_string(mNumberAVSMSamples));
         defines.add(mpSampleGenerator->getDefines());
+        defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+        defines.add("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
 
         mGenAccelShadowPip.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
+
+    // TODO rebuild data buffer on changing the format
 
     auto& lights = mpScene->getLights();
 
@@ -672,33 +720,34 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
                 mAccelShadowAABB[i]->setName("AccelShadowAABB_" + std::to_string(i));
             }
         }
+        //Counter
         if (mAccelShadowCounter.empty())
         {
-            mAccelShadowCounter.resize(numBuffers);
+            mAccelShadowCounter.resize(kFramesInFlight);
+            mAccelShadowCounterCPU.resize(kFramesInFlight);
+            mAccelFenceWaitValues.resize(kFramesInFlight);
+            mAccelShadowNumPoints.resize(numBuffers);
+
             uint initData = 0;
-            for (uint i = 0; i < numBuffers; i++)
+            for (uint i = 0; i < kFramesInFlight; i++)
             {
                 mAccelShadowCounter[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), 1u, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                    mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                     Buffer::CpuAccess::None, &initData, false
                 );
                 mAccelShadowCounter[i]->setName("AccelShadowAABBCounter_" + std::to_string(i));
-            }
-        }
-        if (mAccelShadowCounterCPU.empty())
-        {
-            mAccelShadowCounterCPU.resize(numBuffers);
-            mAccelShadowNumPoints.resize(numBuffers);
-            uint initData = 0;
-            for (uint i = 0; i < numBuffers; i++)
-            {
+
                 mAccelShadowCounterCPU[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), 1u, ResourceBindFlags::None,
-                    Buffer::CpuAccess::Read, &initData, false
+                    mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::None, Buffer::CpuAccess::Read, &initData, false
                 );
                 mAccelShadowCounterCPU[i]->setName("AccelShadowAABBCounterCPU_" + std::to_string(i));
-                mAccelShadowNumPoints[i] = mSMSize * mSMSize * mAccelApproxNumElementsPerPixel;
+
+                mAccelFenceWaitValues[i] = 0;
             }
+         
+            for (uint i=0; i<numBuffers; i++)
+                mAccelShadowNumPoints[i] = mSMSize * mSMSize * mAccelApproxNumElementsPerPixel;
+
         }
         if (mAccelShadowData.empty())
         {
@@ -706,7 +755,7 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(float4), mSMSize * mSMSize * mAccelApproxNumElementsPerPixel,
+                    mpDevice, sizeof(uint) * mAccelDataFormatSize, mSMSize * mSMSize * mAccelApproxNumElementsPerPixel,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));
@@ -733,15 +782,19 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
     if (!mGenInactive.accelShadow && mShadowEvaluationMode != ShadowEvalMode::Accel || (mAccelDebugShowAS.enable && mAccelDebugShowAS.stopGeneration))
         return;
 
+    uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount :  0; //For sync if optimization is used
+
     //Clear Counter
-    for (uint i = 0; i < mAccelShadowCounter.size(); i++)
-        pRenderContext->clearUAV(mAccelShadowCounter[i]->getUAV(0u, 1u).get(), uint4(0));
+    pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, lights.size()).get(), uint4(0));
 
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mSMSize * mSMSize * mAccelApproxNumElementsPerPixel));
     mGenAccelShadowPip.pProgram->addDefine("AVSM_DEPTH_BIAS", std::to_string(mDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("AVSM_NORMAL_DEPTH_BIAS", std::to_string(mNormalDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
+    mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+    mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
+    mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -765,13 +818,18 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         var["CB"]["gLightPos"] = mShadowMapMVP[i].pos;
         var["CB"]["gNear"] = mNearFar.x;
         var["CB"]["gFar"] = mNearFar.y;
+        var["CB"]["gLightIdx"] = i;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
-        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection; 
+        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
+        var["CB"]["gInvView"] = mShadowMapMVP[i].invView;
         var["CB"]["gView"] = mShadowMapMVP[i].view;
+        std::array<float4,4> planes = getCameraFrustumPlanes(mpScene); //Get Top,Bottom,Left,Right Camera frustum plane
+        for (uint j = 0; j < 4; j++)
+            var["CB"]["gFrustumPlanes"][j] = planes[j];
 
         var["gAABB"] = mAccelShadowAABB[i];
-        var["gCounter"] = mAccelShadowCounter[i];
+        var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mAccelShadowData[i];
 
         // Get dimensions of ray dispatch.
@@ -780,6 +838,28 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
 
         // Spawn the rays.
         mpScene->raytrace(pRenderContext, mGenAccelShadowPip.pProgram.get(), mGenAccelShadowPip.pVars, uint3(targetDim, 1));
+    }
+
+    // Sync Photon copy data TODO better handling (less delay?)
+    if (mAccelShadowUseCPUCounterOptimization)
+    {
+        // Copy to CPU
+        uint numLights = lights.size();
+        pRenderContext->copyBufferRegion(
+            mAccelShadowCounterCPU[mStagingCount].get(), 0, mAccelShadowCounter[mStagingCount].get(), 0, sizeof(uint32_t) * numLights
+        );
+        pRenderContext->flush();
+        // Frame in flight for the counter
+        mAccelFenceWaitValues[mStagingCount] = mpFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
+        mStagingCount = (mStagingCount + 1) % kFramesInFlight;
+
+        uint64_t& fenceWaitVal = mAccelFenceWaitValues[mStagingCount];
+        // Wait for the GPU to finish the frame
+        mpFence->syncCpu(fenceWaitVal);
+
+        void* data = mAccelShadowCounterCPU[mStagingCount]->map(Buffer::MapType::Read);
+        std::memcpy(mAccelShadowNumPoints.data(), data, sizeof(uint) * numLights);
+        mAccelShadowCounterCPU[mStagingCount]->unmap();
     }
 
     //Build the Acceleration structure
@@ -792,22 +872,55 @@ void TransparencyPathTracer::generateAccelShadow(RenderContext* pRenderContext, 
         aabbCount.push_back(numPoints);
     }
     mpShadowAccelerationStrucure->update(pRenderContext, aabbCount);
-
-    //Handle photon counter
-    if (mAccelShadowUseCPUCounterOptimization)
-    {
-        for (uint i = 0; i < lights.size(); i++)
-        {
-            pRenderContext->copyBufferRegion(mAccelShadowCounterCPU[i].get(), 0, mAccelShadowCounter[i].get(), 0, sizeof(uint32_t));
-            void* data = mAccelShadowCounterCPU[i]->map(Buffer::MapType::Read);
-            std::memcpy(&mAccelShadowNumPoints[i], data, sizeof(uint));
-            mAccelShadowCounterCPU[i]->unmap();
-        }
-    }
 }
 
 void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "Trace Scene");
+
+    if (mResetTracePass) {
+        mTracer.resetPip();
+        mResetTracePass = false;
+    }
+       
+
+    // Create scene ray tracing program.
+    if(!mTracer.pProgram){
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderFile);
+        
+        if (mAccelUseRayTracingInline){
+            desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+            desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
+        }else{
+            desc.setMaxAttributeSize(std::max(16u, mpScene->getRaytracingMaxAttributeSize()));
+            desc.setMaxPayloadSize(kMaxPayloadSizeByterWithAccel);
+        }
+
+        desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
+
+        uint rayTypeCount = mAccelUseRayTracingInline ? 2 : 3;
+        mTracer.pBindingTable = RtBindingTable::create(rayTypeCount, rayTypeCount, mpScene->getGeometryCount());
+        auto& sbt = mTracer.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen"));
+        sbt->setMiss(0, desc.addMiss("alphaMiss"));
+        sbt->setMiss(1, desc.addMiss("shadowMiss"));
+        if (!mAccelUseRayTracingInline)
+            sbt->setMiss(2, desc.addMiss("shadowAccelMiss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(
+                0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("alphaClosestHit", "alphaAnyHit")
+            );
+            sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("", "shadowAnyHit"));
+            if (!mAccelUseRayTracingInline)
+                sbt->setHitGroup(2, 0, desc.addHitGroup("", "shadowAccelAnyHit", "shadowAccelIntersection"));
+        }
+
+        mTracer.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+    } 
+
     auto& lights = mpScene->getLights();
     // Specialize program.
     // These defines should not modify the program vars. Do not trigger program vars re-creation.
@@ -826,6 +939,9 @@ void TransparencyPathTracer::traceScene(RenderContext* pRenderContext, const Ren
     mTracer.pProgram->addDefine("USE_AVSM_PCF", mAVSMUsePCF ? "1" : "0");
     mTracer.pProgram->addDefine("USE_AVSM_INTERPOLATION", mAVSMUseInterpolation ? "1" : "0");
     mTracer.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
+    mTracer.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+    mTracer.pProgram->addDefine("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
+    mTracer.pProgram->addDefine("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
     mTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
@@ -924,6 +1040,7 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
 
         auto defines = mpScene->getSceneDefines();
         defines.add("ACCEL_MODE", std::to_string((uint)mAccelMode));
+        defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
         // Create Program and state
         mRasterShowAccelPass.pProgram = GraphicsProgram::create(mpDevice, desc, defines);
         mRasterShowAccelPass.pState = GraphicsState::create(mpDevice);
@@ -950,10 +1067,16 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
 
     //Runtime Defines
     mRasterShowAccelPass.pProgram->addDefine("ACCEL_MODE", std::to_string((uint)mAccelMode));
+    mRasterShowAccelPass.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
 
     //Vars
     if (!mRasterShowAccelPass.pVars)
         mRasterShowAccelPass.pVars = GraphicsVars::create(mpDevice, mRasterShowAccelPass.pProgram.get());
+
+    uint frameInFlight = 0;
+    // Staging count was increased at the end of the generation code, so take one less
+    if (mAccelShadowUseCPUCounterOptimization)
+        frameInFlight = mStagingCount == 0 ? kFramesInFlight - 1 : mStagingCount - 1; 
 
     auto var = mRasterShowAccelPass.pVars->getRootVar();
 
@@ -972,7 +1095,7 @@ void TransparencyPathTracer::debugShowShadowAccel(RenderContext* pRenderContext,
     var["gPointSampler"] = mpPointSampler;
 
     var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
-    var["gShadowCounter"] = mAccelShadowCounter[mAccelDebugShowAS.selectedLight];
+    var["gShadowCounter"] = mAccelShadowCounter[frameInFlight];
     var["gShadowData"] = mAccelShadowData[mAccelDebugShowAS.selectedLight];
     var["gOutputColor"] = renderData.getTexture(kOutputColor); //For blending
 
@@ -1471,6 +1594,12 @@ void TransparencyPathTracer::renderUI(Gui::Widgets& widget)
                 group.var("CPU Counter overestimation", mAccelShadowOverestimation, 1.0f, 2.0f, 0.001f);
             }
 
+            mRebuildAccelDataBuffer |= group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
+            group.tooltip("Data formats; For more info see AccelShadowData.slang");
+            group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
+            group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
+            group.checkbox("Use PCF", mAccelUsePCF);
+            mResetTracePass |= group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
             if (auto group2 = group.group("Debug"))
             {
                 group2.checkbox("Enable", mAccelDebugShowAS.enable);
@@ -1634,35 +1763,7 @@ void TransparencyPathTracer::setScene(RenderContext* pRenderContext, const ref<S
         if (pScene->hasGeometryType(Scene::GeometryType::Custom))
         {
             logWarning("MinimalPathTracer: This render pass does not support custom primitives.");
-        }
-
-        // Create scene ray tracing program.
-        {
-            RtProgram::Desc desc;
-            desc.addShaderModules(mpScene->getShaderModules());
-            desc.addShaderLibrary(kShaderFile);
-            desc.setMaxPayloadSize(kMaxPayloadSizeBytes);
-            desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
-            desc.setMaxTraceRecursionDepth(kMaxRecursionDepth);
-
-            mTracer.pBindingTable = RtBindingTable::create(3, 3, mpScene->getGeometryCount());
-            auto& sbt = mTracer.pBindingTable;
-            sbt->setRayGen(desc.addRayGen("rayGen"));
-            sbt->setMiss(0, desc.addMiss("alphaMiss"));
-            sbt->setMiss(1, desc.addMiss("shadowMiss"));
-            sbt->setMiss(2, desc.addMiss("shadowAccelMiss"));
-
-            if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
-            {
-                sbt->setHitGroup(
-                    0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("alphaClosestHit", "alphaAnyHit")
-                );
-                sbt->setHitGroup(1, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("", "shadowAnyHit"));
-                sbt->setHitGroup(2, 0, desc.addHitGroup("", "shadowAccelAnyHit", "shadowAccelIntersection"));
-            }
-
-            mTracer.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
-        }        
+        }       
     }
 }
 
