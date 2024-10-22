@@ -182,6 +182,7 @@ void GBufferRaster::execute(RenderContext* pRenderContext, const RenderData& ren
     }
 
     RasterizerState::CullMode cullMode = mForceCullMode ? mCullMode : kDefaultCullMode;
+    RasterizerState::MeshRenderMode renderMode = mCullNonOpaque ? RasterizerState::MeshRenderMode::SkipNonOpaque : RasterizerState::MeshRenderMode::All;
 
     // Depth pass.
     {
@@ -196,9 +197,9 @@ void GBufferRaster::execute(RenderContext* pRenderContext, const RenderData& ren
         mDepthPass.pState->setFbo(mpFbo);
 
         if (mUseFrustumCulling)
-            mpScene->rasterizeFrustumCulling(pRenderContext, mDepthPass.pState.get(), mDepthPass.pVars.get(), cullMode);
+            mpScene->rasterizeFrustumCulling(pRenderContext, mDepthPass.pState.get(), mDepthPass.pVars.get(), cullMode, renderMode);
         else
-            mpScene->rasterize(pRenderContext, mDepthPass.pState.get(), mDepthPass.pVars.get(), cullMode);
+            mpScene->rasterize(pRenderContext, mDepthPass.pState.get(), mDepthPass.pVars.get(), cullMode, renderMode);
     }
 
     // GBuffer pass.
@@ -228,11 +229,11 @@ void GBufferRaster::execute(RenderContext* pRenderContext, const RenderData& ren
         var["PerFrameCB"]["gFrameDim"] = mFrameDim;
         mGBufferPass.pState->setFbo(mpFbo); // Sets the viewport
 
-        // Rasterize the scene.
+        //Rasterize the scene
         if (mUseFrustumCulling)
-            mpScene->rasterizeFrustumCulling(pRenderContext, mGBufferPass.pState.get(), mGBufferPass.pVars.get(), cullMode);
+            mpScene->rasterizeFrustumCulling(pRenderContext, mGBufferPass.pState.get(), mGBufferPass.pVars.get(), cullMode, renderMode);
         else
-            mpScene->rasterize(pRenderContext, mGBufferPass.pState.get(), mGBufferPass.pVars.get(), cullMode);
+            mpScene->rasterize(pRenderContext, mGBufferPass.pState.get(), mGBufferPass.pVars.get(), cullMode, renderMode);
     }
 
     mFrameCount++;

@@ -287,6 +287,7 @@ namespace Falcor
             bool isStatic = false;              ///< True if group represents static non-instanced geometry.
             bool isDisplaced = false;           ///< True if group uses displacement mapping.
             bool isCastShadow = true;          ///< True if group mesh should cast shadows
+            bool isOpaque = true;              ///< True if group mesh is opaque
         };
 
         /** Scene graph node.
@@ -1309,6 +1310,7 @@ namespace Falcor
             bool ignoreWinding = false;     ///< Ignores winding and forces draws without culling (for transparent and double sided mats)
             bool isDynamic = false;         ///< For Dynamic Meshes if they should be rendered seperatly
             bool isCastShadow = true;      ///< True if the mesh should cast a shadow
+            bool isOpaque = true;           ///< True if the mesh is opaque
             ResourceFormat ibFormat = ResourceFormat::Unknown;  ///< Index buffer format.
         };
 

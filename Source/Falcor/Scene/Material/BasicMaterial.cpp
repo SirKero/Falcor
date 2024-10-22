@@ -628,7 +628,7 @@ namespace Falcor
         // This is however expected to be rare and probably not worth the runtime cost of an extra branch.
         // TODO: Check if optimizing for always-fail is worth it.
         // TODO: Update the logic if other alpha modes are added.
-        bool useAlpha = mAlphaRange.x < getAlphaThreshold();
+        bool useAlpha = mAlphaRange.x < 1.0; //getAlphaThreshold(); 
         setAlphaMode(useAlpha ? AlphaMode::Mask : AlphaMode::Opaque);
     }
 

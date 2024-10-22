@@ -167,5 +167,9 @@ void VBufferRaster::execute(RenderContext* pRenderContext, const RenderData& ren
 
     // Rasterize the scene.
     RasterizerState::CullMode cullMode = mForceCullMode ? mCullMode : kDefaultCullMode;
-    mpScene->rasterize(pRenderContext, mRaster.pState.get(), mRaster.pVars.get(), cullMode);
+    RasterizerState::MeshRenderMode renderMode = mCullNonOpaque ?RasterizerState::MeshRenderMode::SkipNonOpaque :RasterizerState::MeshRenderMode::All;
+    if (mUseFrustumCulling)
+        mpScene->rasterizeFrustumCulling(pRenderContext, mRaster.pState.get(), mRaster.pVars.get(), cullMode, renderMode);
+    else
+        mpScene->rasterize(pRenderContext, mRaster.pState.get(), mRaster.pVars.get(), cullMode, renderMode);
 }

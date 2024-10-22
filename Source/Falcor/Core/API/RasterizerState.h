@@ -74,10 +74,12 @@ public:
     */
     enum class MeshRenderMode : uint32_t
     {
-        All = 0,                ///< Rasterize all meshes
-        SkipStatic = 1,         ///< Rasterize static meshes only
-        SkipDynamic = 2,        ///< Rasterize dynamic meshes 
-        SkipNonDoubleSided = 4, ///< Rasterizes only double Sided Meshes
+        All = 0x00,             ///< Rasterize all meshes
+        SkipStatic = 0x1,         ///< Rasterize static meshes only
+        SkipDynamic = 0x2,        ///< Rasterize dynamic meshes 
+        SkipNonDoubleSided = 0x4, ///< Rasterizes only double Sided Meshes
+        SkipNonOpaque = 0x8, ///< Rasterizes only opaque meshes
+        SkipOpaque = 0x10,   ///< Rasterizes only non-opaque meshes
     };
 
     /**

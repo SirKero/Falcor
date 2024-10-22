@@ -82,6 +82,7 @@ protected:
     bool                            mUseAlphaTest = true;                           ///< Enable alpha test.
     bool                            mAdjustShadingNormals = true;                   ///< Adjust shading normals.
     bool                            mForceCullMode = false;                         ///< Force cull mode for all geometry, otherwise set it based on the scene.
+    bool                            mCullNonOpaque = false;                         ///< Culls all alpha tested materials 
     RasterizerState::CullMode       mCullMode = RasterizerState::CullMode::Back;    ///< Cull mode to use for when mForceCullMode is true.
     bool                            mUseFrustumCulling = true;                      ///< Frustum Culling for rasterization
 

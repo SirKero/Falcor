@@ -1787,8 +1787,10 @@ namespace Falcor
 
         using meshList = std::vector<MeshID>;
         std::unordered_map<NodeID, meshList> nodeToMeshList;
-        meshList staticMeshes;
-        meshList staticNonShadowCastingMeshes;
+        meshList staticOpaqueMeshes;
+        meshList staticOpaqueNonShadowCastingMeshes;
+        meshList staticNonOpaqueMeshes;
+        meshList staticNonOpaqueNonShadowCastingMeshes;
         meshList staticDisplacedMeshes;
         meshList dynamicDisplacedMeshes;
         size_t nonInstancedMeshCount = 0;
@@ -1805,10 +1807,13 @@ namespace Falcor
             const auto& pMaterial = mSceneData.pMaterials->getMaterial(mesh.materialId);
             if (pMaterial->isDisplaced()) mesh.isDisplaced = true;
             if (!pMaterial->isCastShadow()) mesh.isCastShadow = false;
+            if (!pMaterial->isOpaque()) mesh.isOpaque = false;
 
             if (mesh.isStatic && mesh.isDisplaced) staticDisplacedMeshes.push_back(meshID);
-            else if (mesh.isStatic && !mesh.isCastShadow) staticNonShadowCastingMeshes.push_back(meshID);
-            else if (mesh.isStatic) staticMeshes.push_back(meshID);
+            else if (mesh.isStatic && !mesh.isCastShadow && mesh.isOpaque) staticOpaqueNonShadowCastingMeshes.push_back(meshID);
+            else if (mesh.isStatic && !mesh.isCastShadow && !mesh.isOpaque) staticNonOpaqueNonShadowCastingMeshes.push_back(meshID);
+            else if (mesh.isStatic && mesh.isOpaque) staticOpaqueMeshes.push_back(meshID);
+            else if (mesh.isStatic && !mesh.isOpaque) staticNonOpaqueMeshes.push_back(meshID);
             else if (!mesh.isStatic && mesh.isDisplaced) dynamicDisplacedMeshes.push_back(meshID);
             else nodeToMeshList[nodeID].push_back(meshID);
             nonInstancedMeshCount++;
@@ -1817,13 +1822,20 @@ namespace Falcor
         // Validate that mesh counts add up.
         size_t nonInstancedDynamicMeshCount = 0;
         for (const auto& it : nodeToMeshList) nonInstancedDynamicMeshCount += it.second.size();
-        FALCOR_ASSERT(staticMeshes.size() + staticNonShadowCastingMeshes.size() + staticDisplacedMeshes.size() + dynamicDisplacedMeshes.size() + nonInstancedDynamicMeshCount == nonInstancedMeshCount);
+        FALCOR_ASSERT(
+            staticOpaqueMeshes.size() + staticNonOpaqueMeshes.size() + staticOpaqueNonShadowCastingMeshes.size() +
+                staticNonOpaqueNonShadowCastingMeshes.size() + staticDisplacedMeshes.size() +
+                dynamicDisplacedMeshes.size() + nonInstancedDynamicMeshCount ==
+            nonInstancedMeshCount
+        );
 
         // Classify instanced meshes.
         // The instanced meshes are grouped based on their lists of instances.
         // Meshes with an identical set of instances can be placed together in a BLAS.
-        std::map<std::set<NodeID>, meshList> instancesToMeshList;
-        std::map<std::set<NodeID>, meshList> instancesToNonShadowCastingMeshList;
+        std::map<std::set<NodeID>, meshList> instancesToOpaqueMeshList;
+        std::map<std::set<NodeID>, meshList> instancesToNonOpaqueMeshList;
+        std::map<std::set<NodeID>, meshList> instancesToOpaqueNonShadowCastingMeshList;
+        std::map<std::set<NodeID>, meshList> instancesToNonOpaqueNonShadowCastingMeshList;
         std::map<std::set<NodeID>, meshList> displacedInstancesToMeshList;
         size_t instancedMeshCount = 0;
 
@@ -1835,30 +1847,45 @@ namespace Falcor
             // Mark displaced meshes.
             const auto& pMaterial = mSceneData.pMaterials->getMaterial(mesh.materialId);
             if (pMaterial->isDisplaced()) mesh.isDisplaced = true;
-            if (!pMaterial->isCastShadow())
-                mesh.isCastShadow = false;
+            if (!pMaterial->isCastShadow()) mesh.isCastShadow = false;
+            if (!pMaterial->isOpaque()) mesh.isOpaque = false;
 
             if (mesh.isDisplaced) displacedInstancesToMeshList[mesh.instances].push_back(meshID);
-            else if (!mesh.isCastShadow)
-                instancesToNonShadowCastingMeshList[mesh.instances].push_back(meshID);
-            else instancesToMeshList[mesh.instances].push_back(meshID);
+            else if (!mesh.isCastShadow && mesh.isOpaque) instancesToOpaqueNonShadowCastingMeshList[mesh.instances].push_back(meshID);
+            else if (!mesh.isCastShadow && !mesh.isOpaque) instancesToNonOpaqueNonShadowCastingMeshList[mesh.instances].push_back(meshID);
+            else if (mesh.isOpaque) instancesToOpaqueMeshList[mesh.instances].push_back(meshID);
+            else instancesToNonOpaqueMeshList[mesh.instances].push_back(meshID);
             instancedMeshCount++;
         }
 
         // Validate that each mesh is only indexed once.
-        std::set<MeshID> instancedMeshes;
-        size_t instancedCount = 0;
-        for (const auto& it : instancesToMeshList)
+        std::set<MeshID> instancedOpaqueMeshes;
+        size_t instancedOpaqueCount = 0;
+        for (const auto& it : instancesToOpaqueMeshList)
         {
-            instancedMeshes.insert(it.second.begin(), it.second.end());
-            instancedCount += it.second.size();
+            instancedOpaqueMeshes.insert(it.second.begin(), it.second.end());
+            instancedOpaqueCount += it.second.size();
         }
-        std::set<MeshID> instancedNonShadowCastingMeshes;
-        size_t instancedNonShadowCastingCount = 0;
-        for (const auto& it : instancesToNonShadowCastingMeshList)
+        std::set<MeshID> instancedNonOpaqueMeshes;
+        size_t instancedNonOpaqueCount = 0;
+        for (const auto& it : instancesToNonOpaqueMeshList)
         {
-            instancedNonShadowCastingMeshes.insert(it.second.begin(), it.second.end());
-            instancedNonShadowCastingCount += it.second.size();
+            instancedNonOpaqueMeshes.insert(it.second.begin(), it.second.end());
+            instancedNonOpaqueCount += it.second.size();
+        }
+        std::set<MeshID> instancedOpaqueNonShadowCastingMeshes;
+        size_t instancedOpaqueNonShadowCastingCount = 0;
+        for (const auto& it : instancesToOpaqueNonShadowCastingMeshList)
+        {
+            instancedOpaqueNonShadowCastingMeshes.insert(it.second.begin(), it.second.end());
+            instancedOpaqueNonShadowCastingCount += it.second.size();
+        }
+        std::set<MeshID> instancedNonOpaqueNonShadowCastingMeshes;
+        size_t instancedNonOpaqueNonShadowCastingCount = 0;
+        for (const auto& it : instancesToNonOpaqueNonShadowCastingMeshList)
+        {
+            instancedNonOpaqueNonShadowCastingMeshes.insert(it.second.begin(), it.second.end());
+            instancedNonOpaqueNonShadowCastingCount += it.second.size();
         }
         std::set<MeshID> displacedInstancedMeshes;
         size_t displacedInstancedCount = 0;
@@ -1867,19 +1894,19 @@ namespace Falcor
             displacedInstancedMeshes.insert(it.second.begin(), it.second.end());
             displacedInstancedCount += it.second.size();
         }
-        if ((instancedCount + instancedNonShadowCastingCount + displacedInstancedCount) != instancedMeshCount ||
-            (instancedMeshes.size() + instancedNonShadowCastingMeshes.size() + displacedInstancedMeshes.size()) != instancedMeshCount)
+        if ((instancedOpaqueCount + instancedNonOpaqueCount + instancedOpaqueNonShadowCastingCount + instancedNonOpaqueNonShadowCastingCount + displacedInstancedCount)
+            != instancedMeshCount ||
+            (instancedOpaqueMeshes.size() + instancedNonOpaqueMeshes.size() + instancedOpaqueNonShadowCastingMeshes.size() + instancedNonOpaqueNonShadowCastingMeshes.size() + displacedInstancedMeshes.size())
+            != instancedMeshCount)
             throw RuntimeError("Error in instanced mesh grouping logic");
 
-        logInfo("Found {} static non-instanced meshes, arranged in 1 mesh group.", staticMeshes.size());
-        logInfo("Found {} static (non shadow throwable) non-instanced meshes, arranged in 1 mesh group.", staticNonShadowCastingMeshes.size());
+        logInfo("Found {} opaque static non-instanced meshes, arranged in 1 mesh group.", staticOpaqueMeshes.size());
+        logInfo("Found {} non-opaque static non-instanced meshes, arranged in 1 mesh group.", staticNonOpaqueMeshes.size());
+        logInfo("Found {} opaque static (non shadow throwable) non-instanced meshes, arranged in 1 mesh group.", staticOpaqueNonShadowCastingMeshes.size());
+        logInfo("Found {} non-opaque static (non shadow throwable) non-instanced meshes, arranged in 1 mesh group.", staticNonOpaqueNonShadowCastingMeshes.size());
         logInfo("Found {} displaced non-instanced meshes, arranged in 1 mesh group.", staticDisplacedMeshes.size());
         logInfo("Found {} dynamic non-instanced meshes, arranged in {} mesh groups.", nonInstancedDynamicMeshCount, nodeToMeshList.size());
-        logInfo("Found {} instanced meshes, arranged in {} mesh groups.", instancedMeshCount, instancesToMeshList.size());
-        logInfo(
-            "Found {} (non shadow throwable) instanced meshes, arranged in {} mesh groups.", instancedNonShadowCastingCount,
-            instancesToNonShadowCastingMeshList.size()
-        );
+        logInfo("Found {} instanced meshes, arranged in {} mesh groups.", instancedMeshCount, instancesToOpaqueMeshList.size() + instancesToNonOpaqueMeshList.size() + instancesToOpaqueNonShadowCastingMeshList.size() + instancesToNonOpaqueNonShadowCastingMeshList.size());
 
         // Build final result. Format is a list of Mesh ID's per mesh group.
 
@@ -1889,29 +1916,37 @@ namespace Falcor
             {
                 //The group should contain the same
                 auto& mesh = mMeshes[meshes[0].get()];
-                mMeshGroups.push_back({meshes, mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow});
+                mMeshGroups.push_back({meshes, mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque});
             }
             else
             {
                 for (const auto& meshID : meshes)
                 {
                     auto& mesh = mMeshes[meshID.get()];
-                    mMeshGroups.push_back(MeshGroup{meshList({meshID}), mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow});
+                    mMeshGroups.push_back(MeshGroup{meshList({meshID}), mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque});
                 }
                 
             }
         };
 
         // All static non-instanced meshes go in a single group or individual groups depending on config.
-        if (!staticMeshes.empty())
+        if (!staticOpaqueMeshes.empty())
         {
-            addMeshes(staticMeshes, is_set(mFlags, Flags::RTDontMergeStatic));
+            addMeshes(staticOpaqueMeshes, is_set(mFlags, Flags::RTDontMergeStatic));
+        }
+        if (!staticNonOpaqueMeshes.empty())
+        {
+            addMeshes(staticNonOpaqueMeshes, is_set(mFlags, Flags::RTDontMergeStatic));
         }
 
         // All static non-instanced meshes go in a single group or individual groups depending on config.
-        if (!staticNonShadowCastingMeshes.empty())
+        if (!staticOpaqueNonShadowCastingMeshes.empty())
         {
-            addMeshes(staticNonShadowCastingMeshes, is_set(mFlags, Flags::RTDontMergeStatic));
+            addMeshes(staticOpaqueNonShadowCastingMeshes, is_set(mFlags, Flags::RTDontMergeStatic));
+        }
+        if (!staticNonOpaqueNonShadowCastingMeshes.empty())
+        {
+            addMeshes(staticNonOpaqueNonShadowCastingMeshes, is_set(mFlags, Flags::RTDontMergeStatic));
         }
 
         // Non-instanced dynamic meshes were sorted above so just copy each list.
@@ -1921,13 +1956,21 @@ namespace Falcor
         }
 
         // Instanced static and dynamic meshes are grouped based on instance lists.
-        for (const auto& it : instancesToMeshList)
+        for (const auto& it : instancesToOpaqueMeshList)
         {
             addMeshes(it.second,is_set(mFlags, Flags::RTDontMergeInstanced));
         }
+        for (const auto& it : instancesToNonOpaqueMeshList)
+        {
+            addMeshes(it.second, is_set(mFlags, Flags::RTDontMergeInstanced));
+        }
 
         // Instanced static and dynamic meshes are grouped based on instance lists.
-        for (const auto& it : instancesToNonShadowCastingMeshList)
+        for (const auto& it : instancesToOpaqueNonShadowCastingMeshList)
+        {
+            addMeshes(it.second, is_set(mFlags, Flags::RTDontMergeInstanced));
+        }
+        for (const auto& it : instancesToNonOpaqueNonShadowCastingMeshList)
         {
             addMeshes(it.second, is_set(mFlags, Flags::RTDontMergeInstanced));
         }

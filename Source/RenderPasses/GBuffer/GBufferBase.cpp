@@ -55,7 +55,8 @@ namespace
     const char kAdjustShadingNormals[] = "adjustShadingNormals";
     const char kForceCullMode[] = "forceCullMode";
     const char kCullMode[] = "cull";
-}
+    const char kCullNonOpaque[] = "cullNonOpaque";
+    }
 
 void GBufferBase::parseProperties(const Properties& props)
 {
@@ -69,6 +70,7 @@ void GBufferBase::parseProperties(const Properties& props)
         else if (key == kAdjustShadingNormals) mAdjustShadingNormals = value;
         else if (key == kForceCullMode) mForceCullMode = value;
         else if (key == kCullMode) mCullMode = value;
+        else if (key == kCullNonOpaque) mCullNonOpaque = value;
         // TODO: Check for unparsed fields, including those parsed in derived classes.
     }
 
@@ -87,6 +89,7 @@ Properties GBufferBase::getProperties() const
     props[kAdjustShadingNormals] = mAdjustShadingNormals;
     props[kForceCullMode] = mForceCullMode;
     props[kCullMode] = mCullMode;
+    props[kCullNonOpaque] = mCullNonOpaque;
     return props;
 }
 
@@ -127,6 +130,9 @@ void GBufferBase::renderUI(Gui::Widgets& widget)
     mOptionsChanged |= widget.checkbox("Force cull mode", mForceCullMode);
     widget.tooltip("Enable this option to override the default cull mode.\n\n"
         "Otherwise the default for rasterization is to cull backfacing geometry, and for ray tracing to disable culling.", true);
+
+    mOptionsChanged |= widget.checkbox("Cull non-opaque", mCullNonOpaque);
+    widget.tooltip("Culls all non-opaque triangles and renders only opaque objects. Usefull for scenes with more complex transparencies", true);
 
     mOptionsChanged |= widget.checkbox("Frustum Culling", mUseFrustumCulling);
     widget.tooltip("Frustum Culling. Only Implemented for Rasterization passes and ignored for raytracing passes.", true);

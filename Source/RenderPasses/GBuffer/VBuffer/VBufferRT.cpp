@@ -272,6 +272,7 @@ DefineList VBufferRT::getShaderDefines(const RenderData& renderData) const
     RayFlags rayFlags = RayFlags::None;
     if (mForceCullMode && mCullMode == RasterizerState::CullMode::Front) rayFlags = RayFlags::CullFrontFacingTriangles;
     else if (mForceCullMode && mCullMode == RasterizerState::CullMode::Back) rayFlags = RayFlags::CullBackFacingTriangles;
+    if (mCullNonOpaque) rayFlags |= RayFlags::CullNonOpaque;
     defines.add("RAY_FLAGS", std::to_string((uint32_t)rayFlags));
 
     // For optional I/O resources, set 'is_valid_<name>' defines to inform the program of which ones it can access.
