@@ -100,7 +100,7 @@ CustomAccelerationStructure::CustomAccelerationStructure(
         buildAccelerationStructure(pRenderContext, aabbCount, true);
     }
 
-    void CustomAccelerationStructure::bindTlas(ShaderVar& rootVar, std::string shaderName)
+    void CustomAccelerationStructure::bindTlas(const ShaderVar& rootVar, std::string shaderName)
     {
         rootVar[shaderName].setAccelerationStructure(mTlas.pTlasObject);
     }

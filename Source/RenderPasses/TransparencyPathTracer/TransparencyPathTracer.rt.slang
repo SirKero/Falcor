@@ -696,7 +696,7 @@ float evalTmpStochSM(uint lightIdx, float3 posW) {
 inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const AccelShadowData shadowData, const AccelShadowAttribs attribs, const float3 origin){
 
     const float linZ = origin.z;
-    const float2 rangeZ = attribs.rangeZ;
+    float2 rangeZ = attribs.rangeZ;
 
     #if ACCEL_MODE == ACCEL_MODE_SHADOW3D
         // Shadow Data is x-> transparency before depth, y -> transparency after depth

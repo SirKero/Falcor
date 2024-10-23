@@ -75,7 +75,7 @@ public:
     void update(RenderContext* pRenderContext, const uint64_t aabbCount);
     void update(RenderContext* pRenderContext, const std::vector<uint64_t>& aabbCount);
 
-    void bindTlas(ShaderVar& rootVar, std::string shaderName = "gCustomAccel");
+    void bindTlas(const ShaderVar& rootVar, std::string shaderName = "gCustomAccel");
 
 private:
     /*  * Creates the acceleration structure.

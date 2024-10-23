@@ -1,0 +1,177 @@
+import EvaluateAnalyticLight;
+
+cbuffer CB
+{
+    uint gFrameCount; // Current it for sample gen
+}
+
+// Inputs
+Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<float4> gViewW; // Optional
+
+// Outputs
+RWTexture2D<float4> gOutputColor;
+
+static const float kMinOpacity = 1e-7;
+static const uint kMaxElements = 256;   //For now 256 max transparent elements on a ray
+
+/** Payload for alpha ray (20B)
+*/
+struct TransparencyRayData {
+    PackedHitInfo hit; //< Packed Hit
+    float dist;
+
+    __init()
+    {
+        hit = {}; // Init emtpy
+        dist = -1.0;
+    }
+}
+
+/** Struct with data for the current path
+*/
+struct PathData
+{
+    float3  radiance;       ///< Accumulated outgoing radiance from path.
+    bool    terminated;     ///< Set to true when path is terminated.
+    float3  thp;            ///< Current path throughput. This is updated at each path vertex.
+    uint    pathLength;     ///< Path length in number of path segments (0 at origin, 1 at first secondary hit, etc.). Max 2^31.
+    float3 origin;          ///< Next path segment origin.
+    float rayTransparency;  ///< Full transparency for the ray
+    float3 direction;       ///< Next path segment direction.
+    float alphaDist;        ///< Distance when the alpha ray should start
+
+    SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
+
+    /** Initializes ray payload with default parameters.
+    */
+    __init()
+    {
+        this.terminated = false;
+        this.pathLength = 0;
+        this.radiance = float3(0, 0, 0);
+        this.thp = float3(1, 1, 1);
+        this.origin = float3(0, 0, 0);
+        this.direction = float3(0, 0, 0);
+        this.alphaDist = 0.0;
+    }
+};
+
+/** Setup ShadingData based on loaded vertex/material attributes for a hit point.
+    \param[in] hit Hit information.
+    \param[in] rayOrigin Ray origin.
+    \param[in] rayDir Normalized ray direction.
+    \param[in] lod Method for computing texture level-of-detail.
+    \return ShadingData struct.
+*/
+ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
+{
+    const TriangleHit triangleHit = hit.getTriangleHit();
+    VertexData v = gScene.getVertexData(triangleHit);
+    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+
+    return sd;
+}
+
+[shader("miss")]
+void miss(inout TransparencyRayData rayData)
+{
+
+}
+
+[shader("anyhit")]
+void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttributes attribs)
+{
+    // Alpha test for non-opaque geometry.
+    GeometryInstanceID instanceID = getGeometryInstanceID();
+    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
+    const uint materialID = gScene.getMaterialID(instanceID);
+    if (gScene.materials.alphaTest(v, materialID, 0.f, kMinOpacity)) IgnoreHit();
+}
+
+[shader("closesthit")]
+void closestHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttributes attribs)
+{
+    TriangleHit triangleHit;
+    triangleHit.instanceID = getGeometryInstanceID();
+    triangleHit.primitiveIndex = PrimitiveIndex();
+    triangleHit.barycentrics = attribs.barycentrics;
+    rayData.hit = HitInfo(triangleHit).getData();
+    rayData.dist = RayTCurrent();
+}
+
+[shader("raygeneration")]
+void rayGen()
+{
+    const uint2 pixel = DispatchRaysIndex().xy;
+    const uint2 frameDim = DispatchRaysDimensions().xy;
+    float3 colorOut = float3(0);
+    HitInfo hit = HitInfo(gVBuffer[pixel]);
+    float3 viewDir = -gViewW[pixel].xyz;
+
+    // Prepare ray payload.
+    PathData pd = PathData();
+    pd.origin = gScene.camera.getPosition();
+    pd.direction = viewDir;
+    pd.sg = SampleGenerator(pixel, gFrameCount);
+
+    float tMax = gScene.camera.data.farZ;
+    //Get first opaque depth
+    if (hit.isValid()){
+        const TriangleHit triangleHit = hit.getTriangleHit();
+        VertexData v = gScene.getVertexData(triangleHit);
+        tMax = min(tMax, length(v.posW-pd.origin)); //Linear depth
+    }
+
+    //Prepare Ray
+    RayDesc ray;
+    ray.Origin = pd.origin;
+    ray.Direction = pd.direction;
+    ray.TMin =  gScene.camera.data.nearZ;
+    ray.TMax = tMax;
+    TransparencyRayData rayData = TransparencyRayData();
+
+    for(uint i=0; i<kMaxElements && !pd.terminated; i++){
+        //Trace Ray
+        uint rayFlags = RAY_FLAG_CULL_OPAQUE;
+        TraceRay(gScene.rtAccel, rayFlags, 0xFF, 0, rayTypeCount, 0, ray, rayData);
+
+        //Miss
+        if(rayData.dist < 0){
+            pd.terminated = true;
+            break;
+        }
+        HitInfo hit = HitInfo(rayData.hit);
+        if(!hit.isValid())
+            break;
+
+        let lod = ExplicitLodTextureSampler(0.f);
+        //Get shading data
+        ShadingData sd = loadShadingData(hit, pd.direction, lod);
+        //Get material instance
+        uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        //Emissive lights
+        pd.radiance += pd.thp * mi.getProperties(sd).emission * sd.opacity; 
+
+        //Analytic
+        float3 Lr = evalDirectAnalytic(sd, mi, pd.sg);
+        pd.radiance += pd.thp * Lr * sd.opacity;
+
+        //Update thp
+        float transparency = (1.0 - sd.opacity);
+        pd.thp *= transparency; // TODO weight with color? 
+
+        //Update ray
+        ray.TMin = rayData.dist + 1e-10;
+        rayData = TransparencyRayData();
+    }
+
+    //Get color from opaque
+    float4 prevColor = gOutputColor[pixel];
+    colorOut = pd.radiance + prevColor.xyz * pd.thp;
+
+    gOutputColor[pixel] = float4(colorOut, 1.0);
+}
