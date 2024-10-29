@@ -68,14 +68,26 @@ private:
      */
     void prepareAccelerationStructure();
 
+    /** Prepares the Linked List
+     */
+    void prepareLinkedListResources(RenderContext* renderContext, const RenderData& renderData);
+
+    /** Prepares the Linked List
+     */
+    void prepareSpinResources(RenderContext* renderContext, const RenderData& renderData);
+
     /** Initializes all the ray tracing shaders
      */
     void prepareRayTracingShaders(RenderContext* pRenderContext);
 
     /** Generate Photons
      */
-    void generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers = true);
-
+    void preparePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers = true);
+    void generateEmissivePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void generateAnalyticPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    /** Build and Update Accelerationstructures
+    */
+    void buildAccelerationStructure(RenderContext* pRenderContext, const RenderData& renderData); 
     /** Handles the Photon Counter
      */
     void handlePhotonCounter(RenderContext* pRenderContext);
@@ -106,6 +118,8 @@ private:
 
     uint mLightMaxBounces = 5; // Number of Light bounces
     uint mNumDispatchedPhotons = 100000; // Number of Photons dispatched
+    float mEmissivePercentage = 1.f;
+    float mAnalyticPercentage = 1.f;
     uint mPhotonYExtent = 512;            // Dispatch Y extend
     uint mNumMaxPhotons = 2000000;
     uint mNumMaxPhotonsUI = mNumMaxPhotons;
@@ -113,11 +127,19 @@ private:
     float mASBuildBufferPhotonOverestimate = 1.15f;
     bool mChangePhotonLightBufferSize = false;
 
+    bool mSecondPass = false;
+    uint mMode = 0;
 
     ref<Buffer> mpLightTraceAABB;    // Photon AABBs for Acceleration Structure building
     ref<Buffer> mpLightTraceData; // Additional Photon data (L)
     ref<Buffer> mpPhotonCounter;     // Counter for the number of lights
     ref<Buffer> mpPhotonCounterCPU;  // For showing the current number of photons in the UI
+    ref<Buffer> mpLinkedList;
+
+    ref<Texture> mpHeadCounter; // Contains the current node head per pixel
+    ref<Texture> mpColorR; // Contains the current node head per pixel
+    ref<Texture> mpColorG; // Contains the current node head per pixel
+    ref<Texture> mpColorB; // Contains the current node head per pixel
 
     //
     // Render Passes/Programms

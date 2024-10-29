@@ -43,6 +43,7 @@ const std::string kOutputColor = "color";
 const Falcor::ChannelList kOutputChannels{
     {kOutputColor, "gOutColor", "Output Color (linear)", false /*optional*/, ResourceFormat::RGBA32Float},
 };
+const Gui::DropdownList kModes{{0, "Accel"}, {1, "Linked List"}, {2, "Spin"}};
 
 } // namespace
 
@@ -101,15 +102,51 @@ void LightTrace::execute(RenderContext* pRenderContext, const RenderData& render
 
     prepareBuffers(pRenderContext, renderData);
 
-    prepareAccelerationStructure();
+    switch (mMode)
+    {
+    case 0:
+        prepareAccelerationStructure();
+        break;
+    case 1:
+        prepareLinkedListResources(pRenderContext, renderData); 
+        break;
+    case 2:
+        prepareSpinResources(pRenderContext, renderData);
+        break; 
+    default:
+        break;
+    }
 
     // RenderPasses
     handlePhotonCounter(pRenderContext);
 
-    generatePhotonsPass(pRenderContext, renderData);
+    preparePhotonsPass(pRenderContext, renderData);
 
-    collectPhotons(pRenderContext, renderData);
-
+    if (mpScene->useEmissiveLights())
+    {
+        generateEmissivePhotonsPass(pRenderContext, renderData);
+    }
+    
+    if (mpScene->useAnalyticLights())
+    {
+        generateAnalyticPhotonsPass(pRenderContext, renderData);
+    }
+    
+    switch (mMode)
+    {
+    case 0:
+        buildAccelerationStructure(pRenderContext, renderData);
+        collectPhotons(pRenderContext, renderData);
+        break;
+    case 1:
+        collectPhotons(pRenderContext, renderData);
+        break;
+    case 2:
+        collectPhotons(pRenderContext, renderData);
+        break; 
+    default:
+        break;
+    }
     mFrameCount++;
 }
 
@@ -127,8 +164,18 @@ void LightTrace::renderUI(Gui::Widgets& widget)
     mChangePhotonLightBufferSize = widget.button("Apply", true);
 
     changed |= widget.var("Max Bounces", mLightMaxBounces, 0u, 32u);
-
-     mOptionsChanged |= changed;
+    if (mpScene->useAnalyticLights() && mpScene->useEmissiveLights())
+    {
+        widget.text("Emissive Lights Samples: " + std::to_string((uint) ceil(mNumDispatchedPhotons * mEmissivePercentage)));
+        widget.var("Emissive Lights Percentage: ", mEmissivePercentage, 0.f, 1.f, 0.1f);
+        mAnalyticPercentage = 1 - mEmissivePercentage;
+        widget.text("Analytic Lights Samples: " + std::to_string((uint) floor(mNumDispatchedPhotons * mAnalyticPercentage)));
+        widget.var("Analytic Lights Percentage: ", mAnalyticPercentage, 0.f, 1.f, 0.1f);
+        mEmissivePercentage = 1 - mAnalyticPercentage;
+    }
+    changed |= widget.dropdown("Current Mode", kModes, mMode);
+    widget.tooltip("Use Linked Lists to store photons instead of AABBs.");
+    mOptionsChanged |= changed;
 }
 
 void LightTrace::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
@@ -240,6 +287,44 @@ void LightTrace::prepareAccelerationStructure()
     }
 }
 
+void LightTrace::prepareLinkedListResources(RenderContext* pRenderContext, const RenderData& renderData) {
+    if (!mpLinkedList)
+    {
+        mpLinkedList = Buffer::createStructured(mpDevice, sizeof(float4), mNumMaxPhotons);
+    }
+    if (!mpHeadCounter)
+    {
+        uint2 frameDim = renderData.getDefaultTextureDims();
+        mpHeadCounter = Texture::create2D(mpDevice, frameDim.x , frameDim.y, ResourceFormat::R32Uint, 1U, 1, nullptr, ResourceBindFlags::AllColorViews);
+    }
+    pRenderContext->clearUAV(mpHeadCounter->getUAV().get(), uint4(-1));
+}
+
+void LightTrace::prepareSpinResources(RenderContext* pRenderContext, const RenderData& renderData) {
+
+    uint2 frameDim = renderData.getDefaultTextureDims();
+    if (!mpColorR)
+    {
+        mpColorR = Texture::create2D(mpDevice, frameDim.x , frameDim.y, ResourceFormat::R32Uint, 1U, 1, nullptr, ResourceBindFlags::AllColorViews);
+    }
+    if (!mpColorG)
+    {
+        mpColorG = Texture::create2D(mpDevice, frameDim.x , frameDim.y, ResourceFormat::R32Uint, 1U, 1, nullptr, ResourceBindFlags::AllColorViews);
+    }
+    if (!mpColorB)
+    {
+        mpColorB = Texture::create2D(mpDevice, frameDim.x , frameDim.y, ResourceFormat::R32Uint, 1U, 1, nullptr, ResourceBindFlags::AllColorViews);
+    }
+    pRenderContext->clearUAV(mpColorR->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpColorG->getUAV().get(), uint4(0));
+    pRenderContext->clearUAV(mpColorB->getUAV().get(), uint4(0));
+    auto var = mGeneratePhotonPass.pVars->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var);
+    var["gColorR"] = mpColorR; 
+    var["gColorG"] = mpColorG;
+    var["gColorB"] = mpColorB;
+}
+
 void LightTrace::prepareRayTracingShaders(RenderContext* pRenderContext)
 {
     auto globalTypeConformances = mpScene->getMaterialSystem().getTypeConformances();
@@ -268,7 +353,7 @@ float2 getPixelWidthHeight(uint2 frameDim, float fovY, float aspect)
     return float2(wPix, hPix);
 }
 
-void LightTrace::generatePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers)
+void LightTrace::preparePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool clearBuffers)
 {
     FALCOR_PROFILE(pRenderContext, "PhotonGeneration");
 
@@ -279,6 +364,7 @@ void LightTrace::generatePhotonsPass(RenderContext* pRenderContext, const Render
     // Defines
     mGeneratePhotonPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mGeneratePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons));
+    mGeneratePhotonPass.pProgram->addDefine("MODE", std::to_string(mMode));
 
     if (!mGeneratePhotonPass.pVars)
     {
@@ -309,8 +395,6 @@ void LightTrace::generatePhotonsPass(RenderContext* pRenderContext, const Render
 
     // Fill flags
     uint flags = 0;
-    if (!mpScene->useEmissiveLights())
-        flags |= 0x20; // Analytic lights collect flag
 
     nameBuf = "CB";
     var[nameBuf]["gMaxRecursion"] = mLightMaxBounces;
@@ -323,29 +407,58 @@ void LightTrace::generatePhotonsPass(RenderContext* pRenderContext, const Render
     
     var["gLightTraceAABB"] = mpLightTraceAABB;
     var["gLightTraceData"] = mpLightTraceData;
-
+    var["gLinkedList"] = mpLinkedList;
     var["gPhotonCounter"] = mpPhotonCounter;
+    var["gHeadCounter"] = mpHeadCounter;
+}
 
+
+void LightTrace::generateEmissivePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "generateEmissivePhotons");
     // Get dimensions of ray dispatch.
-    uint dispatchedPhotons = mNumDispatchedPhotons;
+    uint dispatchedPhotons = ceil(mNumDispatchedPhotons * mEmissivePercentage);
     const uint2 targetDim = uint2(std::max(1u, dispatchedPhotons / mPhotonYExtent), mPhotonYExtent);
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     // Trace the photons
     mpScene->raytrace(pRenderContext, mGeneratePhotonPass.pProgram.get(), mGeneratePhotonPass.pVars, uint3(targetDim, 1));
 
-    pRenderContext->uavBarrier(mpPhotonCounter.get());
-    for (uint i = 0; i < 3; i++)
-    {
-        pRenderContext->uavBarrier(mpLightTraceAABB.get());
-        pRenderContext->uavBarrier(mpLightTraceData.get());
-    }
+}
 
-    // Build/Update Acceleration Structure
+void LightTrace::generateAnalyticPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "generateAnalyticPhotons");
+    // Fill flags
+    uint flags = 0;
+    flags |= 0x20; // Analytic lights collect flag
+
+    FALCOR_ASSERT(mGeneratePhotonPass.pVars);
+
+    auto var = mGeneratePhotonPass.pVars->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var);
+    var["CB"]["gFlags"] = flags;
+
+    // Get dimensions of ray dispatch.
+    uint dispatchedPhotons = floor(mNumDispatchedPhotons * mAnalyticPercentage);
+    const uint2 targetDim = uint2(std::max(1u, dispatchedPhotons / mPhotonYExtent), mPhotonYExtent);
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    // Trace the photons
+    mpScene->raytrace(pRenderContext, mGeneratePhotonPass.pProgram.get(), mGeneratePhotonPass.pVars, uint3(targetDim, 1));
+
+}
+
+void LightTrace::buildAccelerationStructure(RenderContext* pRenderContext, const RenderData& renderData) {
+
+    pRenderContext->uavBarrier(mpPhotonCounter.get());
+    pRenderContext->uavBarrier(mpLightTraceAABB.get());
+    pRenderContext->uavBarrier(mpLightTraceData.get());
     uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
     std::vector<uint64_t> photonBuildSize = {
         std::min(mNumMaxPhotons, currentPhotons)};
     mpLightTraceAS->update(pRenderContext, photonBuildSize);
+
 }
 
 void LightTrace::handlePhotonCounter(RenderContext* pRenderContext)
@@ -361,6 +474,8 @@ void LightTrace::handlePhotonCounter(RenderContext* pRenderContext)
 void LightTrace::collectPhotons(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "CollectPhotons");
+    //Defines
+    mCollectPhotonPass.pProgram->addDefine("MODE", std::to_string(mMode));
 
     if (!mCollectPhotonPass.pVars)
         mCollectPhotonPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
@@ -374,7 +489,12 @@ void LightTrace::collectPhotons(RenderContext* pRenderContext, const RenderData&
 
     var["gLightTraceAABB"] = mpLightTraceAABB;
     var["gLightTraceData"] = mpLightTraceData;
+    var["gLinkedList"] = mpLinkedList;
     var["gLightCounter"] = mpPhotonCounter;
+    var["gHeadCounter"] = mpHeadCounter;
+    var["gColorR"] = mpColorR;
+    var["gColorG"] = mpColorG;
+    var["gColorB"] = mpColorB;
 
     var["gColor"] = renderData[kOutputColor]->asTexture();
 
