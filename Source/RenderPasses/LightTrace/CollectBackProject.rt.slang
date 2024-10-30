@@ -18,10 +18,27 @@ cbuffer PerFrame
     uint _pad;
 }
 
+struct ListNode {
+    float3 luminance;
+    int next;
+
+    static ListNode create() {
+        ListNode node;
+        node.luminance = float3(0);
+        node.next = -1;
+        return node;
+    }
+};
+
 // Inputs
 Buffer<uint> gLightCounter;
 RWStructuredBuffer<AABB> gLightTraceAABB;
 RWStructuredBuffer<float4> gLightTraceData;
+RWStructuredBuffer<ListNode> gLinkedList;
+RWTexture2D<uint> gHeadCounter;
+RWTexture2D<float> gColorR;
+RWTexture2D<float> gColorG;
+RWTexture2D<float> gColorB;
 
 // Outputs
 RWTexture2D<float4> gColor;
@@ -129,12 +146,26 @@ void intersection()
     }
 }
 
+float3 getLuminance()
+{
+    uint2 headTextureIndex = DispatchRaysIndex().xy; 
+    uint linkedListIndex = gHeadCounter[headTextureIndex];
+    float3 luminance = float3(0.0); 
+    while (linkedListIndex != uint(-1)) {
+        ListNode currentNode = gLinkedList[linkedListIndex];    
+        luminance += currentNode.luminance;
+        linkedListIndex = currentNode.next;
+    }
+    return luminance;
+}
+
 
 [shader("raygeneration")]
 void rayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 launchDim = DispatchRaysDimensions().xy;
+    #if MODE == 0
     let lod = ExplicitLodTextureSampler(0.f);
 
     float2 pixelCenter = float2(launchIndex) + 0.5;
@@ -157,6 +188,9 @@ void rayGen()
     radiance += rayData.radiance;
       
     gColor[launchIndex] = float4(radiance, 1.f);
-
-
+    #elif MODE == 1
+    gColor[launchIndex] = float4(getLuminance(), 1.f); 
+    #elif MODE == 2
+    gColor[launchIndex] = float4(asfloat(gColorR[launchIndex]), asfloat(gColorG[launchIndex]), asfloat(gColorB[launchIndex]), 1.f);
+    #endif
 }

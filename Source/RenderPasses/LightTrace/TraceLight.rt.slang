@@ -31,17 +31,34 @@ cbuffer CB
     uint gFlags; //Flags for the pass. See GenerationFlags enum
 };
 
+struct ListNode {
+    float3 luminance;
+    int next;
 
-#if USE_EMISSIVE_LIGHT  //Buffer is only valid if emissive light is enabled
+    static ListNode create() {
+        ListNode node;
+        node.luminance = float3(0);
+        node.next = -1;
+        return node;
+    }
+};
+
+#if USE_EMISSIVE_LIGHT//Buffer is only valid if emissive light is enabled
 cbuffer Light{
     EmissiveLightSampler gEmissiveSampler;
 }
 #endif
-
+// inputs
 RWStructuredBuffer<AABB> gLightTraceAABB;
 RWStructuredBuffer<float4> gLightTraceData;
+RWStructuredBuffer<ListNode> gLinkedList;
+RWTexture2D<uint> gHeadCounter;
 RWBuffer<uint> gPhotonCounter;
 Texture2D<uint> gPhotonCullingMask;
+
+RWTexture2D<uint> gColorR;
+RWTexture2D<uint> gColorG;
+RWTexture2D<uint> gColorB;
 
 enum class GenerationFlags // : uint32_t
 {
@@ -416,6 +433,19 @@ float getCosThetaP(float2 pixelPos)
     return dot(float3(0.f, 0.f, 1.f), projectedPixelDir);
 }
 
+void writeColorValue(RWTexture2D<uint> colorTex, uint2 pixel, float value)
+{
+    uint currentColor = 0;
+    uint originalValue;
+    [allow_uav_condition]
+    do {
+       InterlockedAdd(colorTex[pixel], 0u, currentColor); 
+       float color = asfloat(currentColor);
+       uint updatedColor = asuint(color + value);
+       InterlockedCompareExchange(colorTex[pixel], currentColor, updatedColor, originalValue);
+    } while(originalValue != currentColor);
+}
+
 [shader("raygeneration")]
 void rayGen()
 {
@@ -475,7 +505,7 @@ void rayGen()
     photon.faceNPhi = 1.f;
     
     uint rayFlags = 0;
-        
+    uint prevPhotonIndex = 0;
     //recursion where the photons are shot
     for (uint i = 0; i < gMaxRecursion && !rayData.terminated; i++)
     {
@@ -496,7 +526,7 @@ void rayGen()
         float2 pixelDir = (floor(cameraPos.xy * 0.5 * gFrameDim) + 0.5) * gPixelWidthHeight * gProjectedFocalLength;
         cameraPos.xy = cameraPos.xy * 0.5 + 0.5; //UV from [-1,1] to [0,1]
         bool validReprojection = true;
-        if (any(cameraPos.xy < 0) || any(cameraPos.xy > 1) || cameraPos.z < 0 || cameraPos.z > 1)
+        if (any(cameraPos.xy < 0) || any(cameraPos.xy >= 1) || cameraPos.z < 0 || cameraPos.z > 1)
             validReprojection = false;
 
         bool reprojectionVisible = false;
@@ -519,21 +549,51 @@ void rayGen()
             TraceRay(gScene.rtAccel, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff /* instanceInclusionMask */, 1 /* hitIdx */, rayTypeCount, 1 /* missIdx */, shadowRay, shadowData);
             reprojectionVisible = !shadowData.shadowed;
         }
+        #if MODE == 0
         //Store in AABB
         if(validReprojection && reprojectionVisible){
-            uint photonIndex = 0;
-            InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
-            if (photonIndex <= kPhotonBufferSize)
-            {
-                getReprojectionBRDF(rayData, pointToCamera, ray.Direction, pathData);
-                float2 screenPos = floor(cameraPos.xy * gFrameDim) + 0.5f;
-                AABB photonAABB = AABB(float3(screenPos - 0.4, -0.4), float3(screenPos + 0.4, 0.4));
-                gLightTraceAABB[photonIndex] = photonAABB;
-                gLightTraceData[photonIndex] = float4(photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(pixelDir),3)) ,1);
-                //gLightTraceData[photonIndex] = float4(float3(pow(getCosThetaP(pixelDir),3), 0.0f, 0.0f) ,1);
+                uint photonIndex = 0;
+                InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
+                if (photonIndex <= kPhotonBufferSize)
+                {
+                    getReprojectionBRDF(rayData, pointToCamera, ray.Direction, pathData);
+                    float2 screenPos = floor(cameraPos.xy * gFrameDim) + 0.5f;
+                    AABB photonAABB = AABB(float3(screenPos - 0.4, -0.4), float3(screenPos + 0.4, 0.4));
+                    gLightTraceAABB[photonIndex] = photonAABB;
+                    gLightTraceData[photonIndex] = float4(photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(pixelDir),3)) ,1);
+                }
             }
-        }
-
+        #elif MODE == 1 
+        //Store in Linked List
+            if(validReprojection && reprojectionVisible){
+                uint photonIndex = 0;
+                InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
+                if (photonIndex < kPhotonBufferSize)
+                {
+                    uint2 currentPixel = cameraPos.xy * gFrameDim;
+                    ListNode node = ListNode.create();
+                    getReprojectionBRDF(rayData, pointToCamera, ray.Direction, pathData);
+                    node.luminance = photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(pixelDir),3));
+                    InterlockedExchange(gHeadCounter[currentPixel], photonIndex, /*out*/ node.next); 
+                    gLinkedList[photonIndex] = node; 
+                }
+            }
+        #elif MODE == 2
+            if(validReprojection && reprojectionVisible){
+                uint photonIndex = 0;
+                InterlockedAdd(gPhotonCounter[0], 1u, photonIndex);
+                if (photonIndex < kPhotonBufferSize)
+                {
+                    uint2 currentPixel = cameraPos.xy * gFrameDim;
+                    float3 luminance = float3(0.f);
+                    getReprojectionBRDF(rayData, pointToCamera, ray.Direction, pathData);
+                    luminance = photon.flux * pathData.reprojection_brdf / (distToCamera * distToCamera * gNormalizedPixelArea * pow(getCosThetaP(pixelDir),3));
+                    writeColorValue(gColorR, currentPixel, luminance.r);
+                    writeColorValue(gColorG, currentPixel, luminance.g);
+                    writeColorValue(gColorB, currentPixel, luminance.b);
+                }
+            }
+        #endif
         //Russian Roulette
         const float rrVal = luminance(pathData.thp);
         const float prob = max(0.f, 1.f - rrVal);
@@ -551,5 +611,4 @@ void rayGen()
         ray.Origin = pathData.origin;
         ray.Direction = pathData.direction;
     }
-    
 }
