@@ -9,6 +9,7 @@ import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
+import Rendering.ShadowMaps.ShadowMap;
 
 import AccelShadow.AccelShadow;
 import LinkedList.LinkedListShadow;
@@ -119,9 +120,9 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
 
     float visibility = 1.0;
 
-    RayQuery<RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rayQuery;
-    uint rayFlags = RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
-    rayQuery.TraceRayInline(gScene.rtAccel, rayFlags, 0xff, ray);
+    RayQuery<RAY_FLAG_FORCE_NON_OPAQUE> rayQuery;
+    uint rayFlags = RAY_FLAG_FORCE_NON_OPAQUE;
+    rayQuery.TraceRayInline(gScene.rtAccel, 0, 0xff, ray);
 
     while (rayQuery.Proceed()) {
         if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
@@ -143,10 +144,7 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
         }
     }
 
-    // Check if opaque surface was hit
-    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT) {
-        visibility = 1.0;
-    }
+    //No need to check comitted status, as no hit is accepted
 
     return visibility;
 }
@@ -187,6 +185,15 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     shadow = gLinkedListShadow.eval(lightIndex, sd.posW);
 #endif
 
+#if EVAL_OPAQUE_SHADOW_MAP
+    LightData lightData = gScene.getLight(lightIndex);
+    SMLightData smData = gShadowMap.getShadowMapLightData(lightData, lightIndex);
+    float opaqueShadow = 1.f;
+    bool isDynamic = false;
+    gShadowMap.evalShadowMap(sd.posW, smData, float4(0.f) /*random (only x is used currently)*/, 0.f /*MipLevel*/, opaqueShadow, isDynamic);
+
+    shadow = min(shadow, opaqueShadow);
+#endif
     if (shadow <= 0) return float3(0.f);
 
     // Evaluate contribution.

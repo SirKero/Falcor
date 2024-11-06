@@ -29,6 +29,7 @@
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
 
+#include "Rendering/ShadowMaps/ShadowMap.h"
 #include "TransparencyShadowMethod.h"
 
 using namespace Falcor;
@@ -91,6 +92,7 @@ private:
     // Internal state
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
+    std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
 
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::RayTracing;
     uint mSelectedShadowMethod = 0;
@@ -101,6 +103,7 @@ private:
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     LightSampleMode mLightSampleMode = LightSampleMode::RIS;
     bool mOptionsChanged = false;
+    bool mEnableOpaqueShadowMaps = true;    //Enable opaque shadow pass
 
     //Passes
     // Pipelines / Programms

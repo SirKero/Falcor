@@ -115,6 +115,16 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         mpScene->getLightCollection(pRenderContext);
     }
 
+    //Generate optional opaque shadow map
+    if (mEnableOpaqueShadowMaps && !mpShadowMap)
+    {
+        mpShadowMap = std::make_shared<ShadowMap>(mpDevice, mpScene);
+        mpShadowMap->setOpaqueCullModeNonOpaque();
+    }
+
+    if (mEnableOpaqueShadowMaps && mpShadowMap)
+        mpShadowMap->update(pRenderContext);
+
     //Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
@@ -139,6 +149,15 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
     dirty |= methodChanged;
 
+    dirty |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);
+    widget.tooltip("Enables a extra opaque shadow map pass. Shadow Method should only evaluate non-opaque geometry in that case");
+
+    if (mEnableOpaqueShadowMaps && mpShadowMap)
+    {
+        if (auto group = widget.group("Opaque Shadow Map Settings"))
+            mpShadowMap->renderUI(group);
+    }
+
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
     {
         mShadowMethods[mSelectedShadowMethod]->renderUI(widget);
@@ -152,6 +171,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
 
     //Reset all passes
     mShadowMethods.clear();
+    mpShadowMap.reset();
     mpEvalDirectPass.reset();
     mEvalTransparencyDirectRay.resetPip();
 
@@ -170,6 +190,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("SHADOW_EVAL_MODE", std::to_string((uint)mShadowRenderMethod));
     defines.add(mShadowMethods[mSelectedShadowMethod]->getDefines());
     defines.add("LIGHT_SAMPLE_MODE", std::to_string((uint)mLightSampleMode));
+    if (mpShadowMap && mEnableOpaqueShadowMaps)
+        defines.add(mpShadowMap->getDefines());
+    defines.add("EVAL_OPAQUE_SHADOW_MAP", mEnableOpaqueShadowMaps ? "1" : "0");
 
     return defines;
 }
@@ -206,6 +229,9 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
     mpSampleGenerator->setShaderData(var);                    // Sample generator
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
+
+    if (mpShadowMap)
+        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
 
@@ -282,6 +308,9 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
+
+    if (mpShadowMap)
+        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
 

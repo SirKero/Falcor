@@ -28,6 +28,7 @@
 #pragma once
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
+#include "Rendering/ShadowMaps/ShadowMap.h"
 
 using namespace Falcor;
 
@@ -58,6 +59,10 @@ public:
     */
     virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData, ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) {}
 
+    /* Sets a pointer to a opaque shadow map
+    */
+    void setOpaqueShadowMap(const std::shared_ptr<ShadowMap>& shadowMap) { mpOpaqueShadowMap = shadowMap; }
+
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene) {}
 
@@ -81,6 +86,7 @@ protected:
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
+    std::shared_ptr<ShadowMap> mpOpaqueShadowMap;       //default shadow map pass for opaque
 
     uint2 mResolution = uint2(512);
     float2 mNearFar = float2(0.1f, 60.f);
