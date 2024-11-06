@@ -68,6 +68,12 @@ const Gui::DropdownList kCascadedModeForEndOfLevels{
     {0u, "Shadow Map"},
     {1u, "Ray Shadow"},
 };
+
+const Gui::DropdownList kOpaqueCullModeUI{
+    {(uint)ShadowMap::OpaqueCullMode::RenderAll, "Render All"},
+    {(uint)ShadowMap::OpaqueCullMode::CullOpaque, "Cull Opaque"},
+    {(uint)ShadowMap::OpaqueCullMode::CullNonOpaque, "Cull Non-Opaque"}
+};
 } // namespace
 
 ShadowMap::ShadowMap(ref<Device> device, ref<Scene> scene) : mpDevice{device}, mpScene{scene}
@@ -940,6 +946,7 @@ void ShadowMap::rasterCubeEachFace(uint index, ref<Light> light, RenderContext* 
     else if (mShadowMapUpdateMode != SMUpdateMode::Static)
         meshRenderMode |= RasterizerState::MeshRenderMode::SkipStatic;
 
+    handleOpaqueCullingRaster(meshRenderMode);
 
     for (size_t face = 0; face < 6; face++)
     {
@@ -1123,6 +1130,8 @@ bool ShadowMap::rasterSpotLight(uint index, ref<Light> light, RenderContext* pRe
         if (dynamicMode)
             meshRenderMode = RasterizerState::MeshRenderMode::SkipDynamic;
 
+        handleOpaqueCullingRaster(meshRenderMode);
+
         bindAndRenderShadowMap(index, meshRenderMode);
 
         //Blur
@@ -1138,8 +1147,9 @@ bool ShadowMap::rasterSpotLight(uint index, ref<Light> light, RenderContext* pRe
     if (dynamicMode)
     {
         uint dynIndex = mCountSpotShadowMaps + index; //Offset dynamic Index
-
-        bindAndRenderShadowMap(dynIndex, RasterizerState::MeshRenderMode::SkipStatic);
+        auto renderMode = RasterizerState::MeshRenderMode::SkipStatic;
+        handleOpaqueCullingRaster(renderMode);
+        bindAndRenderShadowMap(dynIndex, renderMode);
     }
 
     return updateVP;
@@ -1440,6 +1450,7 @@ bool ShadowMap::rasterCascaded(ref<Light> light, RenderContext* pRenderContext, 
         {
             meshRenderMode |= RasterizerState::MeshRenderMode::SkipNonDoubleSided;
         }
+        handleOpaqueCullingRaster(meshRenderMode);
 
         if (mUseFrustumCulling)
         {
@@ -2058,6 +2069,8 @@ bool ShadowMap::renderUI(Gui::Widgets& widget)
      {
         mUpdateShadowMap |= group.checkbox("Render Double Sided Only", mSMDoubleSidedOnly);
         group.tooltip("Only renders materials flagged as double sided (often alpha tested). Can be used as an optimization");
+        mUpdateShadowMap |= group.dropdown("Opaque CullMode", kOpaqueCullModeUI, (uint&)mOpaqueCullMode);
+        group.tooltip("Allows the culling of opaque / non-opaque objects");
         mRasterDefinesChanged |= group.checkbox("Alpha Test", mUseAlphaTest);
         if (mUseAlphaTest)
         {
@@ -2381,4 +2394,13 @@ void ShadowMap::dummyProfileRaster(RenderContext* pRenderContext) {
     FALCOR_PROFILE(pRenderContext, "rasterizeScene");
 }
 
+inline void ShadowMap::handleOpaqueCullingRaster(RasterizerState::MeshRenderMode& renderMode) {
+    if (mOpaqueCullMode == OpaqueCullMode::CullOpaque)
+        renderMode |= RasterizerState::MeshRenderMode::SkipOpaque;
+    if (mOpaqueCullMode == OpaqueCullMode::CullNonOpaque)
+        renderMode |= RasterizerState::MeshRenderMode::SkipNonOpaque;
 }
+
+}
+
+

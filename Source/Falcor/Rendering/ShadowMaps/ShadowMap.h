@@ -99,6 +99,10 @@ public:
     const uint getCascadedLevels() const { return mCascadedLevelCount; }
     std::vector<float2>& getCascadedWidthHeight() { return mCascadedWidthHeight; }
 
+    void setOpaqueCullModeNonOpaque() { mOpaqueCullMode = OpaqueCullMode::CullNonOpaque; }
+    void setOpaqueCullModeOpaque() { mOpaqueCullMode = OpaqueCullMode::CullOpaque; }
+    void setOpaqueCullModeNone() { mOpaqueCullMode = OpaqueCullMode::RenderAll; }
+
 
     enum class SMUpdateMode: uint
     {
@@ -110,6 +114,13 @@ public:
     {
         Manual = 0u,
         AutomaticNvidia = 1u,
+    };
+
+    enum class OpaqueCullMode : uint32_t
+    {
+        RenderAll = 0u,
+        CullOpaque = 1u,
+        CullNonOpaque = 2u
     };
 
 private:
@@ -165,6 +176,8 @@ private:
     void calcProjViewForCascaded(const LightData& lightData, std::vector<bool>& renderLevel, bool forceUpdate = false);
     void dummyProfileRaster(RenderContext* pRenderContext); // Shows the rasterizeSzene profile even if nothing was rendered
 
+    inline void handleOpaqueCullingRaster(RasterizerState::MeshRenderMode& renderMode);
+
     // Getter
     std::vector<ref<Texture>>& getShadowMapsCube() { return mpShadowMapsCube; }
     std::vector<ref<Texture>>& getShadowMaps() { return mpShadowMaps; }
@@ -205,6 +218,7 @@ private:
     ResourceFormat mShadowMapFormat = ResourceFormat::D32Float;                 //Format D32 (F32 for most) and [untested] D16 (Unorm 16 for most) are supported
     RasterizerState::CullMode mCullMode = RasterizerState::CullMode::None;      //Cull mode. Double Sided Materials are not culled
     bool mUseFrustumCulling = true;
+    OpaqueCullMode mOpaqueCullMode = OpaqueCullMode::RenderAll;
 
     float mNear = 0.1f;
     float mFar = 60.f;
