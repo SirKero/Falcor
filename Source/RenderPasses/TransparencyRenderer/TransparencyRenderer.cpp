@@ -118,12 +118,24 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     //Generate optional opaque shadow map
     if (mEnableOpaqueShadowMaps && !mpShadowMap)
     {
-        mpShadowMap = std::make_shared<ShadowMap>(mpDevice, mpScene);
+        mpShadowMap = std::make_shared<ShadowMap>(mpDevice, mpScene, ShadowMapType::Variance);
         mpShadowMap->setOpaqueCullModeNonOpaque();
+        for (auto& method : mShadowMethods)
+            method->setOpaqueShadowMap(mpShadowMap);
     }
 
     if (mEnableOpaqueShadowMaps && mpShadowMap)
+    {
         mpShadowMap->update(pRenderContext);
+        for (auto& method : mShadowMethods)
+            method->enableOpaqueShadowMap();
+    }
+    else if (!mEnableOpaqueShadowMaps && mpShadowMap)
+    {
+        for (auto& method : mShadowMethods)
+            method->enableOpaqueShadowMap(false);
+    }
+        
 
     //Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -193,6 +205,8 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     if (mpShadowMap && mEnableOpaqueShadowMaps)
         defines.add(mpShadowMap->getDefines());
     defines.add("EVAL_OPAQUE_SHADOW_MAP", mEnableOpaqueShadowMaps ? "1" : "0");
+    RayFlags evalQueryRayFlags = mEnableOpaqueShadowMaps ? RayFlags::CullOpaque : RayFlags::ForceNonOpaque;
+    defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
 
     return defines;
 }

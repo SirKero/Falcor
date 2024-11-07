@@ -208,6 +208,9 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
     if (mAccelDebugShowAS.enable && mAccelDebugShowAS.stopGeneration)
         return;
 
+    //Check if opaque shadow map is set and change ray flags accordingly
+    mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
+
     auto& lights = mpScene->getLights();
     uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount : 0; // For sync if optimization is used
 
@@ -219,6 +222,7 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)

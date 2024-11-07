@@ -76,7 +76,7 @@ const Gui::DropdownList kOpaqueCullModeUI{
 };
 } // namespace
 
-ShadowMap::ShadowMap(ref<Device> device, ref<Scene> scene) : mpDevice{device}, mpScene{scene}
+ShadowMap::ShadowMap(ref<Device> device, ref<Scene> scene, ShadowMapType shadowMapType) : mpDevice{device}, mpScene{scene}, mShadowMapType{shadowMapType}
 {
     FALCOR_ASSERT(mpScene);
 

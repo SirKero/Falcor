@@ -62,7 +62,8 @@ RWBuffer<uint> gCounter;
 RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 
 static const float kMinOpacity = 1e-7;
-static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; //Either 0.5(Normal) or 1.0(PCF)
+static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
+static const uint kRayFlags = ACCEL_RAY_FLAGS;
 
 static const float2 kMSAAPattern[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
                                          float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
@@ -276,8 +277,7 @@ void rayGen()
         rayData.dist = -1;
 
         //Trace ray
-        uint rayFlags = 0;
-        TraceRay(gScene.rtAccel, rayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss or opaque object ends the ray
         if (i == 0 && rayData.dist < 0)

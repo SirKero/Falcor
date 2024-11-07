@@ -149,9 +149,12 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
 
     prepareResources(pRenderContext);
 
+    mLLRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
+
      // Defines
     mGenLinkedListPip.pProgram->addDefine("LL_DEPTH_BIAS", std::to_string(mDepthBias));
     mGenLinkedListPip.pProgram->addDefine("LL_NORMAL_DEPTH_BIAS", std::to_string(mNormalDepthBias));
+    mGenLinkedListPip.pProgram->addDefine("LL_RAY_FLAGS", std::to_string((uint)mLLRayFlags));
     if (mUseLinkedListArray)
     {
         mGenLinkedListPip.pProgram->addDefine("USE_LINKED_LIST_ARRAY");

@@ -58,7 +58,7 @@ class RenderContext;
 class FALCOR_API ShadowMap
 {
 public:
-    ShadowMap(ref<Device> device, ref<Scene> scene);
+    ShadowMap(ref<Device> device, ref<Scene> scene, ShadowMapType shadowMapType = ShadowMapType::SDExponentialVariance);
 
     // Renders and updates the shadow maps if necessary
     bool update(RenderContext* pRenderContext);

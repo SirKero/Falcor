@@ -61,7 +61,11 @@ public:
 
     /* Sets a pointer to a opaque shadow map
     */
-    void setOpaqueShadowMap(const std::shared_ptr<ShadowMap>& shadowMap) { mpOpaqueShadowMap = shadowMap; }
+    void setOpaqueShadowMap(const std::shared_ptr<ShadowMap>& shadowMap){ mpOpaqueShadowMap = shadowMap;  mOpaqueShadowMapEnabled = true; }
+
+    /* Set enable status for the opaque shadow map
+    */
+    void enableOpaqueShadowMap(bool enable = true) { mOpaqueShadowMapEnabled = enable; }
 
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene) {}
@@ -87,6 +91,7 @@ protected:
     ref<Device> mpDevice;
     ref<Scene> mpScene;
     std::shared_ptr<ShadowMap> mpOpaqueShadowMap;       //default shadow map pass for opaque
+    bool mOpaqueShadowMapEnabled = false;
 
     uint2 mResolution = uint2(512);
     float2 mNearFar = float2(0.1f, 60.f);

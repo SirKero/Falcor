@@ -63,6 +63,7 @@ private:
 
     float mDepthBias = 1e-6f;
     float mNormalDepthBias = 1e-3f;
+    RayFlags mLLRayFlags = RayFlags::None;
 
     //Linked List
     std::vector<ref<Buffer>> mpLinkedList;

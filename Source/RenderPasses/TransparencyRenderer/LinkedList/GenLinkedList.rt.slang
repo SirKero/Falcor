@@ -73,6 +73,7 @@ RWBuffer<uint> gCounter2; // counter for array storage
 static const float kDepthBias = LL_DEPTH_BIAS;
 static const float kNormalBias = LL_NORMAL_DEPTH_BIAS;
 static const float kMinOpacity = 1e-7;
+static const uint kRayFlags = LL_RAY_FLAGS;
 
 ExplicitRayConesLodTextureSampler computeLod(VertexData v, float3 rayDir)
 {
@@ -190,8 +191,7 @@ void rayGen()
     for (uint i = 0; i < MAX_ELEMENTS; i++) {
 
         //Trace ray
-        uint rayFlags = 0;
-        TraceRay(gScene.rtAccel, rayFlags, kShadowRayInstanceMask /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         if(rayData.depth < 0) break; // miss shader
 

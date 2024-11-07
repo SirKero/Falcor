@@ -27,6 +27,10 @@ import LinkedList.LinkedListShadow;
 #define LIGHT_SAMPLE_MODE_UNIFORM 0
 #define LIGHT_SAMPLE_MODE_RIS 1
 
+#ifndef TR_RAY_QUERY_FLAG
+#define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
+#endif
+
 // For RIS light sampling
 struct RISReservoir {
     uint lightIdx; // Light Index
@@ -120,8 +124,7 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
 
     float visibility = 1.0;
 
-    RayQuery<RAY_FLAG_FORCE_NON_OPAQUE> rayQuery;
-    uint rayFlags = RAY_FLAG_FORCE_NON_OPAQUE;
+    RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
     rayQuery.TraceRayInline(gScene.rtAccel, 0, 0xff, ray);
 
     while (rayQuery.Proceed()) {

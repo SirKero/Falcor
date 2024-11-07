@@ -736,6 +736,7 @@ struct ShadowMap
         //Evaluate the shadow map
         if(ShadowMapType(kShadowMapMode) == ShadowMapType::SDVariance){
             float2 varianceSV = float2(0);
+            [unroll]
             for(uint i=0; i<4;i++)
                 varianceSV += lerpWeights[i] * float2(gatherDepths[i], gatherDepths[i]* gatherDepths[i]);
 
