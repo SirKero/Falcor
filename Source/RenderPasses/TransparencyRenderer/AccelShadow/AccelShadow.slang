@@ -1,6 +1,8 @@
 #pragma once
 #include "AccelShadowData.slang"
 
+import Rendering.ShadowMaps.ShadowTestFunctions;
+import Rendering.ShadowMaps.ShadowMapHelpers;
 __exported import Scene.Raytracing;
 __exported import Scene.Intersection;
 
@@ -156,7 +158,7 @@ struct AccelShadowShader
 
     #if SHADOW_ACCEL_PCF
         float2 gatherUV;
-        float4 w = getGatherWeights(shadowPos.xy, gSMSize, gatherUV);
+        float4 w = getGatherWeights(shadowPos.xy, gSMSize.x, gatherUV);
         float2 shadowPixel = gatherUV.xy * gSMSize;
     #else
         float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
