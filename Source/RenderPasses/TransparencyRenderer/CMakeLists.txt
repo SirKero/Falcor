@@ -8,6 +8,13 @@ target_sources(TransparencyRenderer PRIVATE
 	AccelShadow/AccelShadowData.slang
 	AccelShadow/DebugShowShadowAccel.3d.slang
 
+	AccelShadowKBuffer/AccelShadowKBuffer.h
+	AccelShadowKBuffer/AccelShadowKBuffer.cpp
+    AccelShadowKBuffer/GenAccelShadowKBuffer.rt.slang
+	AccelShadowKBuffer/AccelShadowKBuffer.slang
+	AccelShadowKBuffer/AccelShadowKBufferData.slang
+	AccelShadowKBuffer/DebugShowShadowAccel.3d.slang
+
 	LinkedList/LinkedListShadow.h
 	LinkedList/LinkedListShadow.cpp
 	LinkedList/LinkedListShadow.slang
