@@ -145,7 +145,7 @@ void AccelShadowKBuffer::prepareResources(RenderContext* pRenderContext) {
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint) * mAccelDataFormatSize, mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
+                    mpDevice, sizeof(uint2), mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mAccelKElements,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));

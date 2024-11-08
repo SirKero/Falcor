@@ -1,87 +1,51 @@
-#ifndef SHADOW_DATA_FORMAT_SIZE
-#define SHADOW_DATA_FORMAT_SIZE 4
-#endif
-
-#if SHADOW_DATA_FORMAT_SIZE == 1
-#define SHADOW_DATA_FORMAT uint
-#elif SHADOW_DATA_FORMAT_SIZE == 2
 #define SHADOW_DATA_FORMAT uint2
-#elif SHADOW_DATA_FORMAT_SIZE == 4
-#define SHADOW_DATA_FORMAT uint4
-#else
-#error Unknows Format Size
+
+#ifndef ACCEL_K_PER_BOX
+#define ACCEL_K_PER_BOX 4
 #endif
 
 struct AccelShadowKBufferData {
-    float transparencyStart;
+    struct DataNode {
+        float rangeStart;
+        float rangeEnd;
+        float transparency;
+    }
+    DataNode nodes[ACCEL_K_PER_BOX];
     float transparencyEnd;
-    float firstBoxRange;
 
     __init() {
-        this.transparencyEnd = 1.0;
-        this.transparencyStart = 1.0;
-        this.firstBoxRange = 1e-8;
-    }
-
-    __init(float transparencyStart, float transparencyEnd, float firstBoxRange) {
-        this.transparencyStart = transparencyStart;
-        this.transparencyEnd = transparencyEnd;
-        this.firstBoxRange = firstBoxRange;
-    }
-
-    [mutating]
-    void unpack(uint data) {
-        this.transparencyStart = float(data & 0xFF) / 255.0;
-        this.transparencyEnd = float((data >> 8) & 0xFF) / 255.0;
-        this.firstBoxRange = f16tof32((data >> 16) & 0xFFFF);
+        [unroll]
+        for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {
+            this.nodes[i].rangeStart = 1.0f;
+            this.nodes[i].rangeEnd = 0.0f;
+            this.nodes[i].transparency = -1.f;
+        }
+        this.transparencyEnd = 1.f;
     }
 
     [mutating]
-    void unpack(uint2 data) {
-        this.transparencyStart = f16tof32(data.x & 0xFFFF);
-        this.transparencyEnd = f16tof32((data.x >> 16) & 0xFFFF);
-        this.firstBoxRange = asfloat(data.y);
-
+    void unpack(uint2 data[ACCEL_K_PER_BOX]) {
+        transparencyEnd = f16tof32((data[0].y >> 16) & 0xFFFF);
+        for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {
+            nodes[i].rangeStart = float(data[i].x & 0xFFFF) / float(0xFFFF);
+            nodes[i].rangeEnd = float((data[i].x >> 16) & 0xFFFF) / float(0xFFFF);
+            nodes[i].transparency = f16tof32(data[i].y & 0xFFFF);
+        }
     }
 
-    [mutating]
-    void unpack(uint4 data) {
-        this.transparencyStart = asfloat(data.x);
-        this.transparencyEnd = asfloat(data.y);
-        this.firstBoxRange = asfloat(data.z);
-    }
-
-    __init(uint data) {
-        unpack(data);
-    }
-    __init(uint2 data) {
-        unpack(data);
-    }
-    __init(uint4 data) {
+    __init(uint2 data[ACCEL_K_PER_BOX]) {
         unpack(data);
     }
 
-    uint packAsUint() {
-        uint data = 0;
-        data |= uint(round(this.transparencyStart * 255.0)) & 0xFF;
-        data |= (uint(round(this.transparencyEnd * 255.0)) & 0xFF) << 8;
-        data |= f32tof16(this.firstBoxRange) << 16;
-        return data;
+    void pack(out uint2 data[ACCEL_K_PER_BOX]) {
+        [unroll]
+        for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {
+            data[i].x = uint(nodes[i].rangeStart * float(0xFFFF)) & 0xFFFF;
+            data[i].x |= (uint(nodes[i].rangeEnd * float(0xFFFF)) & 0xFFFF) << 16;
+            data[i].y = f32tof16(nodes[i].transparency);
+        }
+
+        data[0].y |= f32tof16(transparencyEnd) << 16;
     }
 
-    uint2 packAsUint2() {
-        uint2 data = uint2(0);
-        data.x |= f32tof16(this.transparencyStart);
-        data.x |= f32tof16(this.transparencyEnd) << 16;
-        data.y = asuint(this.firstBoxRange);
-        return data;
-    }
-
-    uint4 packAsUint4() {
-        uint4 data = uint4(0);
-        data.x = asuint(this.transparencyStart);
-        data.y = asuint(this.transparencyEnd);
-        data.z = asuint(this.firstBoxRange);
-        return data;
-    }
 }

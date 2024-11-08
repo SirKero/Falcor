@@ -181,16 +181,6 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     rayData.dist = RayTCurrent();
 }
 
-void writeData(const uint index, const AccelShadowKBufferData shadowData) {
-    #if SHADOW_DATA_FORMAT_SIZE == 1
-        gData[index] = shadowData.packAsUint();
-    #elif SHADOW_DATA_FORMAT_SIZE == 2
-        gData[index] = shadowData.packAsUint2(); // Transmittance last sample
-    #elif SHADOW_DATA_FORMAT_SIZE == 4
-        gData[index] = shadowData.packAsUint4(); // Transmittance last sample
-    #endif
-}
-
 //Checks if any part of the AABB is in front of the plane
 //Assumes everything is in World space
 bool isInFrontOfPlane(const float3 planeN, const float planeDist, const AABB aabb) {
@@ -270,7 +260,12 @@ void rayGen()
     bool useRayTracing = true;
     float lastMinDepth = 0.0;
     float lastDepthRange = 0.0;
-    float2 lastTransmittances = float2(1.0);
+    float2 blockSamples[ACCEL_K_PER_BOX];
+    float blockTransparency[ACCEL_K_PER_BOX + 1];
+    float2 minMaxBlockSample = float2(FLT_MAX, 0);
+    uint accelDataCounter = 0;
+    for(uint i=0; i< ACCEL_K_PER_BOX + 1 ; i++)
+        blockTransparency[i] = 1.0;
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing ; i++) {
         rayData.depth = -1;
@@ -289,51 +284,91 @@ void rayGen()
         }
 
         if (rayData.dist > 0 && i>0) {
-            // Write output
-            float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
-            float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
-
-            AABB aabb = AABB(minPoint, maxPoint);
-            #if ACCEL_USE_FRUSTUM_CULLING
-                if (aabbIsVisible(aabb, frameDim))
-            #endif
+            // Add to sample
+            blockSamples[accelDataCounter] = float2(lastMinDepth - lastDepthRange, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
+            minMaxBlockSample = float2(min(minMaxBlockSample.x, blockSamples[accelDataCounter].x), max(minMaxBlockSample.y, blockSamples[accelDataCounter].y));
+            blockTransparency[accelDataCounter+1] = rayData.currentTransmittance;
+            accelDataCounter = (accelDataCounter + 1) % ACCEL_K_PER_BOX;
+            //Write
+            if (accelDataCounter == 0) {
+                float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, minMaxBlockSample.x);
+                float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, minMaxBlockSample.y);
+                AABB aabb = AABB(minPoint, maxPoint);
+                //Insert data box
                 {
-                    uint insertIdx = 0;
-                    InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
-                    if (insertIdx > MAX_IDX)
+                    uint aabbIndex = 0;
+                    InterlockedAdd(gCounter[gLightIdx], 1u, aabbIndex);
+                    uint insertIdx = aabbIndex * ACCEL_K_PER_BOX;
+                    if (aabbIndex > MAX_IDX)
                         return;
 
-                    gAABB[insertIdx] = aabb;
-                    writeData(insertIdx, AccelShadowKBufferData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
+                    gAABB[aabbIndex] = aabb;
+                    float depthRange = max(minMaxBlockSample.y - minMaxBlockSample.x, 1e-7);
+                    AccelShadowKBufferData data = AccelShadowKBufferData();
+                    data.transparencyEnd = blockTransparency[ACCEL_K_PER_BOX];
+                    for (uint j = 0; j < ACCEL_K_PER_BOX; j++) {
+                        data.nodes[j].rangeStart = saturate((blockSamples[j].x - minMaxBlockSample.x) / depthRange);
+                        data.nodes[j].rangeEnd = saturate((blockSamples[j].y - minMaxBlockSample.x) / depthRange);
+                        data.nodes[j].transparency = blockTransparency[j];
+                    }
+                    
+                    uint2 packedData[ACCEL_K_PER_BOX];
+                    data.pack(packedData);
+                    for (uint j = 0; j < ACCEL_K_PER_BOX; j++) {
+                        gData[insertIdx + j] = packedData[j];
+                    }
                 }
+
+                minMaxBlockSample = float2(FLT_MAX, 0.0);
+                for(uint j=0; j<ACCEL_K_PER_BOX; j++){
+                    blockSamples[j] = float2(0,0);
+                    blockTransparency[j] = 1.0;
+                }
+                blockTransparency[0] = rayData.currentTransmittance;
+
+            }
         }
         // Update for next iteration
         if (rayData.dist > 0) {
             ray.TMin = rayData.dist;
             lastMinDepth = rayData.depth;
             lastDepthRange = rayData.depthRange;
-            lastTransmittances.y = lastTransmittances.x;
-            lastTransmittances.x = rayData.currentTransmittance;
         }
     }
 
-// Insert last element
-    if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
-        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
-        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, gFar));
+    // Insert last element
+    //sif (lastMinDepth < gFar && rayData.currentTransmittance < 1.0)
+    {
+        blockSamples[accelDataCounter] = float2( lastMinDepth - lastDepthRange, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
+        minMaxBlockSample = float2(min(minMaxBlockSample.x, blockSamples[accelDataCounter].x), max(minMaxBlockSample.y, blockSamples[accelDataCounter].y));
 
+        minMaxBlockSample.y =  max(minMaxBlockSample.y, gFar);
+        // Write
+        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, minMaxBlockSample.x);
+        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, minMaxBlockSample.y);
         AABB aabb = AABB(minPoint, maxPoint);
-        #if ACCEL_USE_FRUSTUM_CULLING
-            if (aabbIsVisible(aabb, frameDim))
-        #endif
-            {
-                uint insertIdx = 0;
-                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
-                if (insertIdx > MAX_IDX)
-                    return;
+        // Insert data box
+        {
+            uint aabbIndex = 0;
+            InterlockedAdd(gCounter[gLightIdx], 1u, aabbIndex);
+            uint insertIdx = aabbIndex * ACCEL_K_PER_BOX;
+            if (aabbIndex > MAX_IDX)
+                return;
 
-                gAABB[insertIdx] = aabb;
-                writeData(insertIdx, AccelShadowKBufferData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
+            gAABB[aabbIndex] = aabb;
+            float depthRange = minMaxBlockSample.y - minMaxBlockSample.x;
+            AccelShadowKBufferData data = AccelShadowKBufferData();
+            data.transparencyEnd = rayData.currentTransmittance;
+            for (uint i = 0; i <= accelDataCounter; i++) {
+                data.nodes[i].rangeStart = saturate((blockSamples[i].x - minMaxBlockSample.x) / depthRange);
+                data.nodes[i].rangeEnd = saturate((blockSamples[i].y - minMaxBlockSample.x) / depthRange);
+                data.nodes[i].transparency = blockTransparency[i];
             }
+            uint2 packedData[ACCEL_K_PER_BOX];
+            data.pack(packedData);
+            for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {
+                gData[insertIdx + i] = packedData[i];
+            }
+        }
     }
 }

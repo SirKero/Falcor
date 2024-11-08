@@ -158,7 +158,7 @@ void verticesToCube(const in GsOut[8] vert, inout TriangleStream<GsOut> outStrea
 [maxvertexcount(48)]
 void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 {
-    const uint count = gShadowCounter[gSelectedLight]; // Get the valid number of aabbs
+    const uint count = gShadowCounter[gSelectedLight] / ACCEL_K_PER_BOX; // Get the valid number of aabbs
     if (aabbIdx == count) {
         float3 ndc[3];
         ndc[0] = float3(-1., -1., 1.0 - 1e-3);
@@ -182,16 +182,19 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 
     // Get AABB and Data
     AABB aabb = gShadowAABB[aabbIdx];
-    AccelShadowKBufferData shadowData = AccelShadowKBufferData(gShadowData[aabbIdx]);
+    //AccelShadowKBufferData shadowData = AccelShadowKBufferData(gShadowData[aabbIdx]); //TODO fix
 
     AABB shadowAABB = aabb;
-    for (uint box = 0; box < 2; box++) {
+    for (uint box = 0; box < 1; box++) {
+        /*
         if (box == 0) {
             aabb.maxPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange;
         } else {
             aabb = shadowAABB;
             aabb.minPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange + 1e-10;
         }
+        */
+
         // Cull AABB
         if (!cullAABB(aabb))
             break;
@@ -219,7 +222,8 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
             float3 posView = rayDir.xyz * (-points[i].z); //view is negative Z
             float4 worldPos = mul(gInvView, float4(posView, 1.0));
             vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
-            vert[i].transparency = box == 0 ? shadowData.transparencyStart : shadowData.transparencyEnd; // TODO
+            // vert[i].transparency = box == 0 ? shadowData.transparencyStart : shadowData.transparencyEnd; // TODO
+            vert[i].transparency = 1.0;
             vert[i].boxIdx = gVisMode == VIS_MODE_FRONTBACKBOX ? box :  aabbIdx;
                 
         }

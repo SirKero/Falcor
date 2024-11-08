@@ -80,6 +80,7 @@ private:
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
     bool mAccelUseFrustumCulling = true;
+    uint mAccelKElements = 4; //TODO make changeable
     RayFlags mAccelRayFlags = RayFlags::None;
 
     struct

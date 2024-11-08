@@ -40,13 +40,6 @@ struct AccelShadowKBufferRayData {
 }
 #endif
 
-struct AccelShadowKBufferAttribs {
-    float2 rangeZ;
-#if SHADOW_ACCEL_PCF
-    float2 pixel;
-#endif
-}
-
 struct AccelShadowKBufferShader
 {
     static const bool kUseNormalizationFactor = false; // TODO make toggable
@@ -68,28 +61,44 @@ struct AccelShadowKBufferShader
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
 
-    inline void handelAccelShadowHit(inout AccelShadowKBufferRayData rayData, const AccelShadowKBufferData shadowData, const AccelShadowKBufferAttribs attribs, const float3 origin) {
-
+    inline void handelAccelShadowHit(inout AccelShadowKBufferRayData rayData, const AABB aabb, const AccelShadowKBufferData shadowData, const float3 origin) {
+        //const float2 pixel = (aabb.minPoint.xy + aabb.maxPoint.xy) / 2.0;
         const float linZ = origin.z;
-        float2 rangeZ = attribs.rangeZ;
-                    
-        // Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
-        rangeZ.y = rangeZ.x + shadowData.firstBoxRange;
-        float vis = shadowData.transparencyEnd;
-        float factor = 1.0;
-        float middleDepth = (rangeZ.x + rangeZ.y) / 2.0;
-        // in first box
-        if (linZ < rangeZ.y) {
-            // factor = max(2.0 - saturate((linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 1.0);
-            // factor = linZ - rangeZ.x;
-            factor = 1.0 / abs(middleDepth - linZ); // TODO stochastic approach?
+        const float near = aabb.minPoint.z;
+        const float far = aabb.maxPoint.z;
+        const float boxLength = far - near;
 
-            vis = shadowData.transparencyStart;
+        float vis = shadowData.transparencyEnd; // When no box is hit, it has to be at the end
+        float hitDepth = -1.0;
+        [unroll]
+        for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {
+            // Recreate box
+            float minBox = near + boxLength * shadowData.nodes[i].rangeStart;
+            float maxBox = near + boxLength * shadowData.nodes[i].rangeEnd;
+            const float boxVis = shadowData.nodes[i].transparency;
+            //Check if linZ is inside
+            if ((boxVis > 0) && (linZ > minBox) && (linZ < maxBox)) {
+                //vis = shadowData.nodes[i].transparency;
+                //float distToMiddle = min(linZ - minBox, maxBox - linZ);
+                float middleDist = (minBox + maxBox) / 2.0;
+                //Replace Hit
+                if (hitDepth < 0 || middleDist < hitDepth) {
+                    vis = max(vis, boxVis);
+                    hitDepth = middleDist;
+                }
+            }
         }
-        float distMiddleToLinZ = abs(middleDepth - linZ);
-        distMiddleToLinZ = middleDepth;
+        //Set hit depth to a valid value (0 is exact hit, aka endTransparency)
+        hitDepth = max(hitDepth, 0.0);
 
-    #if SHADOW_ACCEL_PCF
+        // Update raydata
+        if (rayData.hitDepth < 0 || hitDepth < rayData.hitDepth) {
+            rayData.visibility = vis;
+            rayData.hitDepth = hitDepth;
+        }
+
+       //TODO Support PCF
+    #if 0 // SHADOW_ACCEL_PCF
         uint index = 3;
         float2 pixelDiff = attribs.pixel - origin.xy;
         if (pixelDiff.x > 0 && pixelDiff.y < 0)
@@ -107,16 +116,8 @@ struct AccelShadowKBufferShader
             rayData.visibility[index] = vis;
             rayData.hitDepth[index] = distMiddleToLinZ;
         }
-    #else
-        if (kUseNormalizationFactor) {
-            rayData.visibility += vis * factor;
-            rayData.hitDepth = max(rayData.hitDepth, 0.0) + factor;
-        }
-        else if (rayData.hitDepth < 0 || distMiddleToLinZ < rayData.hitDepth) {
-            rayData.visibility = vis;
-            rayData.hitDepth = distMiddleToLinZ;
-        }
     #endif // SHADOW_ACCEL_PCF
+        
     }
 
     void traceAccelShadowInline(inout AccelShadowKBufferRayData rayData, uint lightIdx, const RayDesc ray) {
@@ -128,18 +129,19 @@ struct AccelShadowKBufferShader
         // Start tracing
         while (rayQuery.Proceed()) {
             AABB aabb = gShadowAABBs[rayQuery.CandidateInstanceIndex()][rayQuery.CandidatePrimitiveIndex()];
-            AccelShadowKBufferAttribs attribs = {};
-            attribs.rangeZ = float2(aabb.minPoint.z, aabb.maxPoint.z);
-            #if SHADOW_ACCEL_PCF
-                attribs.pixel = (aabb.minPoint.xy + aabb.maxPoint.xy) / 2.0; // Pixel center
-            #endif
 
             // Check if hit is valid
             if (!aabb.contains(ray.Origin))
                 continue;
 
-            AccelShadowKBufferData shadowData = AccelShadowKBufferData( gAccelShadowData[rayQuery.CandidateInstanceIndex()][rayQuery.CandidatePrimitiveIndex()]);
-            handelAccelShadowHit(rayData, shadowData, attribs, ray.Origin);
+            uint2 packedShadowData[ACCEL_K_PER_BOX];
+            const uint dataIndex = rayQuery.CandidatePrimitiveIndex() * ACCEL_K_PER_BOX;
+            [unroll]
+            for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {
+                packedShadowData[i] = gAccelShadowData[rayQuery.CandidateInstanceIndex()][dataIndex + i]; 
+            }
+            AccelShadowKBufferData shadowData = AccelShadowKBufferData(packedShadowData);
+            handelAccelShadowHit(rayData,aabb, shadowData, ray.Origin);
         }
     }
 
@@ -178,9 +180,9 @@ struct AccelShadowKBufferShader
         //else
         //    TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 2 /* hitIdx */, 1, 2 /* missIdx */, ray, rayData);
 
-        float visibility = 0;
+        float visibility = rayData.visibility;
 
-    #if SHADOW_ACCEL_PCF
+    #if 0//SHADOW_ACCEL_PCF
 
         for (uint i = 0; i < 4; i++) {
             if (rayData.hitDepth[i] <= 0.0)
@@ -192,13 +194,8 @@ struct AccelShadowKBufferShader
             }
         }
     #else
-        if (rayData.hitDepth <= 0.0)
+        if (rayData.hitDepth < 0.0)
             visibility = 1.0;
-        else {
-            if (kUseNormalizationFactor)
-                rayData.visibility /= max(rayData.hitDepth, 1e-8);
-            visibility = rayData.visibility;
-        }
     #endif
 
         return visibility;
