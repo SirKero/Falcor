@@ -311,8 +311,8 @@ void rayGen()
                         data.nodes[j].rangeEnd = saturate((blockSamples[j].y - minMaxBlockSample.x) / depthRange);
                         data.nodes[j].transparency = blockTransparency[j];
                     }
-                    
-                    uint2 packedData[ACCEL_K_PER_BOX];
+
+                    SHADOW_DATA_FORMAT packedData[ACCEL_K_PER_BOX];
                     data.pack(packedData);
                     for (uint j = 0; j < ACCEL_K_PER_BOX; j++) {
                         gData[insertIdx + j] = packedData[j];
@@ -364,7 +364,7 @@ void rayGen()
                 data.nodes[i].rangeEnd = saturate((blockSamples[i].y - minMaxBlockSample.x) / depthRange);
                 data.nodes[i].transparency = blockTransparency[i];
             }
-            uint2 packedData[ACCEL_K_PER_BOX];
+            SHADOW_DATA_FORMAT packedData[ACCEL_K_PER_BOX];
             data.pack(packedData);
             for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {
                 gData[insertIdx + i] = packedData[i];

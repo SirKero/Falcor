@@ -134,7 +134,7 @@ struct AccelShadowKBufferShader
             if (!aabb.contains(ray.Origin))
                 continue;
 
-            uint2 packedShadowData[ACCEL_K_PER_BOX];
+            SHADOW_DATA_FORMAT packedShadowData[ACCEL_K_PER_BOX];
             const uint dataIndex = rayQuery.CandidatePrimitiveIndex() * ACCEL_K_PER_BOX;
             [unroll]
             for (uint i = 0; i < ACCEL_K_PER_BOX; i++) {

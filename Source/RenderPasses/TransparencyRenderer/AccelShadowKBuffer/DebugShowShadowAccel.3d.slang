@@ -155,11 +155,11 @@ void verticesToCube(const in GsOut[8] vert, inout TriangleStream<GsOut> outStrea
     pixel shader execution per texel. The vertex positions are passed on to the pixel shader.
     Non-textured emissives are culled.
 */
-[maxvertexcount(48)]
+[maxvertexcount(120)]
 void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 {
-    const uint count = gShadowCounter[gSelectedLight] / ACCEL_K_PER_BOX; // Get the valid number of aabbs
-    if (aabbIdx == count) {
+    const uint aabbCount = gShadowCounter[gSelectedLight]; // Get the valid number of aabbs
+    if (aabbIdx == aabbCount) {
         float3 ndc[3];
         ndc[0] = float3(-1., -1., 1.0 - 1e-3);
         ndc[1] = float3(3., -1., 1.0 - 1e-3);
@@ -177,23 +177,37 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
             
         return;
     }
-    if (aabbIdx > count)
+    if (aabbIdx > aabbCount)
         return;
 
     // Get AABB and Data
     AABB aabb = gShadowAABB[aabbIdx];
-    //AccelShadowKBufferData shadowData = AccelShadowKBufferData(gShadowData[aabbIdx]); //TODO fix
+    const uint dataIdx = aabbIdx * ACCEL_K_PER_BOX;
 
-    AABB shadowAABB = aabb;
-    for (uint box = 0; box < 1; box++) {
-        /*
-        if (box == 0) {
-            aabb.maxPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange;
-        } else {
-            aabb = shadowAABB;
-            aabb.minPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange + 1e-10;
+    SHADOW_DATA_FORMAT packedData[ACCEL_K_PER_BOX];
+    [unroll]
+    for(uint i=0; i<ACCEL_K_PER_BOX; i++){
+        packedData[i] = gShadowData[dataIdx + i];
+    }
+    AccelShadowKBufferData shadowData = AccelShadowKBufferData(packedData);
+
+    const float near = aabb.minPoint.z;
+    const float far = aabb.maxPoint.z;
+    const float boxLength = aabb.maxPoint.z - near;
+    for (uint box = 0; box < ACCEL_K_PER_BOX + 1; box++) {
+        float transparency = 1.0;
+        if(box == ACCEL_K_PER_BOX){
+            aabb.minPoint.z = aabb.maxPoint.z;
+            aabb.maxPoint.z = far;
+            transparency = shadowData.transparencyEnd;
+        }else{
+            aabb.minPoint.z = near + boxLength * shadowData.nodes[box].rangeStart;
+            aabb.maxPoint.z = near + boxLength * shadowData.nodes[box].rangeEnd;
+            transparency = shadowData.nodes[box].transparency;
         }
-        */
+
+        if(transparency < 0 || aabb.minPoint.z > aabb.maxPoint.z)
+            break;
 
         // Cull AABB
         if (!cullAABB(aabb))
@@ -222,8 +236,7 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
             float3 posView = rayDir.xyz * (-points[i].z); //view is negative Z
             float4 worldPos = mul(gInvView, float4(posView, 1.0));
             vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
-            // vert[i].transparency = box == 0 ? shadowData.transparencyStart : shadowData.transparencyEnd; // TODO
-            vert[i].transparency = 1.0;
+            vert[i].transparency = transparency;
             vert[i].boxIdx = gVisMode == VIS_MODE_FRONTBACKBOX ? box :  aabbIdx;
                 
         }
