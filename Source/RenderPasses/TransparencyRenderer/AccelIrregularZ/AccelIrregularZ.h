@@ -56,6 +56,8 @@ public:
      */
     virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
 
+    const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
+
 private:
     void prepareResources(RenderContext* pRenderContext);
     std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes();
@@ -101,7 +103,11 @@ private:
     std::vector<ref<Buffer>> mAccelShadowData;                                 // Transparency Data
     std::unique_ptr<CustomAccelerationStructure> mpShadowAccelerationStrucure; // AS
     ref<Texture> mpDebugDepth;                                                 // Depth for the debug passs
+    std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
+    std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples  
 
+    ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
+    ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
     RasterPipeline mRasterShowAccelPass;
 };

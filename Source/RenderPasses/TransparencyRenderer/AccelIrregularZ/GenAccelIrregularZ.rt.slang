@@ -60,6 +60,7 @@ cbuffer CB
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
+RWTexture2D<uint> gAccessCounter;
 
 static const float kMinOpacity = 1e-7;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
@@ -247,6 +248,8 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
+
+    gAccessCounter[pixel] = 0; //clear
 
     float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
 

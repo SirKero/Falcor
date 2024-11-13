@@ -166,7 +166,7 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
 float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg)
 {
     const uint lightCount = gScene.getLightCount();
-    if (lightCount == 0) return float3(0.f);
+    if (lightCount == 0) return float3(0.0);
 
     // Pick one of the analytic light sources randomly with equal probability.
     uint lightIndex = 0;
@@ -174,6 +174,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
     // Sample local light source.
     AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf);
+
+    if (all(ls.Li <= 0.0))
+        return float3(0.0);
 
     // Reject sample if not in the hemisphere of a BSDF lobe.
     float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);

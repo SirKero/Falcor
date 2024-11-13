@@ -47,7 +47,7 @@ struct AccelShadowAttribs {
 #endif
 }
 
-struct AccelShadowShader
+struct AccelIrregularZShader
 {
     static const bool kUseNormalizationFactor = false; // TODO make toggable
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE; //TODO currently ignored and always assumed true
@@ -67,7 +67,7 @@ struct AccelShadowShader
     RaytracingAccelerationStructure gShadowAS;
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
-
+    RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
 
     inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const AccelShadowData shadowData, const AccelShadowAttribs attribs, const float3 origin) {
 
@@ -159,11 +159,15 @@ struct AccelShadowShader
     #if SHADOW_ACCEL_PCF
         float2 gatherUV;
         float4 w = getGatherWeights(shadowPos.xy, gSMSize.x, gatherUV);
-        float2 shadowPixel = gatherUV.xy * gSMSize;
+        const float2 shadowPixel = gatherUV.xy * gSMSize;
     #else
-        float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
+        const float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
     #endif
         float dist = shadowPos.w;
+
+        // Add access
+        const uint2 uShadowPixel = uint2(shadowPixel);
+        InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], 1u);
 
         AccelShadowRayData rayData = AccelShadowRayData();
         RayDesc ray;

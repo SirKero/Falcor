@@ -10,7 +10,7 @@ target_sources(TransparencyRenderer PRIVATE
 
 	AccelShadowKBuffer/AccelShadowKBuffer.h
 	AccelShadowKBuffer/AccelShadowKBuffer.cpp
-    AccelShadowKBuffer/GenAccelShadowKBuffer.rt.slang
+	AccelShadowKBuffer/GenAccelShadowKBuffer.rt.slang
 	AccelShadowKBuffer/AccelShadowKBuffer.slang
 	AccelShadowKBuffer/AccelShadowKBufferData.slang
 	AccelShadowKBuffer/DebugShowShadowAccel.3d.slang
@@ -20,6 +20,8 @@ target_sources(TransparencyRenderer PRIVATE
 	AccelIrregularZ/GenAccelIrregularZ.rt.slang
 	AccelIrregularZ/AccelIrregularZ.slang
 	AccelIrregularZ/AccelIrregularZData.slang
+	AccelIrregularZ/GenAccessMips.cs.slang
+	AccelIrregularZ/CalcSampleDistribution.cs.slang
 
 	LinkedList/LinkedListShadow.h
 	LinkedList/LinkedListShadow.cpp

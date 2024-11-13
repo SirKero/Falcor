@@ -33,6 +33,8 @@ namespace
     //Shader Paths
     const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/AccelIrregularZ/";
     const std::string kGenShader = kShaderFolder + "GenAccelIrregularZ.rt.slang";
+    const std::string kAccessMipsShader = kShaderFolder + "GenAccessMips.cs.slang";
+    const std::string kCalcSampleDistributionShader = kShaderFolder + "CalcSampleDistribution.cs.slang";
     //const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //UI
@@ -53,6 +55,8 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
     {
         mAccelShadowAABB.clear();
         mpShadowAccelerationStrucure.reset();
+        mAccessTextures.clear();
+        mSampleDistribution.clear();
     }
 
     if (mRebuildAccelDataBuffer || mResolutionChanged)
@@ -96,7 +100,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
 
     // Create / Destroy resources
     {
-        uint numBuffers = lights.size();
+        const uint numBuffers = lights.size();
 
         if (mAccelShadowAABB.empty())
         {
@@ -166,6 +170,37 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
                 CustomAccelerationStructure::UpdateMode::TLASOnly
             );
         }
+
+        if (mAccessTextures.empty())
+        {
+            mAccessTextures.resize(numBuffers);
+            for (uint i=0; i<numBuffers; i++)
+            {
+                mAccessTextures[i] = Texture::create2D(
+                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Uint, 1u, Texture::kMaxPossible, nullptr,
+                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+                );
+                mAccessTextures[i]->setName("AccessTextureLight" + std::to_string(i));
+            }
+        }
+
+        if (mSampleDistribution.empty())
+        {
+            mSampleDistribution.resize(numBuffers);
+            for (uint i = 0; i < numBuffers; i++)
+            {
+                mSampleDistribution[i] = Texture::create2D(
+                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Uint, 1u, Texture::kMaxPossible, nullptr,
+                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+                );
+                //Set highest mip to total number of samples
+                pRenderContext->clearUAV(
+                    mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), uint4(mResolution.x * mResolution.y)
+                );
+                mSampleDistribution[i]->setName("SampleDistribution" + std::to_string(i));
+            }
+        }
+
     }
 }
 
@@ -216,6 +251,70 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     auto& lights = mpScene->getLights();
     uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount : 0; // For sync if optimization is used
 
+    //Create Access Mips
+    {
+        FALCOR_PROFILE(pRenderContext, "Generate Access Mips");
+        //Create Gen Mips pass
+        if (!mGenAccessMips)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kAccessMipsShader).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+
+            mGenAccessMips = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        for (uint m = 0; m < mAccessTextures[0]->getMipCount() - 1; m++)
+        {
+            auto var = mGenAccessMips->getRootVar();
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                var["gSrc"][i].setSrv(mAccessTextures[i]->getSRV(m, 1u));
+                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(m + 1));
+            }
+               
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m + 1), mAccessTextures[0]->getHeight(m + 1), lights.size());
+            var["CB"]["gDstSize"] = dispatchDim.xy();
+
+            mGenAccessMips->execute(pRenderContext, dispatchDim);
+        }
+    }
+    //Distribute Samples
+    {
+        FALCOR_PROFILE(pRenderContext, "Distribute Shadow Samples");
+        // Create Compute Pass
+        if (!mCalcSampleDistribution)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kCalcSampleDistributionShader).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+
+            mCalcSampleDistribution = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+         for (int m = mSampleDistribution[0]->getMipCount() - 2; m >= 0; m--)
+        {
+             auto var = mCalcSampleDistribution->getRootVar();
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                var["gImpt"][i].setSrv(mAccessTextures[i]->getSRV(m, 1u));
+                var["gImptMip"][i].setSrv(mAccessTextures[i]->getSRV(m+1, 1u));
+                var["gSmp"][i].setUav(mSampleDistribution[i]->getUAV(m));
+                var["gSmpMip"][i].setSrv(mSampleDistribution[i]->getSRV(m + 1, 1u));
+            }
+
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
+            var["CB"]["gDstSize"] = dispatchDim.xy();
+
+            mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
+        }
+    }
+
+
     // Clear Counter
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, lights.size()).get(), uint4(0));
 
@@ -261,6 +360,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gAABB"] = mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mAccelShadowData[i];
+        var["gAccessCounter"] = mAccessTextures[i];
 
         // Get dimensions of ray dispatch.
         const uint2 targetDim = mResolution;
@@ -330,6 +430,7 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
         shadowVar["gAccelShadowData"][i] = mAccelShadowData[i];
         shadowVar["gShadowAABBs"][i] = mAccelShadowAABB[i];
+        shadowVar["gAccessCounter"][i] = mAccessTextures[i];
     }
 
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
