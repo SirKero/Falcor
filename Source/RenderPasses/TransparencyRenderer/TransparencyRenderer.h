@@ -57,7 +57,8 @@ public:
         RayTracing = 0,
         AccelShadow = 1,
         LinkedList = 2,
-        AccelShadowKBuffer = 3
+        AccelShadowKBuffer = 3,
+        AccelIrregularZ = 4
     };
 
     FALCOR_ENUM_INFO(ShadowRenderMethod,  {
@@ -65,6 +66,7 @@ public:
             {ShadowRenderMethod::AccelShadow, "AccelShadow"},
             {ShadowRenderMethod::LinkedList, "LinkedList"},
             {ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"},
+            {ShadowRenderMethod::AccelIrregularZ, "AccelIrregularZ"},
         }
     );
 

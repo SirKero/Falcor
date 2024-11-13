@@ -14,12 +14,14 @@ import Rendering.ShadowMaps.ShadowMap;
 import AccelShadow.AccelShadow;
 import LinkedList.LinkedListShadow;
 import AccelShadowKBuffer.AccelShadowKBuffer;
+import AccelIrregularZ.AccelIrregularZ;
 
 // Shadow Eval Modes
 #define SHADOW_EVAL_MODE_RAYTRACING 0
 #define SHADOW_EVAL_MODE_Accel 1
 #define SHADOW_EVAL_MODE_LinkedList 2
 #define SHADOW_EVAL_MODE_AccelKBuffer 3
+#define SHADOW_EVAL_MODE_AccelIrregularZ 4
 
 #ifndef SHADOW_EVAL_MODE
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
@@ -188,8 +190,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     shadow = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
 #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedList
     shadow = gLinkedListShadow.eval(lightIndex, sd.posW);
-#else //SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
+#elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
     shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
+#else // SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
+    shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, ls.posW);
 #endif
 
 #if EVAL_OPAQUE_SHADOW_MAP

@@ -1,9 +1,9 @@
 add_plugin(TransparencyRenderer)
 
 target_sources(TransparencyRenderer PRIVATE
-    AccelShadow/AccelShadow.h
-    AccelShadow/AccelShadow.cpp
-    AccelShadow/GenAccelShadow.rt.slang
+	AccelShadow/AccelShadow.h
+	AccelShadow/AccelShadow.cpp
+	AccelShadow/GenAccelShadow.rt.slang
 	AccelShadow/AccelShadow.slang
 	AccelShadow/AccelShadowData.slang
 	AccelShadow/DebugShowShadowAccel.3d.slang
@@ -14,6 +14,12 @@ target_sources(TransparencyRenderer PRIVATE
 	AccelShadowKBuffer/AccelShadowKBuffer.slang
 	AccelShadowKBuffer/AccelShadowKBufferData.slang
 	AccelShadowKBuffer/DebugShowShadowAccel.3d.slang
+	
+	AccelIrregularZ/AccelIrregularZ.h
+	AccelIrregularZ/AccelIrregularZ.cpp
+	AccelIrregularZ/GenAccelIrregularZ.rt.slang
+	AccelIrregularZ/AccelIrregularZ.slang
+	AccelIrregularZ/AccelIrregularZData.slang
 
 	LinkedList/LinkedListShadow.h
 	LinkedList/LinkedListShadow.cpp
@@ -21,13 +27,13 @@ target_sources(TransparencyRenderer PRIVATE
 	LinkedList/GenLinkedList.rt.slang
 	LinkedList/GenLinkedListNeighbors.cs.slang
 
-    TransparencyShadowMethod.h
-    TransparencyShadowMethod.cpp
+	TransparencyShadowMethod.h
+	TransparencyShadowMethod.cpp
 
-    TransparencyRenderer.cpp
-    TransparencyRenderer.h
-    EvaluateAnalyticLight.slang
-    EvalDirect.cs.slang
+	TransparencyRenderer.cpp
+	TransparencyRenderer.h
+	EvaluateAnalyticLight.slang
+	EvalDirect.cs.slang
 	EvalTransparenciesDirect.rt.slang
 )
 
