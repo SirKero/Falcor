@@ -26,6 +26,8 @@ void main(uint3 thdID: SV_DispatchThreadID)
 
     float weight = float(sampleImportance) / fullImportance;
 
+    //TODO error diffusion
+
     uint samples = 0;
     if (weight > 0)
         samples = uint(ceil(sampleCount * weight));

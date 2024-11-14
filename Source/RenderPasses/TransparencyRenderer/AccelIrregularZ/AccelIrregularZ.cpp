@@ -47,6 +47,11 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
+    Sampler::Desc samplerDesc = {};
+    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+    mpPointSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpPointSampler)
 }
 
 void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -324,6 +329,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
+    mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -348,6 +354,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["CB"]["gNear"] = mNearFar.x;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
+        var["CB"]["gSamplePerRes"] = kSamplesPerPixel;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
         var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
@@ -361,9 +368,11 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mAccelShadowData[i];
         var["gAccessCounter"] = mAccessTextures[i];
+        var["gSampleDistribution"] = mSampleDistribution[i];
+        var["gPointSampler"] = mpPointSampler;
 
         // Get dimensions of ray dispatch.
-        const uint2 targetDim = mResolution;
+        const uint2 targetDim = uint2(mResolution.x * kSamplesPerPixel, mResolution.y);
         FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
         // Spawn the rays.

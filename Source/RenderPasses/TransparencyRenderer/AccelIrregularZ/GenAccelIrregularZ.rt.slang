@@ -48,7 +48,7 @@ cbuffer CB
     float gNear;
     float gFar;
     uint gLightIdx;     //LightIndex
-    uint _pad;
+    uint gSamplePerRes; //Number of samples per pixel
     float4x4 gViewProj;    // View Projection for current light
     float4x4 gInvViewProj; // Inverse view projection
     float4x4 gInvProj;
@@ -61,16 +61,32 @@ RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 RWTexture2D<uint> gAccessCounter;
+Texture2D<uint> gSampleDistribution;
+
+SamplerState gPointSampler;
 
 static const float kMinOpacity = 1e-7;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
+static const uint kMipLevels = SAMPLE_DIST_MIPS;
 
-static const float2 kMSAAPattern[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
+// DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
+static const float2 kMSAAPattern2[2] = { float2(-0.25, -0.25), float2(0.25, 0.25)};
+
+static const float2 kMSAAPattern4[4] = { float2(-0.125, -0.375), float2(0.375, -0.125), float2(-0.375, 0.125), float2(0.125, 0.375)
+                                      };
+
+static const float2 kMSAAPattern8[8] = { float2(0.0625, -0.1875),  float2(-0.0625, 0.1875), float2(0.3125, 0.0625), float2(-0.1875, -0.3125),
+                                        float2(-0.3125, 0.3125), float2(-0.4375, -0.0625), float2(0.1875, 0.4375),   float2(0.4375, -0.4375)
+                                      };
+
+/* Unused
+static const float2 kMSAAPattern16[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
                                          float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
                                          float2(-0.125, 0.375), float2(0.0, -0.4375),   float2(-0.25, 0.375),     float2(-0.375, 0.25),
                                          float2(-0.5, 0.0),      float2(0.4375, -0.25),    float2(0.375, 0.4375), float2(-0.4375, -0.5)
                                        };
+*/
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -142,8 +158,9 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
 
     //Get the for corners of the pixel to approximate the size of the 3D pixel
     float2 pixel = float2(DispatchRaysIndex().xy) + 0.5;
-    const uint2 frameDim = DispatchRaysDimensions().xy;
-
+    uint2 frameDim = DispatchRaysDimensions().xy;
+    frameDim.x /= gSamplePerRes;
+   
     //Estimate the size of the currently hit plane for the pixel
     float2 ndcCorners[4];
     ndcCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
@@ -247,13 +264,38 @@ bool aabbIsVisible(AABB aabb, uint2 smSize){
 void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
-    uint2 frameDim = DispatchRaysDimensions().xy;
+    const uint2 frameDim = DispatchRaysDimensions().xy;
+    const uint2 smRes = uint2(frameDim.x / gSamplePerRes, frameDim.y);
 
-    gAccessCounter[pixel] = 0; //clear
+    if (all(pixel < smRes)) {
+        gAccessCounter[pixel] = 0; // clear
+    }
+    //TODO Go through the mip chain
+    uint subpixelID = 1 + pixel.x % gSamplePerRes;
+    pixel.x /= gSamplePerRes;
 
-    float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
+    uint numSamples = gSampleDistribution[pixel];
+    if (numSamples == 3)
+        numSamples = 4;
+    else if (numSamples > 4 && numSamples <= 8)
+        numSamples = 8;
 
-    float2 relFramePos = pixelSample / frameDim;
+    if (numSamples < subpixelID)
+        return;
+
+    numSamples = min(numSamples, gSamplePerRes);
+
+    float2 pixelOffset = float2(0);
+    if (numSamples == 2)
+        pixelOffset = kMSAAPattern2[subpixelID - 1];
+    else if (numSamples == 4)
+        pixelOffset = kMSAAPattern4[subpixelID - 1];
+    else if (numSamples == 8)
+        pixelOffset = kMSAAPattern8[subpixelID - 1];
+
+    float2 pixelSample = pixel + 0.5 + pixelOffset; //+ kMSAAPattern[gFrameCount % 16];
+
+    float2 relFramePos = pixelSample / smRes;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
     relFramePos.y *= -1.f;
 
@@ -298,7 +340,7 @@ void rayGen()
 
             AABB aabb = AABB(minPoint, maxPoint);
             #if ACCEL_USE_FRUSTUM_CULLING
-                if (aabbIsVisible(aabb, frameDim))
+                if (aabbIsVisible(aabb, smRes))
             #endif
                 {
                     uint insertIdx = 0;
@@ -327,7 +369,7 @@ void rayGen()
 
         AABB aabb = AABB(minPoint, maxPoint);
         #if ACCEL_USE_FRUSTUM_CULLING
-            if (aabbIsVisible(aabb, frameDim))
+            if (aabbIsVisible(aabb, smRes))
         #endif
             {
                 uint insertIdx = 0;

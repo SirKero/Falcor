@@ -161,7 +161,7 @@ struct AccelIrregularZShader
         float4 w = getGatherWeights(shadowPos.xy, gSMSize.x, gatherUV);
         const float2 shadowPixel = gatherUV.xy * gSMSize;
     #else
-        const float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
+        const float2 shadowPixel = shadowPos.xy * gSMSize;//floor(shadowPos.xy * gSMSize) + 0.5;
     #endif
         float dist = shadowPos.w;
 

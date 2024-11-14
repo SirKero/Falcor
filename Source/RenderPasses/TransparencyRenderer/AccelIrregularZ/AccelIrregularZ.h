@@ -71,7 +71,8 @@ private:
     uint mStagingCount = 0;
 
     // Accel shadow settings
-    static const uint mAccelApproxNumElementsPerPixel = 4u;
+    static const uint kSamplesPerPixel = 8u;
+    static const uint mAccelApproxNumElementsPerPixel = 12u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
@@ -97,6 +98,8 @@ private:
         bool stopGeneration = false;
     } mAccelDebugShowAS;
 
+    ref<Sampler> mpPointSampler; 
+
     std::vector<ref<Buffer>> mAccelShadowAABB;                                 // For Accel AABB points
     std::vector<ref<Buffer>> mAccelShadowCounter;                              // Counter for inserting points
     std::vector<ref<Buffer>> mAccelShadowCounterCPU;                           // Counter for inserting points
@@ -105,7 +108,7 @@ private:
     ref<Texture> mpDebugDepth;                                                 // Depth for the debug passs
     std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
     std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples  
-
+    
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
