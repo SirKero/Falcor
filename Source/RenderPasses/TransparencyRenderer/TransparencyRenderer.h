@@ -98,8 +98,8 @@ private:
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
     std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
 
-    ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::RayTracing;
-    uint mSelectedShadowMethod = 0;
+    ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
+    uint mSelectedShadowMethod = std::max((int)mShadowRenderMethod - 1, 0);
 
     std::vector<std::shared_ptr<TransparencyShadowMethod>> mShadowMethods; //Shadow Methods that rely on extra structures (mSelectedShadowMethod - 1)
 
