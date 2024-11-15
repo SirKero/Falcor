@@ -9,7 +9,9 @@ import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
+#if EVAL_OPAQUE_SHADOW_MAP
 import Rendering.ShadowMaps.ShadowMap;
+#endif
 
 import AccelShadow.AccelShadow;
 import LinkedList.LinkedListShadow;

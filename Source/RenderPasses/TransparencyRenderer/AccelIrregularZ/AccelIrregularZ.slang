@@ -34,17 +34,14 @@ struct AccelShadowRayData {
     float hitDepth;
 
     __init() {
-        this.visibility = 0.0;
+        this.visibility = 1.0;
         this.hitDepth = -1.0;
     }
 }
 #endif
 
 struct AccelShadowAttribs {
-    float2 rangeZ;
-#if SHADOW_ACCEL_PCF
     float2 pixel;
-#endif
 }
 
 struct AccelIrregularZShader
@@ -70,54 +67,26 @@ struct AccelIrregularZShader
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
 
     inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const AccelShadowData shadowData, const AccelShadowAttribs attribs, const float3 origin) {
-
-        const float linZ = origin.z;
-        float2 rangeZ = attribs.rangeZ;
-                    
-        // Shadow Data is x->lengthfirstbox , y-> transparency first box, z -> transparency second box
-        rangeZ.y = rangeZ.x + shadowData.firstBoxRange;
-        float vis = shadowData.transparencyEnd;
-        float factor = 1.0;
-        float middleDepth = (rangeZ.x + rangeZ.y) / 2.0;
-        // in first box
-        if (linZ < rangeZ.y) {
-            // factor = max(2.0 - saturate((linZ - rangeZ.x) / (rangeZ.y - rangeZ.x)), 1.0);
-            // factor = linZ - rangeZ.x;
-            factor = 1.0 / abs(middleDepth - linZ); // TODO stochastic approach?
-
-            vis = shadowData.transparencyStart;
-        }
-        float distMiddleToLinZ = abs(middleDepth - linZ);
-        distMiddleToLinZ = middleDepth;
-
-    #if SHADOW_ACCEL_PCF
-        uint index = 3;
-        float2 pixelDiff = attribs.pixel - origin.xy;
-        if (pixelDiff.x > 0 && pixelDiff.y < 0)
-            index = 2;
-        else if (pixelDiff.x > 0 && pixelDiff.y > 0)
-            index = 1;
-        else if (pixelDiff.x < 0 && pixelDiff.y > 0)
-            index = 0;
-
+        //Take average of all hit samples
         if (kUseNormalizationFactor) {
-            rayData.visibility[index] += vis * factor;
-            rayData.hitDepth[index] = max(rayData.hitDepth[index], 0.0) + factor;
-        }
-        else if (rayData.hitDepth[index] < 0 || distMiddleToLinZ < rayData.hitDepth[index]) {
-            rayData.visibility[index] = vis;
-            rayData.hitDepth[index] = distMiddleToLinZ;
-        }
-    #else
-        if (kUseNormalizationFactor) {
-            rayData.visibility += vis * factor;
-            rayData.hitDepth = max(rayData.hitDepth, 0.0) + factor;
-        }
-        else if (rayData.hitDepth < 0 || distMiddleToLinZ < rayData.hitDepth) {
-            rayData.visibility = vis;
-            rayData.hitDepth = distMiddleToLinZ;
-        }
-    #endif // SHADOW_ACCEL_PCF
+            if (rayData.hitDepth < 0) {
+                rayData.visibility = shadowData.transparency;
+                rayData.hitDepth = 1.0;
+            } else {
+                rayData.visibility += shadowData.transparency;
+                rayData.hitDepth += 1.0;
+            }
+        } //Take the sample that is the nearest
+        else {
+            const float linZ = origin.z;
+
+            float distToDepth = abs(linZ - shadowData.hitDepth);
+
+            if (rayData.hitDepth < 0 || distToDepth < rayData.hitDepth) {
+                rayData.visibility = shadowData.transparency;
+                rayData.hitDepth = distToDepth;
+            }
+        }     
     }
 
     void traceAccelShadowInline(inout AccelShadowRayData rayData, uint lightIdx, const RayDesc ray) {
@@ -130,7 +99,6 @@ struct AccelIrregularZShader
         while (rayQuery.Proceed()) {
             AABB aabb = gShadowAABBs[rayQuery.CandidateInstanceIndex()][rayQuery.CandidatePrimitiveIndex()];
             AccelShadowAttribs attribs = {};
-            attribs.rangeZ = float2(aabb.minPoint.z, aabb.maxPoint.z);
             #if SHADOW_ACCEL_PCF
                 attribs.pixel = (aabb.minPoint.xy + aabb.maxPoint.xy) / 2.0; // Pixel center
             #endif
@@ -183,29 +151,13 @@ struct AccelIrregularZShader
         //else
         //    TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 2 /* hitIdx */, 1, 2 /* missIdx */, ray, rayData);
 
-        float visibility = 0;
+        float visibility = rayData.visibility;
 
-    #if SHADOW_ACCEL_PCF
-
-        for (uint i = 0; i < 4; i++) {
-            if (rayData.hitDepth[i] <= 0.0)
-                visibility += w[i] * 1.0;
-            else {
-                if (kUseNormalizationFactor)
-                    rayData.visibility[i] /= max(rayData.hitDepth[i], 1e-8);
-                visibility += w[i] * rayData.visibility[i];
-            }
+        if (kUseNormalizationFactor) {
+            if (rayData.hitDepth > 0)
+                visibility /= rayData.hitDepth;
         }
-    #else
-        if (rayData.hitDepth <= 0.0)
-            visibility = 1.0;
-        else {
-            if (kUseNormalizationFactor)
-                rayData.visibility /= max(rayData.hitDepth, 1e-8);
-            visibility = rayData.visibility;
-        }
-    #endif
-
+        
         return visibility;
     }
     

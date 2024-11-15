@@ -72,13 +72,13 @@ private:
 
     // Accel shadow settings
     static const uint kSamplesPerPixel = 8u;
-    static const uint mAccelApproxNumElementsPerPixel = 12u;
+    static const uint mAccelApproxNumElementsPerPixel = 16u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
     float mAccelShadowOverestimation = 1.1f;
-    uint mAccelDataFormatSize = 4; // Size of the data struct for the accel data
+    uint mAccelDataFormatSize = 2; // Size of the data struct for the accel data
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;

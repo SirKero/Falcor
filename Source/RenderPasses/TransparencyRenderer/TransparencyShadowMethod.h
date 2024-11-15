@@ -59,10 +59,6 @@ public:
     */
     virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData, ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) {}
 
-    /* Sets a pointer to a opaque shadow map
-    */
-    void setOpaqueShadowMap(const std::shared_ptr<ShadowMap>& shadowMap){ mpOpaqueShadowMap = shadowMap;  mOpaqueShadowMapEnabled = true; }
-
     /* Set enable status for the opaque shadow map
     */
     void enableOpaqueShadowMap(bool enable = true) { mOpaqueShadowMapEnabled = enable; }
@@ -90,7 +86,6 @@ protected:
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
-    std::shared_ptr<ShadowMap> mpOpaqueShadowMap;       //default shadow map pass for opaque
     bool mOpaqueShadowMapEnabled = false;
 
     uint2 mResolution = uint2(512);

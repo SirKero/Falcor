@@ -107,7 +107,8 @@ private:
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     LightSampleMode mLightSampleMode = LightSampleMode::RIS;
     bool mOptionsChanged = false;
-    bool mEnableOpaqueShadowMaps = true;    //Enable opaque shadow pass
+    bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass
+    bool mOpaqueShadowMapModeChanged = false;
 
     //Passes
     // Pipelines / Programms

@@ -109,6 +109,13 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         return;
     }
 
+    if (mOpaqueShadowMapModeChanged)
+    {
+        mpEvalDirectPass.reset();
+        mEvalTransparencyDirectRay.resetPip();
+        mOpaqueShadowMapModeChanged = false;
+    }
+
     bool sceneHasAnalyticLights = !mpScene->getLights().empty();
 
     // Request the light collection if emissive lights are enabled.
@@ -122,8 +129,6 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     {
         mpShadowMap = std::make_shared<ShadowMap>(mpDevice, mpScene, ShadowMapType::Variance);
         mpShadowMap->setOpaqueCullModeNonOpaque();
-        for (auto& method : mShadowMethods)
-            method->setOpaqueShadowMap(mpShadowMap);
     }
 
     if (mEnableOpaqueShadowMaps && mpShadowMap)
@@ -163,7 +168,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
     dirty |= methodChanged;
 
-    dirty |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);
+    mOpaqueShadowMapModeChanged |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);
     widget.tooltip("Enables a extra opaque shadow map pass. Shadow Method should only evaluate non-opaque geometry in that case");
 
     if (mEnableOpaqueShadowMaps && mpShadowMap)
@@ -248,7 +253,7 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
-    if (mpShadowMap)
+    if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
@@ -327,7 +332,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
-    if (mpShadowMap)
+    if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;

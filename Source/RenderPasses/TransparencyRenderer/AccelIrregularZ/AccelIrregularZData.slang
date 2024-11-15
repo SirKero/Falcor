@@ -13,42 +13,36 @@
 #endif
 
 struct AccelShadowData {
-    float transparencyStart;
-    float transparencyEnd;
-    float firstBoxRange;
+    float transparency;
+    float hitDepth;
 
     __init() {
-        this.transparencyEnd = 1.0;
-        this.transparencyStart = 1.0;
-        this.firstBoxRange = 1e-8;
+        this.transparency = 1.0;
+        this.hitDepth = 0.0;
     }
 
-    __init(float transparencyStart, float transparencyEnd, float firstBoxRange) {
-        this.transparencyStart = transparencyStart;
-        this.transparencyEnd = transparencyEnd;
-        this.firstBoxRange = firstBoxRange;
+    __init(float transparency , float hitDepth) {
+        this.transparency = transparency;
+        this.hitDepth = hitDepth;
     }
 
     [mutating]
     void unpack(uint data) {
-        this.transparencyStart = float(data & 0xFF) / 255.0;
-        this.transparencyEnd = float((data >> 8) & 0xFF) / 255.0;
-        this.firstBoxRange = f16tof32((data >> 16) & 0xFFFF);
+        this.transparency = f16tof32(data & 0xFFFF);
+        this.hitDepth = f16tof32((data >> 16) & 0xFFFF);
     }
 
     [mutating]
     void unpack(uint2 data) {
-        this.transparencyStart = f16tof32(data.x & 0xFFFF);
-        this.transparencyEnd = f16tof32((data.x >> 16) & 0xFFFF);
-        this.firstBoxRange = asfloat(data.y);
+        this.transparency = asfloat(data.x);
+        this.hitDepth = asfloat(data.y);
 
     }
 
     [mutating]
     void unpack(uint4 data) {
-        this.transparencyStart = asfloat(data.x);
-        this.transparencyEnd = asfloat(data.y);
-        this.firstBoxRange = asfloat(data.z);
+        this.transparency = asfloat(data.x);
+        this.hitDepth = asfloat(data.y);
     }
 
     __init(uint data) {
@@ -63,25 +57,22 @@ struct AccelShadowData {
 
     uint packAsUint() {
         uint data = 0;
-        data |= uint(round(this.transparencyStart * 255.0)) & 0xFF;
-        data |= (uint(round(this.transparencyEnd * 255.0)) & 0xFF) << 8;
-        data |= f32tof16(this.firstBoxRange) << 16;
+        data |= f32tof16(this.transparency);
+        data |= f32tof16(this.hitDepth) << 16;
         return data;
     }
 
     uint2 packAsUint2() {
         uint2 data = uint2(0);
-        data.x |= f32tof16(this.transparencyStart);
-        data.x |= f32tof16(this.transparencyEnd) << 16;
-        data.y = asuint(this.firstBoxRange);
+        data.x = asuint(this.transparency);
+        data.y = asuint(this.hitDepth);
         return data;
     }
 
     uint4 packAsUint4() {
         uint4 data = uint4(0);
-        data.x = asuint(this.transparencyStart);
-        data.y = asuint(this.transparencyEnd);
-        data.z = asuint(this.firstBoxRange);
+        data.x = asuint(this.transparency);
+        data.y = asuint(this.hitDepth);
         return data;
     }
 }

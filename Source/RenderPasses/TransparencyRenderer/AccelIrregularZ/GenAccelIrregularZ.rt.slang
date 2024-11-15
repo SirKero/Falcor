@@ -31,13 +31,11 @@ struct RayData
     float dist;
     float depth;
     float currentTransmittance;
-    float depthRange;
 
     __init() {
         this.dist = -1.0;
         this.depth = 1.0;
         this.currentTransmittance = 1.0;
-        this.depthRange = 0.0;
     }
 };
 
@@ -65,20 +63,29 @@ Texture2D<uint> gSampleDistribution;
 
 SamplerState gPointSampler;
 
+static const bool kUseSampleDistribution = true;
 static const float kMinOpacity = 1e-7;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
 
 // DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
-static const float2 kMSAAPattern2[2] = { float2(-0.25, -0.25), float2(0.25, 0.25)};
+//Offsets are (xMin, xMax, yMin, yMax)
+static const float2 kMSAAPattern2[2] = { float2(-0.25, -0.25), float2(0.25, 0.25) };
 
 static const float2 kMSAAPattern4[4] = { float2(-0.125, -0.375), float2(0.375, -0.125), float2(-0.375, 0.125), float2(0.125, 0.375)
                                       };
-
+static const float4 kMSAAPixelOffset4[4] =  { float4(-0.375, 0.125, -0.125, 0.375), float4(-0.375, 0.125, -0.375, 0.125),
+                                              float4(-0.125, 0.375, -0.125, 0.375), float4(-0.125,0.375, -0.375, 0.125)
+                                            };
 static const float2 kMSAAPattern8[8] = { float2(0.0625, -0.1875),  float2(-0.0625, 0.1875), float2(0.3125, 0.0625), float2(-0.1875, -0.3125),
                                         float2(-0.3125, 0.3125), float2(-0.4375, -0.0625), float2(0.1875, 0.4375),   float2(0.4375, -0.4375)
                                       };
+static const float4 kMSAAPixelOffset8[8] = { float4(-0.0625, 0.4375, -0.3125, 0.1875), float4(-0.4375, 0.0625, -0.1875, 0.3125),
+                                             float4(-0.3125, 0.1875, -0.0625, 0.4375), float4(-0.3125, 0.1875, -0.1875, 0.3125),
+                                             float4(-0.1875, 0.3125, -0.3125, 0.1875), float4(-0.0625, 0.4375, -0.4375 ,0.0625),
+                                             float4(-0.1875, 0.3125, -0.4375, 0.0625), float4(-0.4375, 0.0625, 0.0625 ,0.4375)
+                                            };
 
 /* Unused
 static const float2 kMSAAPattern16[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
@@ -152,50 +159,10 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
 
     rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - sd.opacity);
     float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
-    //rayData.depth = posH.w; // Linear depth
-    float3 posView = mul(gView, float4(sd.posW, 1.f)).xyz;
-    rayData.depth = -1.0 * posView.z; //same as above
-
-    //Get the for corners of the pixel to approximate the size of the 3D pixel
-    float2 pixel = float2(DispatchRaysIndex().xy) + 0.5;
-    uint2 frameDim = DispatchRaysDimensions().xy;
-    frameDim.x /= gSamplePerRes;
-   
-    //Estimate the size of the currently hit plane for the pixel
-    float2 ndcCorners[4];
-    ndcCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
-    ndcCorners[1] = (pixel + float2(kPixelOffset, -kPixelOffset)) / frameDim;
-    ndcCorners[2] = (pixel + float2(-kPixelOffset, kPixelOffset)) / frameDim;
-    ndcCorners[3] = (pixel + float2(kPixelOffset, kPixelOffset)) / frameDim;
-    //From [0,1] to [-1,1]
-    [unroll]
-    for (uint i = 0; i < 4; i++) {
-        ndcCorners[i] = ndcCorners[i] * 2.0 - 1.0;
-        ndcCorners[i].y *= -1.f;
-    }
-    float3 rayDir[4];
-    //To view space
-    for (uint i = 0; i < 4; i++) {
-        rayDir[i] = mul(gInvProj, float4(ndcCorners[i], 1.0, 1.0)).xyz;
-        // rayDir[i].xyz /= rayDir[i].z; // Normalize z
-        rayDir[i] = normalize(rayDir[i]);
-    }
-    // View normal
-    float3 faceN = sd.frontFacing ? sd.faceN : -sd.faceN;
-    float3 normalView = normalize(mul(gView, float4(faceN, 0)).xyz);
-
-    float maxDepth = rayData.depth;
-    float minDepth = rayData.depth;
-    for (uint i = 0; i < 4; i++) {
-        float t = 0;
-        if (intersectPlane(normalView, posView, rayDir[i], t)) {
-            float3 hitView = rayDir[i] * t;
-            maxDepth = max(maxDepth, -hitView.z);
-            minDepth = min(minDepth, -hitView.z);
-        }
-    }
-    rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-4);
-
+    rayData.depth = posH.w; // Linear depth
+    //float3 posView = mul(gView, float4(sd.posW, 1.f)).xyz;
+    //rayData.depth = -1.0 * posView.z; //same as above
+    
     rayData.dist = RayTCurrent();
 }
 
@@ -265,34 +232,43 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
-    const uint2 smRes = uint2(frameDim.x / gSamplePerRes, frameDim.y);
+    uint2 smRes = uint2(frameDim.x / gSamplePerRes, frameDim.y);
+    float2 pixelOffset = float2(0);
+    float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); //Pixel offset to create AABB (xMin, xMax, yMin, yMax)
 
     if (all(pixel < smRes)) {
         gAccessCounter[pixel] = 0; // clear
-    }
-    //TODO Go through the mip chain
-    uint subpixelID = 1 + pixel.x % gSamplePerRes;
-    pixel.x /= gSamplePerRes;
-
-    uint numSamples = gSampleDistribution[pixel];
-    if (numSamples == 3)
-        numSamples = 4;
-    else if (numSamples > 4 && numSamples <= 8)
-        numSamples = 8;
-
-    if (numSamples < subpixelID)
+    } else if (!kUseSampleDistribution)
         return;
 
-    numSamples = min(numSamples, gSamplePerRes);
+    // TODO Go through the mip chain
+    if (kUseSampleDistribution){
+        uint subpixelID = 1 + pixel.x % gSamplePerRes;
+        pixel.x /= gSamplePerRes;
 
-    float2 pixelOffset = float2(0);
-    if (numSamples == 2)
-        pixelOffset = kMSAAPattern2[subpixelID - 1];
-    else if (numSamples == 4)
-        pixelOffset = kMSAAPattern4[subpixelID - 1];
-    else if (numSamples == 8)
-        pixelOffset = kMSAAPattern8[subpixelID - 1];
+        uint numSamples = gSampleDistribution[pixel];
+        if (numSamples > 1 && numSamples <= 4)
+            numSamples = 4;
+        else if (numSamples > 4 && numSamples <= 8)
+            numSamples = 8;
 
+        if (numSamples < subpixelID)
+            return;
+
+        numSamples = min(numSamples, gSamplePerRes);
+
+        if (numSamples == 2)
+            pixelOffset = kMSAAPattern2[subpixelID - 1];
+        else if (numSamples == 4) {
+            pixelOffset = kMSAAPattern4[subpixelID - 1];
+            boxPixelOffset = kMSAAPixelOffset4[subpixelID - 1];
+        }
+        else if (numSamples == 8) {
+            pixelOffset = kMSAAPattern8[subpixelID - 1];
+            boxPixelOffset = kMSAAPixelOffset8[subpixelID - 1];
+        }   
+    }
+    
     float2 pixelSample = pixel + 0.5 + pixelOffset; //+ kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / smRes;
@@ -313,9 +289,9 @@ void rayGen()
 
     RayData rayData = RayData();
     bool useRayTracing = true;
-    float lastMinDepth = 0.0;
-    float lastDepthRange = 0.0;
-    float2 lastTransmittances = float2(1.0);
+    float2 boxZ = float2(0.0); //Last two middle depths
+    float lastHitDepth = 0.0;
+    float2 lastTransmittances = float2(1.0); //Store the last two transmittances
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing ; i++) {
         rayData.depth = -1;
@@ -324,19 +300,25 @@ void rayGen()
         //Trace ray
         TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
-        // A miss or opaque object ends the ray
+        // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0)
             return;
 
         //End ray tracing for the next frame
-        if (rayData.currentTransmittance <= kMinOpacity || rayData.dist < 0) {
+        if (lastTransmittances.y <= kMinOpacity || rayData.dist < 0) {
             useRayTracing = false;
         }
 
-        if (rayData.dist > 0 && i>0) {
+        // Update box dims
+        if (rayData.dist > 0) {
+            boxZ.y = boxZ.x;
+            boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
+        }
+
+        if (rayData.dist > 0 && i>1) {
             // Write output
-            float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
-            float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
+            float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.y);
+            float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxZ.x);
 
             AABB aabb = AABB(minPoint, maxPoint);
             #if ACCEL_USE_FRUSTUM_CULLING
@@ -347,26 +329,32 @@ void rayGen()
                     InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
                     if (insertIdx > MAX_IDX)
                         return;
-            
+
                     gAABB[insertIdx] = aabb;
-                    writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
+                    writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
                 }
         }
         // Update for next iteration
         if (rayData.dist > 0) {
-            ray.TMin = rayData.dist;
-            lastMinDepth = rayData.depth;
-            lastDepthRange = rayData.depthRange;
+            ray.TMin = rayData.dist + 1e-10;
+            lastHitDepth = rayData.depth;
             lastTransmittances.y = lastTransmittances.x;
             lastTransmittances.x = rayData.currentTransmittance;
+            
         }
     }
 
-// Insert last element
-    if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
-        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
-        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, gFar));
+// Insert last two elements
+    if (rayData.dist < 0)
+        rayData.depth = gFar;
 
+    // Update box
+    boxZ.y = boxZ.x;
+    boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
+
+    if (lastTransmittances.y < 1.0) {
+        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, boxZ.y);
+        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, boxZ.x);
         AABB aabb = AABB(minPoint, maxPoint);
         #if ACCEL_USE_FRUSTUM_CULLING
             if (aabbIsVisible(aabb, smRes))
@@ -378,7 +366,25 @@ void rayGen()
                     return;
 
                 gAABB[insertIdx] = aabb;
-                writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
+                writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
+            }
+    }
+    // Store last box
+    if (lastTransmittances.x < 1.0 && rayData.dist >= 0) {
+        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, boxZ.x);
+        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, gFar);
+        AABB aabb = AABB(minPoint, maxPoint);
+        #if ACCEL_USE_FRUSTUM_CULLING
+            if (aabbIsVisible(aabb, smRes))
+        #endif
+            {
+                uint insertIdx = 0;
+                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                if (insertIdx > MAX_IDX)
+                    return;
+
+                gAABB[insertIdx] = aabb;
+                writeData(insertIdx, AccelShadowData(lastTransmittances.x, rayData.depth));
             }
     }
 }
