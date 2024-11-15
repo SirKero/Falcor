@@ -322,6 +322,9 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
     // Clear Counter
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, lights.size()).get(), uint4(0));
+    //Clear AABBs
+    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB);
+
 
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));

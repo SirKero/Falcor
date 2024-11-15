@@ -77,6 +77,11 @@ public:
 
     void bindTlas(const ShaderVar& rootVar, std::string shaderName = "gCustomAccel");
 
+    /** Clears the AABBs.
+     */
+    void clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer);
+    void clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers);
+
 private:
     /*  * Creates the acceleration structure.
      * Has to be called at least once to create the AS. buildAccelerationStructure(...) needs to be called after that to build/update the AS
@@ -107,6 +112,8 @@ private:
     /** Build the BLAS
      */
     void buildBottomLevelAS(RenderContext* pRenderContext, const std::vector<uint64_t>& aabbCount, bool updateAABBCount);
+ 
+    
 
     // Acceleration Structure helpers Structs
     struct BLASData
@@ -144,6 +151,9 @@ private:
     RtAccelerationStructurePrebuildInfo mTlasPrebuildInfo = {};
     ref<Buffer> mTlasScratch;
     TLASData mTlas;
+
+    //Custom Clear Pass for AABBs (need NaN in minPoint.x)
+    ref<ComputePass> mpClearAABBsPass;
 };
 
 }

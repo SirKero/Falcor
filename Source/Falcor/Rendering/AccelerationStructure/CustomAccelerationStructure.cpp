@@ -35,13 +35,18 @@
 
 namespace Falcor
 {
-CustomAccelerationStructure::CustomAccelerationStructure(
-    ref<Device> pDevice,
-    const uint64_t aabbCount,
-    const uint64_t aabbGpuAddress,
-    const BuildMode buildMode,
-    const UpdateMode updateMode
-)
+    namespace
+    {
+    std::string kAABBClearShaderFile = "Rendering/AccelerationStructure/ClearAABBs.cs.slang";
+    }
+
+    CustomAccelerationStructure::CustomAccelerationStructure(
+        ref<Device> pDevice,
+        const uint64_t aabbCount,
+        const uint64_t aabbGpuAddress,
+        const BuildMode buildMode,
+        const UpdateMode updateMode
+    )
     {
         mpDevice = pDevice;
         if (!mpDevice->isFeatureSupported(Device::SupportedFeatures::Raytracing))
@@ -346,4 +351,44 @@ CustomAccelerationStructure::CustomAccelerationStructure(
         pRenderContext->uavBarrier(mTlas.pTlas.get());
     }
 
-}
+    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer) {
+        std::vector<ref<Buffer>> pAABBs = {pAABBBuffer};
+        clearAABBBuffers(pRenderContext, pAABBs);
+    }
+
+    //TODO add a gpu counter or cpu counter input to only clear a selected range 
+    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers) {
+        FALCOR_PROFILE(pRenderContext, "Clear Accel AABB Buffers");
+
+        if (pAABBBuffers.empty())
+            return;
+
+        //Create compute pass if invalid
+        if (!mpClearAABBsPass)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kAABBClearShaderFile).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+
+            mpClearAABBsPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+        auto var = mpClearAABBsPass->getRootVar();
+
+        for (auto& pAABB : pAABBBuffers)
+        {
+            uint3 dispatchSize = uint3(1);
+            if (pAABB->isStructured() || pAABB->isTyped())
+                dispatchSize.x = (pAABB->getElementCount());
+            else
+                dispatchSize.x = pAABB->getElementCount() / sizeof(AABB);
+
+            var["CB"]["gMax"] = dispatchSize.x;
+            var["CB"]["gOffset"] = 0;
+            var["gAABB"] = pAABB;
+
+            mpClearAABBsPass->execute(pRenderContext, dispatchSize);
+        }
+    }
+
+} //namespace Falcor
