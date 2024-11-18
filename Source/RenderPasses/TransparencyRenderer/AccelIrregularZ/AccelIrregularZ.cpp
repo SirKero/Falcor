@@ -35,10 +35,10 @@ namespace
     const std::string kGenShader = kShaderFolder + "GenAccelIrregularZ.rt.slang";
     const std::string kAccessMipsShader = kShaderFolder + "GenAccessMips.cs.slang";
     const std::string kCalcSampleDistributionShader = kShaderFolder + "CalcSampleDistribution.cs.slang";
-    //const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
+    const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //UI
-    const Gui::DropdownList kAccelDebugVisModes = {{0, "Transparency (Heatmap)"}, {1, "AABB index"}, {2, "NormalBoxVis"}};
+    const Gui::DropdownList kAccelDebugVisModes = {{0, "Transparency (Heatmap)"}, {1, "AABB index"}, {2, "Pixel"}, {3, "DepthPoints"}};
     const Gui::DropdownList kAccelDataFormat = {{1, "Uint"}, {2, "Uint2"}, {4, "Uint4"}};
 
 }; // namespace
@@ -521,6 +521,85 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
 
 void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& renderData, ref<Texture> debugOut,  ref<Texture> colorOut)
 {
-    //TODO
+    // Early return if disabled
+    if (!mAccelDebugShowAS.enable)
+        return;
+
+    FALCOR_PROFILE(pRenderContext, "ShowAccel");
+
+    const uint2 dims = renderData.getDefaultTextureDims();
+    if (!mpDebugDepth || math::any(uint2(mpDebugDepth->getWidth(), mpDebugDepth->getHeight()) != dims))
+    {
+        mpDebugDepth =
+            Texture::create2D(mpDevice, dims.x, dims.y, ResourceFormat::D32Float, 1u, 1u, nullptr, ResourceBindFlags::DepthStencil);
+        mpDebugDepth->setName("DebugRasterDepth");
+    }
+
+    // Init Program
+    if (!mRasterShowAccelPass.pProgram)
+    {
+        // Init program
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderDebugShowShadowAccelRaster).vsEntry("vsMain").psEntry("psMain").gsEntry("gsMain");
+        desc.setShaderModel("6_6");
+
+        auto defines = mpScene->getSceneDefines();
+        defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+        // Create Program and state
+        mRasterShowAccelPass.pProgram = GraphicsProgram::create(mpDevice, desc, defines);
+        mRasterShowAccelPass.pState = GraphicsState::create(mpDevice);
+
+        // Set state
+        mRasterShowAccelPass.pState->setProgram(mRasterShowAccelPass.pProgram);
+        mRasterShowAccelPass.pState->setVao(Vao::create(Vao::Topology::PointList));
+
+        // Set raster state
+        RasterizerState::Desc rsDesc;
+        rsDesc.setCullMode(RasterizerState::CullMode::None);
+        rsDesc.setFillMode(RasterizerState::FillMode::Solid);
+        mRasterShowAccelPass.pState->setRasterizerState(RasterizerState::create(rsDesc));
+
+        mRasterShowAccelPass.pFBO = Fbo::create(mpDevice);
+    }
+
+    // Set draw target
+    mRasterShowAccelPass.pFBO->attachColorTarget(debugOut, 0);
+    mRasterShowAccelPass.pFBO->attachDepthStencilTarget(mpDebugDepth);
+    pRenderContext->clearFbo(mRasterShowAccelPass.pFBO.get(), float4(0, 0, 0, 1), 1.0, 0);
+    mRasterShowAccelPass.pState->setFbo(mRasterShowAccelPass.pFBO);
+
+    // Runtime Defines
+    mRasterShowAccelPass.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+
+    // Vars
+    if (!mRasterShowAccelPass.pVars)
+        mRasterShowAccelPass.pVars = GraphicsVars::create(mpDevice, mRasterShowAccelPass.pProgram.get());
+
+    uint frameInFlight = 0;
+    // Staging count was increased at the end of the generation code, so take one less
+    if (mAccelShadowUseCPUCounterOptimization)
+        frameInFlight = mStagingCount == 0 ? kFramesInFlight - 1 : mStagingCount - 1;
+
+    auto var = mRasterShowAccelPass.pVars->getRootVar();
+
+    var["gScene"] = mpScene->getParameterBlock();
+    var["CB"]["gSMSize"] = mResolution;
+    var["CB"]["gNear"] = mNearFar.x;
+    var["CB"]["gFar"] = mNearFar.y;
+    var["CB"]["gSelectedLight"] = mAccelDebugShowAS.selectedLight;
+    var["CB"]["gCullMin"] = float3(mAccelDebugShowAS.clipX.x, mAccelDebugShowAS.clipY.x, mAccelDebugShowAS.clipZ.x);
+    var["CB"]["gCullMax"] = float3(mAccelDebugShowAS.clipX.y, mAccelDebugShowAS.clipY.y, mAccelDebugShowAS.clipZ.y);
+    var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
+    var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
+    var["CB"]["gMaxSampleCount"] = kSamplesPerPixel;
+    var["CB"]["gInvView"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invView;
+    var["CB"]["gInvProj"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invProjection;
+
+    var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
+    var["gShadowCounter"] = mAccelShadowCounter[frameInFlight];
+    var["gShadowData"] = mAccelShadowData[mAccelDebugShowAS.selectedLight];
+    var["gOutputColor"] = colorOut; // For blending
+
+    pRenderContext->draw(mRasterShowAccelPass.pState.get(), mRasterShowAccelPass.pVars.get(), mAccelShadowMaxNumPoints, 0);
 }
 
