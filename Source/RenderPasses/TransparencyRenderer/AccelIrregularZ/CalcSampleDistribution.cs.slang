@@ -23,14 +23,16 @@ void main(uint3 thdID: SV_DispatchThreadID)
     uint fullImportance = gImptMip[thdID.z][pixelMip];
     uint sampleImportance = gImpt[thdID.z][pixel];
     uint sampleCount = gSmpMip[thdID.z][pixelMip];
+    if (gDstSize.x == 2)
+        sampleCount = min(sampleCount, fullImportance);
 
     float weight = float(sampleImportance) / fullImportance;
 
-    //TODO error diffusion
+    //TODO error diffusion ?
 
     uint samples = 0;
     if (weight > 0)
-        samples = uint(ceil(sampleCount * weight));
+        samples = uint(round(sampleCount * weight));
 
     gSmp[thdID.z][pixel] = samples;
 }

@@ -358,11 +358,11 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
         var["CB"]["gSamplePerRes"] = kSamplesPerPixel;
+        var["CB"]["gMipCount"] = mSampleDistribution[i]->getMipCount();
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
         var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
         var["CB"]["gInvView"] = mShadowMapMVP[i].invView;
-        var["CB"]["gView"] = mShadowMapMVP[i].view;
         std::array<float4, 4> planes = getCameraFrustumPlanes(); // Get Top,Bottom,Left,Right Camera frustum plane
         for (uint j = 0; j < 4; j++)
             var["CB"]["gFrustumPlanes"][j] = planes[j];

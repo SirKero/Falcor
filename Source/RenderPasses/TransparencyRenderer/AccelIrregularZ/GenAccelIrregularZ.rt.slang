@@ -46,12 +46,12 @@ cbuffer CB
     float gNear;
     float gFar;
     uint gLightIdx;     //LightIndex
-    uint gSamplePerRes; //Number of samples per pixel
-    float4x4 gViewProj;    // View Projection for current light
+    uint gSamplePerRes; // Number of samples per pixel
+    uint gMipCount;     // Number of mips
+    float4x4 gViewProj;
     float4x4 gInvViewProj; // Inverse view projection
     float4x4 gInvProj;
     float4x4 gInvView;
-    float4x4 gView;
     float4 gFrustumPlanes[4]; //Top, Bottom, Left, Right Planes of frustum
 }
 
@@ -162,9 +162,6 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - sd.opacity);
     float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
     rayData.depth = posH.w; // Linear depth
-    //float3 posView = mul(gView, float4(sd.posW, 1.f)).xyz;
-    //rayData.depth = -1.0 * posView.z; //same as above
-    
     rayData.dist = RayTCurrent();
 }
 
@@ -244,11 +241,28 @@ void rayGen()
         return;
 
     // TODO Go through the mip chain
+    float pixelCenterOffest = 0.5;
     if (kUseSampleDistribution){
         uint subpixelID = 1 + pixel.x % gSamplePerRes;
         pixel.x /= gSamplePerRes;
+        float2 relPixel = (float2(pixel)+0.5) / smRes;
 
-        uint numSamples = gSampleDistribution[pixel];
+        uint numSamples = 0;
+        int mipLevel = 1;
+        uint mipRes = 2;
+        for (int m = gMipCount - 2 ; m >= 0; m--) {
+            uint2 mipPos = uint2(relPixel * mipRes);
+            numSamples = gSampleDistribution.Load(uint3(mipPos,m));
+            mipLevel = 1 + m;
+            if (numSamples <= 4)
+                break;
+            mipRes *= 2;
+        }
+
+        // Check if sample is still valid
+        int mipCheck = mipLevel - 1;
+        if (mipCheck > 0 && any(pixel % (mipCheck * 2) != 0))
+            return;
 
         if (numSamples > 1 && numSamples <= 4)
             numSamples = 4;
@@ -271,10 +285,14 @@ void rayGen()
         else if (numSamples == 8) {
             pixelOffset = kMSAAPattern8[subpixelID - 1];
             boxPixelOffset = kMSAAPixelOffset8[subpixelID - 1];
-        }   
+        }
+
+        pixelOffset *= mipLevel;
+        boxPixelOffset *= mipLevel;
+        pixelCenterOffest *= mipLevel;
     }
 
-    float2 pixelSample = pixel + 0.5 + pixelOffset; //+ kMSAAPattern[gFrameCount % 16];
+    float2 pixelSample = pixel + pixelCenterOffest + pixelOffset; //+ kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / smRes;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
@@ -287,8 +305,8 @@ void rayGen()
     float3 toNear = posWPixelNear.xyz - gLightPos;
 
     RayDesc ray;
-    ray.TMin = length(toNear); ;                                                                  // Always start at depth 0
-    ray.TMax = distance(gLightPos, posWPixelFar.xyz / posWPixelFar.w); // Real far for the pixel
+    ray.TMin = length(toNear);                                          // Always start at depth 0
+    ray.TMax = distance(gLightPos, posWPixelFar.xyz / posWPixelFar.w);  // Real far for the pixel
     ray.Origin = gLightPos;
     ray.Direction = normalize(toNear); // World direction
 
