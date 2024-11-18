@@ -82,8 +82,8 @@ private:
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
-    bool mAccelUseFrustumCulling = true;
-    uint mAccelKElements = 4; //TODO make changeable
+    bool mAccelUseFrustumCulling = false;
+    bool mAccelUseNearestDepth = false;  //Use nearest depth instead of average
     RayFlags mAccelRayFlags = RayFlags::None;
 
     struct

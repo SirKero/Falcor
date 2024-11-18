@@ -72,6 +72,8 @@ static const uint kMipLevels = SAMPLE_DIST_MIPS;
 // DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
 //Offsets are (xMin, xMax, yMin, yMax)
 static const float2 kMSAAPattern2[2] = { float2(-0.25, -0.25), float2(0.25, 0.25) };
+static const float4 kMSAAPixelOffset2[2] = { float4(-0.25, 0.75, -0.25, 0.75), float4(-0.75, 0.25, -0.75, 0.25)
+                                            };
 
 static const float2 kMSAAPattern4[4] = { float2(-0.125, -0.375), float2(0.375, -0.125), float2(-0.375, 0.125), float2(0.125, 0.375)
                                       };
@@ -84,7 +86,7 @@ static const float2 kMSAAPattern8[8] = { float2(0.0625, -0.1875),  float2(-0.062
 static const float4 kMSAAPixelOffset8[8] = { float4(-0.0625, 0.4375, -0.3125, 0.1875), float4(-0.4375, 0.0625, -0.1875, 0.3125),
                                              float4(-0.3125, 0.1875, -0.0625, 0.4375), float4(-0.3125, 0.1875, -0.1875, 0.3125),
                                              float4(-0.1875, 0.3125, -0.3125, 0.1875), float4(-0.0625, 0.4375, -0.4375 ,0.0625),
-                                             float4(-0.1875, 0.3125, -0.4375, 0.0625), float4(-0.4375, 0.0625, 0.0625 ,0.4375)
+                                             float4(-0.1875, 0.3125, -0.4375, 0.0625), float4(-0.4375, 0.0625, -0.0625 ,0.4375)
                                             };
 
 /* Unused
@@ -247,6 +249,7 @@ void rayGen()
         pixel.x /= gSamplePerRes;
 
         uint numSamples = gSampleDistribution[pixel];
+
         if (numSamples > 1 && numSamples <= 4)
             numSamples = 4;
         else if (numSamples > 4 && numSamples <= 8)
@@ -257,8 +260,10 @@ void rayGen()
 
         numSamples = min(numSamples, gSamplePerRes);
 
-        if (numSamples == 2)
+        if (numSamples == 2) {
             pixelOffset = kMSAAPattern2[subpixelID - 1];
+            boxPixelOffset = kMSAAPixelOffset2[subpixelID - 1];
+        }
         else if (numSamples == 4) {
             pixelOffset = kMSAAPattern4[subpixelID - 1];
             boxPixelOffset = kMSAAPixelOffset4[subpixelID - 1];
@@ -268,7 +273,7 @@ void rayGen()
             boxPixelOffset = kMSAAPixelOffset8[subpixelID - 1];
         }   
     }
-    
+
     float2 pixelSample = pixel + 0.5 + pixelOffset; //+ kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / smRes;
@@ -353,8 +358,8 @@ void rayGen()
     boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
 
     if (lastTransmittances.y < 1.0) {
-        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, boxZ.y);
-        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, boxZ.x);
+        float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.y);
+        float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxZ.x);
         AABB aabb = AABB(minPoint, maxPoint);
         #if ACCEL_USE_FRUSTUM_CULLING
             if (aabbIsVisible(aabb, smRes))
@@ -371,8 +376,8 @@ void rayGen()
     }
     // Store last box
     if (lastTransmittances.x < 1.0 && rayData.dist >= 0) {
-        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, boxZ.x);
-        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, gFar);
+        float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.x);
+        float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, gFar);
         AABB aabb = AABB(minPoint, maxPoint);
         #if ACCEL_USE_FRUSTUM_CULLING
             if (aabbIsVisible(aabb, smRes))

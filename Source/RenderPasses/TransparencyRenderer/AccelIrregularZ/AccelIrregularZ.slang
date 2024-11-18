@@ -18,6 +18,10 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_RAY_INLINE 1
 #endif
 
+#ifndef ACCEL_USE_NEAREST_DEPTH
+#define ACCEL_USE_NEAREST_DEPTH 0
+#endif
+
 #if SHADOW_ACCEL_PCF
 struct AccelShadowRayData {
     float4 visibility;
@@ -46,7 +50,7 @@ struct AccelShadowAttribs {
 
 struct AccelIrregularZShader
 {
-    static const bool kUseNormalizationFactor = false; // TODO make toggable
+    static const bool kUseNearestDepth = ACCEL_USE_NEAREST_DEPTH; // TODO make toggable
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE; //TODO currently ignored and always assumed true
 
     cbuffer SMCB
@@ -67,17 +71,8 @@ struct AccelIrregularZShader
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
 
     inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const AccelShadowData shadowData, const AccelShadowAttribs attribs, const float3 origin) {
-        //Take average of all hit samples
-        if (kUseNormalizationFactor) {
-            if (rayData.hitDepth < 0) {
-                rayData.visibility = shadowData.transparency;
-                rayData.hitDepth = 1.0;
-            } else {
-                rayData.visibility += shadowData.transparency;
-                rayData.hitDepth += 1.0;
-            }
-        } //Take the sample that is the nearest
-        else {
+        // Take the sample that is the nearest
+        if (kUseNearestDepth) {
             const float linZ = origin.z;
 
             float distToDepth = abs(linZ - shadowData.hitDepth);
@@ -85,6 +80,15 @@ struct AccelIrregularZShader
             if (rayData.hitDepth < 0 || distToDepth < rayData.hitDepth) {
                 rayData.visibility = shadowData.transparency;
                 rayData.hitDepth = distToDepth;
+            }
+        } // Take average of all hit samples
+        else {
+            if (rayData.hitDepth < 0) {
+                rayData.visibility = shadowData.transparency;
+                rayData.hitDepth = 1.0;
+            } else {
+                rayData.visibility += shadowData.transparency;
+                rayData.hitDepth += 1.0;
             }
         }     
     }
@@ -153,7 +157,7 @@ struct AccelIrregularZShader
 
         float visibility = rayData.visibility;
 
-        if (kUseNormalizationFactor) {
+        if (!kUseNearestDepth) {
             if (rayData.hitDepth > 0)
                 visibility /= rayData.hitDepth;
         }

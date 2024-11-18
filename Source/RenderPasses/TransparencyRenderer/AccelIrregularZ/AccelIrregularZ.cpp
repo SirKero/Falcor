@@ -154,7 +154,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint2), mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mAccelKElements,
+                    mpDevice, sizeof(uint) * mAccelDataFormatSize, mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));
@@ -425,6 +425,7 @@ DefineList AccelIrregularZ::getDefines()
     defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
     defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
+    defines.add("ACCEL_USE_NEAREST_DEPTH", mAccelUseNearestDepth ? "1" : "0");
     return defines;
 }
 
@@ -497,6 +498,8 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
         group.checkbox("Use PCF", mAccelUsePCF);
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
+        group.checkbox("Use Visibility of nearest depth", mAccelUseNearestDepth);
+        group.tooltip("Only uses the Visibility of the sample with the closest depth. If disabled, the average of all hit Boxes is used");
         if (auto group2 = group.group("Debug"))
         {
             group2.checkbox("Enable", mAccelDebugShowAS.enable);
