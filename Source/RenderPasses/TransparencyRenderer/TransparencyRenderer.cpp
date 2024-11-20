@@ -177,7 +177,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             mpShadowMap->renderUI(group);
     }
 
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing && !mShadowMethods.empty() && mShadowMethods[mSelectedShadowMethod])
     {
         mShadowMethods[mSelectedShadowMethod]->renderUI(widget);
     }

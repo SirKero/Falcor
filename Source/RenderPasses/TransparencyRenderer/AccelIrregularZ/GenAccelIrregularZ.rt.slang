@@ -253,15 +253,17 @@ void rayGen()
         for (int m = gMipCount - 2 ; m >= 0; m--) {
             uint2 mipPos = uint2(relPixel * mipRes);
             numSamples = gSampleDistribution.Load(uint3(mipPos,m));
-            mipLevel = 1 + m;
-            if (numSamples <= 4)
+            mipLevel = m;
+            if (numSamples <= 4) {
                 break;
+            }
+                
             mipRes *= 2;
         }
 
         // Check if sample is still valid
-        int mipCheck = mipLevel - 1;
-        if (mipCheck > 0 && any(pixel % (mipCheck * 2) != 0))
+        int mipMulFactor = 1 << mipLevel;
+        if (mipLevel > 0 && any(pixel % mipMulFactor != 0))
             return;
 
         if (numSamples > 1 && numSamples <= 4)
@@ -287,9 +289,9 @@ void rayGen()
             boxPixelOffset = kMSAAPixelOffset8[subpixelID - 1];
         }
 
-        pixelOffset *= mipLevel;
-        boxPixelOffset *= mipLevel;
-        pixelCenterOffest *= mipLevel;
+        pixelOffset *= mipMulFactor;
+        boxPixelOffset *= mipMulFactor;
+        pixelCenterOffest *= mipMulFactor;
     }
 
     float2 pixelSample = pixel + pixelCenterOffest + pixelOffset; //+ kMSAAPattern[gFrameCount % 16];
