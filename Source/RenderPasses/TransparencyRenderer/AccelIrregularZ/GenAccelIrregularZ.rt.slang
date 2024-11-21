@@ -240,7 +240,7 @@ void rayGen()
     } else if (!kUseSampleDistribution)
         return;
 
-    // TODO Go through the mip chain
+    // Go through the mip chain
     float pixelCenterOffest = 0.5;
     if (kUseSampleDistribution){
         uint subpixelID = 1 + pixel.x % gSamplePerRes;
@@ -255,13 +255,14 @@ void rayGen()
             numSamples = gSampleDistribution.Load(uint3(mipPos,m));
             mipLevel = m;
             if (numSamples <= 4) {
+                numSamples = 4;
                 break;
             }
                 
             mipRes *= 2;
         }
 
-        // Check if sample is still valid
+        // Check if pixel should be evaluated
         int mipMulFactor = 1 << mipLevel;
         if (mipLevel > 0 && any(pixel % mipMulFactor != 0))
             return;
