@@ -1013,8 +1013,8 @@ bool resolveAlpha(const in TransparencyRayData alphaRay, inout PathData pd, out 
     float transparency = (1.0 - opacity);
     pd.thp *= transparency; // Update THP
     if (kUseAlphaRussianRoulette) { // Russian Roulette
-        pd.rayTransparency *= (1.0 - opacity);
-        if (russianRoulette(pd.rayTransparency, pd.thp, pd.sg))
+        float rrProb = (1.0 - opacity);
+        if (russianRoulette(rrProb, pd.thp, pd.sg))
             needAlphaTest = false;
     }
 
