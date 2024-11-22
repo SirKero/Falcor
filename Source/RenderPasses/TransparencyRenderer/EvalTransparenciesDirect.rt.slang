@@ -154,11 +154,10 @@ void rayGen()
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod);
         //Emissive lights
-        pd.radiance += pd.thp * mi.getProperties(sd).emission * sd.opacity; 
+        pd.radiance += pd.thp * mi.getProperties(sd).emission * sd.opacity;
 
-        //Analytic
-        float3 Lr = evalDirectAnalytic(sd, mi, pd.sg);
-        pd.radiance += pd.thp * Lr * sd.opacity;
+        // Analytic
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp * sd.opacity);
 
         //Update thp
         float transparency = (1.0 - sd.opacity);

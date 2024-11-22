@@ -8,6 +8,8 @@ Texture2D<uint> gImptMip[COUNT_LIGHTS];
 RWTexture2D<uint> gSmp[COUNT_LIGHTS];
 Texture2D<uint> gSmpMip[COUNT_LIGHTS];
 
+static const uint kMaxAtomicWeight = 64; //Should be the same as in AccelIrregularZ.slang (where the atomic counter is increased)
+
 cbuffer CB {
     uint2 gDstSize;
 }
@@ -24,7 +26,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
     uint sampleImportance = gImpt[thdID.z][pixel];
     uint sampleCount = gSmpMip[thdID.z][pixelMip];
     if (gDstSize.x == 2)
-        sampleCount = min(sampleCount, fullImportance);
+        sampleCount = min(sampleCount, uint(ceil(float(fullImportance) / kMaxAtomicWeight)));
 
     float weight = float(sampleImportance) / fullImportance;
 

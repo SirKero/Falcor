@@ -165,7 +165,7 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
     \param[in,out] sg SampleGenerator object.
     \return Outgoing radiance in view direction.
 */
-float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg)
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0))
 {
     const uint lightCount = gScene.getLightCount();
     if (lightCount == 0) return float3(0.0);
@@ -185,6 +185,12 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     bool flipLightDir = (NdotL < kMinCosTheta) && (sd.opacity < 1);
     float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
 
+    // Eval BSDF
+    float3 Li = mi.eval(sd, lightDirection, sg) * ls.Li * invPdf * thp;
+    float Li_lum = luminance(Li);
+    if (Li_lum <= 0)
+        return float3(0);
+
     // Test visibility by tracing a shadow ray.
     float shadow = 1.0;
 #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING
@@ -198,7 +204,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
     shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
 #else // SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
-    shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, ls.posW);
+    shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, ls.posW, saturate(Li_lum));
 #endif
 
 #if EVAL_OPAQUE_SHADOW_MAP
@@ -210,8 +216,6 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
     shadow = min(shadow, opaqueShadow);
 #endif
-    if (shadow <= 0) return float3(0.f);
-
     // Evaluate contribution.
-    return mi.eval(sd, lightDirection, sg) * ls.Li * invPdf * shadow;
+    return Li * shadow;
 }

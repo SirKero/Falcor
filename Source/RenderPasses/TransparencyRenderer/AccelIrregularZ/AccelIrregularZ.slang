@@ -50,8 +50,9 @@ struct AccelShadowAttribs {
 
 struct AccelIrregularZShader
 {
-    static const bool kUseNearestDepth = ACCEL_USE_NEAREST_DEPTH; // TODO make toggable
-    static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE; //TODO currently ignored and always assumed true
+    static const bool kUseNearestDepth = ACCEL_USE_NEAREST_DEPTH;
+    static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;  // TODO currently ignored and always assumed true
+    static const uint kMaxAtomicWeight = 64;                      //Max value to be added on the atomic counter          
 
     cbuffer SMCB
     {
@@ -116,7 +117,14 @@ struct AccelIrregularZShader
         }
     }
 
-    float eval(uint lightIdx, float3 posW, float3 lightPosW) {
+    /** Caculates the shadow value by evaluating the shadow acceleration structure
+    * \param[in] index of the current light
+    * \param[in] world position of the current hit
+    * \param[in] world postion of the currently choosen light
+    * \param[in] unshadowed luminance estimate of the point. Is used to weight the access texture. Should be in (0, 1]
+    * \return visibility in [0,1]
+    */
+    float eval(uint lightIdx, float3 posW, float3 lightPosW, float luminance = 1.0) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
         shadowPos.xyz /= shadowPos.w;
 
@@ -139,7 +147,8 @@ struct AccelIrregularZShader
 
         // Add access
         const uint2 uShadowPixel = uint2(shadowPixel);
-        InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], 1u);
+        uint backprojectionWeight = clamp(uint(luminance * kMaxAtomicWeight),1, kMaxAtomicWeight);
+        InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
 
         AccelShadowRayData rayData = AccelShadowRayData();
         RayDesc ray;
