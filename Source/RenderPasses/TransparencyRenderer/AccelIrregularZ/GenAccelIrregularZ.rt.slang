@@ -24,6 +24,10 @@ import Utils.Geometry.GeometryHelpers;
 #define ACCEL_USE_FRUSTUM_CULLING 0
 #endif
 
+#ifndef MAX_SAMPLES_PER_PIXEL
+#define MAX_SAMPLES_PER_PIXEL 8
+#endif
+
 /** Payload for shadow ray.
 */
 struct RayData
@@ -46,13 +50,16 @@ cbuffer CB
     float gNear;
     float gFar;
     uint gLightIdx;     //LightIndex
-    uint gSamplePerRes; // Number of samples per pixel
     uint gMipCount;     // Number of mips
     float4x4 gViewProj;
     float4x4 gInvViewProj; // Inverse view projection
     float4x4 gInvProj;
     float4x4 gInvView;
     float4 gFrustumPlanes[4]; //Top, Bottom, Left, Right Planes of frustum
+}
+
+cbuffer JitterSamples {
+    float2 gJitterSamples[MAX_SAMPLES_PER_PIXEL];
 }
 
 RWStructuredBuffer<AABB> gAABB;
@@ -68,27 +75,18 @@ static const float kMinOpacity = 1e-7;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
+static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
+static const uint kMaxSamplesPerPixel = MAX_SAMPLES_PER_PIXEL;
 
 // DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
-//Offsets are (xMin, xMax, yMin, yMax)
-static const float2 kMSAAPattern2[2] = { float2(-0.25, -0.25), float2(0.25, 0.25) };
-static const float4 kMSAAPixelOffset2[2] = { float4(-0.25, 0.75, -0.25, 0.75), float4(-0.75, 0.25, -0.75, 0.25)
-                                            };
+// Offsets are (xMin, xMax, yMin, yMax)
+static const float2 kMSAAPattern2[4] = { float2(-0.25, -0.25), float2(0.25, 0.25), float2(-0.25, 0.25), float2(0.25, -0.25) };
 
 static const float2 kMSAAPattern4[4] = { float2(-0.125, -0.375), float2(0.375, -0.125), float2(-0.375, 0.125), float2(0.125, 0.375)
                                       };
-static const float4 kMSAAPixelOffset4[4] =  { float4(-0.375, 0.125, -0.125, 0.375), float4(-0.375, 0.125, -0.375, 0.125),
-                                              float4(-0.125, 0.375, -0.125, 0.375), float4(-0.125,0.375, -0.375, 0.125)
-                                            };
 static const float2 kMSAAPattern8[8] = { float2(0.0625, -0.1875),  float2(-0.0625, 0.1875), float2(0.3125, 0.0625), float2(-0.1875, -0.3125),
                                         float2(-0.3125, 0.3125), float2(-0.4375, -0.0625), float2(0.1875, 0.4375),   float2(0.4375, -0.4375)
                                       };
-static const float4 kMSAAPixelOffset8[8] = { float4(-0.0625, 0.4375, -0.3125, 0.1875), float4(-0.4375, 0.0625, -0.1875, 0.3125),
-                                             float4(-0.3125, 0.1875, -0.0625, 0.4375), float4(-0.3125, 0.1875, -0.1875, 0.3125),
-                                             float4(-0.1875, 0.3125, -0.3125, 0.1875), float4(-0.0625, 0.4375, -0.4375 ,0.0625),
-                                             float4(-0.1875, 0.3125, -0.4375, 0.0625), float4(-0.4375, 0.0625, -0.0625 ,0.4375)
-                                            };
-
 /* Unused
 static const float2 kMSAAPattern16[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
                                          float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
@@ -231,7 +229,7 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
-    uint2 smRes = uint2(frameDim.x / gSamplePerRes, frameDim.y);
+    uint2 smRes = uint2(frameDim.x / kMaxSamplesPerPixel, frameDim.y);
     float2 pixelOffset = float2(0);
     float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); //Pixel offset to create AABB (xMin, xMax, yMin, yMax)
 
@@ -242,9 +240,9 @@ void rayGen()
 
     // Go through the mip chain
     float pixelCenterOffest = 0.5;
-    if (kUseSampleDistribution){
-        uint subpixelID = 1 + pixel.x % gSamplePerRes;
-        pixel.x /= gSamplePerRes;
+    if (kUseSampleDistribution) {
+        uint subpixelID = 1 + pixel.x % kMaxSamplesPerPixel;
+        pixel.x /= kMaxSamplesPerPixel;
         float2 relPixel = (float2(pixel)+0.5) / smRes;
 
         uint numSamples = 0;
@@ -275,21 +273,43 @@ void rayGen()
         if (numSamples < subpixelID)
             return;
 
-        numSamples = min(numSamples, gSamplePerRes);
+        numSamples = min(numSamples, kMaxSamplesPerPixel);
 
-        if (numSamples == 2) {
-            pixelOffset = kMSAAPattern2[subpixelID - 1];
-            boxPixelOffset = kMSAAPixelOffset2[subpixelID - 1];
+        //DirectX Multisample pattern
+        if (numSamples > 1) {
+            uint jitterBuffId = subpixelID - 1;
+            if (kUseMSAAJitterPattern)
+            {
+                switch (numSamples) {
+                case 2:
+                    pixelOffset = kMSAAPattern2[jitterBuffId + 2 * (gFrameCount % 2)];
+                    break;
+                case 4:
+                    pixelOffset = kMSAAPattern4[jitterBuffId];
+                    break;
+                case 8:
+                    pixelOffset = kMSAAPattern8[jitterBuffId];
+                }
+            } else // Jitter Buffer
+            {
+                if (numSamples == 2 && (gFrameCount % 2 == 0))
+                    jitterBuffId += 1;
+                pixelOffset = gJitterSamples[jitterBuffId];
+            }
+            // Calc box offset
+            float2 border = float2(-0.5, 0.5);
+            if (numSamples == 2) {
+                boxPixelOffset = float4(border.x - pixelOffset.x, border.y - pixelOffset.x, border.x - pixelOffset.y, border.y - pixelOffset.y);
+            } else { // numSamples == 4 || numSaples == 8
+                //X
+                border = pixelOffset.x >= 0 ? float2(0.0, 0.5) : float2(-0.5, 0.0);
+                boxPixelOffset.xy = float2(border.x - pixelOffset.x, border.y - pixelOffset.x);
+                //Y
+                border = pixelOffset.y >= 0 ? float2(0.0, 0.5) : float2(-0.5, 0.0);
+                boxPixelOffset.zw = float2(border.x - pixelOffset.y, border.y - pixelOffset.y);
+            }
         }
-        else if (numSamples == 4) {
-            pixelOffset = kMSAAPattern4[subpixelID - 1];
-            boxPixelOffset = kMSAAPixelOffset4[subpixelID - 1];
-        }
-        else if (numSamples == 8) {
-            pixelOffset = kMSAAPattern8[subpixelID - 1];
-            boxPixelOffset = kMSAAPixelOffset8[subpixelID - 1];
-        }
-
+        
         pixelOffset *= mipMulFactor;
         boxPixelOffset *= mipMulFactor;
         pixelCenterOffest *= mipMulFactor;

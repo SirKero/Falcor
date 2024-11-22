@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "AccelIrregularZ.h"
 #include "Utils/Math/FalcorMath.h"
+#include "Utils/SampleGenerators/HaltonSamplePattern.h"
 
 namespace
 {
@@ -51,7 +52,14 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
     samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     mpPointSampler = Sampler::create(mpDevice, samplerDesc);
-    FALCOR_ASSERT(mpPointSampler)
+    FALCOR_ASSERT(mpPointSampler);
+
+    //Init the sample points for Halton
+    mHaltonSampleCount.resize(kSamplesPerPixel);
+    for (uint i = 0; i < kSamplesPerPixel; i++)
+    {
+        mHaltonSampleCount[i] = i;
+    }
 }
 
 void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -240,6 +248,26 @@ std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes()
     return frustumPlanes;
 }
 
+/**
+ * Returns elements of the Halton low-discrepancy sequence.
+ * @param[in] index Index of the queried element, starting from 0.
+ * @param[in] base Base for the digit inversion. Should be the next unused prime number.
+ */
+float halton(uint32_t index, uint32_t base)
+{
+    // Reversing digit order in the given base in floating point.
+    float result = 0.0f;
+    float factor = 1.0f;
+
+    for (; index > 0; index /= base)
+    {
+        factor /= base;
+        result += factor * (index % base);
+    }
+
+    return result;
+}
+
 void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Generate Shadow Acceleration Structure");
@@ -333,6 +361,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
+    mGenAccelShadowPip.pProgram->addDefine("USE_MSAA_JITTER", mJitterUseMSAA ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("MAX_SAMPLES_PER_PIXEL", std::to_string(kSamplesPerPixel));
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -343,6 +373,24 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     }
 
     FALCOR_ASSERT(mGenAccelShadowPip.pVars);
+    auto var = mGenAccelShadowPip.pVars->getRootVar();
+
+    // Set Halton Jitter (same for every light)
+    for (uint i = 0; i < kSamplesPerPixel; i++)
+    {
+        float2 sample = {halton(mHaltonSampleCount[i], 2), halton(mHaltonSampleCount[i], 3)};
+        mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % 64;
+        //Create one or more samples for every 1/4 of a pixel. In an X pattern 0:TopLeft , 1:BottomRight, 2:TopRight, 3: BottomLeft
+        uint samplePos = i % 4;
+        sample *= 0.5f; //from [0,1] to [0,0.5]
+        //X negative
+        if (samplePos == 0 || samplePos == 3)
+            sample.x -= 0.5f;
+        //Y negative
+        if (samplePos == 1 || samplePos == 3)
+            sample.y -= 0.5f;
+        var["JitterSamples"]["gJitterSamples"][i] = sample;
+    }
 
     // Trace the pass for every light
     for (uint i = 0; i < lights.size(); i++)
@@ -351,13 +399,12 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             break;
         FALCOR_PROFILE(pRenderContext, lights[i]->getName());
         // Bind Utility
-        auto var = mGenAccelShadowPip.pVars->getRootVar();
+        
         var["CB"]["gFrameCount"] = mFrameCount;
         var["CB"]["gLightPos"] = mShadowMapMVP[i].pos;
         var["CB"]["gNear"] = mNearFar.x;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
-        var["CB"]["gSamplePerRes"] = kSamplesPerPixel;
         var["CB"]["gMipCount"] = mSampleDistribution[i]->getMipCount();
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
@@ -496,6 +543,8 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         group.tooltip("Data formats; For more info see AccelShadowData.slang");
         group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
+        group.checkbox("Jitter: Use MSAA", mJitterUseMSAA);
+        group.tooltip("Uses MSAA Jitter pattern for generation. If disabled uses subpixel Halton Pattern");
         group.checkbox("Use PCF", mAccelUsePCF);
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         group.checkbox("Use Visibility of nearest depth", mAccelUseNearestDepth);

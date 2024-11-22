@@ -70,6 +70,10 @@ private:
     ref<GpuFence> mpFence;                 ///< Fence for CPU/GPU syncs
     uint mStagingCount = 0;
 
+    //Jitter
+    std::vector<uint> mHaltonSampleCount;
+    bool mJitterUseMSAA = false; //Enable MSAA sample pattern
+
     // Accel shadow settings
     static const uint kSamplesPerPixel = 8u;
     static const uint mAccelApproxNumElementsPerPixel = 16u;
