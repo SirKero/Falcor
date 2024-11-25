@@ -77,6 +77,8 @@ public:
 
     void bindTlas(const ShaderVar& rootVar, std::string shaderName = "gCustomAccel");
 
+    void setMinBLASUpdateCount(const size_t count) { mMinUpdateAABBCount = count; }
+
     /** Clears the AABBs.
      */
     void clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer);
@@ -142,6 +144,7 @@ private:
     bool mAccelerationStructureWasBuild = false;    //To check if update can be performed
     size_t mNumberBlas = 0;
     size_t mBlasScratchMaxSize = 0;
+    size_t mMinUpdateAABBCount = 0;                 //Custom update count. AABB is only update if count is bigger than the min update count
 
     std::vector<BLASData> mBlasData;
     std::vector<ref<Buffer>> mBlas;

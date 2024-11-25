@@ -178,10 +178,12 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
                 aabbCount.push_back(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel);
                 aabbGPUAddress.push_back(mAccelShadowAABB[i]->getGpuAddress());
             }
+            //Note: TLAS update is slightly faster (~0.02 ms) even though rebuild is usally recommended. Tracing times do not change between toggeling the update mode
             mpShadowAccelerationStrucure = std::make_unique<CustomAccelerationStructure>(
                 mpDevice, aabbCount, aabbGPUAddress, CustomAccelerationStructure::BuildMode::None,
                 CustomAccelerationStructure::UpdateMode::TLASOnly
             );
+            mpShadowAccelerationStrucure->setMinBLASUpdateCount(kMinAABBUpdateCount);
         }
 
         if (mAccessTextures.empty())

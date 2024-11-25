@@ -67,6 +67,7 @@ private:
 
     //Sync Resources
     static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
+    static const uint kMinAABBUpdateCount = 128; //Shadow map should not be updated if there is less than this amount of AABBs
     ref<GpuFence> mpFence;                 ///< Fence for CPU/GPU syncs
     uint mStagingCount = 0;
 

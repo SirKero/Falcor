@@ -299,6 +299,9 @@ namespace Falcor
 
         for (size_t i = 0; i < mNumberBlas; i++)
         {
+            //Skip
+            if (aabbCount[i] <= mMinUpdateAABBCount)
+                continue;
             auto& blas = mBlasData[i];
 
             // barriers for the scratch and blas buffer
