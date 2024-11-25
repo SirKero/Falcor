@@ -58,6 +58,20 @@ public:
 
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 
+     enum class SMSamplePattern : uint
+    {
+        Center = 0,
+        Halton = 1,
+        MSAA = 2,
+    };
+
+    FALCOR_ENUM_INFO(SMSamplePattern,{
+            {SMSamplePattern::Center, "Center"},
+            {SMSamplePattern::Halton, "Halton"},
+            {SMSamplePattern::MSAA, "MSAA"},
+        }
+    );
+
 private:
     void prepareResources(RenderContext* pRenderContext);
     std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes();
@@ -71,12 +85,13 @@ private:
     ref<GpuFence> mpFence;                 ///< Fence for CPU/GPU syncs
     uint mStagingCount = 0;
 
-    //Jitter
+    //Sample Gen (+Jitter)
     std::vector<uint> mHaltonSampleCount;
-    bool mJitterUseMSAA = false; //Enable MSAA sample pattern
+    uint mMaxSamplesPerPixelSqr = 3; //Sample box size (e.g 3 = 3x3 box)
+    SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
+
 
     // Accel shadow settings
-    static const uint kSamplesPerPixel = 8u;
     static const uint mAccelApproxNumElementsPerPixel = 16u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
@@ -119,3 +134,4 @@ private:
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
     RasterPipeline mRasterShowAccelPass;
 };
+FALCOR_ENUM_REGISTER(AccelIrregularZ::SMSamplePattern);

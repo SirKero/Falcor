@@ -215,6 +215,7 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
         float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
     };
 
+    //TODO fix
     uint sampleCountMult = 1;
     switch (gMaxSampleCount) {
         case 4:

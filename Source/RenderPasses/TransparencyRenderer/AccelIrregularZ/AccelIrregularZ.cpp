@@ -53,13 +53,6 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     mpPointSampler = Sampler::create(mpDevice, samplerDesc);
     FALCOR_ASSERT(mpPointSampler);
-
-    //Init the sample points for Halton
-    mHaltonSampleCount.resize(kSamplesPerPixel);
-    for (uint i = 0; i < kSamplesPerPixel; i++)
-    {
-        mHaltonSampleCount[i] = i;
-    }
 }
 
 void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -354,8 +347,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, lights.size()).get(), uint4(0));
     //Clear AABBs
     mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB);
-
-
+       
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
@@ -363,8 +355,13 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
-    mGenAccelShadowPip.pProgram->addDefine("USE_MSAA_JITTER", mJitterUseMSAA ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("MAX_SAMPLES_PER_PIXEL", std::to_string(kSamplesPerPixel));
+    mGenAccelShadowPip.pProgram->addDefine("USE_MSAA_JITTER", mSamplePattern == SMSamplePattern::MSAA ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine(
+        "MAX_SAMPLES_PER_PIXEL_X", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 8 : mMaxSamplesPerPixelSqr)
+    );
+    mGenAccelShadowPip.pProgram->addDefine(
+        "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
+    );
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -378,19 +375,26 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     auto var = mGenAccelShadowPip.pVars->getRootVar();
 
     // Set Halton Jitter (same for every light)
-    for (uint i = 0; i < kSamplesPerPixel; i++)
+
+    // Init the sample points for Halton
+    const uint maxSamplesSq = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
+    if (mSamplePattern == SMSamplePattern::Halton && mHaltonSampleCount.size() != maxSamplesSq)
     {
-        float2 sample = {halton(mHaltonSampleCount[i], 2), halton(mHaltonSampleCount[i], 3)};
-        mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % 64;
-        //Create one or more samples for every 1/4 of a pixel. In an X pattern 0:TopLeft , 1:BottomRight, 2:TopRight, 3: BottomLeft
-        uint samplePos = i % 4;
-        sample *= 0.5f; //from [0,1] to [0,0.5]
-        //X negative
-        if (samplePos == 0 || samplePos == 3)
-            sample.x -= 0.5f;
-        //Y negative
-        if (samplePos == 1 || samplePos == 3)
-            sample.y -= 0.5f;
+        mHaltonSampleCount.resize(maxSamplesSq);
+        for (uint i = 0; i < maxSamplesSq; i++)
+            mHaltonSampleCount[i] = i;
+    }    
+
+    //Upload jittered sampled
+    for (uint i = 0; i < maxSamplesSq; i++)
+    {
+        float2 sample = float2(0.5);
+        if (mSamplePattern == SMSamplePattern::Halton)
+        {
+            sample = {halton(mHaltonSampleCount[i], 2), halton(mHaltonSampleCount[i], 3)}; // sample in [0,1]
+            mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % 64;                             // TODO as option?
+        }
+       
         var["JitterSamples"]["gJitterSamples"][i] = sample;
     }
 
@@ -424,7 +428,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gPointSampler"] = mpPointSampler;
 
         // Get dimensions of ray dispatch.
-        const uint2 targetDim = uint2(mResolution.x * kSamplesPerPixel, mResolution.y);
+        const uint2 targetDim = mSamplePattern == SMSamplePattern::MSAA ? uint2(mResolution.x * 8, mResolution.y)
+                                               : uint2(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr);
         FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
         // Spawn the rays.
@@ -545,8 +550,20 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         group.tooltip("Data formats; For more info see AccelShadowData.slang");
         group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
-        group.checkbox("Jitter: Use MSAA", mJitterUseMSAA);
-        group.tooltip("Uses MSAA Jitter pattern for generation. If disabled uses subpixel Halton Pattern");
+
+        group.dropdown("Subpixel Sample Pattern", mSamplePattern);
+        group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
+        if (mSamplePattern == SMSamplePattern::MSAA)
+        {
+            group.text("8x8 Subpixel sampling box size (fix for MSAA)");
+        }
+        else
+        {
+            if (group.var("Subpixel sampling box size", mMaxSamplesPerPixelSqr, 1u, 32u, 1u))
+                mGenAccelShadowPip.pVars.reset();
+            group.tooltip("Box size for the subpixel sampling. E.g. 3 -> 3x3 box.");
+        }
+
         group.checkbox("Use PCF", mAccelUsePCF);
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         group.checkbox("Use Visibility of nearest depth", mAccelUseNearestDepth);
@@ -645,7 +662,7 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
     var["CB"]["gCullMax"] = float3(mAccelDebugShowAS.clipX.y, mAccelDebugShowAS.clipY.y, mAccelDebugShowAS.clipZ.y);
     var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
     var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
-    var["CB"]["gMaxSampleCount"] = kSamplesPerPixel;
+    var["CB"]["gMaxSampleCount"] = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
     var["CB"]["gInvView"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invView;
     var["CB"]["gInvProj"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invProjection;
 

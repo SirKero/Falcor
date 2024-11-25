@@ -24,8 +24,12 @@ import Utils.Geometry.GeometryHelpers;
 #define ACCEL_USE_FRUSTUM_CULLING 0
 #endif
 
-#ifndef MAX_SAMPLES_PER_PIXEL
-#define MAX_SAMPLES_PER_PIXEL 8
+#ifndef MAX_SAMPLES_PER_PIXEL_X
+#define MAX_SAMPLES_PER_PIXEL_X 8
+#endif
+
+#ifndef MAX_SAMPLES_PER_PIXEL_Y
+#define MAX_SAMPLES_PER_PIXEL_Y 1
 #endif
 
 /** Payload for shadow ray.
@@ -59,7 +63,7 @@ cbuffer CB
 }
 
 cbuffer JitterSamples {
-    float2 gJitterSamples[MAX_SAMPLES_PER_PIXEL];
+    float2 gJitterSamples[MAX_SAMPLES_PER_PIXEL_X * MAX_SAMPLES_PER_PIXEL_Y];
 }
 
 RWStructuredBuffer<AABB> gAABB;
@@ -76,7 +80,7 @@ static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
-static const uint kMaxSamplesPerPixel = MAX_SAMPLES_PER_PIXEL;
+static const uint2 kMaxSamplesPerPixel = uint2(MAX_SAMPLES_PER_PIXEL_X,MAX_SAMPLES_PER_PIXEL_Y) ;
 
 // DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
 // Offsets are (xMin, xMax, yMin, yMax)
@@ -229,10 +233,12 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
-    uint2 smRes = uint2(frameDim.x / kMaxSamplesPerPixel, frameDim.y);
     float2 pixelOffset = float2(0);
-    float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); //Pixel offset to create AABB (xMin, xMax, yMin, yMax)
+    float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
 
+    uint2 smRes = uint2(frameDim.x / kMaxSamplesPerPixel.x, frameDim.y / kMaxSamplesPerPixel.y);
+
+    //Clear access counter
     if (all(pixel < smRes)) {
         gAccessCounter[pixel] = 0; // clear
     } else if (!kUseSampleDistribution)
@@ -241,8 +247,8 @@ void rayGen()
     // Go through the mip chain
     float pixelCenterOffest = 0.5;
     if (kUseSampleDistribution) {
-        uint subpixelID = 1 + pixel.x % kMaxSamplesPerPixel;
-        pixel.x /= kMaxSamplesPerPixel;
+        uint subpixelID = 1 + pixel.x % kMaxSamplesPerPixel.x + (pixel.y % kMaxSamplesPerPixel.y) * kMaxSamplesPerPixel.x;
+        pixel /= kMaxSamplesPerPixel;
         float2 relPixel = (float2(pixel)+0.5) / smRes;
 
         uint numSamples = 0;
@@ -252,11 +258,12 @@ void rayGen()
             uint2 mipPos = uint2(relPixel * mipRes);
             numSamples = gSampleDistribution.Load(uint3(mipPos,m));
             mipLevel = m;
-            if (numSamples <= 4) {
+            // If a sample from the mip chain was choosen, always use 4 samples for that pixel
+            //if (m > 0 && numSamples <= 4) {
+            if (numSamples <= 4) { //This version handles disocclusion better but is slower as more samples are traced
                 numSamples = 4;
                 break;
             }
-                
             mipRes *= 2;
         }
 
@@ -265,19 +272,27 @@ void rayGen()
         if (mipLevel > 0 && any(pixel % mipMulFactor != 0))
             return;
 
-        if (numSamples > 1 && numSamples <= 4)
-            numSamples = 4;
-        else if (numSamples > 4 && numSamples <= 8)
-            numSamples = 8;
+        //Cap samples to availible patterns
+        if (kUseMSAAJitterPattern) {
+            if (numSamples > 2 && numSamples <= 4)
+                numSamples = 4;
+            else if (numSamples > 4 && numSamples <= 8)
+                numSamples = 8;
+        } else {
+            float numSampleSqrt = sqrt(float(numSamples));
+            numSampleSqrt = floor(numSampleSqrt);
+            numSamples = uint(numSampleSqrt) + 1;
+            numSamples *= numSamples;
+        }        
 
         if (numSamples < subpixelID)
             return;
 
-        numSamples = min(numSamples, kMaxSamplesPerPixel);
+        numSamples = min(numSamples, kMaxSamplesPerPixel.x * kMaxSamplesPerPixel.y);
 
         //DirectX Multisample pattern
         if (numSamples > 1) {
-            uint jitterBuffId = subpixelID - 1;
+            uint jitterBuffId = subpixelID - 1; //From [1, numSamples] to [0, numSamples - 1]
             if (kUseMSAAJitterPattern)
             {
                 switch (numSamples) {
@@ -290,22 +305,33 @@ void rayGen()
                 case 8:
                     pixelOffset = kMSAAPattern8[jitterBuffId];
                 }
+
+                // Calc box offset
+                float2 border = float2(-0.5, 0.5);
+                if (numSamples == 2) {
+                    boxPixelOffset = float4(border.x - pixelOffset.x, border.y - pixelOffset.x, border.x - pixelOffset.y, border.y - pixelOffset.y);
+                } else { // numSamples == 4 || numSaples == 8
+                    // X
+                    border = pixelOffset.x >= 0 ? float2(0.0, 0.5) : float2(-0.5, 0.0);
+                    boxPixelOffset.xy = float2(border.x - pixelOffset.x, border.y - pixelOffset.x);
+                    // Y
+                    border = pixelOffset.y >= 0 ? float2(0.0, 0.5) : float2(-0.5, 0.0);
+                    boxPixelOffset.zw = float2(border.x - pixelOffset.y, border.y - pixelOffset.y);
+                }
             } else // Jitter Buffer
             {
-                if (numSamples == 2 && (gFrameCount % 2 == 0))
-                    jitterBuffId += 1;
-                pixelOffset = gJitterSamples[jitterBuffId];
-            }
-            // Calc box offset
-            float2 border = float2(-0.5, 0.5);
-            if (numSamples == 2) {
-                boxPixelOffset = float4(border.x - pixelOffset.x, border.y - pixelOffset.x, border.x - pixelOffset.y, border.y - pixelOffset.y);
-            } else { // numSamples == 4 || numSaples == 8
-                //X
-                border = pixelOffset.x >= 0 ? float2(0.0, 0.5) : float2(-0.5, 0.0);
+                pixelOffset = gJitterSamples[jitterBuffId];  //pixel offset in [0,1]
+                uint samplesSq = sqrt(numSamples); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
+                const float subpixelSize = 1.0 / samplesSq;
+                float2 subpixelLoc = float2(jitterBuffId % samplesSq, jitterBuffId / samplesSq);
+                float2 borderMin = subpixelLoc * subpixelSize;
+                // X
+                float2 border = float2(borderMin.x, borderMin.x + subpixelSize) - 0.5; // From [0, 1] to [-0.5,0.5]
+                pixelOffset.x = border.x + pixelOffset.x * subpixelSize; // Offset from [0,1] in pixel to [0,1] in subpixel
                 boxPixelOffset.xy = float2(border.x - pixelOffset.x, border.y - pixelOffset.x);
-                //Y
-                border = pixelOffset.y >= 0 ? float2(0.0, 0.5) : float2(-0.5, 0.0);
+                // Y
+                border = float2(borderMin.y, borderMin.y + subpixelSize) - 0.5; // From [0, 1] to [-0.5,0.5]
+                pixelOffset.y = border.x + pixelOffset.y * subpixelSize;
                 boxPixelOffset.zw = float2(border.x - pixelOffset.y, border.y - pixelOffset.y);
             }
         }
