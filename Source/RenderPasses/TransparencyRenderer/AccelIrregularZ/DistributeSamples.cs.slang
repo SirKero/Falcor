@@ -86,10 +86,18 @@ void main(uint3 thdID: SV_DispatchThreadID)
         else if (numSamples > 4 && numSamples <= 8)
             numSamples = 8;
     } else {
-        float numSampleSqrt = sqrt(float(numSamples));
-        numSampleSqrt = floor(numSampleSqrt);
-        numSamples = uint(numSampleSqrt) + 1;
-        numSamples *= numSamples;
+        /*
+        if (numSamples == 2 || numSamples == 3) {
+            numSamples = 4;
+        } else
+        */
+        {
+            float numSampleSqrt = sqrt(float(numSamples));
+            //numSampleSqrt = floor(numSampleSqrt); // Underestimate samples (e.g. 8 -> 4 )
+            numSampleSqrt = round(numSampleSqrt); // take the closest sample
+            numSamples = uint(numSampleSqrt); 
+            numSamples *= numSamples;
+        }
     }
 
     if (numSamples < subpixelID)
