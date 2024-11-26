@@ -62,7 +62,7 @@ public:
     {
         Center = 0,
         Halton = 1,
-        MSAA = 2,
+        MSAA = 2
     };
 
     FALCOR_ENUM_INFO(SMSamplePattern,{
@@ -89,6 +89,7 @@ private:
     std::vector<uint> mHaltonSampleCount;
     uint mMaxSamplesPerPixelSqr = 3; //Sample box size (e.g 3 = 3x3 box)
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
+    bool mUseSeperateSampleDistributionPass = true; //Use the seperate sample distribution pass 
 
 
     // Accel shadow settings
@@ -127,10 +128,13 @@ private:
     std::unique_ptr<CustomAccelerationStructure> mpShadowAccelerationStrucure; // AS
     ref<Texture> mpDebugDepth;                                                 // Depth for the debug passs
     std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
-    std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples  
+    std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
+    std::vector<ref<Buffer>> mPixelSample;                                     //A pixel sample for the gen pass
+    ref<Buffer> mpPixelSampleCounter;                                           //Counter for the current number of buffers
     
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
+    ref<ComputePass> mpDistributeSamples;            //Distribute Samples for the generation pass
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
     RasterPipeline mRasterShowAccelPass;
 };

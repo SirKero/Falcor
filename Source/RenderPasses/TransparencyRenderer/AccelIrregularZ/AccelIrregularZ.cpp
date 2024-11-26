@@ -36,6 +36,7 @@ namespace
     const std::string kGenShader = kShaderFolder + "GenAccelIrregularZ.rt.slang";
     const std::string kAccessMipsShader = kShaderFolder + "GenAccessMips.cs.slang";
     const std::string kCalcSampleDistributionShader = kShaderFolder + "CalcSampleDistribution.cs.slang";
+    const std::string kDistributeSamplesShader = kShaderFolder + "DistributeSamples.cs.slang";
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //UI
@@ -63,6 +64,8 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mpShadowAccelerationStrucure.reset();
         mAccessTextures.clear();
         mSampleDistribution.clear();
+        mPixelSample.clear();
+        mpPixelSampleCounter.reset();
     }
 
     if (mRebuildAccelDataBuffer || mResolutionChanged)
@@ -72,7 +75,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
 
     updateSMMatrices(pRenderContext);
-
+    
     // Create AVSM trace program
     if (!mGenAccelShadowPip.pProgram)
     {
@@ -129,12 +132,12 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             mAccelFenceWaitValues.resize(kFramesInFlight);
             mAccelShadowNumPoints.resize(numBuffers);
 
-            uint initData = 0;
+            std::vector<uint> initData(numBuffers, 0);
             for (uint i = 0; i < kFramesInFlight; i++)
             {
                 mAccelShadowCounter[i] = Buffer::createStructured(
                     mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                    Buffer::CpuAccess::None, &initData, false
+                    Buffer::CpuAccess::None, initData.data(), false
                 );
                 mAccelShadowCounter[i]->setName("AccelShadowAABBCounter_" + std::to_string(i));
 
@@ -209,6 +212,29 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             }
         }
 
+        
+        if (mPixelSample.empty())
+        {
+            mPixelSample.resize(numBuffers);
+            for (uint i = 0; i < numBuffers; i++)
+            {
+                mPixelSample[i] = Buffer::createStructured(
+                    mpDevice, sizeof(uint4), mResolution.x * mResolution.y * 2,
+                    ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
+                );
+                mPixelSample[i]->setName("PixelSampleBuf" + std::to_string(i));
+            }
+        }
+        if (!mpPixelSampleCounter)
+        {
+            std::vector<uint> initData(numBuffers, 0);
+            mpPixelSampleCounter = Buffer::createStructured(
+                mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, &initData, false
+            );
+            mpPixelSampleCounter->setName("PixelSampleConter");
+        }
+        
     }
 }
 
@@ -342,6 +368,76 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
     }
 
+    // Init the sample points for Halton Jitter
+    const uint maxSamplesSq = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
+    if (mSamplePattern == SMSamplePattern::Halton && mHaltonSampleCount.size() != maxSamplesSq)
+    {
+        mHaltonSampleCount.resize(maxSamplesSq);
+        for (uint i = 0; i < maxSamplesSq; i++)
+            mHaltonSampleCount[i] = i;
+    }
+    auto setHaltonJitterSamples = [&](ShaderVar& shaderVar) {
+        for (uint i = 0; i < maxSamplesSq; i++)
+        {
+            float2 sample = float2(0.5);
+            if (mSamplePattern == SMSamplePattern::Halton)
+            {
+                sample = {halton(mHaltonSampleCount[i], 2), halton(mHaltonSampleCount[i], 3)}; // sample in [0,1]
+                mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % 64; // TODO reset count as option?
+            }
+
+            shaderVar["JitterSamples"]["gJitterSamples"][i] = sample;
+        }
+    };
+
+
+    // Create a pixel sample list
+    if(mUseSeperateSampleDistributionPass)
+    {
+        FALCOR_PROFILE(pRenderContext, "Create Pixel Samples");
+        if (!mGenAccelShadowPip.pVars)
+            mpDistributeSamples.reset();
+        // Clear Counter
+        pRenderContext->clearUAV(mpPixelSampleCounter->getUAV(0u, lights.size()).get(), uint4(0));
+
+        // Create Compute Pass
+        if (!mpDistributeSamples)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kDistributeSamplesShader).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+            defines.add("USE_MSAA_JITTER", mSamplePattern == SMSamplePattern::MSAA ? "1" : "0");
+            defines.add(
+                "MAX_SAMPLES_PER_PIXEL_X", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 8 : mMaxSamplesPerPixelSqr)
+            );
+            defines.add(
+                "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
+            );
+
+            mpDistributeSamples = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        auto var = mpDistributeSamples->getRootVar();
+
+        // Upload jittered sampled
+        setHaltonJitterSamples(var);
+    
+        var["gPixelSampleCounter"] = mpPixelSampleCounter;
+        for (uint i = 0; i < lights.size(); i++)
+        {
+            var["gSampleDistribution"][i] = mSampleDistribution[i];
+            var["gPixelSample"][i] = mPixelSample[i];
+        }
+
+        uint3 dispatchDim = uint3(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr, lights.size());
+        var["CB"]["gSMRes"] = mResolution;
+        var["CB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
+        var["CB"]["gFrameCount"] = mFrameCount;
+
+        mpDistributeSamples->execute(pRenderContext, dispatchDim);
+    }
 
     // Clear Counter
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, lights.size()).get(), uint4(0));
@@ -362,6 +458,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine(
         "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
     );
+    mGenAccelShadowPip.pProgram->addDefine("USE_SAMPLE_DISTRIBUTION_IN_GEN", mUseSeperateSampleDistributionPass ? "0" : "1");
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -375,28 +472,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     auto var = mGenAccelShadowPip.pVars->getRootVar();
 
     // Set Halton Jitter (same for every light)
-
-    // Init the sample points for Halton
-    const uint maxSamplesSq = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
-    if (mSamplePattern == SMSamplePattern::Halton && mHaltonSampleCount.size() != maxSamplesSq)
-    {
-        mHaltonSampleCount.resize(maxSamplesSq);
-        for (uint i = 0; i < maxSamplesSq; i++)
-            mHaltonSampleCount[i] = i;
-    }    
-
-    //Upload jittered sampled
-    for (uint i = 0; i < maxSamplesSq; i++)
-    {
-        float2 sample = float2(0.5);
-        if (mSamplePattern == SMSamplePattern::Halton)
-        {
-            sample = {halton(mHaltonSampleCount[i], 2), halton(mHaltonSampleCount[i], 3)}; // sample in [0,1]
-            mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % 64;                             // TODO as option?
-        }
-       
-        var["JitterSamples"]["gJitterSamples"][i] = sample;
-    }
+    if (!mUseSeperateSampleDistributionPass)
+        setHaltonJitterSamples(var);
 
     // Trace the pass for every light
     for (uint i = 0; i < lights.size(); i++)
@@ -423,13 +500,21 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gAABB"] = mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mAccelShadowData[i];
+        var["gPointSampler"] = mpPointSampler;
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
-        var["gPointSampler"] = mpPointSampler;
+        var["gPixelSample"] = mPixelSample[i];
+        var["gPixelSampleCounter"] = mpPixelSampleCounter;
 
         // Get dimensions of ray dispatch.
-        const uint2 targetDim = mSamplePattern == SMSamplePattern::MSAA ? uint2(mResolution.x * 8, mResolution.y)
-                                               : uint2(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr);
+        uint2 targetDim = mResolution;
+        if (!mUseSeperateSampleDistributionPass)
+        {
+            targetDim = mSamplePattern == SMSamplePattern::MSAA
+                            ? uint2(mResolution.x * 8, mResolution.y)
+                            : uint2(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr);
+        }
+                    
         FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
         // Spawn the rays.
@@ -551,6 +636,11 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
 
+        group.checkbox("Use seperate Sample Distribution Pass", mUseSeperateSampleDistributionPass);
+        group.tooltip(
+            "Enables a seperate pass that distributes the sample into a buffer. Seems faster as there is less divergence in the raytracing "
+            "shader"
+        );
         group.dropdown("Subpixel Sample Pattern", mSamplePattern);
         group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
         if (mSamplePattern == SMSamplePattern::MSAA)

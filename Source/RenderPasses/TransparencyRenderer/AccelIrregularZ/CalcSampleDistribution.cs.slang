@@ -26,7 +26,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
     uint sampleImportance = gImpt[thdID.z][pixel];
     uint sampleCount = gSmpMip[thdID.z][pixelMip];
     if (gDstSize.x == 2)
-        sampleCount = min(sampleCount, uint(ceil(float(fullImportance) / kMaxAtomicWeight)));
+        sampleCount = min(sampleCount * 0.5, uint(ceil(float(fullImportance) / kMaxAtomicWeight)));
 
     float weight = float(sampleImportance) / fullImportance;
 

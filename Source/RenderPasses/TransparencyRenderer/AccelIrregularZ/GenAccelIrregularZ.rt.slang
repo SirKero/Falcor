@@ -71,10 +71,12 @@ RWBuffer<uint> gCounter;
 RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 RWTexture2D<uint> gAccessCounter;
 Texture2D<uint> gSampleDistribution;
+StructuredBuffer<uint4> gPixelSample;
+Buffer<uint> gPixelSampleCounter;
 
 SamplerState gPointSampler;
 
-static const bool kUseSampleDistribution = true;
+static const bool kUseSampleDistribution = USE_SAMPLE_DISTRIBUTION_IN_GEN;
 static const float kMinOpacity = 1e-7;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
@@ -236,16 +238,20 @@ void rayGen()
     float2 pixelOffset = float2(0);
     float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
 
-    uint2 smRes = uint2(frameDim.x / kMaxSamplesPerPixel.x, frameDim.y / kMaxSamplesPerPixel.y);
+    uint2 smRes;
+    if(kUseSampleDistribution)
+        smRes = uint2(frameDim.x / kMaxSamplesPerPixel.x, frameDim.y / kMaxSamplesPerPixel.y);
+    else
+        smRes = frameDim;
 
     //Clear access counter
     if (all(pixel < smRes)) {
         gAccessCounter[pixel] = 0; // clear
-    } else if (!kUseSampleDistribution)
-        return;
+    }
 
     // Go through the mip chain
     float pixelCenterOffest = 0.5;
+
     if (kUseSampleDistribution) {
         uint subpixelID = 1 + pixel.x % kMaxSamplesPerPixel.x + (pixel.y % kMaxSamplesPerPixel.y) * kMaxSamplesPerPixel.x;
         pixel /= kMaxSamplesPerPixel;
@@ -339,9 +345,25 @@ void rayGen()
         pixelOffset *= mipMulFactor;
         boxPixelOffset *= mipMulFactor;
         pixelCenterOffest *= mipMulFactor;
+    }else{ //Load data from external pass
+        uint sampleCount = gPixelSampleCounter[gLightIdx];
+        uint sampleIdx = pixel.x + frameDim.x * pixel.y;
+        if(sampleIdx > sampleCount)
+            return;
+
+        uint4 pixelData = gPixelSample[sampleIdx];
+        pixelOffset.x = asfloat(pixelData.x);
+        pixelOffset.y = asfloat(pixelData.y);
+        pixel = uint2(0);
+        pixelCenterOffest = 0.0;
+
+        boxPixelOffset.x = f16tof32(pixelData.z & 0xFFFF);
+        boxPixelOffset.y = f16tof32(pixelData.z >> 16);
+        boxPixelOffset.z = f16tof32(pixelData.w & 0xFFFF);
+        boxPixelOffset.w = f16tof32(pixelData.w >> 16);
     }
 
-    float2 pixelSample = pixel + pixelCenterOffest + pixelOffset; //+ kMSAAPattern[gFrameCount % 16];
+    float2 pixelSample = pixel + pixelCenterOffest + pixelOffset;
 
     float2 relFramePos = pixelSample / smRes;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]

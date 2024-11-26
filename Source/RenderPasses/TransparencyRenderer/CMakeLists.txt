@@ -22,6 +22,7 @@ target_sources(TransparencyRenderer PRIVATE
 	AccelIrregularZ/AccelIrregularZData.slang
 	AccelIrregularZ/GenAccessMips.cs.slang
 	AccelIrregularZ/CalcSampleDistribution.cs.slang
+	AccelIrregularZ/DistributeSamples.cs.slang
 	AccelIrregularZ/DebugShowShadowAccel.3d.slang
 
 	LinkedList/LinkedListShadow.h
