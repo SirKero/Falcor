@@ -52,7 +52,8 @@ struct AccelIrregularZShader
 {
     static const bool kUseNearestDepth = ACCEL_USE_NEAREST_DEPTH;
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;  // TODO currently ignored and always assumed true
-    static const uint kMaxAtomicWeight = 64;                      //Max value to be added on the atomic counter          
+    static const uint kMaxAtomicWeight = 64;                      // Max value to be added on the atomic counter
+    static const bool kUseOneAABBForAllLight = ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS;
 
     cbuffer SMCB
     {
@@ -97,12 +98,12 @@ struct AccelIrregularZShader
     void traceAccelShadowInline(inout AccelShadowRayData rayData, uint lightIdx, const RayDesc ray) {
         RayQuery<RAY_FLAG_NONE> rayQuery;
         uint rayFlags = 0;
-        uint instanceMask = 1 << lightIdx;
+        uint instanceMask = kUseOneAABBForAllLight ? 0xFF : 1 << lightIdx;
         rayQuery.TraceRayInline(gShadowAS, rayFlags, instanceMask, ray);
-
+        const uint aabbIdx = kUseOneAABBForAllLight ? 0 : lightIdx;
         // Start tracing
         while (rayQuery.Proceed()) {
-            AABB aabb = gShadowAABBs[rayQuery.CandidateInstanceIndex()][rayQuery.CandidatePrimitiveIndex()];
+            AABB aabb = gShadowAABBs[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
             AccelShadowAttribs attribs = {};
             #if SHADOW_ACCEL_PCF
                 attribs.pixel = (aabb.minPoint.xy + aabb.maxPoint.xy) / 2.0; // Pixel center
@@ -112,7 +113,7 @@ struct AccelIrregularZShader
             if (!aabb.contains(ray.Origin))
                 continue;
 
-            AccelShadowData shadowData = AccelShadowData( gAccelShadowData[rayQuery.CandidateInstanceIndex()][rayQuery.CandidatePrimitiveIndex()]);
+            AccelShadowData shadowData = AccelShadowData(gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()]);
             handelAccelShadowHit(rayData, shadowData, attribs, ray.Origin);
         }
     }
@@ -149,6 +150,10 @@ struct AccelIrregularZShader
         const uint2 uShadowPixel = uint2(shadowPixel);
         uint backprojectionWeight = clamp(uint(luminance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
+
+        // If only one AABB is used for all lights, offset the pixel pos
+        if (kUseOneAABBForAllLight)
+            shadowPixel.x += gSMSize.x * lightIdx;
 
         AccelShadowRayData rayData = AccelShadowRayData();
         RayDesc ray;

@@ -93,6 +93,7 @@ private:
 
 
     // Accel shadow settings
+    bool mUseOneAABBForAllLights = true;
     static const uint mAccelApproxNumElementsPerPixel = 16u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync

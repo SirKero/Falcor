@@ -82,7 +82,8 @@ static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
-static const uint2 kMaxSamplesPerPixel = uint2(MAX_SAMPLES_PER_PIXEL_X,MAX_SAMPLES_PER_PIXEL_Y) ;
+static const uint2 kMaxSamplesPerPixel = uint2(MAX_SAMPLES_PER_PIXEL_X, MAX_SAMPLES_PER_PIXEL_Y);
+static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
 
 // DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
 // Offsets are (xMin, xMax, yMin, yMax)
@@ -225,6 +226,13 @@ bool aabbIsVisible(AABB aabb, uint2 smSize){
     }
 
     return visible;
+}
+
+inline uint getInsertIndex() {
+    uint insertIdx = 0;
+    const uint lightIdx = kUseOneAABBForAllLights ? 0 : gLightIdx;
+    InterlockedAdd(gCounter[lightIdx], 1u, insertIdx);
+    return insertIdx;
 }
 
 //
@@ -375,6 +383,12 @@ void rayGen()
     posWPixelNear.xyz /= posWPixelNear.w;
     float3 toNear = posWPixelNear.xyz - gLightPos;
 
+    // Add offset to the pixel position if one aabb is used
+    // Currently this is solved simple by just adding an offset of the SM size * LightIndex in x direction
+    if (kUseOneAABBForAllLights) {
+        pixelSample.x += smRes.x * gLightIdx;
+    }
+
     RayDesc ray;
     ray.TMin = length(toNear);                                          // Always start at depth 0
     ray.TMax = distance(gLightPos, posWPixelFar.xyz / posWPixelFar.w);  // Real far for the pixel
@@ -419,8 +433,7 @@ void rayGen()
                 if (aabbIsVisible(aabb, smRes))
             #endif
                 {
-                    uint insertIdx = 0;
-                    InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                    uint insertIdx = getInsertIndex();
                     if (insertIdx > MAX_IDX)
                         return;
 
@@ -454,8 +467,7 @@ void rayGen()
             if (aabbIsVisible(aabb, smRes))
         #endif
             {
-                uint insertIdx = 0;
-                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                uint insertIdx = getInsertIndex();
                 if (insertIdx > MAX_IDX)
                     return;
 
@@ -472,8 +484,7 @@ void rayGen()
             if (aabbIsVisible(aabb, smRes))
         #endif
             {
-                uint insertIdx = 0;
-                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
+                uint insertIdx = getInsertIndex();                
                 if (insertIdx > MAX_IDX)
                     return;
 
