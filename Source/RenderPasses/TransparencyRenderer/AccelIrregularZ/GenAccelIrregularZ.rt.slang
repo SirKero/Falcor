@@ -273,8 +273,8 @@ void rayGen()
             numSamples = gSampleDistribution.Load(uint3(mipPos,m));
             mipLevel = m;
             // If a sample from the mip chain was choosen, always use 4 samples for that pixel
-            //if (m > 0 && numSamples <= 4) {
-            if (numSamples <= 4) { //This version handles disocclusion better but is slower as more samples are traced
+            if (m > 0 && numSamples <= 4) {
+            //if (numSamples <= 4) { //This version handles disocclusion better but is slower as more samples are traced
                 numSamples = 4;
                 break;
             }
@@ -294,8 +294,9 @@ void rayGen()
                 numSamples = 8;
         } else {
             float numSampleSqrt = sqrt(float(numSamples));
-            numSampleSqrt = floor(numSampleSqrt);
-            numSamples = uint(numSampleSqrt) + 1;
+            // numSampleSqrt = floor(numSampleSqrt); // Underestimate samples (e.g. 8 -> 4 )
+            numSampleSqrt = round(numSampleSqrt); // take the closest sample count
+            numSamples = uint(numSampleSqrt);
             numSamples *= numSamples;
         }        
 

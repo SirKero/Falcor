@@ -226,7 +226,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             for (uint i = 0; i < numBuffers; i++)
             {
                 mPixelSample[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint4), mResolution.x * mResolution.y * 2,
+                    mpDevice, sizeof(uint4), mResolution.x * mResolution.y,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mPixelSample[i]->setName("PixelSampleBuf" + std::to_string(i));
@@ -357,9 +357,46 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             mCalcSampleDistribution = ComputePass::create(mpDevice, desc, defines, true);
         }
 
-         for (int m = mSampleDistribution[0]->getMipCount() - 2; m >= 0; m--)
+        //Calc ray count dispatch
+        auto var = mCalcSampleDistribution->getRootVar();
+
+        if (mEnableDynamicRayCountCalc && mFrameCount > 0)
         {
-             auto var = mCalcSampleDistribution->getRootVar();
+            //Get mip level
+            uint mip = mSampleDistribution[0]->getMipCount() - 1;
+            var["CB"]["gCalcTotalDispatchCount"] = true;
+            var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mDynRCGuardPercentage);
+            var["CB"]["gChangePercentage"] = mDynRCChangePercentage; // 50% for now
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                var["gImpt"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
+                var["gSmp"][i].setUav(mSampleDistribution[i]->getUAV(mip));
+            }
+            int lastFrameInFlight = 0;
+            if (mAccelShadowUseCPUCounterOptimization)
+            {
+                lastFrameInFlight = mStagingCount - 1;
+                lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
+            }
+                 
+            var["gAABBCount"] = mAccelShadowCounter[lastFrameInFlight];
+            mCalcSampleDistribution->execute(pRenderContext, uint3(1,1,1));
+        }
+
+        if (mResetRayCount)
+        {
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                pRenderContext->clearUAV(mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), uint4(mResolution.x * mResolution.y));
+            }
+            
+            mResetRayCount = false;
+        }
+
+        var["CB"]["gCalcTotalDispatchCount"] = false;
+        for (int m = mSampleDistribution[0]->getMipCount() - 2; m >= 0; m--)
+        {
+            
             for (uint i = 0; i < lights.size(); i++)
             {
                 var["gImpt"][i].setSrv(mAccessTextures[i]->getSRV(m, 1u));
@@ -370,6 +407,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
             var["CB"]["gDstSize"] = dispatchDim.xy();
+            
 
             mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
         }
@@ -640,8 +678,21 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                 group2.separator();
             }
         }
+
+        mResolutionChanged |= group.var("AABB size (Res x this)", mAccelApproxNumElementsPerPixel, 1u, 32u, 1u);
+        group.tooltip("Multiplier for the AABB buffer size.");
+
         mResolutionChanged |= group.checkbox("Use one AABB for all lights", mUseOneAABBForAllLights); //Should trigger rebuild of all buffers
         group.tooltip("Uses one AABB for all lights. Light coordinates are put side by side on the x axis");
+
+        mResetRayCount |= group.checkbox("Use GPU Sample Distribution opimization", mEnableDynamicRayCountCalc);
+        if (mEnableDynamicRayCountCalc)
+        {
+            group.var("GPU SD Total Mult", mDynRCGuardPercentage, 0.001f, 1.f);
+            group.tooltip("Multiplier for the total that is used to calculate the ray count for the current frame");
+            group.var("GPU SD Change Mult", mDynRCChangePercentage, 0.001f, 1.f);
+            group.tooltip("Multiplier for the change value in the Sample Distribution");
+        }
 
         group.checkbox("Use CPU Counter optimization", mAccelShadowUseCPUCounterOptimization);
         group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size.");

@@ -87,19 +87,24 @@ private:
 
     //Sample Gen (+Jitter)
     std::vector<uint> mHaltonSampleCount;
-    uint mMaxSamplesPerPixelSqr = 3; //Sample box size (e.g 3 = 3x3 box)
+    uint mMaxSamplesPerPixelSqr = 4; //Sample box size (e.g 3 = 3x3 box)
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
-    bool mUseSeperateSampleDistributionPass = true; //Use the seperate sample distribution pass 
+    bool mUseSeperateSampleDistributionPass = false; //Use the seperate sample distribution pass 
 
+    //Dynamic ray count on gpu
+    bool mEnableDynamicRayCountCalc = true;
+    bool mResetRayCount = false;
+    float mDynRCGuardPercentage = 0.9f; //take 90% of the total
+    float mDynRCChangePercentage = 1.f; //How much of the optimal value should be taken
 
     // Accel shadow settings
     bool mUseOneAABBForAllLights = true;
-    static const uint mAccelApproxNumElementsPerPixel = 16u;
+    uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
-    float mAccelShadowOverestimation = 1.1f;
+    float mAccelShadowOverestimation = 1.3f;
     uint mAccelDataFormatSize = 2; // Size of the data struct for the accel data
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;
