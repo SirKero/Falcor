@@ -48,16 +48,16 @@ bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
     if (mResolutionChanged)
         mResolution.y = mResolution.x;
 
-    bool changed = widget.var("Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
+    mUpdateSMMatrices |= widget.var("Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
 
-    return mResolutionChanged || changed;
+    return mResolutionChanged || mUpdateSMMatrices;
 }
 
 void TransparencyShadowMethod::updateSMMatrices(RenderContext* pRenderContext, bool rebuild)
 {
     auto& lights = mpScene->getLights();
     // Check if resize is neccessary
-    bool rebuildAll = false;
+    bool rebuildAll = mUpdateSMMatrices;
     if (mShadowMapMVP.size() != lights.size())
     {
         mShadowMapMVP.resize(lights.size());
@@ -76,6 +76,7 @@ void TransparencyShadowMethod::updateSMMatrices(RenderContext* pRenderContext, b
             mShadowMapMVP[i].calculate(lights[i], mNearFar);
         }
     }
+    mUpdateSMMatrices = false;
 }
 
 void TransparencyShadowMethod::LightMVP::calculate(ref<Light> light, float2 nearFar)

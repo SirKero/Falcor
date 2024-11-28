@@ -89,7 +89,8 @@ protected:
     bool mOpaqueShadowMapEnabled = false;
 
     uint2 mResolution = uint2(512);
-    float2 mNearFar = float2(0.1f, 60.f);
+    bool mUpdateSMMatrices = false;         //True if VP Matrices of the shadow maps should be recalculated
+    float2 mNearFar = float2(1.f, 60.f);
     bool mResolutionChanged = false;         //True if the resolution changed
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light

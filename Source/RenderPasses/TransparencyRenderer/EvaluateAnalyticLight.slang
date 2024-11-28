@@ -184,6 +184,8 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
     bool flipLightDir = (NdotL < kMinCosTheta) && (sd.opacity < 1);
     float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
+    if (flipLightDir)
+        ls.Li *= (1.0 - sd.opacity); 
 
     // Eval BSDF
     float3 Li = mi.eval(sd, lightDirection, sg) * ls.Li * invPdf * thp;
