@@ -112,6 +112,7 @@ private:
     bool mAccelUseFrustumCulling = false;
     bool mAccelUseNearestDepth = false;  //Use nearest depth instead of average
     RayFlags mAccelRayFlags = RayFlags::None;
+    float mMergeBoxDist = 5e-2f; //Distance the accel boxes are merged
 
     struct
     {

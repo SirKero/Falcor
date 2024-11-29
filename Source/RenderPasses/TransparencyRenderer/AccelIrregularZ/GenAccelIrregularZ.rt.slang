@@ -84,6 +84,7 @@ static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
 static const uint2 kMaxSamplesPerPixel = uint2(MAX_SAMPLES_PER_PIXEL_X, MAX_SAMPLES_PER_PIXEL_Y);
 static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
+static const float kMergeDistance = ACCEL_MERGE_BOX_DIST;
 
 // DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
 // Offsets are (xMin, xMax, yMin, yMax)
@@ -400,9 +401,10 @@ void rayGen()
     bool useRayTracing = true;
     float2 boxZ = float2(0.0); //Last two middle depths
     float lastHitDepth = 0.0;
-    float2 lastTransmittances = float2(1.0); //Store the last two transmittances
+    float2 lastTransmittances = float2(1.0); // Store the last two transmittances
+    bool mergeLastBox = false; //Merge the box from the prevoius frame
     // Loop to get all possible samples
-    for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing ; i++) {
+    for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
         rayData.dist = -1;
 
@@ -418,14 +420,18 @@ void rayGen()
             useRayTracing = false;
         }
 
+        // Merge boxes for non-opaque hits if they are too close to another
+        float distDiff = rayData.depth - lastHitDepth;
+        bool mergeBox = distDiff < kMergeDistance && (rayData.currentTransmittance > kMinOpacity); 
         // Update box dims
         if (rayData.dist > 0) {
-            boxZ.y = boxZ.x;
-            boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
+            if (!mergeLastBox)
+                boxZ.y = boxZ.x;
+            boxZ.x = lastHitDepth + (distDiff) / 2;           
         }
 
-        if (rayData.dist > 0 && i>1) {
-            // Write output
+        // Write output data
+        if (rayData.dist > 0 && i>1 && (!mergeBox)) {
             float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.y);
             float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxZ.x);
 
@@ -446,9 +452,12 @@ void rayGen()
         if (rayData.dist > 0) {
             ray.TMin = rayData.dist + 1e-10;
             lastHitDepth = rayData.depth;
-            lastTransmittances.y = lastTransmittances.x;
+            if(!mergeBox)
+                lastTransmittances.y = lastTransmittances.x;
+            else
+                lastTransmittances.y = lerp(lastTransmittances.y, lastTransmittances.x, 0.05);
             lastTransmittances.x = rayData.currentTransmittance;
-            
+            mergeLastBox = mergeBox;            
         }
     }
 

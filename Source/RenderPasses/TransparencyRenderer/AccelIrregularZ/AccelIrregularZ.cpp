@@ -506,6 +506,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     );
     mGenAccelShadowPip.pProgram->addDefine("USE_SAMPLE_DISTRIBUTION_IN_GEN", mUseSeperateSampleDistributionPass ? "0" : "1");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -725,6 +726,10 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         }
 
         //group.checkbox("Use PCF", mAccelUsePCF);
+        group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");
+        group.tooltip(
+            "Merges Accel Boxes together and takes the transparency of the first box. Can add bias (brightening). \n Set to 0 to disable."
+        );
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         group.checkbox("Use Visibility of nearest depth", mAccelUseNearestDepth);
         group.tooltip("Only uses the Visibility of the sample with the closest depth. If disabled, the average of all hit Boxes is used");
