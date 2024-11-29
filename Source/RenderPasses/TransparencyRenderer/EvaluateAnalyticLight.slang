@@ -37,6 +37,8 @@ import AccelIrregularZ.AccelIrregularZ;
 #define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
 #endif
 
+static const float kMinIncidentAngle = 1e-3; //Min Incident angle for light
+
 // For RIS light sampling
 struct RISReservoir {
     uint lightIdx; // Light Index
@@ -176,16 +178,17 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
     // Sample local light source.
     AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf);
+    float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
 
-    if (all(ls.Li <= 0.0))
+    // Reject sample if invalid or has an too steep incident angle
+    if (all(ls.Li <= 0.0) || (abs(NdotL) < kMinIncidentAngle))
         return float3(0.0);
 
-    // Reject sample if not in the hemisphere of a BSDF lobe.
-    float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
-    bool flipLightDir = (NdotL < kMinCosTheta) && (sd.opacity < 1);
+    // Flip light dir for non-opaque surfaces, so light shines through 
+    bool flipLightDir = (NdotL < 0) && (sd.opacity < 1);
     float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
     if (flipLightDir)
-        ls.Li *= (1.0 - sd.opacity); 
+        ls.Li *= (1.0 - sd.opacity); // consider the opacity of the hit if light shined through
 
     // Eval BSDF
     float3 Li = mi.eval(sd, lightDirection, sg) * ls.Li * invPdf * thp;
