@@ -703,8 +703,8 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
 
         mRebuildAccelDataBuffer |= group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
         group.tooltip("Data formats; For more info see AccelShadowData.slang");
-        group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
-        group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
+        //group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
+        //group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
 
         group.checkbox("Use seperate Sample Distribution Pass", mUseSeperateSampleDistributionPass);
         group.tooltip(
@@ -724,7 +724,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
             group.tooltip("Box size for the subpixel sampling. E.g. 3 -> 3x3 box.");
         }
 
-        group.checkbox("Use PCF", mAccelUsePCF);
+        //group.checkbox("Use PCF", mAccelUsePCF);
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         group.checkbox("Use Visibility of nearest depth", mAccelUseNearestDepth);
         group.tooltip("Only uses the Visibility of the sample with the closest depth. If disabled, the average of all hit Boxes is used");
@@ -733,7 +733,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
             group2.checkbox("Enable", mAccelDebugShowAS.enable);
             if (mAccelDebugShowAS.enable && mpScene)
             {
-                if (mpScene->getLightCount() > 1)
+                if (mpScene->getLightCount() > 1 && !mUseOneAABBForAllLights)
                     group2.slider("Selected Light", mAccelDebugShowAS.selectedLight, 0u, mpScene->getLightCount() - 1);
                 group2.var("Clip X", mAccelDebugShowAS.clipX, 0.f, float(mResolution.x), 0.1f);
                 group2.var("Clip Y", mAccelDebugShowAS.clipY, 0.f, float(mResolution.y), 0.1f);
@@ -776,6 +776,8 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
 
         auto defines = mpScene->getSceneDefines();
         defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+        defines.add("USE_ONE_AABB_FOR_ALL", mUseOneAABBForAllLights ? "1" : "0");
+        defines.add("COUNT_LIGHTS", std::to_string(mpScene->getLightCount()));
         // Create Program and state
         mRasterShowAccelPass.pProgram = GraphicsProgram::create(mpDevice, desc, defines);
         mRasterShowAccelPass.pState = GraphicsState::create(mpDevice);
@@ -801,6 +803,7 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
 
     // Runtime Defines
     mRasterShowAccelPass.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+    mRasterShowAccelPass.pProgram->addDefine("USE_ONE_AABB_FOR_ALL", mUseOneAABBForAllLights ? "1" : "0");
 
     // Vars
     if (!mRasterShowAccelPass.pVars)
@@ -817,14 +820,19 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
     var["CB"]["gSMSize"] = mResolution;
     var["CB"]["gNear"] = mNearFar.x;
     var["CB"]["gFar"] = mNearFar.y;
-    var["CB"]["gSelectedLight"] = mAccelDebugShowAS.selectedLight;
+    var["CB"]["gSelectedLight"] = mUseOneAABBForAllLights ? 0 : mAccelDebugShowAS.selectedLight;
     var["CB"]["gCullMin"] = float3(mAccelDebugShowAS.clipX.x, mAccelDebugShowAS.clipY.x, mAccelDebugShowAS.clipZ.x);
     var["CB"]["gCullMax"] = float3(mAccelDebugShowAS.clipX.y, mAccelDebugShowAS.clipY.y, mAccelDebugShowAS.clipZ.y);
     var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
     var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
     var["CB"]["gMaxSampleCount"] = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
-    var["CB"]["gInvView"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invView;
-    var["CB"]["gInvProj"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invProjection;
+
+    //Set the viewProj matrices
+    for (uint i = 0; i < mpScene->getLightCount(); i++)
+    {
+        var["LightMatrices"]["gInvView"][i] = mShadowMapMVP[i].invView;
+        var["LightMatrices"]["gInvProj"][i] = mShadowMapMVP[i].invProjection;
+    }
 
     var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
     var["gShadowCounter"] = mAccelShadowCounter[frameInFlight];
