@@ -49,8 +49,12 @@ namespace
     const std::string kShaderModel = "6_6"; //Shader model for compute shader
 
     const std::string kInputVBuffer = "vbuffer";
+    const std::string kInputDepth = "inDepth";
+    const std::string kInputMV = "inMotion";
     const std::string kOutputColor = "outColor";
     const std::string kOutputDebug = "outDebug";
+    const std::string kOutputDepth = "outDepth";
+    const std::string kOutputMV = "outMotion";
 
     const ChannelList kInputChannels = {
         {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
@@ -60,6 +64,17 @@ namespace
     const ChannelList kOutputChannels = {
         {kOutputColor, "gOutputColor", "Output color (sum of direct and indirect)", false, ResourceFormat::RGBA32Float},
         {kOutputDebug, "gDebugOut", "Output debug tex (sum of direct and indirect)", true, ResourceFormat::RGBA32Float},
+    };
+
+    //Additional Geometry information that may need info about the first transparent hit
+    const ChannelList kInputGeometryInfoChannels = {
+        {kInputDepth, "gInDepth", "Depth buffer (NDC)", true /* optional */},
+        {kInputMV, "gInMotion", "Motion vector", true /* optional */},
+    };
+
+    const ChannelList kOutputGeometryInfoChannels = {
+        {kOutputDepth, "gOutDepth", "Depth buffer (NDC) with transparencies", true, ResourceFormat::R32Float},
+        {kOutputMV, "gOutMotion", "Motion Vector including transparencies", true, ResourceFormat::RG32Float},
     };
 
 }; // namespace
@@ -81,7 +96,9 @@ RenderPassReflection TransparencyRenderer::reflect(const CompileData& compileDat
 
     // Define our input/output channels.
     addRenderPassInputs(reflector, kInputChannels);
+    addRenderPassInputs(reflector, kInputGeometryInfoChannels);
     addRenderPassOutputs(reflector, kOutputChannels, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget);
+    addRenderPassOutputs(reflector, kOutputGeometryInfoChannels);
 
     return reflector;
 }
@@ -100,12 +117,17 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     // If we have no scene, just clear the outputs and return.
     if (!mpScene)
     {
-        for (auto it : kOutputChannels)
+        auto clearOut = [&](const ChannelList& channelList)
         {
-            Texture* pDst = renderData.getTexture(it.name).get();
-            if (pDst)
-                pRenderContext->clearTexture(pDst);
-        }
+            for (const auto& it : channelList)
+            {
+                Texture* pDst = renderData.getTexture(it.name).get();
+                if (pDst)
+                    pRenderContext->clearTexture(pDst);
+            }
+        };
+        clearOut(kOutputChannels);
+        clearOut(kOutputGeometryInfoChannels);
         return;
     }
 
@@ -314,6 +336,9 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
 
     // Update define that can change at runtime
     mEvalTransparencyDirectRay.pProgram->addDefines(getLightEvalDefines());
+    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
+    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
+    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
     
     // Init Vars
     if (!mEvalTransparencyDirectRay.pVars)
@@ -345,9 +370,15 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
             var[desc.texname] = renderData.getTexture(desc.name);
         }
     };
-    for (auto channel : kInputChannels)
+    for (auto& channel : kInputChannels)
+        bind(channel);
+    for (auto& channel : kInputGeometryInfoChannels)
+        bind(channel);
+    for (auto& channel : kOutputGeometryInfoChannels)
         bind(channel);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
+
+
 
      // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

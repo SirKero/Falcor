@@ -1,4 +1,5 @@
 import EvaluateAnalyticLight;
+import Utils.Math.MathHelpers;
 
 cbuffer CB
 {
@@ -9,9 +10,16 @@ cbuffer CB
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gViewW; // Optional
 
+// Depths/MV for TAA or DLSS
+Texture2D<float> gInDepth;
+Texture2D<float2> gInMotion;
+RWTexture2D<float> gOutDepth;
+RWTexture2D<float2> gOutMotion;
+
 // Outputs
 RWTexture2D<float4> gOutputColor;
 
+#define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = 1e-7;
 static const uint kMaxElements = 256;   //For now 256 max transparent elements on a ray
 
@@ -109,7 +117,11 @@ void rayGen()
     const uint2 frameDim = DispatchRaysDimensions().xy;
     float3 colorOut = float3(0);
     HitInfo hit = HitInfo(gVBuffer[pixel]);
-    float3 viewDir = -gViewW[pixel].xyz;
+    float3 viewDir;
+    if (is_valid(gViewW))
+        viewDir = -gViewW[pixel].xyz;
+    else
+        viewDir = gScene.camera.computeRayPinhole(pixel, frameDim).dir;
 
     // Prepare ray payload.
     PathData pd = PathData();
@@ -124,6 +136,13 @@ void rayGen()
         VertexData v = gScene.getVertexData(triangleHit);
         tMax = min(tMax, length(v.posW-pd.origin)); //Linear depth
     }
+
+    float depth = 1;
+    float2 mVec = float2(0);
+    if (is_valid(gInDepth))
+        depth = gInDepth[pixel];
+    if (is_valid(gInMotion))
+        mVec = gInMotion[pixel];
 
     //Prepare Ray
     RayDesc ray;
@@ -166,11 +185,28 @@ void rayGen()
         //Update ray
         ray.TMin = rayData.dist + 1e-10;
         rayData = TransparencyRayData();
-    }
 
+        // Update depth and motion vector if valid
+        if (i == 0 && is_valid(gOutDepth)) {
+            float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
+            depth = curPosH.z / curPosH.w;
+        }
+        if (i == 0 && is_valid(gOutMotion)) {
+            // Compute motion vector.
+            float3 prevPosW = gScene.getPrevPosW(hit.getTriangleHit());
+            float2 pixelPos = pixel + float2(0.5f, 0.5f);
+            float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
+            mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
+        }
+    }
     //Get color from opaque
     float4 prevColor = gOutputColor[pixel];
     colorOut = pd.radiance + prevColor.xyz * pd.thp;
 
     gOutputColor[pixel] = float4(colorOut, 1.0);
+
+    if (is_valid(gOutMotion))
+        gOutMotion[pixel] = mVec;
+    if (is_valid(gOutDepth))
+        gOutDepth[pixel] = depth;
 }
