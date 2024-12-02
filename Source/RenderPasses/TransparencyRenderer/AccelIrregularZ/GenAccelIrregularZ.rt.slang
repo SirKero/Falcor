@@ -422,7 +422,7 @@ void rayGen()
 
         // Merge boxes for non-opaque hits if they are too close to another
         float distDiff = rayData.depth - lastHitDepth;
-        bool mergeBox = distDiff < kMergeDistance && (rayData.currentTransmittance > kMinOpacity); 
+        bool mergeBox = i > 1 && distDiff < kMergeDistance && (rayData.currentTransmittance > kMinOpacity); 
         // Update box dims
         if (rayData.dist > 0) {
             if (!mergeLastBox)
