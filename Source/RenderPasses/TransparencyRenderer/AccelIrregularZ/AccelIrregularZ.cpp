@@ -208,18 +208,17 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             for (uint i = 0; i < numBuffers; i++)
             {
                 mSampleDistribution[i] = Texture::create2D(
-                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Uint, 1u, Texture::kMaxPossible, nullptr,
+                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Float, 1u, Texture::kMaxPossible, nullptr,
                     ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
                 );
                 //Set highest mip to total number of samples
                 pRenderContext->clearUAV(
-                    mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), uint4(mResolution.x * mResolution.y)
+                    mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), float4(mResolution.x * mResolution.y)
                 );
                 mSampleDistribution[i]->setName("SampleDistribution" + std::to_string(i));
             }
         }
 
-        
         if (mPixelSample.empty())
         {
             mPixelSample.resize(numBuffers);
@@ -240,8 +239,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
                 Buffer::CpuAccess::None, &initData, false
             );
             mpPixelSampleCounter->setName("PixelSampleConter");
-        }
-        
+        }        
     }
 }
 
@@ -387,7 +385,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         {
             for (uint i = 0; i < lights.size(); i++)
             {
-                pRenderContext->clearUAV(mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), uint4(mResolution.x * mResolution.y));
+                pRenderContext->clearUAV(mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), float4(mResolution.x * mResolution.y));
             }
             
             mResetRayCount = false;
@@ -476,7 +474,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             var["gPixelSample"][i] = mPixelSample[i];
         }
 
-        uint3 dispatchDim = uint3(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr, lights.size());
+        //uint3 dispatchDim = uint3(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr, lights.size()); //Old Version(see shader)
+        uint3 dispatchDim = uint3(mResolution.x, mResolution.y, lights.size()); //New one
         var["CB"]["gSMRes"] = mResolution;
         var["CB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
         var["CB"]["gFrameCount"] = mFrameCount;

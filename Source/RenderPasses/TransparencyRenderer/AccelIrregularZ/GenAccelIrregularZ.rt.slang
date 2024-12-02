@@ -70,7 +70,7 @@ RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 RWTexture2D<uint> gAccessCounter;
-Texture2D<uint> gSampleDistribution;
+Texture2D<float> gSampleDistribution;
 StructuredBuffer<uint4> gPixelSample;
 Buffer<uint> gPixelSampleCounter;
 
@@ -271,7 +271,7 @@ void rayGen()
         uint mipRes = 2;
         for (int m = gMipCount - 2 ; m >= 0; m--) {
             uint2 mipPos = uint2(relPixel * mipRes);
-            numSamples = gSampleDistribution.Load(uint3(mipPos,m));
+            numSamples = uint(round(gSampleDistribution.Load(uint3(mipPos,m))));
             mipLevel = m;
             // If a sample from the mip chain was choosen, always use 4 samples for that pixel
             if (m > 0 && numSamples <= 4) {
@@ -374,7 +374,7 @@ void rayGen()
     }
 
     float2 pixelSample = pixel + pixelCenterOffest + pixelOffset;
-
+   
     float2 relFramePos = pixelSample / smRes;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
     relFramePos.y *= -1.f;

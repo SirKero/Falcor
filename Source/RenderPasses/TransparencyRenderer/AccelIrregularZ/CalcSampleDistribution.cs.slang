@@ -5,8 +5,8 @@
 
 Texture2D<uint> gImpt[COUNT_LIGHTS];
 Texture2D<uint> gImptMip[COUNT_LIGHTS]; 
-RWTexture2D<uint> gSmp[COUNT_LIGHTS];   //Distributed Sample (Rays) texture
-Texture2D<uint> gSmpMip[COUNT_LIGHTS];
+RWTexture2D<float> gSmp[COUNT_LIGHTS];   //Distributed Sample (Rays) texture
+Texture2D<float> gSmpMip[COUNT_LIGHTS];
 
 Buffer<uint> gAABBCount;    //Last frames aabb count
 
@@ -56,7 +56,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         // Write new ray counts to textures
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             float w = importances[i] / totalImportance;
-            gSmp[i][pixel] = min(uint(w * totalRayCount), kMaxSamples);
+            gSmp[i][pixel] = min(floor(w * totalRayCount), kMaxSamples);
         }
     }
     //Pull ray count to lower levels
@@ -64,16 +64,16 @@ void main(uint3 thdID: SV_DispatchThreadID)
         uint2 pixelMip = pixel / 2;
         uint fullImportance = gImptMip[thdID.z][pixelMip];
         uint sampleImportance = gImpt[thdID.z][pixel];
-        uint sampleCount = gSmpMip[thdID.z][pixelMip];
+        float sampleCount = gSmpMip[thdID.z][pixelMip];
         //if (gDstSize.x == 2)
             //sampleCount = min(sampleCount, uint(ceil(float(fullImportance) / kMaxAtomicWeight)));
 
         float weight = float(sampleImportance) / (fullImportance + 1e-10);
 
         // TODO error diffusion ?
-        uint samples = 0;
+        float samples = 0.0;
         if (weight > 1e-7)
-            samples = uint(ceil(sampleCount * weight));
+            samples = sampleCount * weight;
 
         gSmp[thdID.z][pixel] = samples;
     }
