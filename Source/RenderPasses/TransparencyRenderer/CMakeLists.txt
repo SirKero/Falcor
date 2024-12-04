@@ -24,6 +24,7 @@ target_sources(TransparencyRenderer PRIVATE
 	AccelIrregularZ/CalcSampleDistribution.cs.slang
 	AccelIrregularZ/DistributeSamples.cs.slang
 	AccelIrregularZ/DebugShowShadowAccel.3d.slang
+	AccelIrregularZ/OptimizeSamples.cs.slang
 
 	LinkedList/LinkedListShadow.h
 	LinkedList/LinkedListShadow.cpp

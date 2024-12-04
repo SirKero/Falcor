@@ -37,6 +37,7 @@ namespace
     const std::string kAccessMipsShader = kShaderFolder + "GenAccessMips.cs.slang";
     const std::string kCalcSampleDistributionShader = kShaderFolder + "CalcSampleDistribution.cs.slang";
     const std::string kDistributeSamplesShader = kShaderFolder + "DistributeSamples.cs.slang";
+    const std::string kOptimizeSamplesShader = kShaderFolder + "OptimizeSamples.cs.slang";
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //UI
@@ -410,6 +411,40 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
         }
     }
+    //Optimize Samples
+    if (mOptimizeSampleDistribution)
+    {
+        FALCOR_PROFILE(pRenderContext, "Optimize distributed Samples");
+        // Create Compute Pass
+        if (!mpOptimizeSamples)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kOptimizeSamplesShader).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+            defines.add("MAX_SAMPLES", std::to_string(mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr));
+
+            mpOptimizeSamples = ComputePass::create(mpDevice, desc, defines, true);
+        }
+        mpOptimizeSamples->getProgram()->addDefine("MAX_SAMPLES", std::to_string(mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr));
+        auto var = mpOptimizeSamples->getRootVar();
+        
+        for (uint m = 1; m < mSampleDistribution[0]->getMipCount(); m++)
+        {
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                var["gSampleDistribution0"][i].setUav(mSampleDistribution[i]->getUAV(m - 1));
+                var["gSampleDistribution1"][i].setUav(mSampleDistribution[i]->getUAV(m));
+            }
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
+            var["CB"]["gDispatchSize"] = dispatchDim.xy();
+            var["CB"]["gMipLevel"] = m - 1;
+            var["CB"]["gLightCount"] = lights.size();
+
+            mpOptimizeSamples->execute(pRenderContext, dispatchDim);
+        }
+    }
 
     // Init the sample points for Halton Jitter
     const uint maxSamplesSq = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
@@ -700,6 +735,9 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         {
             group.var("CPU Counter overestimation", mAccelShadowOverestimation, 1.0f, 2.0f, 0.001f);
         }
+
+        group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
+        group.tooltip("Optimizes the sample distribution texture with an extra compute pass");
 
         mRebuildAccelDataBuffer |= group.dropdown("Data Format Size", kAccelDataFormat, mAccelDataFormatSize);
         group.tooltip("Data formats; For more info see AccelShadowData.slang");

@@ -89,7 +89,8 @@ private:
     std::vector<uint> mHaltonSampleCount;
     uint mMaxSamplesPerPixelSqr = 4; //Sample box size (e.g 3 = 3x3 box)
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
-    bool mUseSeperateSampleDistributionPass = false; //Use the seperate sample distribution pass 
+    bool mUseSeperateSampleDistributionPass = true; //Use the seperate sample distribution pass
+    bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights 
 
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;
@@ -142,6 +143,7 @@ private:
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
     ref<ComputePass> mpDistributeSamples;            //Distribute Samples for the generation pass
+    ref<ComputePass> mpOptimizeSamples;             //Optimize Sample distribution
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
     RasterPipeline mRasterShowAccelPass;
 };
