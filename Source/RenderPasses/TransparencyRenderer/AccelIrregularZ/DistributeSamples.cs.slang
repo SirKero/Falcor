@@ -42,7 +42,8 @@ static const float2 kMSAAPattern8[8] = { float2(0.0625, -0.1875),  float2(-0.062
                                       
 static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
 static const uint2 kMaxSamplesPerPixel = uint2(MAX_SAMPLES_PER_PIXEL_X, MAX_SAMPLES_PER_PIXEL_Y);
-static const float kFP16PrecisionGuard = 1e-4; //To avoid errors due to fp16 precision
+static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;
+static const float kFP16PrecisionGuard = 5e-4; //To avoid errors due to fp16 precision
 
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
@@ -173,81 +174,136 @@ void main(uint3 thdID: SV_DispatchThreadID)
     if (idx1D > totalSamples)
         return;
 
-    float weight = idx1D / totalSamples; // weight in [0,1]
-    // Go through the mip chain
-    int mipLevel = gMipCount - 2;
-    uint2 mipIdx = uint2(0); // Top left
-    uint2 selectedMipIdx = mipIdx;
-    uint prevMipRes = 1; // Mip res for previous iteration
-    float choosenSampleCount = 1.0;
-    bool potentiallyStop = false;
-    for (int m = gMipCount - 2; m >= 0; m--) {
-        float4 mipSamples;
-        mipSamples[0] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x, mipIdx.y, m));
-        mipSamples[1] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x + 1, mipIdx.y, m));
-        mipSamples[2] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x, mipIdx.y + 1, m));
-        mipSamples[3] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
-        float totalMipSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
-        float sampleWeight = weight * totalMipSamples;
-        float currSamples = 0.0;
-        uint selectedSubpixel = 0;
-        float numSamples = 0;
-        for (uint x = 0; x < 4; x++) {
-            numSamples = mipSamples[x];
-            currSamples += numSamples;
-            selectedSubpixel = x;
-            if (sampleWeight < currSamples)
-                break;
+    int mipMulFactor = 1; // Default Mip 0
+    uint index = idx1D;
+    uint sampleCount = 1;
+
+    if (!kUseOptimizedSampleDistribution)
+    {
+        float weight = idx1D / totalSamples; // weight in [0,1]
+        // Go through the mip chain
+        int mipLevel = gMipCount - 2;
+        uint2 mipIdx = uint2(0); // Top left
+        uint2 selectedMipIdx = mipIdx;
+        uint prevMipRes = 1; // Mip res for previous iteration
+        float choosenSampleCount = 1.0;
+        bool potentiallyStop = false;
+        for (int m = gMipCount - 2; m >= 0; m--) {
+            float4 mipSamples;
+            mipSamples[0] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x, mipIdx.y, m));
+            mipSamples[1] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+            mipSamples[2] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+            mipSamples[3] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+            float totalMipSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+            float sampleWeight = weight * totalMipSamples;
+            float currSamples = 0.0;
+            uint selectedSubpixel = 0;
+            float numSamples = 0;
+            for (uint x = 0; x < 4; x++) {
+                numSamples = mipSamples[x];
+                currSamples += numSamples;
+                selectedSubpixel = x;
+                if (sampleWeight < currSamples)
+                    break;
+            }
+            // Update weight
+            currSamples -= numSamples;
+            weight = saturate((sampleWeight - currSamples) / numSamples);
+
+            // Check if sample can be accepted
+            if (potentiallyStop)
+                if (floor(choosenSampleCount) > numSamples)
+                    break;
+
+            // If we are below 4 samples, the sample is potentially accepted.
+            // In the next iteration we look if the sample count is still the same. If this is the case we go deeper in the mip chain,
+            // else the sample from the previous iteration is accepted
+            choosenSampleCount = numSamples;
+            if (numSamples <= 4) {
+                potentiallyStop = true;
+            }
+            mipLevel = m;
+
+            // Update idx for next it
+            if (selectedSubpixel == 1 || selectedSubpixel == 3)
+                mipIdx.x += 1;
+            if (selectedSubpixel > 1) // 2 or 3
+                mipIdx.y += 1;
+
+            selectedMipIdx = mipIdx;
+            mipIdx *= 2; // Update for new resolution
+            prevMipRes *= 2;
         }
-        // Update weight
-        currSamples -= numSamples;
-        weight = saturate((sampleWeight - currSamples) / numSamples);
+        // Get pixel on default resolution
+        float2 relPixel = float2(selectedMipIdx) / prevMipRes;
+        pixel = uint2((relPixel * smRes) + 0.5);
+        if (choosenSampleCount <= 0)
+            return;
+        choosenSampleCount = max(choosenSampleCount, 1.0);
+        mipMulFactor = 1 << mipLevel; // Multiplier for Mip level
+        // Get next lowest sample count
+        float sampleSqrt = sqrt(float(choosenSampleCount));
+        sampleSqrt = floor(sampleSqrt); // Underestimate samples (e.g. 8 -> 4). Other samples should be distributed randomly
+        sampleCount = uint(sampleSqrt);
+        sampleCount *= sampleCount;
 
-        // Check if sample can be accepted
-        if (potentiallyStop)
-            if (floor(choosenSampleCount) > numSamples)
-                break;
-
-        // If we are below 4 samples, the sample is potentially accepted.
-        // In the next iteration we look if the sample count is still the same. If this is the case we go deeper in the mip chain,
-        //else the sample from the previous iteration is accepted
-        choosenSampleCount = numSamples;
-        if (numSamples <= 4) {
-            potentiallyStop = true;
-        }
-        mipLevel = m;
-
-        // Update idx for next it
-        if (selectedSubpixel == 1 || selectedSubpixel == 3)
-            mipIdx.x += 1;
-        if (selectedSubpixel > 1) // 2 or 3
-            mipIdx.y += 1;
-
-        selectedMipIdx = mipIdx;
-        mipIdx *= 2; // Update for new resolution
-        prevMipRes *= 2;
+        // Get an index from the choosenSampleCount. Theoretically this amount of samples should be produced
+        index = uint(idx1D % uint(choosenSampleCount));
+        bool randOffset = (index / sampleCount) >= 1; // TODO add
+        if (randOffset) return;
+        sampleCount = min(sampleCount, kMaxSamplesPerPixel.x * kMaxSamplesPerPixel.y); // cap to sample count
+        index = index % sampleCount;
     }
-    // Get pixel on default resolution
-    float2 relPixel = float2(selectedMipIdx) / prevMipRes;
-    pixel = uint2((relPixel * smRes) + 0.5);
-    if (choosenSampleCount <= 0)
-        return;
-    choosenSampleCount = max(choosenSampleCount, 1.0);
-    int mipMulFactor = 1 << mipLevel; // Multiplier for Mip level
-    // Get next lowest sample count
-    float sampleSqrt = sqrt(float(choosenSampleCount));
-    sampleSqrt = floor(sampleSqrt); // Underestimate samples (e.g. 8 -> 4). Other samples should be distributed randomly
-    uint sampleCount = uint(sampleSqrt);
-    sampleCount *= sampleCount;
+    else // Optimized Version. Distributed samples are forced uints
+    {
+        // For this version we always traverse the whole mip chain, as every sample is at least 1
+        uint2 mipIdx = uint2(0); // Top left
+        uint2 selectedMipIdx = mipIdx;
+        uint weightIdx = idx1D; //Uint weight for traversal
+        uint choosenSampleCount = 1;
+        uint prevMipRes = 1; // Mip res for previous iteration
+        for (int m = gMipCount - 2; m >= 0; m--) {
+            float4 mipSamples;
+            mipSamples[0] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x, mipIdx.y, m));
+            mipSamples[1] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+            mipSamples[2] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+            mipSamples[3] = gSampleDistribution[smIdx].Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+            uint currSamples = 0;
+            uint selectedSubpixel = 0;
+            uint numSamples = 0;
+            for (uint x = 0; x < 4; x++) {
+                numSamples = uint(round(mipSamples[x]));
+                currSamples += numSamples;
+                selectedSubpixel = x;
+                if (weightIdx < currSamples)
+                    break;
+            }
+            // Update weight idx
+            uint prevSampleIdx = currSamples - numSamples;
+            weightIdx -= prevSampleIdx;
+            choosenSampleCount = numSamples;
 
-    // Get an index from the choosenSampleCount. Theoretically this amount of samples should be produced
-    uint index = uint(idx1D % uint(choosenSampleCount));
-    bool randOffset = (index / sampleCount) >= 1; // TODO add
-    if (randOffset) return;
-    sampleCount = min(sampleCount, kMaxSamplesPerPixel.x * kMaxSamplesPerPixel.y); // cap to sample count
-    index = index % sampleCount;
+            // Update idx for next it
+            if (selectedSubpixel == 1 || selectedSubpixel == 3)
+                mipIdx.x += 1;
+            if (selectedSubpixel > 1) // 2 or 3
+                mipIdx.y += 1;
 
-    pixelOffset = gJitterSamples[index]; // pixel offset in [0,1]
+            selectedMipIdx = mipIdx;
+            mipIdx *= 2; // Update for new resolution
+            prevMipRes *= 2;
+        }
+        // Get pixel on default resolution
+        float2 relPixel = float2(selectedMipIdx) / prevMipRes;
+        pixel = uint2((relPixel * smRes) + 0.5);
+
+        sampleCount = choosenSampleCount;
+        index = idx1D % choosenSampleCount;
+
+    }
+
+    uint jitterIdx = idx1D % (kMaxSamplesPerPixel.x * kMaxSamplesPerPixel.y); //TODO separate jitter from sample count
+    pixelOffset = gJitterSamples[jitterIdx]; // pixel offset in [0,1]
     uint samplesSq = uint(sqrt(sampleCount));   // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
     const float subpixelSize = 1.0 / samplesSq;
     float2 subpixelLoc = float2(index % samplesSq, index / samplesSq);
@@ -266,7 +322,6 @@ void main(uint3 thdID: SV_DispatchThreadID)
     pixelCenterOffest *= mipMulFactor;
 
     float2 pixelSample = pixel + pixelCenterOffest + pixelOffset;
-    gTestTexture[smIdx][thdID.xy] = float4(selectedMipIdx.x, selectedMipIdx.y, weight, 1);
 
     //Store in buffer
     uint insertIdx = 0;

@@ -493,10 +493,12 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             defines.add(
                 "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
             );
+            defines.add("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
 
             mpDistributeSamples = ComputePass::create(mpDevice, desc, defines, true);
         }
 
+        mpDistributeSamples->getProgram()->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
         auto var = mpDistributeSamples->getRootVar();
 
         // Upload jittered sampled

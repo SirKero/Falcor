@@ -64,7 +64,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         totalSampleWeight = 0;
         for (uint i = 0; i < 4 && totalWeightOverOne > 0; i++) {
             if (values[i] > 1.0) {
-                float portion = 1.0 + min(((values[i] - 1.0) / totalWeightOverOne) * remainingWeight , 0.0);
+                float portion = 1.0 + max(((values[i] - 1.0) / totalWeightOverOne) * remainingWeight , 0.0);
                 if (gMipLevel == 0) {
                     portion = floor(sqrt(portion));
                     portion *= portion;
@@ -73,13 +73,13 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 values[i] = portion;
             }
             totalSampleWeight += values[i];
-        }
+        }            
     } else if (gMipLevel == 0) {
         [unroll]
         for (uint i = 0; i < 4; i++) {
             // Add to total weight when less then one TODO Distribution bug
-            //if (totalSampleWeight < numValidSamples && values[i] > 0)
-            //    values[i] = 1.0;
+            if (totalSampleWeight < numValidSamples && values[i] > 0)
+                values[i] = 1.0;
             if (values[i] > 1) {
                 values[i] = floor(sqrt(values[i]));
                 values[i] *= values[i];
