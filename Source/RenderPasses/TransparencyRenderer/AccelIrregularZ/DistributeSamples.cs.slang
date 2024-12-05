@@ -42,6 +42,7 @@ static const float2 kMSAAPattern8[8] = { float2(0.0625, -0.1875),  float2(-0.062
                                       
 static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
 static const uint2 kMaxSamplesPerPixel = uint2(MAX_SAMPLES_PER_PIXEL_X, MAX_SAMPLES_PER_PIXEL_Y);
+static const float kFP16PrecisionGuard = 1e-4; //To avoid errors due to fp16 precision
 
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
@@ -270,7 +271,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
     //Store in buffer
     uint insertIdx = 0;
     InterlockedAdd(gPixelSampleCounter[smIdx], 1u, insertIdx);
-    uint offsetXY = f32tof16(boxPixelOffset.x) | (f32tof16(boxPixelOffset.y) << 16);
-    uint offsetZW = f32tof16(boxPixelOffset.z) | (f32tof16(boxPixelOffset.w) << 16);
+    uint offsetXY = f32tof16(boxPixelOffset.x - kFP16PrecisionGuard) | (f32tof16(boxPixelOffset.y + kFP16PrecisionGuard) << 16);
+    uint offsetZW = f32tof16(boxPixelOffset.z - kFP16PrecisionGuard) | (f32tof16(boxPixelOffset.w + kFP16PrecisionGuard) << 16);
     gPixelSample[smIdx][insertIdx] = uint4(asuint(pixelSample.x),asuint(pixelSample.y), offsetXY, offsetZW);
 }
