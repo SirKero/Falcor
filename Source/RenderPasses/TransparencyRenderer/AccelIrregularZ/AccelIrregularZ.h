@@ -28,6 +28,7 @@
 #pragma once
 #include "../TransparencyShadowMethod.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
+#include "Rendering/ShadowMaps/Blur/SMGaussianBlur.h"
 
 class AccelIrregularZ : public TransparencyShadowMethod
 {
@@ -90,7 +91,8 @@ private:
     uint mMaxSamplesPerPixelSqr = 4; //Sample box size (e.g 3 = 3x3 box)
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mUseSeperateSampleDistributionPass = true; //Use the seperate sample distribution pass
-    bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights 
+    bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
+    bool mBlurSampleDistribution = false; //Blurs the lowest level of the sample distribution
 
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;
@@ -127,7 +129,8 @@ private:
         bool stopGeneration = false;
     } mAccelDebugShowAS;
 
-    ref<Sampler> mpPointSampler; 
+    ref<Sampler> mpPointSampler;
+    std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
 
     std::vector<ref<Buffer>> mAccelShadowAABB;                                 // For Accel AABB points
     std::vector<ref<Buffer>> mAccelShadowCounter;                              // Counter for inserting points
