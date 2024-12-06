@@ -576,10 +576,11 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             break;
         FALCOR_PROFILE(pRenderContext, lights[i]->getName());
         // Bind Utility
-        
+        bool isDirectional = lights[i]->getType() == LightType::Directional;
+
         var["CB"]["gFrameCount"] = mFrameCount;
-        var["CB"]["gLightPos"] = mShadowMapMVP[i].pos;
-        var["CB"]["gNear"] = mNearFar.x;
+        var["CB"]["gLightPos"] = isDirectional ? lights[i]->getData().dirW : mShadowMapMVP[i].pos;
+        var["CB"]["gIsDirectional"] = isDirectional;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
         var["CB"]["gMipCount"] = mSampleDistribution[i]->getMipCount();
@@ -804,6 +805,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                 if (group2.dropdown("Mode", kAccelDebugVisModes, mAccelDebugShowAS.visMode))
                     mAccelDebugShowAS.stopGeneration = mAccelDebugShowAS.visMode == 1 ? true : mAccelDebugShowAS.stopGeneration;
                 group2.checkbox("Stop Generation", mAccelDebugShowAS.stopGeneration);
+                mUpdateDirectional = !mAccelDebugShowAS.stopGeneration;
             }
         }
     }
@@ -875,6 +877,18 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
     if (mAccelShadowUseCPUCounterOptimization)
         frameInFlight = mStagingCount == 0 ? kFramesInFlight - 1 : mStagingCount - 1;
 
+    //Get index of directional light if the scene contains it
+    uint directionalIndex = UINT_MAX;
+    auto& lights = mpScene->getLights();
+    for (uint i = 0; i <lights.size(); i++)
+    {
+        if (lights[i]->getType() == LightType::Directional)
+        {
+            directionalIndex = i;
+            break;
+        }
+    }
+
     auto var = mRasterShowAccelPass.pVars->getRootVar();
 
     var["gScene"] = mpScene->getParameterBlock();
@@ -887,12 +901,14 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
     var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
     var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
     var["CB"]["gMaxSampleCount"] = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
+    var["CB"]["gDirectionalIdx"] = directionalIndex;
 
     //Set the viewProj matrices
     for (uint i = 0; i < mpScene->getLightCount(); i++)
     {
         var["LightMatrices"]["gInvView"][i] = mShadowMapMVP[i].invView;
         var["LightMatrices"]["gInvProj"][i] = mShadowMapMVP[i].invProjection;
+        var["InvViewProjections"]["gInvViewProj"][i] = mShadowMapMVP[i].invViewProjection;
     }
 
     var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];

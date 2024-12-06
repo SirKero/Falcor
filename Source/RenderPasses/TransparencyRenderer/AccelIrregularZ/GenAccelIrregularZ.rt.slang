@@ -51,7 +51,7 @@ cbuffer CB
 {
     uint gFrameCount; // Current frame count
     float3 gLightPos; // Current Light Position
-    float gNear;
+    bool gIsDirectional; //Is light a directional light (posW invalid)
     float gFar;
     uint gLightIdx;     //LightIndex
     uint gMipCount;     // Number of mips
@@ -167,7 +167,7 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
 
     rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - sd.opacity);
     float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
-    rayData.depth = posH.w; // Linear depth
+    rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
     rayData.dist = RayTCurrent();
 }
 
@@ -383,7 +383,14 @@ void rayGen()
     float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.f, 1.f));
 
     posWPixelNear.xyz /= posWPixelNear.w;
-    float3 toNear = posWPixelNear.xyz - gLightPos;
+    posWPixelFar.xyz /= posWPixelFar.w;
+    float3 toNear;
+    if (gIsDirectional) {
+        toNear = posWPixelFar.xyz - posWPixelNear.xyz;
+    } else {
+        toNear = posWPixelNear.xyz - gLightPos;
+    }
+   
 
     // Add offset to the pixel position if one aabb is used
     // Currently this is solved simple by just adding an offset of the SM size * LightIndex in x direction
@@ -392,17 +399,26 @@ void rayGen()
     }
 
     RayDesc ray;
-    ray.TMin = length(toNear);                                          // Always start at depth 0
-    ray.TMax = distance(gLightPos, posWPixelFar.xyz / posWPixelFar.w);  // Real far for the pixel
-    ray.Origin = gLightPos;
-    ray.Direction = normalize(toNear); // World direction
+    if (gIsDirectional) {
+        ray.TMin = 0;
+        ray.TMax = length(toNear);
+        ray.Origin = posWPixelNear.xyz;
+        ray.Direction = gLightPos; // World direction (stored in pos)
+    } else {
+        ray.TMin = length(toNear); // Always start at depth 0
+        ray.TMax = distance(gLightPos, posWPixelFar.xyz); // Real far for the pixel
+        ray.Origin = gLightPos;
+        ray.Direction = normalize(toNear); // World direction
+    }
+    
 
     RayData rayData = RayData();
     bool useRayTracing = true;
     float2 boxZ = float2(0.0); //Last two middle depths
     float lastHitDepth = 0.0;
     float2 lastTransmittances = float2(1.0); // Store the last two transmittances
-    bool mergeLastBox = false; //Merge the box from the prevoius frame
+    bool mergeLastBox = false;               // Merge the box from the prevoius frame
+    const float far = ray.TMax;
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
@@ -463,7 +479,7 @@ void rayGen()
 
 // Insert last two elements
     if (rayData.dist < 0)
-        rayData.depth = gFar;
+        rayData.depth = far;
 
     // Update box
     boxZ.y = boxZ.x;
@@ -488,7 +504,7 @@ void rayGen()
     // Store last box
     if (lastTransmittances.x < 1.0 && rayData.dist >= 0) {
         float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.x);
-        float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, gFar);
+        float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, far);
         AABB aabb = AABB(minPoint, maxPoint);
         #if ACCEL_USE_FRUSTUM_CULLING
             if (aabbIsVisible(aabb, smRes))

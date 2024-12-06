@@ -119,22 +119,24 @@ struct AccelIrregularZShader
     }
 
     /** Caculates the shadow value by evaluating the shadow acceleration structure
-    * \param[in] index of the current light
-    * \param[in] world position of the current hit
-    * \param[in] world postion of the currently choosen light
-    * \param[in] unshadowed luminance estimate of the point. Is used to weight the access texture. Should be in (0, 1]
-    * \return visibility in [0,1]
-    */
-    float eval(uint lightIdx, float3 posW, float3 lightPosW, float luminance = 1.0) {
+     * \param[in] index of the current light
+     * \param[in] world position of the current hit
+     * \param[in] is the light directional (ortho projection)
+     * \param[in] unshadowed luminance estimate of the point. Is used to weight the access texture. Should be in (0, 1]
+     * \return visibility in [0,1]
+     */
+    float eval(uint lightIdx, float3 posW, bool isDirectional = false, float luminance = 1.0) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
-        shadowPos.xyz /= shadowPos.w;
 
+        if (!isDirectional) {
+            shadowPos.xyz /= shadowPos.w;
+            shadowPos.z = (shadowPos.w - gNear) / (gFar - gNear); // Linear distance
+        }
         shadowPos.y *= -1;                                    // Flip
         shadowPos.xy = shadowPos.xy * 0.5 + 0.5;              // UV from [-1,1] to [0,1]
-        shadowPos.z = (shadowPos.w - gNear) / (gFar - gNear); // Linear distance
-
+        
         // Check if inside
-        if (any(shadowPos.xyz < 0.0) || any(shadowPos.xyz > 1.0))
+        if (any(shadowPos.xy < 0.0) || any(shadowPos.xy > 1.0))
             return 0.0;
 
     #if SHADOW_ACCEL_PCF
@@ -143,8 +145,8 @@ struct AccelIrregularZShader
         const float2 shadowPixel = gatherUV.xy * gSMSize;
     #else
         const float2 shadowPixel = shadowPos.xy * gSMSize;//floor(shadowPos.xy * gSMSize) + 0.5;
-    #endif
-        float dist = shadowPos.w;
+#endif
+        float dist = isDirectional ? shadowPos.z : shadowPos.w;
 
         // Add access
         const uint2 uShadowPixel = uint2(shadowPixel);

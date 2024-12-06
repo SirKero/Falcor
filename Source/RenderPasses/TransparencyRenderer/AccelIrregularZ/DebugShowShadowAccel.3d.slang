@@ -25,8 +25,9 @@ cbuffer CB
     float3      gCullMax;       //XYZ culling max
     float       gBlendT;
     uint        gVisMode;       // Vizualization mode
-    uint        gMaxSampleCount;//Max number of samples per pixel   
-    uint2       _pad;
+    uint        gMaxSampleCount;//Max number of samples per pixel
+    uint        gDirectionalIdx; //Light with this index is directional
+    uint       _pad;
    
 }
 
@@ -34,6 +35,9 @@ cbuffer LightMatrices
 {
     float4x4 gInvView[COUNT_LIGHTS]; // Inverse View
     float4x4 gInvProj[COUNT_LIGHTS]; // Inverse Projection
+}
+cbuffer InvViewProjections {
+    float4x4 gInvViewProj[COUNT_LIGHTS];
 }
 
 #define VIS_MODE_VISIBILITY 0   //Visibility Heatmap
@@ -260,15 +264,22 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
     }
 
     // Transform all vertices into world space
+    bool isDirectional = matrixIdx == gDirectionalIdx;
     GsOut vert[8];
     [unroll]
     for (uint i = 0; i < 8; i++) {
         float2 ndc = (2.0 * points[i].xy / gSMSize) - 1.0;
         ndc.y *= -1.0;
-        float4 rayDir = mul(gInvProj[matrixIdx], float4(ndc, 1.0, 1.0));
-        rayDir.xyz /= rayDir.z; //Normalize z
-        float3 posView = rayDir.xyz * (-points[i].z); // view is negative Z
-        float4 worldPos = mul(gInvView[matrixIdx], float4(posView, 1.0));
+        float4 worldPos;
+        if (isDirectional) {
+            worldPos = mul(gInvViewProj[matrixIdx], float4(ndc, points[i].z, 1.0));
+        } else {
+            float4 rayDir = mul(gInvProj[matrixIdx], float4(ndc, 1.0, 1.0));
+            rayDir.xyz /= rayDir.z;                       // Normalize z
+            float3 posView = rayDir.xyz * (-points[i].z); // view is negative Z
+            worldPos = mul(gInvView[matrixIdx], float4(posView, 1.0));
+        }
+        
         vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
         vert[i].transparency = shadowData.transparency;
         if (gVisMode == VIS_MODE_AABBINDEX)

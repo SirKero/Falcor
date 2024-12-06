@@ -79,7 +79,7 @@ struct RISReservoir {
 
 /** Samples a light index either uniform or with RIS (Good if a couple lights are used that dont overlap each other)
  */
-AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleGenerator sg, out uint lightIndex, out float invPdf) {
+AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleGenerator sg, out uint lightIndex, out float invPdf, out uint type) {
     AnalyticLightSample ls = {};
     #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_UNIFORM
         float lightSelect = 0.0;
@@ -91,10 +91,10 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
 
         // Sample local light source.
         LightData lightData = gScene.getLight(lightIndex);
+        type = lightData.type;
         sampleLight(posW, lightData, sg, ls);
     #else //LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_RIS
         RISReservoir r = RISReservoir();
-        LightData selectedLightData = {};
         // Loop through all lights
         for (uint i = 0; i < lightCount; i++) {
             float randomNum = i == 0 ? 0.5 : sampleNext1D(sg); // Random number
@@ -104,7 +104,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
             float w = luminance(itLs.Li); // Take the Light attenuation as weight
             if (r.update(i, w, randomNum)) {
                 ls = itLs;
-                selectedLightData = lightData;
+                type = lightData.type;
             }
         }
         r.finalize(luminance(ls.Li)); // targetFunction
@@ -175,9 +175,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     // Pick one of the analytic light sources randomly with equal probability.
     uint lightIndex = 0;
     float invPdf = 1.0;
+    uint lightType = 0;
 
     // Sample local light source.
-    AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf);
+    AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf, lightType);
     float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
 
     // Reject sample if invalid or has an too steep incident angle
@@ -197,6 +198,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         return float3(0);
 
     // Test visibility by tracing a shadow ray.
+    bool isDirectional = lightType == (uint)LightType::Directional; //Slight different calculations for ortho
     float shadow = 1.0;
 #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING
     // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
@@ -209,7 +211,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
     shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
 #else // SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
-    shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, ls.posW, saturate(Li_lum));
+    shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(Li_lum));
 #endif
 
 #if EVAL_OPAQUE_SHADOW_MAP

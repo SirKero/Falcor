@@ -81,7 +81,7 @@ protected:
         float4x4 invProjection = float4x4();
         float4x4 invView = float4x4();
 
-        void calculate(ref<Light> light, float2 nearFar);
+        void calculate(ref<Light> pLight, ref<Scene> pScene, float2 nearFar);
     };
 
     ref<Device> mpDevice;
@@ -90,7 +90,8 @@ protected:
 
     uint2 mResolution = uint2(512);
     bool mUpdateSMMatrices = false;         //True if VP Matrices of the shadow maps should be recalculated
-    float2 mNearFar = float2(1.f, 60.f);
+    bool mUpdateDirectional = true;         //To disable update of directional lights (for debug purposes)
+    float2 mNearFar = float2(1.f, 60.f);    //Near and far for spot
     bool mResolutionChanged = false;         //True if the resolution changed
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
