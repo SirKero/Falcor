@@ -35,6 +35,17 @@ namespace
     };
 }
 
+TransparencyShadowMethod::TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene) {
+    uint count = 0;
+    for (auto& lights : mpScene->getLights())
+        if (lights->getType() == LightType::Directional)
+        {
+            mHasDirectionalLight = true;
+            count++;
+        }
+    FALCOR_ASSERT(count <= 1); //More than 1 directional light? 
+}
+
 DefineList TransparencyShadowMethod::getDefines()
 {
     DefineList defines;
@@ -50,6 +61,11 @@ bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
         mResolution.y = mResolution.x;
 
     mUpdateSMMatrices |= widget.var("Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
+    if (mHasDirectionalLight)
+    {
+        widget.var("Directional Light Max Camera Dist", mDirectionalMaxCameraDist, 0.001f, FLT_MAX);
+        widget.tooltip("The maximum camera distance that is used to create the perspective shadow map");
+    }
 
     return mResolutionChanged || mUpdateSMMatrices;
 }
@@ -75,23 +91,22 @@ void TransparencyShadowMethod::updateSMMatrices(RenderContext* pRenderContext, b
         rebuild |= rebuildAll;
         if (rebuild)
         {
-            mShadowMapMVP[i].calculate(lights[i], mpScene, mNearFar);
+            updateMVP(mShadowMapMVP[i], lights[i]);
         }
     }
     mUpdateSMMatrices = false;
 }
 
-void TransparencyShadowMethod::LightMVP::calculate(ref<Light> pLight, ref<Scene> pScene,  float2 nearFar)
-{
+void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) {
     auto& lightData = pLight->getData();
-    switch (lightData.type)
+    switch (pLight->getType())
     {
-    //Directional light. Create a prespective shadow map
-    case (uint)LightType::Directional:
+    // Directional light. Create a prespective shadow map
+    case LightType::Directional:
     {
-        auto& cameraData = pScene->getCamera()->getData();
+        auto& cameraData = mpScene->getCamera()->getData();
         float camNear = cameraData.nearZ;
-        float camFar = math::min(cameraData.farZ, 20.f); //TODO better limiter
+        float camFar = math::min(cameraData.farZ, mDirectionalMaxCameraDist); // TODO better limiter
         float camFovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
 
         // Get the 8 corners of the frustum Part
@@ -115,11 +130,11 @@ void TransparencyShadowMethod::LightMVP::calculate(ref<Light> pLight, ref<Scene>
         for (const auto& p : frustumCorners)
             center += p.xyz();
         center /= 8.f;
-        view = math::matrixFromLookAt(center, center + lightData.dirW, upVec); //Set view
+        lightMVP.view = math::matrixFromLookAt(center, center + lightData.dirW, upVec); // Set view
 
         // Create a view space AABB to clamp cascaded values
-        const AABB& sceneBounds = pScene->getSceneBounds();
-        AABB smViewAABB = sceneBounds.transform(view);
+        const AABB& sceneBounds = mpScene->getSceneBounds();
+        AABB smViewAABB = sceneBounds.transform(lightMVP.view);
 
         // Get Box for Orto
         float minX = std::numeric_limits<float>::max();
@@ -130,7 +145,7 @@ void TransparencyShadowMethod::LightMVP::calculate(ref<Light> pLight, ref<Scene>
         float maxZ = std::numeric_limits<float>::lowest();
         for (const float4& p : frustumCorners)
         {
-            float3 vp = math::mul(view, p).xyz();
+            float3 vp = math::mul(lightMVP.view, p).xyz();
             minX = std::min(minX, vp.x);
             maxX = std::max(maxX, vp.x);
             minY = std::min(minY, vp.y);
@@ -142,28 +157,31 @@ void TransparencyShadowMethod::LightMVP::calculate(ref<Light> pLight, ref<Scene>
         maxZ = std::max(maxZ, smViewAABB.maxPoint.z);
         minZ = std::min(minZ, smViewAABB.minPoint.z);
 
-        projection = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); //set projection
+        lightMVP.projection = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
         break;
     }
-    case (uint)LightType::Point:
+    case LightType::Point:
     {
-        pos = lightData.posW;
+        lightMVP.pos = lightData.posW;
         float openingAngle = math::min(lightData.openingAngle, float(M_PI / 4.f)); // TODO support point lights
-        float3 lightTarget = pos + lightData.dirW;
+        float3 lightTarget = lightMVP.pos + lightData.dirW;
         const float3 up = abs(lightData.dirW.y) == 1 ? float3(0, 0, 1) : float3(0, 1, 0);
-        view = math::matrixFromLookAt(lightData.posW, lightTarget, up);
-        projection = math::perspective(openingAngle * 2, 1.f, nearFar.x, nearFar.y);
-        
+        lightMVP.view = math::matrixFromLookAt(lightData.posW, lightTarget, up);
+        lightMVP.projection = math::perspective(openingAngle * 2, 1.f, mNearFar.x, mNearFar.y);
+
         break;
     }
     default:
-        throw RuntimeError("Scene contains unsupported Light Type (Distant, Rect, Disc, Sphere)\n Only Spot(+Point) and Directional are currently supported");
+        throw RuntimeError(
+            "Scene contains unsupported Light Type (Distant, Rect, Disc, Sphere)\n Only Spot(+Point) and Directional are currently "
+            "supported"
+        );
         break;
     }
 
-    //Same for all valid lights
-    viewProjection = math::mul(projection, view);
-    invViewProjection = math::inverse(viewProjection);
-    invProjection = math::inverse(projection);
-    invView = math::inverse(view);
+    // Same for all valid lights
+    lightMVP.viewProjection = math::mul(lightMVP.projection, lightMVP.view);
+    lightMVP.invViewProjection = math::inverse(lightMVP.viewProjection);
+    lightMVP.invProjection = math::inverse(lightMVP.projection);
+    lightMVP.invView = math::inverse(lightMVP.view);
 }

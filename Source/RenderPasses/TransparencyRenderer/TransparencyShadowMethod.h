@@ -64,7 +64,7 @@ public:
     void enableOpaqueShadowMap(bool enable = true) { mOpaqueShadowMapEnabled = enable; }
 
 protected:
-    TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene) {}
+    TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
     //Function to update the Shadow Map Matrices
     virtual void updateSMMatrices(RenderContext* pRenderContext, bool rebuild = false);
@@ -80,17 +80,18 @@ protected:
         float4x4 invViewProjection = float4x4();
         float4x4 invProjection = float4x4();
         float4x4 invView = float4x4();
-
-        void calculate(ref<Light> pLight, ref<Scene> pScene, float2 nearFar);
     };
+    virtual void updateMVP(LightMVP& lightMVP, ref<Light> pLight);
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
     bool mOpaqueShadowMapEnabled = false;
+    bool mHasDirectionalLight = false;      
 
     uint2 mResolution = uint2(512);
     bool mUpdateSMMatrices = false;         //True if VP Matrices of the shadow maps should be recalculated
     bool mUpdateDirectional = true;         //To disable update of directional lights (for debug purposes)
+    float mDirectionalMaxCameraDist = 20.f; //Max camera dist taken for directional lights
     float2 mNearFar = float2(1.f, 60.f);    //Near and far for spot
     bool mResolutionChanged = false;         //True if the resolution changed
 
