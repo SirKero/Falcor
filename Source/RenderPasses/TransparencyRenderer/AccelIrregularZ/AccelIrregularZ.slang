@@ -65,6 +65,7 @@ struct AccelIrregularZShader
     cbuffer ShadowVPs
     {
         float4x4 gShadowMapVP[COUNT_LIGHTS];
+        float4x4 gStaggeredDirVP; //Only valid if there is a directional light
     }
 
     RaytracingAccelerationStructure gShadowAS;
@@ -145,11 +146,21 @@ struct AccelIrregularZShader
         const float2 shadowPixel = gatherUV.xy * gSMSize;
     #else
         const float2 shadowPixel = shadowPos.xy * gSMSize;//floor(shadowPos.xy * gSMSize) + 0.5;
-#endif
+    #endif
         float dist = isDirectional ? shadowPos.z : shadowPos.w;
 
         // Add access
-        const uint2 uShadowPixel = uint2(shadowPixel);
+        uint2 uShadowPixel;
+        if(isDirectional){
+            // For directional use the staggered MVP for access
+            float2 dirShadowPixel = mul(gStaggeredDirVP, float4(posW, 1)).xy;
+            dirShadowPixel.y *= -1;                            // Flip
+            dirShadowPixel.xy = clamp(dirShadowPixel.xy * 0.5 + 0.5 , 0.f, 1.f); // UV from [-1,1] to [0,1]
+            uShadowPixel = uint2(dirShadowPixel * gSMSize);
+        }
+        else
+            uShadowPixel = uint2(shadowPixel);
+
         uint backprojectionWeight = clamp(uint(luminance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
 

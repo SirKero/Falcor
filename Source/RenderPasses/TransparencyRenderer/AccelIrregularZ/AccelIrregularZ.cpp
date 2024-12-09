@@ -82,7 +82,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
 
     updateSMMatrices(pRenderContext);
-    
+
     // Create AVSM trace program
     if (!mGenAccelShadowPip.pProgram)
     {
@@ -304,6 +304,26 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     // Abort early if disabled
     if (mAccelDebugShowAS.enable && mAccelDebugShowAS.stopGeneration)
         return;
+
+    // Handle light MVP for directional lights
+    if (mHasDirectionalLight)
+    {
+        if (mDirectionalLightIndex < 0 || mDirectionalLightIndex < (int(mpScene->getLightCount())-1))
+        {
+            for (uint i = 0; i < mpScene->getLightCount(); i++)
+            {
+                if (mpScene->getLight(i)->getType() == LightType::Directional)
+                {
+                    mDirectionalLightIndex = i;
+                    break;
+                }
+            }
+        }        
+
+        LightMVP tmp = mShadowMapMVP[mDirectionalLightIndex];
+        mShadowMapMVP[mDirectionalLightIndex] = mStaggeredDirectionalLightMVP;
+        mStaggeredDirectionalLightMVP = tmp;
+    }
 
     //Check if opaque shadow map is set and change ray flags accordingly
     mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
@@ -677,6 +697,7 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     for (uint i = 0; i < lights.size(); i++)
     {
         shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
+        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
         shadowVar["gAccessCounter"][i] = mAccessTextures[i];
     }
     const auto accelDataSize = mUseOneAABBForAllLights ? 1 : lights.size();

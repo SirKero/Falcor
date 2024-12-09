@@ -117,6 +117,9 @@ private:
     RayFlags mAccelRayFlags = RayFlags::None;
     float mMergeBoxDist = 5e-2f; //Distance the accel boxes are merged
 
+    LightMVP mStaggeredDirectionalLightMVP = {};
+    int mDirectionalLightIndex = -1; //Used to set LightMVP
+
     struct
     {
         bool enable = false;
