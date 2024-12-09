@@ -193,6 +193,9 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     mOpaqueShadowMapModeChanged |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);
     widget.tooltip("Enables a extra opaque shadow map pass. Shadow Method should only evaluate non-opaque geometry in that case");
 
+    widget.checkbox("Enable Fallback Shadows", mEnableFallbackRayTracedShadows);
+    widget.tooltip("Some techniques allow for ray traced shadows as a fallback. They can be toggled on/off manually here");
+
     if (mEnableOpaqueShadowMaps && mpShadowMap)
     {
         if (auto group = widget.group("Opaque Shadow Map Settings"))
@@ -238,6 +241,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("EVAL_OPAQUE_SHADOW_MAP", mEnableOpaqueShadowMaps ? "1" : "0");
     RayFlags evalQueryRayFlags = mEnableOpaqueShadowMaps ? RayFlags::CullOpaque : RayFlags::ForceNonOpaque;
     defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
+    defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
 
     return defines;
 }

@@ -135,11 +135,16 @@ struct AccelIrregularZShader
         }
         shadowPos.y *= -1;                                    // Flip
         shadowPos.xy = shadowPos.xy * 0.5 + 0.5;              // UV from [-1,1] to [0,1]
-        
-        // Check if inside
-        if (any(shadowPos.xy < 0.0) || any(shadowPos.xy > 1.0))
-            return 0.0;
 
+        bool validShadow = true;
+        // Check if inside the SM
+        if (any(shadowPos.xy < 0.0) || any(shadowPos.xy > 1.0)) {
+            if (!isDirectional) {
+                return 0.f;
+            }
+            validShadow = false;
+        }
+            
     #if SHADOW_ACCEL_PCF
         float2 gatherUV;
         float4 w = getGatherWeights(shadowPos.xy, gSMSize.x, gatherUV);
@@ -151,18 +156,26 @@ struct AccelIrregularZShader
 
         // Add access
         uint2 uShadowPixel;
+        bool validBackprojection = true;
         if(isDirectional){
             // For directional use the staggered MVP for access
             float2 dirShadowPixel = mul(gStaggeredDirVP, float4(posW, 1)).xy;
             dirShadowPixel.y *= -1;                            // Flip
-            dirShadowPixel.xy = clamp(dirShadowPixel.xy * 0.5 + 0.5 , 0.f, 1.f); // UV from [-1,1] to [0,1]
+            dirShadowPixel.xy = dirShadowPixel.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+            if (any(dirShadowPixel.xy < 0.0) || any(dirShadowPixel.xy > 1.0))
+                validBackprojection = false;
             uShadowPixel = uint2(dirShadowPixel * gSMSize);
         }
         else
             uShadowPixel = uint2(shadowPixel);
 
         uint backprojectionWeight = clamp(uint(luminance * kMaxAtomicWeight),1, kMaxAtomicWeight);
-        InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
+        if(validBackprojection)
+            InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
+
+        //Raytraced shadows as fallback
+        if (!validShadow)
+            return -1.f;
 
         // If only one AABB is used for all lights, offset the pixel pos
         if (kUseOneAABBForAllLight)

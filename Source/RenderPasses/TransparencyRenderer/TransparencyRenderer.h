@@ -109,6 +109,7 @@ private:
     bool mOptionsChanged = false;
     bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass
     bool mOpaqueShadowMapModeChanged = false;
+    bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
 
     //Passes
     // Pipelines / Programms

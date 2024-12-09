@@ -37,7 +37,8 @@ import AccelIrregularZ.AccelIrregularZ;
 #define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
 #endif
 
-static const float kMinIncidentAngle = 1e-3; //Min Incident angle for light
+static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
+static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; //Enable ray tracing for techniques that return a negative shadow value
 
 // For RIS light sampling
 struct RISReservoir {
@@ -200,11 +201,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     // Test visibility by tracing a shadow ray.
     bool isDirectional = lightType == (uint)LightType::Directional; //Slight different calculations for ortho
     float shadow = 1.0;
-#if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING
-    // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-    const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
-    shadow = traceShadowRay(origin, ls.dir, ls.distance);
-#elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
+
+    //Shadow maps
+#if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
     shadow = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
 #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedList
     shadow = gLinkedListShadow.eval(lightIndex, sd.posW);
@@ -213,6 +212,16 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 #else // SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
     shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(Li_lum));
 #endif
+    //TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
+
+    // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
+    if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (shadow < 0) && kEnableFallbackRay) {
+        const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
+        shadow = traceShadowRay(origin, ls.dir, ls.distance);
+    }
+
+    // Clamp shadow in [0,1]
+    shadow = clamp(shadow, 0.0, 1.0);
 
 #if EVAL_OPAQUE_SHADOW_MAP
     LightData lightData = gScene.getLight(lightIndex);
