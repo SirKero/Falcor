@@ -55,11 +55,10 @@ cbuffer CB
     float gFar;
     uint gLightIdx;     //LightIndex
     uint gMipCount;     // Number of mips
+    uint2 gSMRes;       // ShadowMap resolution
+    uint2 _pad;
     float4x4 gViewProj;
     float4x4 gInvViewProj; // Inverse view projection
-    float4x4 gInvProj;
-    float4x4 gInvView;
-    float4 gFrustumPlanes[4]; //Top, Bottom, Left, Right Planes of frustum
 }
 
 cbuffer JitterSamples {
@@ -181,54 +180,6 @@ void writeData(const uint index, const AccelShadowData shadowData) {
     #endif
 }
 
-//Checks if any part of the AABB is in front of the plane
-//Assumes everything is in World space
-bool isInFrontOfPlane(const float3 planeN, const float planeDist, const AABB aabb) {
-    float3 c = aabb.center();
-    float3 e = aabb.maxPoint - c; // Positive extends
-    // Compute the projection interval radius of b onto L(t) = b.c + t * p.n
-    float r = dot(e, abs(planeN));
-
-    //A intersection would be if the signed distance is between [-r, r], but we only want to check if
-    //any part of the box is in front of the plane, hence we test if the distance is [-inf, -r]
-    return -r <= (dot(planeN, c) - planeDist);
-}
-
-//Checks if the AABB is inside of the cameras frustum
-bool aabbIsVisible(AABB aabb, uint2 smSize){
-    // Convert to World space AABB
-    float3 points[8] = {
-        aabb.minPoint,
-        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.minPoint.z),
-        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
-        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
-        float3(aabb.minPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
-        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
-        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
-        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
-    };
-    AABB aabbWorld = AABB(float3(FLT_MAX), float3(-FLT_MAX));
-    [unroll]
-    for (uint i = 0; i < 8; i++) {
-        float2 ndc = (2.0 * points[i].xy / smSize) - 1.0;
-        ndc.y *= -1.0;
-        float4 rayDir = mul(gInvProj, float4(ndc, 1.0, 1.0));
-        rayDir.xyz /= rayDir.z;                       // Normalize z
-        float3 posView = rayDir.xyz * (-points[i].z); // view is negative Z
-        float4 worldPos = mul(gInvView, float4(posView, 1.0));
-        aabbWorld.minPoint = min(aabbWorld.minPoint, worldPos.xyz);
-        aabbWorld.maxPoint = max(aabbWorld.maxPoint, worldPos.xyz);
-    }
-
-    bool visible = true;
-    [unroll]
-    for (uint i = 0; i < 4; i++) {
-        visible &= isInFrontOfPlane(gFrustumPlanes[i].xyz, gFrustumPlanes[i].w, aabbWorld);
-    }
-
-    return visible;
-}
-
 inline uint getInsertIndex() {
     uint insertIdx = 0;
     const uint lightIdx = kUseOneAABBForAllLights ? 0 : gLightIdx;
@@ -247,11 +198,7 @@ void rayGen()
     float2 pixelOffset = float2(0);
     float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
 
-    uint2 smRes;
-    if(kUseSampleDistribution)
-        smRes = uint2(frameDim.x / kMaxSamplesPerPixel.x, frameDim.y / kMaxSamplesPerPixel.y);
-    else
-        smRes = frameDim;
+    const uint2 smRes = gSMRes;
 
     //Clear access counter
     if (all(pixel < smRes)) {
@@ -452,17 +399,14 @@ void rayGen()
             float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxZ.x);
 
             AABB aabb = AABB(minPoint, maxPoint);
-            #if ACCEL_USE_FRUSTUM_CULLING
-                if (aabbIsVisible(aabb, smRes))
-            #endif
-                {
-                    uint insertIdx = getInsertIndex();
-                    if (insertIdx > MAX_IDX)
-                        return;
+            {
+                uint insertIdx = getInsertIndex();
+                if (insertIdx > MAX_IDX)
+                    return;
 
-                    gAABB[insertIdx] = aabb;
-                    writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
-                }
+                gAABB[insertIdx] = aabb;
+                writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
+            }
         }
         // Update for next iteration
         if (rayData.dist > 0) {
@@ -489,33 +433,27 @@ void rayGen()
         float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.y);
         float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxZ.x);
         AABB aabb = AABB(minPoint, maxPoint);
-        #if ACCEL_USE_FRUSTUM_CULLING
-            if (aabbIsVisible(aabb, smRes))
-        #endif
-            {
-                uint insertIdx = getInsertIndex();
-                if (insertIdx > MAX_IDX)
-                    return;
+        {
+            uint insertIdx = getInsertIndex();
+            if (insertIdx > MAX_IDX)
+                return;
 
-                gAABB[insertIdx] = aabb;
-                writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
-            }
+            gAABB[insertIdx] = aabb;
+            writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
+        }
     }
     // Store last box
     if (lastTransmittances.x < 1.0 && rayData.dist >= 0) {
         float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.x);
         float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, far);
         AABB aabb = AABB(minPoint, maxPoint);
-        #if ACCEL_USE_FRUSTUM_CULLING
-            if (aabbIsVisible(aabb, smRes))
-        #endif
-            {
-                uint insertIdx = getInsertIndex();                
-                if (insertIdx > MAX_IDX)
-                    return;
+        {
+            uint insertIdx = getInsertIndex();                
+            if (insertIdx > MAX_IDX)
+                return;
 
-                gAABB[insertIdx] = aabb;
-                writeData(insertIdx, AccelShadowData(lastTransmittances.x, rayData.depth));
-            }
+            gAABB[insertIdx] = aabb;
+            writeData(insertIdx, AccelShadowData(lastTransmittances.x, rayData.depth));
+        }
     }
 }

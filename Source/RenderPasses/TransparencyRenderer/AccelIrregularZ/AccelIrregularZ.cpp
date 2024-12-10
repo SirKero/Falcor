@@ -220,13 +220,14 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             }
         }
 
-        if (mPixelSample.empty())
+        uint pixelSamplesSize = uint(mResolution.x * mResolution.y * mSampleOverestimate);
+        if (mPixelSample.empty() || mPixelSample[0]->getElementCount() < pixelSamplesSize)
         {
             mPixelSample.resize(numBuffers);
             for (uint i = 0; i < numBuffers; i++)
             {
                 mPixelSample[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint4), mResolution.x * mResolution.y,
+                    mpDevice, sizeof(uint4), pixelSamplesSize,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mPixelSample[i]->setName("PixelSampleBuf" + std::to_string(i));
@@ -543,7 +544,14 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
         //uint3 dispatchDim = uint3(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr, lights.size()); //Old Version(see shader)
         uint3 dispatchDim = uint3(mResolution.x, mResolution.y, lights.size()); //New one
+        if (mOptimizeSampleDistribution)
+        {
+            dispatchDim.x = dispatchDim.x * mSampleOverestimate;
+            dispatchDim.y = dispatchDim.y * mSampleOverestimate;
+        }
+            
         var["CB"]["gSMRes"] = mResolution;
+        var["CB"]["gDispatchDim"] = dispatchDim.xy();
         var["CB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
         var["CB"]["gFrameCount"] = mFrameCount;
 
@@ -604,13 +612,9 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
         var["CB"]["gMipCount"] = mSampleDistribution[i]->getMipCount();
+        var["CB"]["gSMRes"] = mResolution;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
-        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
-        var["CB"]["gInvView"] = mShadowMapMVP[i].invView;
-        std::array<float4, 4> planes = getCameraFrustumPlanes(); // Get Top,Bottom,Left,Right Camera frustum plane
-        for (uint j = 0; j < 4; j++)
-            var["CB"]["gFrustumPlanes"][j] = planes[j];
 
         var["gAABB"] = mUseOneAABBForAllLights ? mAccelShadowAABB[0] : mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
@@ -628,6 +632,10 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             targetDim = mSamplePattern == SMSamplePattern::MSAA
                             ? uint2(mResolution.x * 8, mResolution.y)
                             : uint2(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr);
+        }
+        else if (mOptimizeSampleDistribution)
+        {
+            targetDim = uint2(float2(targetDim) * mSampleOverestimate);
         }
                     
         FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
@@ -772,6 +780,11 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
 
         group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
         group.tooltip("Optimizes the sample distribution texture with an extra compute pass");
+        if (mOptimizeSampleDistribution)
+        {
+            group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
+            group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
+        }
         group.checkbox("Blur Sample distribution", mBlurSampleDistribution);
         if (mBlurSampleDistribution && mpGaussianBlur)
         {
@@ -798,7 +811,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         }
         else
         {
-            if (group.var("Subpixel sampling box size", mMaxSamplesPerPixelSqr, 1u, 32u, 1u))
+            if (group.var("Subpixel sampling box size", mMaxSamplesPerPixelSqr, 1u, 1024u, 1u))
                 mGenAccelShadowPip.pVars.reset();
             group.tooltip("Box size for the subpixel sampling. E.g. 3 -> 3x3 box.");
         }

@@ -88,11 +88,12 @@ private:
 
     //Sample Gen (+Jitter)
     std::vector<uint> mHaltonSampleCount;
-    uint mMaxSamplesPerPixelSqr = 4; //Sample box size (e.g 3 = 3x3 box)
+    uint mMaxSamplesPerPixelSqr = 64; //Sample box size (e.g 3 = 3x3 box)
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mUseSeperateSampleDistributionPass = true; //Use the seperate sample distribution pass
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
-    bool mBlurSampleDistribution = false; //Blurs the lowest level of the sample distribution
+    float mSampleOverestimate = 1.25f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
+    bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
 
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;

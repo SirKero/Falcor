@@ -22,6 +22,7 @@ RWTexture2D<float4> gTestTexture[COUNT_LIGHTS];
 
 cbuffer CB {
     uint2 gSMRes;
+    uint2 gDispatchDim;
     uint gMipCount;
     uint gFrameCount;
 }
@@ -162,15 +163,16 @@ void main(uint3 thdID: SV_DispatchThreadID)
     uint2 pixel = thdID.xy;
     float2 pixelOffset = float2(0);
     float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
-    uint2 smRes = gSMRes;
+    const uint2 smRes = gSMRes;
+    const uint2 dispatchDim = gDispatchDim;
     const uint smIdx = thdID.z;
 
     // Go through the mip chain
     float pixelCenterOffest = 0.5;
 
     float totalSamples = float(gSampleDistribution[smIdx].Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
-    totalSamples = min(totalSamples, smRes.x * smRes.y);
-    uint idx1D = pixel.x + pixel.y * smRes.x; // Create an 1D weight from 2D
+    totalSamples = min(totalSamples, dispatchDim.x * dispatchDim.y);
+    uint idx1D = pixel.x + pixel.y * dispatchDim.x; // Create an 1D weight from 2D
     if (idx1D > totalSamples)
         return;
 
