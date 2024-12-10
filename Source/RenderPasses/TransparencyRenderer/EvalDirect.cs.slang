@@ -12,6 +12,8 @@ Texture2D<float4> gViewW; // Optional
 // Outputs
 RWTexture2D<float4> gOutputColor;
 
+static const bool kAdjustShadingNormals = true;
+
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
     \param[in] rayOrigin Ray origin.
@@ -44,7 +46,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
         let lod = ExplicitLodTextureSampler(0.f);
         // Load shading data.
         ShadingData sd = loadShadingData(hit, viewDir, lod);
-        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        uint hints = 0;
+        if (kAdjustShadingNormals)
+            hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
         colorOut += mi.getProperties(sd).emission * sd.opacity;
 

@@ -21,7 +21,8 @@ RWTexture2D<float4> gOutputColor;
 
 #define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = 1e-7;
-static const uint kMaxElements = 256;   //For now 256 max transparent elements on a ray
+static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
+static const bool kAdjustShadingNormals = true;
 
 /** Payload for alpha ray (20B)
 */
@@ -169,9 +170,11 @@ void rayGen()
         let lod = ExplicitLodTextureSampler(0.f);
         //Get shading data
         ShadingData sd = loadShadingData(hit, pd.direction, lod);
-        //Get material instance
-        uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        // Get material instance
+        uint hints = 0;
+        if (kAdjustShadingNormals)
+            hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         //Emissive lights
         pd.radiance += pd.thp * mi.getProperties(sd).emission * sd.opacity;
 
