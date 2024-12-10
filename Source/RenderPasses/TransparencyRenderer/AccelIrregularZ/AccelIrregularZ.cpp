@@ -579,6 +579,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
     );
     mGenAccelShadowPip.pProgram->addDefine("USE_SAMPLE_DISTRIBUTION_IN_GEN", mUseSeperateSampleDistributionPass ? "0" : "1");
+    mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
 
@@ -627,13 +628,15 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
         // Get dimensions of ray dispatch.
         uint2 targetDim = mResolution;
+        /*
         if (!mUseSeperateSampleDistributionPass)
         {
             targetDim = mSamplePattern == SMSamplePattern::MSAA
                             ? uint2(mResolution.x * 8, mResolution.y)
                             : uint2(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr);
         }
-        else if (mOptimizeSampleDistribution)
+        else*/
+        if (mOptimizeSampleDistribution)
         {
             targetDim = uint2(float2(targetDim) * mSampleOverestimate);
         }
