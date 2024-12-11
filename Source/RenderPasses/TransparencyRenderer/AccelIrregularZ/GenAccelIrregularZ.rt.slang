@@ -188,6 +188,21 @@ inline uint getInsertIndex() {
     return insertIdx;
 }
 
+//Writes the shadow map sample. Returns a bool if the insert was sucessfull
+inline bool writeSample(float2 pixelSample, float4 boxPixelOffset, float boxMinDepth, float boxMaxDepth, float transmittance, float hitDepth) {
+    float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxMinDepth);
+    float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxMaxDepth);
+
+    AABB aabb = AABB(minPoint, maxPoint);
+    uint insertIdx = getInsertIndex();
+    if (insertIdx > MAX_IDX)
+        return false; //Cannot append box
+
+    gAABB[insertIdx] = aabb;
+    writeData(insertIdx, AccelShadowData(transmittance, hitDepth));
+    return true;
+}
+
 //
 // Shader entry point for ray generation shader.
 //
@@ -453,19 +468,9 @@ void rayGen()
         }
 
         // Write output data
-        if (rayData.dist > 0 && i>1 && (!mergeBox)) {
-            float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.y);
-            float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxZ.x);
-
-            AABB aabb = AABB(minPoint, maxPoint);
-            {
-                uint insertIdx = getInsertIndex();
-                if (insertIdx > MAX_IDX)
-                    return;
-
-                gAABB[insertIdx] = aabb;
-                writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
-            }
+        if (rayData.dist > 0 && i > 1 && (!mergeBox)) {
+            if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, lastTransmittances.y, lastHitDepth))
+                 return;
         }
         // Update for next iteration
         if (rayData.dist > 0) {
@@ -489,30 +494,12 @@ void rayGen()
     boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
 
     if (lastTransmittances.y < 1.0) {
-        float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.y);
-        float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxZ.x);
-        AABB aabb = AABB(minPoint, maxPoint);
-        {
-            uint insertIdx = getInsertIndex();
-            if (insertIdx > MAX_IDX)
-                return;
-
-            gAABB[insertIdx] = aabb;
-            writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastHitDepth));
-        }
+        if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, lastTransmittances.y, lastHitDepth))
+            return;
     }
     // Store last box
     if (lastTransmittances.x < 1.0 && rayData.dist >= 0) {
-        float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxZ.x);
-        float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, far);
-        AABB aabb = AABB(minPoint, maxPoint);
-        {
-            uint insertIdx = getInsertIndex();                
-            if (insertIdx > MAX_IDX)
-                return;
-
-            gAABB[insertIdx] = aabb;
-            writeData(insertIdx, AccelShadowData(lastTransmittances.x, rayData.depth));
-        }
+        if (!writeSample(pixelSample, boxPixelOffset, boxZ.x, far, lastTransmittances.x, rayData.depth))
+            return;
     }
 }
