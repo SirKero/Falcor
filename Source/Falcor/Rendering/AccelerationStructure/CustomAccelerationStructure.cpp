@@ -300,7 +300,7 @@ namespace Falcor
         for (size_t i = 0; i < mNumberBlas; i++)
         {
             //Skip
-            if (aabbCount[i] <= mMinUpdateAABBCount)
+            if (updateAABBCount && aabbCount[i] <= mMinUpdateAABBCount)
                 continue;
             auto& blas = mBlasData[i];
 
@@ -354,13 +354,14 @@ namespace Falcor
         pRenderContext->uavBarrier(mTlas.pTlas.get());
     }
 
-    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer) {
+    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer, bool clearToNaN)
+    {
         std::vector<ref<Buffer>> pAABBs = {pAABBBuffer};
         clearAABBBuffers(pRenderContext, pAABBs);
     }
 
     //TODO add a gpu counter or cpu counter input to only clear a selected range 
-    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers) {
+    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN) {
         FALCOR_PROFILE(pRenderContext, "Clear Accel AABB Buffers");
 
         if (pAABBBuffers.empty())
@@ -388,6 +389,7 @@ namespace Falcor
 
             var["CB"]["gMax"] = dispatchSize.x;
             var["CB"]["gOffset"] = 0;
+            var["CB"]["gClearToNaN"] = clearToNaN;
             var["gAABB"] = pAABB;
 
             mpClearAABBsPass->execute(pRenderContext, dispatchSize);

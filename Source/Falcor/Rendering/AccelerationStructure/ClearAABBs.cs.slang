@@ -2,7 +2,9 @@ import Utils.Math.AABB;
 
 cbuffer CB {
     uint gMax; //Max number of elements
-    uint gOffset; //Index offset
+    uint gOffset; // Index offset
+    bool gClearToNaN; // If true minPoint.x is cleared to nan
+    uint _pad;
 }
 
 RWStructuredBuffer<AABB> gAABB;
@@ -16,7 +18,8 @@ void main(uint thdID: SV_DispatchThreadID)
         return;
     AABB aabb = {};
     aabb.invalidate();
-    aabb.minPoint.x = 0.0 / 0.0;
+    if(gClearToNaN)
+        aabb.minPoint.x = 0.0 / 0.0;
 
     gAABB[aabbIdx] = aabb;
 }
