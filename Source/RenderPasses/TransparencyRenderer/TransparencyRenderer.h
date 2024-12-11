@@ -74,6 +74,7 @@ public:
     {
         Uniform = 0,
         RIS = 1,
+        All = 2,
     };
 
     FALCOR_ENUM_INFO(
@@ -81,6 +82,7 @@ public:
         {
             {LightSampleMode::Uniform, "Uniform"},
             {LightSampleMode::RIS, "RIS"},
+            {LightSampleMode::All, "All"},
         }
     );
 
