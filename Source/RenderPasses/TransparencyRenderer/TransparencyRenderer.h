@@ -113,6 +113,9 @@ private:
     bool mOpaqueShadowMapModeChanged = false;
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
 
+    //Buffer/Textures
+    ref<Texture> mpTransparencyThp; //Thp texture for transparency
+
     //Passes
     // Pipelines / Programms
     struct RayTracingPipeline
