@@ -118,7 +118,6 @@ private:
     std::string mSaveName = "path";
     std::vector<Gui::DropdownValue> mFileList;
     uint32_t mLoadIndex = 0;
-    //float mTimeScale = 1.0;
     bool mLoop = false;
     std::string mOutputFilter;
     std::string mOutputPrefixFolder = "videos";

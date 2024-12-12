@@ -214,11 +214,11 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
     widget.tooltip("Leave empty if no folder is desired");
     widget.textbox("Filename Prefix", mOutputPrefix);
 
-    widget.checkbox("Use Framerate Simulation", mUseFPSLimit);
-    if (mUseFPSLimit)
-        widget.var("FPS", mFps, 1, 240);
+    widget.var("FPS", mFps, 1, 240);
+    widget.tooltip("Forced framerate of the video.\n If Framerate Simulation is disabled, this should be set around the current frame rate"
+    );
 
-    //widget.var("Time Scale", mTimeScale, 0.01f, 100.0f, 0.1f);
+    widget.checkbox("Use Framerate Simulation", mUseFPSLimit);
 
     if(widget.button("Smooth Path") && mPathPoints.size() > 1 && mState != State::Record)
     {
