@@ -45,11 +45,12 @@ class VideoRecorder : public RenderPass
     enum class State
     {
         Idle,
-        Record, // record path
+        Record,  // record path
         Preview, // preview path in app
-        Render, // render to video file
-        Warmup // warmup prior to render that should fix temporal artifacts
+        Render,  // render to video file
+        Warmup   // warmup prior to render that should fix temporal artifacts
     };
+
 public:
     FALCOR_PLUGIN_CLASS(VideoRecorder, "VideoRecorder", "Camera Path and Video recorder(using FFMPEG)");
 
@@ -83,7 +84,7 @@ private:
     void saveFrame(RenderContext* pRenderContext);
     void updateCamera();
 
-    void startRecording(); 
+    void startRecording();
     void stopRecording();
     void startPreview();
     void stopPreview();
@@ -103,7 +104,7 @@ private:
     // forces to return to idle state
     void forceIdle();
 
-    std::vector<PathPoint> mPathPoints; // original recording
+    std::vector<PathPoint> mPathPoints;   // original recording
     std::vector<PathPoint> mSmoothPoints; // smoothed version
     Clock* mpGlobalClock = nullptr;
 
@@ -112,7 +113,6 @@ private:
     RenderGraph* mpRenderGraph;
     std::string mActiveOutput = "";
     std::set<std::string> mOutputs;
-    bool mUseFPSLimit = true;
     int mFps = 60;
 
     std::string mSaveName = "path";
@@ -129,4 +129,5 @@ private:
 
     int guardBand = 0;
     ref<Texture> mpBlitTexture;
+    bool mCutGuardBand = true;
 };

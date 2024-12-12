@@ -33,8 +33,9 @@
 #include <cstdio>
 #include <fstream>
 
-namespace{
-    const std::string kVersionControlHeader = "VideoRecorderVersion1_0";
+namespace
+{
+const std::string kVersionControlHeader = "VideoRecorderVersion1_0";
 }
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
@@ -42,8 +43,7 @@ extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registr
     registry.registerClass<RenderPass, VideoRecorder>();
 }
 
-VideoRecorder::VideoRecorder(ref<Device> pDevice, const Properties& props)
-    : RenderPass(pDevice)
+VideoRecorder::VideoRecorder(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     refreshFileList();
 }
@@ -57,26 +57,27 @@ RenderPassReflection VideoRecorder::reflect(const CompileData& compileData)
 {
     // Define the required resources here
     RenderPassReflection reflector;
-    //reflector.addOutput("dst");
-    //reflector.addInput("src");
+    // reflector.addOutput("dst");
+    // reflector.addInput("src");
     return reflector;
 }
 
 void VideoRecorder::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     auto renderDict = renderData.getDictionary();
-            
+
     // set render graph
     auto pRenderGraph = (RenderGraph*)renderDict[kRenderGraph];
-    if(mpRenderGraph != pRenderGraph)
+    if (mpRenderGraph != pRenderGraph)
     {
         // clear old outputs and add the primary output as default target
         mOutputs.clear();
-        if(pRenderGraph && pRenderGraph->getOutputCount() > 0) mOutputs.insert(pRenderGraph->getOutputName(0));
+        if (pRenderGraph && pRenderGraph->getOutputCount() > 0)
+            mOutputs.insert(pRenderGraph->getOutputName(0));
     }
     mpRenderGraph = pRenderGraph;
 
-    //set GlobalClock
+    // set GlobalClock
     mpGlobalClock = static_cast<Clock*>(renderDict[kRenderGlobalClock]);
 
     // set guard band
@@ -84,22 +85,28 @@ void VideoRecorder::execute(RenderContext* pRenderContext, const RenderData& ren
 }
 
 // helper for fuzzy string matching
-int levenshteinDistance(const std::string& s1, const std::string& s2) {
+int levenshteinDistance(const std::string& s1, const std::string& s2)
+{
     const int len1 = s1.length() + 1;
     const int len2 = s2.length() + 1;
 
     std::vector<std::vector<int>> dp(len1, std::vector<int>(len2, 0));
 
-    for (int i = 0; i < len1; ++i) {
-        for (int j = 0; j < len2; ++j) {
-            if (i == 0) {
+    for (int i = 0; i < len1; ++i)
+    {
+        for (int j = 0; j < len2; ++j)
+        {
+            if (i == 0)
+            {
                 dp[i][j] = j;
             }
-            else if (j == 0) {
+            else if (j == 0)
+            {
                 dp[i][j] = i;
             }
-            else {
-                dp[i][j] = std::min({ dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (s1[i - 1] == s2[j - 1] ? 0 : 1) });
+            else
+            {
+                dp[i][j] = std::min({dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (s1[i - 1] == s2[j - 1] ? 0 : 1)});
             }
         }
     }
@@ -107,14 +114,17 @@ int levenshteinDistance(const std::string& s1, const std::string& s2) {
     return dp[len1 - 1][len2 - 1];
 }
 
-int fuzzyRatio(const std::string& s1, const std::string& s2) {
+int fuzzyRatio(const std::string& s1, const std::string& s2)
+{
     const int distance = levenshteinDistance(s1, s2);
     const int maxLength = std::max(s1.length(), s2.length());
 
-    if (maxLength == 0) {
-        return 100;  // Both strings are empty, consider them a perfect match
+    if (maxLength == 0)
+    {
+        return 100; // Both strings are empty, consider them a perfect match
     }
-    else {
+    else
+    {
         return static_cast<int>(100.0f * (1.0f - static_cast<float>(distance) / maxLength));
     }
 }
@@ -129,7 +139,7 @@ std::vector<std::string> fuzzyFilter(const std::vector<std::string>& strings, st
     {
         auto slower = s;
         std::transform(slower.begin(), slower.end(), slower.begin(), [](unsigned char c) { return std::tolower(c); });
-        tmp.push_back({ fuzzyRatio(slower, filter), s });
+        tmp.push_back({fuzzyRatio(slower, filter), s});
     }
 
     // sort result based on first element of pair (fuzzy ratio)
@@ -137,9 +147,10 @@ std::vector<std::string> fuzzyFilter(const std::vector<std::string>& strings, st
 
     // remove fuzzy ratio from result
     std::vector<std::string> result;
-    for(auto& e : tmp)
+    for (auto& e : tmp)
     {
-        if (e.first <= 0) break; // no more matches
+        if (e.first <= 0)
+            break; // no more matches
         result.push_back(move(e.second));
     }
 
@@ -167,30 +178,31 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
             startRecording();
         }
     }
-    
-    if(mState == State::Preview)
+
+    if (mState == State::Preview)
     {
-        if(widget.button("Preview Stop"))
+        if (widget.button("Preview Stop"))
         {
             stopPreview();
         }
-        //widget.slider("", mRenderIndex, size_t(0), mPathPoints.size() - 1, true);
+        // widget.slider("", mRenderIndex, size_t(0), mPathPoints.size() - 1, true);
     }
     else // (mState == State::Idle)
     {
-        if(widget.button("Preview Start") && mPathPoints.size() && mState == State::Idle)
+        if (widget.button("Preview Start") && mPathPoints.size() && mState == State::Idle)
         {
             mLastFramePathPointValid = false;
             startPreview();
         }
     }
 
-    if(widget.checkbox("Loop", mLoop, true))
+    if (widget.checkbox("Loop", mLoop, true))
     {
-        if (mState == State::Idle && mPathPoints.size()) startPreview();
+        if (mState == State::Idle && mPathPoints.size())
+            startPreview();
     }
 
-    if(mState == State::Render || mState == State::Warmup)
+    if (mState == State::Render || mState == State::Warmup)
     {
         if (widget.button("Render Stop"))
         {
@@ -199,47 +211,47 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
     }
     else
     {
-        if(widget.button("Render Start") && mPathPoints.size() && mState == State::Idle && mOutputs.size())
+        if (widget.button("Render Start") && mPathPoints.size() && mState == State::Idle && mOutputs.size())
         {
-            //startRender();
+            // startRender();
             mLastFramePathPointValid = false;
             startWarmup();
         }
         if (mOutputs.empty())
             widget.tooltip("No outputs selected. Nothing will be saved to file!");
-        else
-            widget.tooltip("FFMPEG is needed. Put in \"build/[buildname]/Source/Mogwai\"");
+        widget.checkbox("Cut Guard Band", mCutGuardBand, true);
     }
     widget.textbox("Folder Prefix", mOutputPrefixFolder);
     widget.tooltip("Leave empty if no folder is desired");
     widget.textbox("Filename Prefix", mOutputPrefix);
 
+    float timeScale = (float)mpGlobalClock->getTimeScale();
+    if (widget.var("Time Scale", timeScale, 0.00001f, 1e10f, 0.1f))
+        mpGlobalClock->setTimeScale(timeScale);
     widget.var("FPS", mFps, 1, 240);
-    widget.tooltip("Forced framerate of the video.\n If Framerate Simulation is disabled, this should be set around the current frame rate"
-    );
 
-    widget.checkbox("Use Framerate Simulation", mUseFPSLimit);
-
-    if(widget.button("Smooth Path") && mPathPoints.size() > 1 && mState != State::Record)
+    if (widget.button("Smooth Path") && mPathPoints.size() > 1 && mState != State::Record)
     {
         smoothPath();
     }
-    if(widget.button("Reset", true))
+    if (widget.button("Reset", true))
     {
         mSmoothPoints.clear();
     }
-    if (mSmoothPoints.size()) widget.text("Active!", true);
-    else widget.text("Not used", true);
+    if (mSmoothPoints.size())
+        widget.text("Active!", true);
+    else
+        widget.text("Not used", true);
 
     // file IO
     widget.textbox("S:", mSaveName);
-    if(widget.button("Save", true) && mPathPoints.size())
+    if (widget.button("Save", true) && mPathPoints.size())
     {
         savePath(mSceneDir + "/" + mSaveName + ".campath");
         refreshFileList();
     }
 
-    if(mFileList.size())
+    if (mFileList.size())
     {
         widget.dropdown("L:", mFileList, mLoadIndex);
         if (widget.button("Load", true) && mLoadIndex < mFileList.size())
@@ -248,17 +260,18 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
         }
     }
 
-    if(widget.button("Output Directory"))
+    if (widget.button("Output Directory"))
     {
         system("explorer .");
     }
 
     // list all outputs
-    if(auto g = widget.group("Outputs"))
+    if (auto g = widget.group("Outputs"))
     {
         bool selectAll = false;
 
-        if (g.button("All")) selectAll = true;
+        if (g.button("All"))
+            selectAll = true;
         if (g.button("None", true))
         {
             mOutputs.clear();
@@ -266,28 +279,28 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
 
         auto allOutputs = mpRenderGraph->getAvailableOutputs();
         g.textbox("Filter", mOutputFilter);
-        if(mOutputFilter.size())
+        if (mOutputFilter.size())
         {
             allOutputs = fuzzyFilter(allOutputs, mOutputFilter);
         }
 
-        for(const auto& name : allOutputs)
+        for (const auto& name : allOutputs)
         {
             bool selected = mOutputs.count(name) != 0;
-            if(g.checkbox(name.c_str(), selected))
+            if (g.checkbox(name.c_str(), selected))
             {
                 if (selected)
                 {
                     mOutputs.insert(name);
                     mpRenderGraph->markOutput(name);
                 }
-                else mOutputs.erase(name);
+                else
+                    mOutputs.erase(name);
             }
-            if(selectAll) mOutputs.insert(name);
+            if (selectAll)
+                mOutputs.insert(name);
         }
     }
-
-    
 
     // logic
     updateCamera();
@@ -296,8 +309,10 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
 void VideoRecorder::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     mpScene = pScene;
-    if(mpScene) mSceneDir = mpScene->getPath().parent_path().string();
-    else mSceneDir = ".";
+    if (mpScene)
+        mSceneDir = mpScene->getPath().parent_path().string();
+    else
+        mSceneDir = ".";
 
     refreshFileList();
 }
@@ -310,7 +325,7 @@ PathPoint VideoRecorder::createFromCamera()
     p.pos = cam->getPosition();
     p.dir = normalize(cam->getTarget() - p.pos);
     p.up = cam->getUpVector();
-    p.time = getTime(); //(float)mpGlobalClock->getTime();
+    p.time = getTime();
 
     return p;
 }
@@ -323,57 +338,71 @@ float VideoRecorder::getTime() const
 namespace fs = std::filesystem;
 
 // file helper functions
-bool folderExists(const std::string& folderPath) {
+bool folderExists(const std::string& folderPath)
+{
     return fs::is_directory(folderPath);
 }
 
-bool createFolder(const std::string& folderPath) {
-    try {
+bool createFolder(const std::string& folderPath)
+{
+    try
+    {
         fs::create_directories(folderPath);
         return true;
     }
-    catch (const std::exception&) {
+    catch (const std::exception&)
+    {
         return false;
     }
 }
 
-bool deleteFolder(const std::string& folderPath) {
-    try {
+bool deleteFolder(const std::string& folderPath)
+{
+    try
+    {
         fs::remove_all(folderPath);
         return true;
     }
-    catch (const std::exception&) {
+    catch (const std::exception&)
+    {
         return false;
     }
 }
 
-void deleteFile(const std::string& filePath) {
-    try {
-        if (fs::exists(filePath) && fs::is_regular_file(filePath)) {
+void deleteFile(const std::string& filePath)
+{
+    try
+    {
+        if (fs::exists(filePath) && fs::is_regular_file(filePath))
+        {
             fs::remove(filePath);
         }
     }
-    catch (const std::exception&) { }
+    catch (const std::exception&)
+    {}
 }
 
 void VideoRecorder::saveFrame(RenderContext* pRenderContext)
 {
-    if (mState != State::Render) return;
+    if (mState != State::Render)
+        return;
     assert(mpRenderGraph);
     mRenderIndex++;
 
-    for(const auto& target : mOutputs)
+    for (const auto& target : mOutputs)
     {
         auto output = mpRenderGraph->getOutput(target);
-        if(!output) continue;
+        if (!output)
+            continue;
 
         auto tex = output->asTexture();
         assert(tex);
-        if(!tex) continue;
+        if (!tex)
+            continue;
 
         const auto& outputName = output->getName();
 
-        if(mRenderIndex <= 1) // replay index 1 == first frame, because this function is called after the camera update
+        if (mRenderIndex <= 1) // replay index 1 == first frame, because this function is called after the camera update
         {
             // delete old content in the tmp output folder
             deleteFolder(outputName);
@@ -385,28 +414,44 @@ void VideoRecorder::saveFrame(RenderContext* pRenderContext)
         filename << filenameBase << std::setfill('0') << std::setw(4) << mRenderIndex << ".bmp";
 
         // blit texture
-        uint4 srcRect = uint4(guardBand, guardBand, tex->getWidth() - guardBand, tex->getHeight() - guardBand);
-        if(!mpBlitTexture ||
-            mpBlitTexture->getWidth() != tex->getWidth() - 2 * guardBand ||
-            mpBlitTexture->getHeight() != tex->getHeight() - 2 * guardBand)
+        uint4 srcRect = uint4(0, 0, tex->getWidth(), tex->getHeight());
+        if (mCutGuardBand)
         {
-            mpBlitTexture = Texture::create2D(
-                mpDevice, tex->getWidth() - 2 * guardBand, tex->getHeight() - 2 * guardBand, ResourceFormat::BGRA8UnormSrgb, 1, 1, nullptr, ResourceBindFlags::RenderTarget | ResourceBindFlags::ShaderResource);
+            srcRect = uint4(guardBand, guardBand, tex->getWidth() - guardBand, tex->getHeight() - guardBand);
+            if (!mpBlitTexture || mpBlitTexture->getWidth() != tex->getWidth() - 2 * guardBand ||
+                mpBlitTexture->getHeight() != tex->getHeight() - 2 * guardBand)
+            {
+                mpBlitTexture = Texture::create2D(
+                    mpDevice, tex->getWidth() - 2 * guardBand, tex->getHeight() - 2 * guardBand, ResourceFormat::BGRA8UnormSrgb, 1, 1,
+                    nullptr, ResourceBindFlags::RenderTarget | ResourceBindFlags::ShaderResource
+                );
+            }
         }
+        else // do not cut guard band
+            if (!mpBlitTexture || mpBlitTexture->getWidth() != tex->getWidth() || mpBlitTexture->getHeight() != tex->getHeight())
+            {
+                mpBlitTexture = Texture::create2D(
+                    mpDevice, tex->getWidth(), tex->getHeight(), ResourceFormat::BGRA8UnormSrgb, 1, 1, nullptr,
+                    ResourceBindFlags::RenderTarget | ResourceBindFlags::ShaderResource
+                );
+            }
 
         pRenderContext->blit(tex->getSRV(), mpBlitTexture->getRTV(), srcRect);
 
-        //tex->captureToFile(0, 0, filename.str(), Bitmap::FileFormat::BmpFile);
+        // tex->captureToFile(0, 0, filename.str(), Bitmap::FileFormat::BmpFile);
         mpBlitTexture->captureToFile(0, 0, filename.str(), Bitmap::FileFormat::BmpFile);
     }
 }
 
 void VideoRecorder::updateCamera()
 {
-    if (!mpScene) return;
+    if (!mpScene)
+        return;
 
     float time = getTime();
     auto cam = mpScene->getCamera();
+    // next time if rendering or previewing
+    double nextTime = getStartTime() + (mRenderIndex / (double)mFps) * mpGlobalClock->getTimeScale();
 
     // helper function to get the interpolated path point based on time
     auto getInterpolatedPathPoint = [&](float time)
@@ -421,11 +466,13 @@ void VideoRecorder::updateCamera()
         }
 
         auto step1 = step2;
-        if (step1 != path.begin()) --step1; // move to previous step
+        if (step1 != path.begin())
+            --step1; // move to previous step
 
         // interpolate position
         float t = (time - step1->time) / (step2->time - step1->time);
-        if (step1->time >= step2->time) t = 1.0; // in case step1 == step2
+        if (step1->time >= step2->time)
+            t = 1.0; // in case step1 == step2
 
         PathPoint res;
         res.time = time;
@@ -435,7 +482,8 @@ void VideoRecorder::updateCamera()
         return res;
     };
 
-    auto updateCamera = [&](const PathPoint& curr) {
+    auto updateCamera = [&](const PathPoint& curr)
+    {
         bool updatePoint = false;
         if (!mLastFramePathPointValid)
         {
@@ -443,7 +491,7 @@ void VideoRecorder::updateCamera()
             mLastFramePathPointValid = true;
             updatePoint = true;
         }
-            
+
         const float error = 0.00001f;
 
         updatePoint |= any(abs(mLastFramePathPoint.pos - curr.pos) > error);
@@ -472,17 +520,18 @@ void VideoRecorder::updateCamera()
             cam->setTarget(p.pos + p.dir);
             cam->setUpVector(p.up);
         }
-        
-        if(p.time >= mPathPoints.back().time)
+
+        if (p.time >= mPathPoints.back().time)
         {
-            if(mLoop)
+            if (mLoop)
             {
                 mpGlobalClock->setTime(getStartTime());
             }
             else // stop animation
                 stopPreview();
         }
-    }  break;
+    }
+    break;
 
     case State::Render:
     {
@@ -493,19 +542,26 @@ void VideoRecorder::updateCamera()
             cam->setTarget(p.pos + p.dir);
             cam->setUpVector(p.up);
         }
-        
+
+        mpGlobalClock->pause(); // make sure it is paused because this pass sets the time manually
         if (p.time >= mPathPoints.back().time)
         {
             // stop animation
             stopRender();
         }
-    }  break;
+        else
+            mpGlobalClock->setTime(nextTime);
+    }
+    break;
 
     case State::Warmup:
     {
         size_t warmupFrames = 120;
         float t = 1.0f - (float)mRenderIndex / (float)warmupFrames;
-        auto p = getInterpolatedPathPoint(t); // fix some issues with temporal passes 
+        double warmupGlobalTime = getStartTime() - (double(warmupFrames - mRenderIndex) / (double)mFps) * mpGlobalClock->getTimeScale();
+        mpGlobalClock->setTime(warmupGlobalTime);
+        mpGlobalClock->pause();               // make sure it is paused because this pass sets the time manually
+        auto p = getInterpolatedPathPoint(t); // fix some issues with temporal passes
         if (updateCamera(p))
         {
             cam->setPosition(p.pos);
@@ -513,19 +569,20 @@ void VideoRecorder::updateCamera()
             cam->setUpVector(p.up);
         }
 
-        if(mRenderIndex++ > warmupFrames)
+        if (mRenderIndex++ > warmupFrames)
         {
             startRender(); // after 100 warmup frames, start rendering
         }
-    }  break;
-
+    }
+    break;
     }
 }
 
 void VideoRecorder::startRecording()
 {
     assert(mState == State::Idle);
-    if(mState != State::Idle) return;
+    if (mState != State::Idle)
+        return;
 
     mState = State::Record;
     mPathPoints.clear();
@@ -536,32 +593,35 @@ void VideoRecorder::startRecording()
 void VideoRecorder::startPreview()
 {
     assert(mState == State::Idle);
-    if(mState != State::Idle) return;
+    if (mState != State::Idle)
+        return;
 
     mState = State::Preview;
-    mpGlobalClock->play();
     mpGlobalClock->setTime(getStartTime());
-    mpScene->getCamera()->setIsAnimated(false); //Disable camera animations
-   
+    mpGlobalClock->setFramerate(0);
+    mpScene->getCamera()->setIsAnimated(false); // Disable camera animations
+    mpGlobalClock->play();
 }
 
 void VideoRecorder::startRender()
 {
     assert(mState != State::Record);
-    if(mState == State::Record) return;
+    if (mState == State::Record)
+        return;
 
     mState = State::Render;
-    mpGlobalClock->play();
-    if (mUseFPSLimit)
-        mpGlobalClock->setFramerate(mFps);
-    
+    mpGlobalClock->setTime(getStartTime());
+    mpGlobalClock->pause();
+    mpGlobalClock->setFramerate(0);
+
     mRenderIndex = 0;
 }
 
 void VideoRecorder::startWarmup()
 {
     assert(mState != State::Record);
-    if (mState == State::Record) return;
+    if (mState == State::Record)
+        return;
 
     mState = State::Warmup;
     mpScene->getCamera()->setIsAnimated(false); // Disable camera animations
@@ -570,12 +630,11 @@ void VideoRecorder::startWarmup()
     mRenderIndex = 0;
 }
 
-
-
 void VideoRecorder::stopRecording()
 {
     assert(mState == State::Record);
-    if(mState != State::Record) return;
+    if (mState != State::Record)
+        return;
 
     mState = State::Idle;
     // remove duplicate points from start and end
@@ -597,13 +656,13 @@ void VideoRecorder::stopRecording()
             mPathPoints = std::vector<PathPoint>(newStart, newEnd);
         }
     }
-    
 }
 
 void VideoRecorder::stopPreview()
 {
     assert(mState == State::Preview);
-    if (mState != State::Preview) return;
+    if (mState != State::Preview)
+        return;
 
     mState = State::Idle;
 }
@@ -611,21 +670,24 @@ void VideoRecorder::stopPreview()
 void VideoRecorder::stopRender()
 {
     assert(mState == State::Render);
-    if(mState != State::Render) return;
+    if (mState != State::Render)
+        return;
 
     mState = State::Idle;
 
-    mpGlobalClock->setFramerate(0); //Reset framerate simulation
+    mpGlobalClock->setFramerate(0); // Reset framerate simulation
 
     // create video files for each output
     for (const auto& target : mOutputs)
     {
         auto output = mpRenderGraph->getOutput(target);
-        if (!output) continue;
+        if (!output)
+            continue;
 
         auto tex = output->asTexture();
         assert(tex);
-        if (!tex) continue;
+        if (!tex)
+            continue;
 
         const auto& outputName = output->getName();
 
@@ -643,7 +705,10 @@ void VideoRecorder::stopRender()
             outputFilename = mOutputPrefix + outputName + ".mp4";
 
         deleteFile(outputFilename); // delete old file (otherwise ffmpeg will not write anything)
-        sprintf_s(buffer, "ffmpeg -r %d -i %s%%04d.bmp -c:v libx264 -preset medium -crf 12 -vf \"fps=%d,format=yuv420p\" \"%s\" 2>&1", mFps, filenameBase.c_str(), mFps, outputFilename.c_str());
+        sprintf_s(
+            buffer, "ffmpeg -r %d -i %s%%04d.bmp -c:v libx264 -preset medium -crf 12 -vf \"fps=%d,format=yuv420p\" \"%s\" 2>&1", mFps,
+            filenameBase.c_str(), mFps, outputFilename.c_str()
+        );
 
         // last frame, convert to video
         FILE* ffmpeg = _popen(buffer, "w");
@@ -660,6 +725,8 @@ void VideoRecorder::stopRender()
             logError("Error while executing ffmpeg:\n");
         }
     }
+
+    mpGlobalClock->play(); // resume clock
 }
 
 void VideoRecorder::stopWarmup()
@@ -669,10 +736,10 @@ void VideoRecorder::stopWarmup()
     startRender();
 }
 
-
 void VideoRecorder::smoothPath()
 {
-    if(mPathPoints.size() < 2) return;
+    if (mPathPoints.size() < 2)
+        return;
 
     mSmoothPoints.clear();
     // apply gaussian blur to path
@@ -680,11 +747,11 @@ void VideoRecorder::smoothPath()
 
     const float timeRadius = 0.5f; // 0.5 seconds
 
-    for(size_t i = 0; i < mPathPoints.size(); ++i)
+    for (size_t i = 0; i < mPathPoints.size(); ++i)
     {
         const auto& p = mPathPoints[i];
         auto& sp = mSmoothPoints[i];
-        sp = p; // initialize with p
+        sp = p;           // initialize with p
         float wsum = 1.0; // weight sum
 
         auto addPoint = [&](const PathPoint& p)
@@ -695,11 +762,11 @@ void VideoRecorder::smoothPath()
             wsum += w;
         };
 
-        for(int j = int(i - 1); j >= 0 && mPathPoints[j].time > p.time - timeRadius; --j)
+        for (int j = int(i - 1); j >= 0 && mPathPoints[j].time > p.time - timeRadius; --j)
         {
             addPoint(mPathPoints[j]);
         }
-        for(int j = int(i + 1); j < int(mPathPoints.size()) && mPathPoints[j].time < p.time + timeRadius; ++j)
+        for (int j = int(i + 1); j < int(mPathPoints.size()) && mPathPoints[j].time < p.time + timeRadius; ++j)
         {
             addPoint(mPathPoints[j]);
         }
@@ -718,9 +785,10 @@ void VideoRecorder::savePath(const std::string& filename) const
     std::ofstream outFile(filename, std::ios::binary);
     if (outFile.is_open())
     {
-        //Write header
+        // Write header
         outFile.write(kVersionControlHeader.c_str(), kVersionControlHeader.size());
-        for (const auto& point : path) {
+        for (const auto& point : path)
+        {
             outFile.write(reinterpret_cast<const char*>(&point), sizeof(PathPoint));
         }
         outFile.close();
@@ -731,8 +799,9 @@ void VideoRecorder::loadPath(const std::string& filename)
 {
     forceIdle();
 
-    //Convert old format to the new one that includes the up vector
-    auto convertPathPointFormat = [](PathPointPre1_0& oldPoint) {
+    // Convert old format to the new one that includes the up vector
+    auto convertPathPointFormat = [](PathPointPre1_0& oldPoint)
+    {
         PathPoint p;
         p.dir = oldPoint.dir;
         p.pos = oldPoint.pos;
@@ -745,8 +814,8 @@ void VideoRecorder::loadPath(const std::string& filename)
     std::ifstream inFile(filename, std::ios::binary);
     if (inFile.is_open())
     {
-        bool isPre1_0 = false;  //If pre 1_0, it has no up vector
-        //Read header
+        bool isPre1_0 = false; // If pre 1_0, it has no up vector
+        // Read header
         std::vector<char> headerChecker(kVersionControlHeader.size());
         if (inFile.read(headerChecker.data(), kVersionControlHeader.size()))
         {
@@ -755,7 +824,7 @@ void VideoRecorder::loadPath(const std::string& filename)
                 if (headerChecker[i] != kVersionControlHeader[i])
                 {
                     isPre1_0 = true;
-                    //Return to start of file
+                    // Return to start of file
                     inFile.clear();
                     inFile.seekg(0);
                     logInfo("Old path file format detected. Will be converted!");
@@ -783,7 +852,8 @@ void VideoRecorder::loadPath(const std::string& filename)
 
         inFile.close();
     }
-    else logError("Cannot open camera path file!");
+    else
+        logError("Cannot open camera path file!");
 }
 
 void VideoRecorder::refreshFileList()
@@ -791,8 +861,10 @@ void VideoRecorder::refreshFileList()
     mFileList.clear();
     Gui::DropdownValue v;
     v.value = 0;
-    for (const auto& entry : std::filesystem::directory_iterator(mSceneDir)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".campath") {
+    for (const auto& entry : std::filesystem::directory_iterator(mSceneDir))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".campath")
+        {
             v.label = entry.path().filename().replace_extension().string();
             mFileList.push_back(v);
             ++v.value;
@@ -802,7 +874,7 @@ void VideoRecorder::refreshFileList()
 
 void VideoRecorder::forceIdle()
 {
-    switch(mState)
+    switch (mState)
     {
     case State::Record:
         stopRecording();
@@ -811,8 +883,8 @@ void VideoRecorder::forceIdle()
         stopPreview();
         break;
     case State::Render:
-        //stopRender();
-        //break;
+        // stopRender();
+        // break;
     case State::Warmup:
         mState = State::Idle;
         break;
