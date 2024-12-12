@@ -31,6 +31,7 @@
 
 #include "Rendering/ShadowMaps/ShadowMap.h"
 #include "TransparencyShadowMethod.h"
+#include "Rendering/Materials/TexLODTypes.slang"
 
 using namespace Falcor;
 
@@ -92,7 +93,7 @@ private:
 
     //Evaluate direct light with an Compute Shader
     void evalDirect(RenderContext* pRenderContext, const RenderData& renderData);
-    //Evaluates the transparencies unitl the first opaque surface
+    //Evaluates the transparencies until the first opaque surface
     void evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData);
 
     // Internal state
@@ -101,6 +102,7 @@ private:
     std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
 
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
+    TexLODMode mRayLodMode = TexLODMode::Mip0;
     uint mSelectedShadowMethod = std::max((int)mShadowRenderMethod - 1, 0);
 
     std::vector<std::shared_ptr<TransparencyShadowMethod>> mShadowMethods; //Shadow Methods that rely on extra structures (mSelectedShadowMethod - 1)

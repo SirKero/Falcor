@@ -37,9 +37,11 @@ target_sources(TransparencyRenderer PRIVATE
 
 	TransparencyRenderer.cpp
 	TransparencyRenderer.h
+	
 	EvaluateAnalyticLight.slang
 	EvalDirect.cs.slang
 	EvalTransparenciesDirect.rt.slang
+	RayLodHelper.slang
 )
 
 target_copy_shaders(TransparencyRenderer RenderPasses/TransparencyRenderer)

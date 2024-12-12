@@ -1,8 +1,12 @@
+#include "RayLodHelper.slang"
+
 import EvaluateAnalyticLight;
 
 cbuffer CB
 {
     uint gFrameCount; // Current it for sample gen
+    float2 gInvFrameDim;
+    float gScreenSpacePixelSpreadAngle;
 }
 
 // Inputs
@@ -51,10 +55,31 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (hit.isValid())
     {
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
-         // Pixel represents a valid primary hit. Compute its contribution.
-        let lod = ExplicitLodTextureSampler(0.f);
+        // Pixel represents a valid primary hit. Compute its contribution.
+        ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+
+        const TriangleHit triangleHit = hit.getTriangleHit();
+        VertexData v = gScene.getVertexData(triangleHit);
+        uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+        float hitT = distance(gScene.camera.getPosition(), v.posW);
+        // Use different texture sampler
+        if (kLODMode == TexLODMode::RayCones)
+        {
+            float2 ddx, ddy;
+            computeAnisotropicAxesRayCones(triangleHit, v, viewDir, hitT, gScreenSpacePixelSpreadAngle, ddx, ddy);
+            lod = ExplicitGradientTextureSampler(ddx, ddy);
+        }
+        else if (kLODMode == TexLODMode::RayDiffs)
+        {
+            float2 ddx, ddy;
+            computeRayDifferentials(triangleHit, viewDir, hitT, gScene.camera, gInvFrameDim, ddx, ddy);
+            lod = ExplicitGradientTextureSampler(ddx, ddy);
+        }
+        // else kLODMode == TexLODMode::Mip0
+
         // Load shading data.
-        ShadingData sd = loadShadingData(hit, viewDir, lod);
+        ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -viewDir, lod);
+
         uint hints = 0;
         if (kAdjustShadingNormals)
             hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;

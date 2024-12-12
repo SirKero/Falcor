@@ -190,6 +190,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
         dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
         dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+        dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
     }
 
     bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
@@ -251,6 +252,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
+    defines.add("RAY_LOD_MODE", std::to_string((uint)mRayLodMode));
 
     return defines;
 }
@@ -280,6 +282,10 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
     // If defines change, refresh the program
     mpEvalDirectPass->getProgram()->addDefines(getLightEvalDefines());
 
+    //Dispatch Dims
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
     // Set variables
     auto var = mpEvalDirectPass->getRootVar();
 
@@ -292,6 +298,8 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gInvFrameDim"] = 1.f / float2(targetDim);        //TODO to defines ? 
+    var["CB"]["gScreenSpacePixelSpreadAngle"] = mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(targetDim.y); //TODO to defines ? 
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -307,8 +315,7 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
     var["gTransparencyThp"] = mpTransparencyThp;
 
     // Execute
-    const uint2 targetDim = renderData.getDefaultTextureDims();
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    
     mpEvalDirectPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
