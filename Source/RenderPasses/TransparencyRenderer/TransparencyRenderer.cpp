@@ -229,13 +229,16 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
 
     if (mpScene)
     {
-        mpScene->setRtASAdditionalGeometryFlag(RtGeometryFlags::NoDuplicateAnyHitInvocation); // Add the NoDublicateAnyHitInvocation flag to
+        mpScene->setRtASAdditionalGeometryFlag(RtGeometryFlags::NoDuplicateAnyHitInvocation); // Add the NoDuplicateAnyHitInvocation flag to
 
         //Add the shadow methods
         mShadowMethods.push_back(std::make_shared<AccelShadow>(mpDevice, mpScene)); //Accel Shadow (0)
         mShadowMethods.push_back(std::make_shared<LinkedListShadow>(mpDevice, mpScene)); // LinkedList (1)
         mShadowMethods.push_back(std::make_shared<AccelShadowKBuffer>(mpDevice,mpScene)); //AccelShadow KBuffer (2)
         mShadowMethods.push_back(std::make_shared<AccelIrregularZ>(mpDevice, mpScene)); // Accel IrregularZ (3)
+
+        if (mpScene->getLightCount() == 1)
+            mLightSampleMode = LightSampleMode::Uniform; //Cheapest light sample mode
     }
 }
 
