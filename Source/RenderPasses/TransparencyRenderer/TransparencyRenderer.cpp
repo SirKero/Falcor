@@ -184,7 +184,14 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
 void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
+
+    if (auto group = widget.group("Shading Settings"))
+    {
+        dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
+        dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
+        dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+    }
+
     bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
     if (methodChanged)
         mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
@@ -242,6 +249,8 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     RayFlags evalQueryRayFlags = mEnableOpaqueShadowMaps ? RayFlags::CullOpaque : RayFlags::ForceNonOpaque;
     defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
+    defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
+    defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
 
     return defines;
 }

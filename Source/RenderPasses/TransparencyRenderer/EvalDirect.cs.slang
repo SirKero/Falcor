@@ -15,6 +15,8 @@ RWTexture2D<float4> gOutputColor;
 
 static const bool kAdjustShadingNormals = true;
 static const float kMinOpacity = 1e-7;
+static const float kAmbientStrength = AMBIENT_STRENGTH;
+static const float kEnvMapStrength = ENV_MAP_STRENGTH;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -57,16 +59,20 @@ void main(uint2 pixel: SV_DispatchThreadID)
         if (kAdjustShadingNormals)
             hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        BSDFProperties bsdfProperties = mi.getProperties(sd);
         // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
-        colorOut += mi.getProperties(sd).emission * sd.opacity;
+        colorOut += bsdfProperties.emission * sd.opacity;
 
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
         colorOut += evalDirectAnalytic(sd, mi, sg);
+
+        // Ambient
+        colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength;
     }
     else //Enviroment map lookup
     {
-        colorOut = gScene.envMap.eval(viewDir);
+        colorOut = gScene.envMap.eval(viewDir) * kEnvMapStrength;
     }
     float3 prevColor = gOutputColor[pixel].xyz;
     gOutputColor[pixel] = float4(colorOut * transparencyThp + prevColor, 1.0);

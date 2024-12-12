@@ -24,6 +24,7 @@ RWTexture2D<float4> gThpOut;
 static const float kMinOpacity = 1e-7;
 static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
+static const float kAmbientStrength = AMBIENT_STRENGTH;
 
 /** Payload for alpha ray (20B)
 */
@@ -186,11 +187,15 @@ void rayGen()
         if (kAdjustShadingNormals)
             hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
-        //Emissive lights
-        pd.radiance += pd.thp * mi.getProperties(sd).emission * sd.opacity;
+        // Emissive lights
+        BSDFProperties bsdfProperties = mi.getProperties(sd);
+        pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
         // Analytic
         pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp * sd.opacity);
+
+        // Ambient
+        pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;
 
         //Update thp
         float transparency = (1.0 - sd.opacity);

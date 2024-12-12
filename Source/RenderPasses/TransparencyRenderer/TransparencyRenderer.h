@@ -113,6 +113,10 @@ private:
     bool mOpaqueShadowMapModeChanged = false;
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
 
+    //Shading Settings
+    float mAmbientStrength = 0.25f;
+    float mEnvMapStrength = 1.f;
+
     //Buffer/Textures
     ref<Texture> mpTransparencyThp; //Thp texture for transparency
 
