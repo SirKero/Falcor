@@ -112,12 +112,13 @@ private:
     RenderGraph* mpRenderGraph;
     std::string mActiveOutput = "";
     std::set<std::string> mOutputs;
+    bool mUseFPSLimit = true;
     int mFps = 60;
 
     std::string mSaveName = "path";
     std::vector<Gui::DropdownValue> mFileList;
     uint32_t mLoadIndex = 0;
-    float mTimeScale = 1.0;
+    //float mTimeScale = 1.0;
     bool mLoop = false;
     std::string mOutputFilter;
     std::string mOutputPrefixFolder = "videos";

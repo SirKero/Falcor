@@ -214,9 +214,11 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
     widget.tooltip("Leave empty if no folder is desired");
     widget.textbox("Filename Prefix", mOutputPrefix);
 
-    widget.var("FPS", mFps, 1, 240);
+    widget.checkbox("Use Framerate Simulation", mUseFPSLimit);
+    if (mUseFPSLimit)
+        widget.var("FPS", mFps, 1, 240);
 
-    widget.var("Time Scale", mTimeScale, 0.01f, 100.0f, 0.1f);
+    //widget.var("Time Scale", mTimeScale, 0.01f, 100.0f, 0.1f);
 
     if(widget.button("Smooth Path") && mPathPoints.size() > 1 && mState != State::Record)
     {
@@ -308,14 +310,14 @@ PathPoint VideoRecorder::createFromCamera()
     p.pos = cam->getPosition();
     p.dir = normalize(cam->getTarget() - p.pos);
     p.up = cam->getUpVector();
-    p.time = (float)mpGlobalClock->getTime();
+    p.time = getTime(); //(float)mpGlobalClock->getTime();
 
     return p;
 }
 
 float VideoRecorder::getTime() const
 {
-    return static_cast<float>(mpGlobalClock->getTime()) * mTimeScale;
+    return static_cast<float>(mpGlobalClock->getTime());
 }
 
 namespace fs = std::filesystem;
@@ -550,7 +552,8 @@ void VideoRecorder::startRender()
 
     mState = State::Render;
     mpGlobalClock->play();
-    mpGlobalClock->setFramerate(mFps);
+    if (mUseFPSLimit)
+        mpGlobalClock->setFramerate(mFps);
     
     mRenderIndex = 0;
 }
@@ -675,7 +678,7 @@ void VideoRecorder::smoothPath()
     // apply gaussian blur to path
     mSmoothPoints.resize(mPathPoints.size());
 
-    const float timeRadius = 0.5f * mTimeScale; // 0.5 seconds
+    const float timeRadius = 0.5f; // 0.5 seconds
 
     for(size_t i = 0; i < mPathPoints.size(); ++i)
     {
