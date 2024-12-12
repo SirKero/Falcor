@@ -74,6 +74,7 @@ public:
     {
         Uniform = 0,
         RIS = 1,
+        All = 2,
     };
 
     FALCOR_ENUM_INFO(
@@ -81,6 +82,7 @@ public:
         {
             {LightSampleMode::Uniform, "Uniform"},
             {LightSampleMode::RIS, "RIS"},
+            {LightSampleMode::All, "All"},
         }
     );
 
@@ -110,6 +112,9 @@ private:
     bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass
     bool mOpaqueShadowMapModeChanged = false;
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
+
+    //Buffer/Textures
+    ref<Texture> mpTransparencyThp; //Thp texture for transparency
 
     //Passes
     // Pipelines / Programms

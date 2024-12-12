@@ -8,11 +8,13 @@ cbuffer CB
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gViewW; // Optional
+Texture2D<float4> gTransparencyThp;
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
 
 static const bool kAdjustShadingNormals = true;
+static const float kMinOpacity = 1e-7;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -36,9 +38,14 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
 {
-    float3 colorOut = float3(0);
+    // Load color from transparency pass
+    float3 colorOut = float3(0.0); 
     const HitInfo hit = HitInfo(gVBuffer[pixel]);
     float3 viewDir = -gViewW[pixel].xyz;
+    float3 transparencyThp = gTransparencyThp[pixel].xyz;
+    if (all(transparencyThp < kMinOpacity))
+        return;
+
     if (hit.isValid())
     {
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
@@ -56,7 +63,11 @@ void main(uint2 pixel: SV_DispatchThreadID)
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
         colorOut += evalDirectAnalytic(sd, mi, sg);
-    } //TODO add env map lookup
-
-    gOutputColor[pixel] = float4(colorOut, 1.0);
+    }
+    else //Enviroment map lookup
+    {
+        colorOut = gScene.envMap.eval(viewDir);
+    }
+    float3 prevColor = gOutputColor[pixel].xyz;
+    gOutputColor[pixel] = float4(colorOut * transparencyThp + prevColor, 1.0);
 }

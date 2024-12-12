@@ -18,6 +18,7 @@ RWTexture2D<float2> gOutMotion;
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
+RWTexture2D<float4> gThpOut;
 
 #define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = 1e-7;
@@ -116,8 +117,7 @@ void rayGen()
 {
     const uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
-    float3 colorOut = float3(0);
-    HitInfo hit = HitInfo(gVBuffer[pixel]);
+    
     float3 viewDir;
     if (is_valid(gViewW))
         viewDir = -gViewW[pixel].xyz;
@@ -131,17 +131,28 @@ void rayGen()
     pd.sg = SampleGenerator(pixel, gFrameCount);
 
     float tMax = gScene.camera.data.farZ;
-    //Get first opaque depth
-    if (hit.isValid()){
-        const TriangleHit triangleHit = hit.getTriangleHit();
-        VertexData v = gScene.getVertexData(triangleHit);
-        tMax = min(tMax, length(v.posW-pd.origin)); //Linear depth
-    }
-
     float depth = 1;
-    float2 mVec = float2(0);
-    if (is_valid(gInDepth))
+    //Get tMax for this either with depth texture or vBuffer
+    if (is_valid(gInDepth)) {
         depth = gInDepth[pixel];
+        // Get recreated 3D position
+        float2 ndc = (float2(pixel) + 0.5) / frameDim; // in [0,1]
+        ndc = 2.0 * ndc - 1.0;                         // in [-1,1]
+        float4 recreatedPos = mul(gScene.camera.data.invViewProj, float4(ndc, depth, 1.0));
+        recreatedPos.xyz /= recreatedPos.w; //Perspective division
+
+        tMax = min(tMax, distance(recreatedPos.xyz, pd.origin));
+    } else { //Use VBuffer for hit
+        HitInfo hit = HitInfo(gVBuffer[pixel]);
+        if (hit.isValid()) {
+            const TriangleHit triangleHit = hit.getTriangleHit();
+            VertexData v = gScene.getVertexData(triangleHit);
+            tMax = min(tMax, length(v.posW - pd.origin)); // Linear depth
+        }
+    }
+       
+    //Motion vector
+    float2 mVec = float2(0);
     if (is_valid(gInMotion))
         mVec = gInMotion[pixel];
 
@@ -183,7 +194,10 @@ void rayGen()
 
         //Update thp
         float transparency = (1.0 - sd.opacity);
-        pd.thp *= transparency; // TODO weight with color? 
+        pd.thp *= transparency; // TODO weight with color?
+
+        if (all(pd.thp <= kMinOpacity))
+            pd.terminated = true;
 
         //Update ray
         ray.TMin = rayData.dist + 1e-10;
@@ -202,11 +216,9 @@ void rayGen()
             mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
         }
     }
-    //Get color from opaque
-    float4 prevColor = gOutputColor[pixel];
-    colorOut = pd.radiance + prevColor.xyz * pd.thp;
-
-    gOutputColor[pixel] = float4(colorOut, 1.0);
+    //Write data
+    gOutputColor[pixel] = float4(pd.radiance, 1.0);
+    gThpOut[pixel] = float4(pd.thp, 1.0);
 
     if (is_valid(gOutMotion))
         gOutMotion[pixel] = mVec;

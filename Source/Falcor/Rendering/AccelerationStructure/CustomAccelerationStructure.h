@@ -79,10 +79,10 @@ public:
 
     void setMinBLASUpdateCount(const size_t count) { mMinUpdateAABBCount = count; }
 
-    /** Clears the AABBs.
+    /** Clears the AABBs. Clears the min.x value to NaN by default (reduces traversal times)
      */
-    void clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer);
-    void clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers);
+    void clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer, bool clearToNaN = true);
+    void clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN = true);
 
 private:
     /*  * Creates the acceleration structure.

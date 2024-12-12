@@ -188,6 +188,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
                 CustomAccelerationStructure::UpdateMode::TLASOnly
             );
             mpShadowAccelerationStrucure->setMinBLASUpdateCount(kMinAABBUpdateCount);
+            mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB);
         }
 
         if (mAccessTextures.empty())

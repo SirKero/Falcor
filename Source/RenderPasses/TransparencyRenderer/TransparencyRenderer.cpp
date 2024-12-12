@@ -170,9 +170,9 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
 
-    evalDirect(pRenderContext, renderData);
-
     evalDirectTransparency(pRenderContext, renderData);
+
+    evalDirect(pRenderContext, renderData);
 
     // Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -294,7 +294,8 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
     };
     for (auto channel : kInputChannels)
         bind(channel);
-    var["gOutputColor"] = renderData.getTexture(kOutputColor);       
+    var["gOutputColor"] = renderData.getTexture(kOutputColor);
+    var["gTransparencyThp"] = mpTransparencyThp;
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -304,6 +305,17 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
 
 void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "Transparency on Primary Ray");
+
+    const auto& screenSize = renderData.getDefaultTextureDims();
+    //Textures
+    if (!mpTransparencyThp || mpTransparencyThp->getWidth() != screenSize.x || mpTransparencyThp->getHeight() != screenSize.y)
+    {
+        mpTransparencyThp = Texture::create2D(
+            mpDevice, screenSize.x, screenSize.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpTransparencyThp->setName("TransparencyThp");
+    }
 
     // Create scene ray tracing program.
     if (!mEvalTransparencyDirectRay.pProgram)
@@ -381,8 +393,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     for (auto& channel : kOutputGeometryInfoChannels)
         bind(channel);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
-
-
+    var["gThpOut"] = mpTransparencyThp;
 
      // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

@@ -32,6 +32,7 @@ import AccelIrregularZ.AccelIrregularZ;
 //LightSampleModes
 #define LIGHT_SAMPLE_MODE_UNIFORM 0
 #define LIGHT_SAMPLE_MODE_RIS 1
+#define LIGHT_SAMPLE_MODE_ALL 2
 
 #ifndef TR_RAY_QUERY_FLAG
 #define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
@@ -80,9 +81,9 @@ struct RISReservoir {
 
 /** Samples a light index either uniform or with RIS (Good if a couple lights are used that dont overlap each other)
  */
-AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleGenerator sg, out uint lightIndex, out float invPdf, out uint type) {
+AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleGenerator sg, inout uint lightIndex, out float invPdf, out uint type) {
     AnalyticLightSample ls = {};
-    #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_UNIFORM
+    #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_UNIFORM //1SPP uniform
         float lightSelect = 0.0;
         lightSelect = sampleNext1D(sg);
 
@@ -94,7 +95,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
         LightData lightData = gScene.getLight(lightIndex);
         type = lightData.type;
         sampleLight(posW, lightData, sg, ls);
-    #else //LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_RIS
+    #elif LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_RIS //RIS
         RISReservoir r = RISReservoir();
         // Loop through all lights
         for (uint i = 0; i < lightCount; i++) {
@@ -112,6 +113,12 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
         // Out data
         lightIndex = r.lightIdx;
         invPdf = r.wSum; // W
+    #else // LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL //All in loop
+        invPdf = 1.0;
+        // Sample local light source.
+        LightData lightData = gScene.getLight(lightIndex);
+        type = lightData.type;
+        sampleLight(posW, lightData, sg, ls);
     #endif
 
     return ls;
@@ -177,61 +184,80 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     uint lightIndex = 0;
     float invPdf = 1.0;
     uint lightType = 0;
+    float3 Li = float3(0);
 
-    // Sample local light source.
-    AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf, lightType);
-    float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
+    #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // For all loop over all lights, for other methods 1SPP is evaluated
+    for (lightIndex; lightIndex < lightCount; lightIndex++)
+    #endif
+    {
+        // Sample local light source.
+        AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf, lightType);
+        float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
 
-    // Reject sample if invalid or has an too steep incident angle
-    if (all(ls.Li <= 0.0) || (abs(NdotL) < kMinIncidentAngle))
-        return float3(0.0);
+        // Reject sample if invalid or has an too steep incident angle
+        if (all(ls.Li <= 0.0) || (abs(NdotL) < kMinIncidentAngle)) {
+            #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
+                    continue;
+            #else
+                    return float3(0.0);
+            #endif
+        }
 
-    // Flip light dir for non-opaque surfaces, so light shines through 
-    bool flipLightDir = (NdotL < 0) && (sd.opacity < 1);
-    float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
-    if (flipLightDir)
-        ls.Li *= (1.0 - sd.opacity); // consider the opacity of the hit if light shined through
+        // Flip light dir for non-opaque surfaces, so light shines through
+        bool flipLightDir = (NdotL < 0) && (sd.opacity < 1);
+        float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
+        if (flipLightDir)
+            ls.Li *= (1.0 - sd.opacity); // consider the opacity of the hit if light shined through
 
-    // Eval BSDF
-    float3 Li = mi.eval(sd, lightDirection, sg) * ls.Li * invPdf * thp;
-    float Li_lum = luminance(Li);
-    if (Li_lum <= 0)
-        return float3(0);
+        // Eval BSDF
+        float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
+        float brdf_lum = luminance(brdf);
+        if (brdf_lum <= 0) {
+            #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
+                        continue;
+            #else
+                        return float3(0.0);
+            #endif
+        }
 
-    // Test visibility by tracing a shadow ray.
-    bool isDirectional = lightType == (uint)LightType::Directional; //Slight different calculations for ortho
-    float shadow = 1.0;
+        // Test visibility by tracing a shadow ray.
+        bool isDirectional = lightType == (uint)LightType::Directional; // Slight different calculations for ortho
+        float shadow = 1.0;
 
-    //Shadow maps
-#if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
-    shadow = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
-#elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedList
-    shadow = gLinkedListShadow.eval(lightIndex, sd.posW);
-#elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
-    shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
-#else // SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
-    shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(Li_lum));
-#endif
-    //TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
+        // Shadow maps
+        #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
+            shadow = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
+        #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedList
+            shadow = gLinkedListShadow.eval(lightIndex, sd.posW);
+        #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
+            shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
+        #elif SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
+            shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(brdf_lum));
+        #endif
 
-    // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-    if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (shadow < 0) && kEnableFallbackRay) {
-        const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
-        shadow = traceShadowRay(origin, ls.dir, ls.distance);
+        // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
+
+        // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
+        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (shadow < 0) && kEnableFallbackRay) {
+            const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
+            shadow = traceShadowRay(origin, ls.dir, ls.distance);
+        }
+
+        // Clamp shadow in [0,1]
+        shadow = clamp(shadow, 0.0, 1.0);
+
+        #if EVAL_OPAQUE_SHADOW_MAP
+            LightData lightData = gScene.getLight(lightIndex);
+            SMLightData smData = gShadowMap.getShadowMapLightData(lightData, lightIndex);
+            float opaqueShadow = 1.f;
+            bool isDynamic = false;
+            gShadowMap.evalShadowMap(sd.posW, smData, float4(0.f) /*random (only x is used currently)*/, 0.f /*MipLevel*/, opaqueShadow, isDynamic);
+
+            shadow = min(shadow, opaqueShadow);
+        #endif
+        // Evaluate contribution.
+        Li += brdf * shadow * ls.Li * invPdf;
     }
 
-    // Clamp shadow in [0,1]
-    shadow = clamp(shadow, 0.0, 1.0);
-
-#if EVAL_OPAQUE_SHADOW_MAP
-    LightData lightData = gScene.getLight(lightIndex);
-    SMLightData smData = gShadowMap.getShadowMapLightData(lightData, lightIndex);
-    float opaqueShadow = 1.f;
-    bool isDynamic = false;
-    gShadowMap.evalShadowMap(sd.posW, smData, float4(0.f) /*random (only x is used currently)*/, 0.f /*MipLevel*/, opaqueShadow, isDynamic);
-
-    shadow = min(shadow, opaqueShadow);
-#endif
-    // Evaluate contribution.
-    return Li * shadow;
+    return Li;
 }
