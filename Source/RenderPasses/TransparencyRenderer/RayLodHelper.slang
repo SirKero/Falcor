@@ -9,6 +9,10 @@ import Rendering.Materials.TexLODHelpers;
 #define SHADOW_LOD_MODE 0 //Mip 0
 #endif
 
+#ifndef SCREEN_SPACE_PIXEL_SPREAD_ANGLE
+#define SCREEN_SPACE_PIXEL_SPREAD_ANGLE 1.0
+#endif
+
 static const TexLODMode kLODMode = TexLODMode(RAY_LOD_MODE);
 static const TexLODMode kShadowLODMode = TexLODMode(SHADOW_LOD_MODE);
 static const float2 kInvFrameDim = float2(INV_FRAME_DIM_X, INV_FRAME_DIM_Y);

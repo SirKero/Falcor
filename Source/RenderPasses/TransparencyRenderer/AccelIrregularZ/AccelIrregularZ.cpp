@@ -584,6 +584,15 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
 
+    //LOD
+    bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
+    mGenAccelShadowPip.pProgram->addDefine("USE_LOD", useLOD ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("SHADOW_LOD_MODE", std::to_string((uint)mRayLodMode));
+    float2 invRenderDims = 1.f / float2(mResolution);
+    mGenAccelShadowPip.pProgram->addDefine("INV_FRAME_DIM_X", std::to_string(invRenderDims.x));
+    mGenAccelShadowPip.pProgram->addDefine("INV_FRAME_DIM_Y", std::to_string(invRenderDims.y));
+
+
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
     {
@@ -617,6 +626,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["CB"]["gSMRes"] = mResolution;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
+        var["CB"]["gSpreadAngle"] = mShadowMapMVP[i].spreadAngle;
+
 
         var["gAABB"] = mUseOneAABBForAllLights ? mAccelShadowAABB[0] : mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];

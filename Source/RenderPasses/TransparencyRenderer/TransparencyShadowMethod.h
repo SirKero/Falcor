@@ -29,6 +29,7 @@
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
 #include "Rendering/ShadowMaps/ShadowMap.h"
+#include "Rendering/Materials/TexLODTypes.slang"
 
 using namespace Falcor;
 
@@ -63,6 +64,10 @@ public:
     */
     void enableOpaqueShadowMap(bool enable = true) { mOpaqueShadowMapEnabled = enable; }
 
+    /* Sets LOD mode for shadow map 
+    */
+    void setShadowLODMode(TexLODMode lodMode) { mRayLodMode = lodMode; }
+
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
@@ -73,7 +78,7 @@ protected:
     struct LightMVP
     {
         float3 pos = float3(0);
-        uint _pad = 0;
+        float spreadAngle = 0;
         float4x4 view = float4x4();
         float4x4 projection = float4x4();
         float4x4 viewProjection = float4x4();
@@ -85,6 +90,7 @@ protected:
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
+    TexLODMode mRayLodMode = TexLODMode::Mip0;
     bool mOpaqueShadowMapEnabled = false;
     bool mHasDirectionalLight = false;      
 

@@ -154,7 +154,7 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
 
             VertexData v = gScene.getVertexData(triangleHit);
             uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-            //LOD mode handling
+            //LOD mode handling TODO this is incorrect as it assumes the pixel is the camera 
             ITextureSampler lod = ExplicitLodTextureSampler(0.f);
             if (kShadowLODMode == TexLODMode::RayCones)
             {

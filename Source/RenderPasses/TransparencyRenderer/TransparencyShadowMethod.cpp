@@ -158,6 +158,7 @@ void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) 
         minZ = std::min(minZ, smViewAABB.minPoint.z);
 
         lightMVP.projection = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
+        lightMVP.spreadAngle = 1.0;
         break;
     }
     case LightType::Point:
@@ -168,7 +169,7 @@ void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) 
         const float3 up = abs(lightData.dirW.y) == 1 ? float3(0, 0, 1) : float3(0, 1, 0);
         lightMVP.view = math::matrixFromLookAt(lightData.posW, lightTarget, up);
         lightMVP.projection = math::perspective(openingAngle * 2, 1.f, mNearFar.x, mNearFar.y);
-
+        lightMVP.spreadAngle = std::atan(2.0f * std::tan(openingAngle * 0.5f) / mResolution.y);
         break;
     }
     default:

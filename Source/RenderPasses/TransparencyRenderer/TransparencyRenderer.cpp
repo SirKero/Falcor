@@ -168,7 +168,10 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         for (auto& method : mShadowMethods)
             method->enableOpaqueShadowMap(false);
     }
-        
+
+    //Update LOD mode
+    for (auto& method : mShadowMethods)
+        method->setShadowLODMode(mShadowLodMode);
 
     //Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)

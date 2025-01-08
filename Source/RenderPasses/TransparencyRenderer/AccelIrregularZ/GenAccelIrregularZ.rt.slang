@@ -1,6 +1,7 @@
 #include "AccelIrregularZData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
+#include "../RayLodHelper.slang"
 
 import Scene.Raytracing;
 import Scene.Intersection;
@@ -56,7 +57,8 @@ cbuffer CB
     uint gLightIdx;     //LightIndex
     uint gMipCount;     // Number of mips
     uint2 gSMRes;       // ShadowMap resolution
-    uint2 _pad;
+    float gSpreadAngle;
+    uint _pad;
     float4x4 gViewProj;
     float4x4 gInvViewProj; // Inverse view projection
 }
@@ -135,6 +137,7 @@ void miss(inout RayData rayData)
 [shader("anyhit")]
 void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
+    //TODO add LOD; improve alpha test (only one texture fetch)
     // Alpha test for non-opaque geometry.
     GeometryInstanceID instanceID = getGeometryInstanceID();
     VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
