@@ -131,6 +131,10 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         return;
     }
 
+    //Set render dimensions for LOD helper
+    if (any(mRenderDims != renderData.getDefaultTextureDims()))
+        mRenderDims = renderData.getDefaultTextureDims();
+
     if (mOpaqueShadowMapModeChanged)
     {
         mpEvalDirectPass.reset();
@@ -192,6 +196,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
         dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
         dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
+        dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
     }
 
     bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
@@ -256,7 +261,14 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
+
+    //LOD
     defines.add("RAY_LOD_MODE", std::to_string((uint)mRayLodMode));
+    defines.add("SHADOW_LOD_MODE", std::to_string((uint)mShadowLodMode));
+    float2 invRenderDims = 1.f / float2(mRenderDims);
+    defines.add("INV_FRAME_DIM_X", std::to_string(invRenderDims.x));
+    defines.add("INV_FRAME_DIM_Y", std::to_string(invRenderDims.y));
+    defines.add("SCREEN_SPACE_PIXEL_SPREAD_ANGLE", std::to_string(mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(mRenderDims.y)));
 
     return defines;
 }
@@ -302,8 +314,6 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gInvFrameDim"] = 1.f / float2(targetDim);  
-    var["CB"]["gScreenSpacePixelSpreadAngle"] = mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(targetDim.y);
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -402,8 +412,6 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gInvFrameDim"] = 1.f / float2(targetDim);            
-    var["CB"]["gScreenSpacePixelSpreadAngle"] = mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(targetDim.y);
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)

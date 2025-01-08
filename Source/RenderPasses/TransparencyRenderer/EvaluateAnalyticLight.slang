@@ -1,9 +1,10 @@
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
+#include "RayLodHelper.slang"
 
-__exported import Scene.Raytracing;
-__exported import Scene.Intersection;
-__exported import Utils.Sampling.SampleGenerator;
+import Scene.Raytracing;
+import Scene.Intersection;
+import Utils.Sampling.SampleGenerator;
 
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
@@ -39,7 +40,7 @@ import AccelIrregularZ.AccelIrregularZ;
 #endif
 
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
-static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; //Enable ray tracing for techniques that return a negative shadow value
+static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 
 // For RIS light sampling
 struct RISReservoir {
@@ -153,7 +154,21 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
 
             VertexData v = gScene.getVertexData(triangleHit);
             uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-            let lod = ExplicitLodTextureSampler(0.f);
+            //LOD mode handling
+            ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+            if (kShadowLODMode == TexLODMode::RayCones)
+            {
+                float2 ddx, ddy;
+                computeAnisotropicAxesRayCones(triangleHit, v, ray.Direction, rayQuery.CandidateTriangleRayT(), kScreenSpacePixelSpreadAngle, ddx, ddy);
+                lod = ExplicitGradientTextureSampler(ddx, ddy);
+            }
+            else if (kShadowLODMode == TexLODMode::RayDiffs)
+            {
+                float2 ddx, ddy;
+                computeRayDifferentials(triangleHit, ray.Direction, rayQuery.CandidateTriangleRayT(), gScene.camera, kInvFrameDim, ddx, ddy);
+                lod = ExplicitGradientTextureSampler(ddx, ddy);
+            }
+            
             ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -ray.Direction, lod);
 
             visibility *= saturate(1.0 - sd.opacity);

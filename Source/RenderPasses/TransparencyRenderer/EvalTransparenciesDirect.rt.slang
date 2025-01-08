@@ -1,13 +1,10 @@
-#include "RayLodHelper.slang"
-
-import EvaluateAnalyticLight;
+#include "EvaluateAnalyticLight.slang"
+ 
 import Utils.Math.MathHelpers;
 
 cbuffer CB
 {
     uint gFrameCount; // Current it for sample gen
-    float2 gInvFrameDim;
-    float gScreenSpacePixelSpreadAngle;
 }
 
 // Inputs
@@ -126,12 +123,12 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
     //LOD
     if (kLODMode == TexLODMode::RayCones)
     {
-        computeAnisotropicAxesRayCones(triangleHit, v, WorldRayDirection(), RayTCurrent(), gScreenSpacePixelSpreadAngle, ddx, ddy);
+        computeAnisotropicAxesRayCones(triangleHit, v, WorldRayDirection(), RayTCurrent(), kScreenSpacePixelSpreadAngle, ddx, ddy);
         lod = ExplicitGradientTextureSampler(ddx, ddy);
     }
     else if (kLODMode == TexLODMode::RayDiffs)
     {
-        computeRayDifferentials(triangleHit, WorldRayDirection(), RayTCurrent(), gScene.camera, gInvFrameDim, ddx, ddy);
+        computeRayDifferentials(triangleHit, WorldRayDirection(), RayTCurrent(), gScene.camera, kInvFrameDim, ddx, ddy);
         lod = ExplicitGradientTextureSampler(ddx, ddy);
     }
 

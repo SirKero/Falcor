@@ -104,12 +104,14 @@ private:
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
     TexLODMode mRayLodMode = TexLODMode::Mip0;
     bool mEnableTransparencyPassLODMode = true;
+    TexLODMode mShadowLodMode = TexLODMode::Mip0;
     uint mSelectedShadowMethod = std::max((int)mShadowRenderMethod - 1, 0);
 
     std::vector<std::shared_ptr<TransparencyShadowMethod>> mShadowMethods; //Shadow Methods that rely on extra structures (mSelectedShadowMethod - 1)
 
     // Runtime data Tracer
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
+    uint2 mRenderDims = uint2(512);
     LightSampleMode mLightSampleMode = LightSampleMode::RIS;
     bool mOptionsChanged = false;
     bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass

@@ -11,6 +11,8 @@ import Rendering.Materials.TexLODHelpers;
 
 static const TexLODMode kLODMode = TexLODMode(RAY_LOD_MODE);
 static const TexLODMode kShadowLODMode = TexLODMode(SHADOW_LOD_MODE);
+static const float2 kInvFrameDim = float2(INV_FRAME_DIM_X, INV_FRAME_DIM_Y);
+static const float kScreenSpacePixelSpreadAngle = SCREEN_SPACE_PIXEL_SPREAD_ANGLE;
 
 /** Ray differentials for primary hit. Code from RayTracingGems, Chapter 20.
  */

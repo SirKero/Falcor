@@ -1,12 +1,8 @@
-#include "RayLodHelper.slang"
-
-import EvaluateAnalyticLight;
+#include "EvaluateAnalyticLight.slang"
 
 cbuffer CB
 {
     uint gFrameCount; // Current it for sample gen
-    float2 gInvFrameDim;
-    float gScreenSpacePixelSpreadAngle;
 }
 
 // Inputs
@@ -66,13 +62,13 @@ void main(uint2 pixel: SV_DispatchThreadID)
         if (kLODMode == TexLODMode::RayCones)
         {
             float2 ddx, ddy;
-            computeAnisotropicAxesRayCones(triangleHit, v, viewDir, hitT, gScreenSpacePixelSpreadAngle, ddx, ddy);
+            computeAnisotropicAxesRayCones(triangleHit, v, viewDir, hitT, kScreenSpacePixelSpreadAngle, ddx, ddy);
             lod = ExplicitGradientTextureSampler(ddx, ddy);
         }
         else if (kLODMode == TexLODMode::RayDiffs)
         {
             float2 ddx, ddy;
-            computeRayDifferentials(triangleHit, viewDir, hitT, gScene.camera, gInvFrameDim, ddx, ddy);
+            computeRayDifferentials(triangleHit, viewDir, hitT, gScene.camera, kInvFrameDim, ddx, ddy);
             lod = ExplicitGradientTextureSampler(ddx, ddy);
         }
         // else kLODMode == TexLODMode::Mip0
