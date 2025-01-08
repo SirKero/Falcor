@@ -103,6 +103,7 @@ private:
 
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
     TexLODMode mRayLodMode = TexLODMode::Mip0;
+    bool mEnableTransparencyPassLODMode = true;
     uint mSelectedShadowMethod = std::max((int)mShadowRenderMethod - 1, 0);
 
     std::vector<std::shared_ptr<TransparencyShadowMethod>> mShadowMethods; //Shadow Methods that rely on extra structures (mSelectedShadowMethod - 1)

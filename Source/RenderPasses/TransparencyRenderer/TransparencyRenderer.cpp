@@ -191,6 +191,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
         dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
         dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
+        dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
     }
 
     bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
@@ -301,8 +302,8 @@ void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const Rende
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gInvFrameDim"] = 1.f / float2(targetDim);        //TODO to defines ? 
-    var["CB"]["gScreenSpacePixelSpreadAngle"] = mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(targetDim.y); //TODO to defines ? 
+    var["CB"]["gInvFrameDim"] = 1.f / float2(targetDim);  
+    var["CB"]["gScreenSpacePixelSpreadAngle"] = mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(targetDim.y);
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -344,7 +345,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kShaderEvalTransparenciesDirect);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
-        desc.setMaxPayloadSize(32u);
+        desc.setMaxPayloadSize(36u);
         desc.setMaxTraceRecursionDepth(1u);
         
         mEvalTransparencyDirectRay.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
@@ -369,11 +370,13 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     }
     FALCOR_ASSERT(mEvalTransparencyDirectRay.pProgram);
 
+    bool useLodMode = mEnableTransparencyPassLODMode && ((mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs));
     // Update define that can change at runtime
     mEvalTransparencyDirectRay.pProgram->addDefines(getLightEvalDefines());
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
+    mEvalTransparencyDirectRay.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
     
     // Init Vars
     if (!mEvalTransparencyDirectRay.pVars)
@@ -387,6 +390,9 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     FALCOR_ASSERT(mEvalTransparencyDirectRay.pVars);
 
     //Bind shader data
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
     auto var = mEvalTransparencyDirectRay.pVars->getRootVar();
     
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -396,6 +402,8 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gInvFrameDim"] = 1.f / float2(targetDim);            
+    var["CB"]["gScreenSpacePixelSpreadAngle"] = mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(targetDim.y);
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -415,7 +423,5 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     var["gThpOut"] = mpTransparencyThp;
 
      // Execute
-    const uint2 targetDim = renderData.getDefaultTextureDims();
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpScene->raytrace(pRenderContext, mEvalTransparencyDirectRay.pProgram.get(), mEvalTransparencyDirectRay.pVars, uint3(targetDim, 1));
 }

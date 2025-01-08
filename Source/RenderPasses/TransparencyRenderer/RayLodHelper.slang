@@ -5,7 +5,12 @@ import Rendering.Materials.TexLODHelpers;
 #define RAY_LOD_MODE 0 //Mip0
 #endif
 
+#ifndef SHADOW_LOD_MODE
+#define SHADOW_LOD_MODE 0 //Mip 0
+#endif
+
 static const TexLODMode kLODMode = TexLODMode(RAY_LOD_MODE);
+static const TexLODMode kShadowLODMode = TexLODMode(SHADOW_LOD_MODE);
 
 /** Ray differentials for primary hit. Code from RayTracingGems, Chapter 20.
  */

@@ -1,9 +1,13 @@
+#include "RayLodHelper.slang"
+
 import EvaluateAnalyticLight;
 import Utils.Math.MathHelpers;
 
 cbuffer CB
 {
     uint gFrameCount; // Current it for sample gen
+    float2 gInvFrameDim;
+    float gScreenSpacePixelSpreadAngle;
 }
 
 // Inputs
@@ -20,22 +24,36 @@ RWTexture2D<float2> gOutMotion;
 RWTexture2D<float4> gOutputColor;
 RWTexture2D<float4> gThpOut;
 
+#ifndef ENABLE_TRANSPARENCY_LOD
+#define ENABLE_TRANSPARENCY_LOD 0
+#endif
+
 #define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = 1e-7;
 static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
 
-/** Payload for alpha ray (20B)
+
+/** Payload for alpha ray (20B + 16B if lod is enabled)
 */
 struct TransparencyRayData {
     PackedHitInfo hit; //< Packed Hit
     float dist;
 
-    __init()
+    #if ENABLE_TRANSPARENCY_LOD
+    float2 ddx;
+    float2 ddy;
+    #endif
+
+    __init(float tMax)
     {
         hit = {}; // Init emtpy
-        dist = -1.0;
+        dist = tMax;
+        #if ENABLE_TRANSPARENCY_LOD
+        ddx = float2(0);
+        ddy = float2(0);
+        #endif
     }
 }
 
@@ -89,28 +107,55 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 [shader("miss")]
 void miss(inout TransparencyRayData rayData)
 {
-
+    rayData.dist = -1.0f; 
 }
 
 [shader("anyhit")]
 void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
     // Alpha test for non-opaque geometry.
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
-    if (gScene.materials.alphaTest(v, materialID, 0.f, kMinOpacity)) IgnoreHit();
+    TriangleHit triangleHit;
+    triangleHit.instanceID = getGeometryInstanceID();
+    triangleHit.primitiveIndex = PrimitiveIndex();
+    triangleHit.barycentrics = attribs.barycentrics;
+
+    VertexData v = gScene.getVertexData(triangleHit);
+    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+    ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+    float2 ddx, ddy;
+    //LOD
+    if (kLODMode == TexLODMode::RayCones)
+    {
+        computeAnisotropicAxesRayCones(triangleHit, v, WorldRayDirection(), RayTCurrent(), gScreenSpacePixelSpreadAngle, ddx, ddy);
+        lod = ExplicitGradientTextureSampler(ddx, ddy);
+    }
+    else if (kLODMode == TexLODMode::RayDiffs)
+    {
+        computeRayDifferentials(triangleHit, WorldRayDirection(), RayTCurrent(), gScene.camera, gInvFrameDim, ddx, ddy);
+        lod = ExplicitGradientTextureSampler(ddx, ddy);
+    }
+
+    if (!gScene.materials.alphaTest(v, materialID, lod, kMinOpacity)) {
+        //Update payload
+        if (RayTCurrent() < rayData.dist) {
+           
+            rayData.hit = HitInfo(triangleHit).getData();
+            rayData.dist = RayTCurrent();
+            #if ENABLE_TRANSPARENCY_LOD
+                rayData.ddx = ddx;
+                rayData.ddy = ddy;
+            #endif
+        }
+    } else {
+        IgnoreHit();
+    }
+    
 }
 
 [shader("closesthit")]
 void closestHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    TriangleHit triangleHit;
-    triangleHit.instanceID = getGeometryInstanceID();
-    triangleHit.primitiveIndex = PrimitiveIndex();
-    triangleHit.barycentrics = attribs.barycentrics;
-    rayData.hit = HitInfo(triangleHit).getData();
-    rayData.dist = RayTCurrent();
+    //Skipped
 }
 
 [shader("raygeneration")]
@@ -163,11 +208,11 @@ void rayGen()
     ray.Direction = pd.direction;
     ray.TMin =  gScene.camera.data.nearZ;
     ray.TMax = tMax;
-    TransparencyRayData rayData = TransparencyRayData();
+    TransparencyRayData rayData = TransparencyRayData(tMax);
 
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
-        //Trace Ray
-        uint rayFlags = RAY_FLAG_CULL_OPAQUE;
+        // Trace Ray
+        uint rayFlags = RAY_FLAG_CULL_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
         TraceRay(gScene.rtAccel, rayFlags, 0xFF, 0, rayTypeCount, 0, ray, rayData);
 
         //Miss
@@ -175,11 +220,15 @@ void rayGen()
             pd.terminated = true;
             break;
         }
+
         HitInfo hit = HitInfo(rayData.hit);
         if(!hit.isValid())
             break;
 
-        let lod = ExplicitLodTextureSampler(0.f);
+        ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+        #if ENABLE_TRANSPARENCY_LOD
+            lod = ExplicitGradientTextureSampler(rayData.ddx, rayData.ddy);
+        #endif 
         //Get shading data
         ShadingData sd = loadShadingData(hit, pd.direction, lod);
         // Get material instance
@@ -206,7 +255,7 @@ void rayGen()
 
         //Update ray
         ray.TMin = rayData.dist + 1e-10;
-        rayData = TransparencyRayData();
+        rayData = TransparencyRayData(ray.TMax);
 
         // Update depth and motion vector if valid
         if (i == 0 && is_valid(gOutDepth)) {
