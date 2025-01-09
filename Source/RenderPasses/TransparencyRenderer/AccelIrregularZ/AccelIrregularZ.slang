@@ -78,11 +78,9 @@ struct AccelIrregularZShader
         if (kUseNearestDepth) {
             const float linZ = origin.z;
 
-            float distToDepth = abs(linZ - shadowData.hitDepth);
-
-            if (rayData.hitDepth < 0 || distToDepth < rayData.hitDepth) {
+            if (rayData.hitDepth < 0 || shadowData.hitDepth < rayData.hitDepth) {
                 rayData.visibility = shadowData.transparency;
-                rayData.hitDepth = distToDepth;
+                rayData.hitDepth = shadowData.hitDepth;
             }
         } // Take average of all hit samples
         else {

@@ -148,8 +148,8 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
     VertexData v = gScene.getVertexData(triangleHit);
     const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
 
-    //if (!gScene.materials.isAlphaTestSupported(materialID))
-    //    return;
+    if (!gScene.materials.isAlphaTestSupported(materialID))
+        return;
 
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
     float2 ddx = float2(0);
@@ -512,7 +512,7 @@ void rayGen()
         }
         // Update for next iteration
         if (rayData.dist > 0) {
-            ray.TMin = rayData.dist + 1e-10;
+            ray.TMin = rayData.dist + 1e-7;
             lastHitDepth = rayData.depth;
             if(!mergeBox)
                 lastTransmittances.y = lastTransmittances.x;
