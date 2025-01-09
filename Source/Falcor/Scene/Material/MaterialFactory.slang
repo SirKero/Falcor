@@ -115,6 +115,32 @@ extension MaterialSystem
         return sd;
     }
 
+    /** Evaluates the opacity of a material
+       \param[in] v Interpolated vertex data.
+       \param[in] materialID Material ID at the hit.
+       \param[in] lod Method for computing texture level-of-detail, must implement the `ITextureSampler` interface.
+       \return Material Opacity
+    */
+    float getMaterialOpacity<L : ITextureSampler>(const VertexData v, const uint materialID, L lod) {
+        // Create IMaterial instance.
+        let material = getMaterial(materialID);
+
+        // Query material to evaluate opacity.
+        float opacity = material.evalOpacity(this, v, lod);
+
+        return opacity;
+    }
+
+    /** Check if Alpha Test is supported by the material
+        \param[in] materialID Material ID at the hit.
+        \return Material Opacity
+    */
+    bool isAlphaTestSupported(const uint materialID) {
+        const MaterialHeader header = materialData[materialID].header;
+
+        return (header.getAlphaMode() != AlphaMode::Opaque);
+    }
+
     /** Perform alpha test at a hit point and return the result.
         \param[in] v Interpolated vertex data.
         \param[in] materialID Material ID at the hit.

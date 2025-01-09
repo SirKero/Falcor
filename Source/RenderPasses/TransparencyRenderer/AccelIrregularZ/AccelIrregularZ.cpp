@@ -89,7 +89,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kGenShader);
-        desc.setMaxPayloadSize(20u); //
+        desc.setMaxPayloadSize(16u); //
                                      //(4) + align(4)
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1u);

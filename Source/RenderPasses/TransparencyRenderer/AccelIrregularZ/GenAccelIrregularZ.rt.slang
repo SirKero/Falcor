@@ -33,18 +33,20 @@ import Utils.Geometry.GeometryHelpers;
 #define MAX_SAMPLES_PER_PIXEL_Y 1
 #endif
 
-/** Payload for shadow ray.
+/** Payload for shadow ray. (16B)
 */
 struct RayData
 {
     float dist;
     float depth;
     float currentTransmittance;
+    float sampleOpacity;
 
     __init() {
         this.dist = -1.0;
         this.depth = 1.0;
         this.currentTransmittance = 1.0;
+        this.sampleOpacity = -1.0;
     }
 };
 
@@ -142,7 +144,20 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
     GeometryInstanceID instanceID = getGeometryInstanceID();
     VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
     const uint materialID = gScene.getMaterialID(instanceID);
-    if (gScene.materials.alphaTest(v, materialID, 0.f, kMinOpacity)) IgnoreHit();
+
+    if (!gScene.materials.isAlphaTestSupported(materialID))
+        IgnoreHit();
+
+    let lod = ExplicitLodTextureSampler(0.f);
+    float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+
+    if (opacity < kMinOpacity)
+        IgnoreHit();
+
+    if (RayTCurrent() < rayData.dist) {
+        rayData.sampleOpacity = opacity;
+        rayData.dist = RayTCurrent();
+    }
 }
 
 bool intersectPlane(const float3 N, const float3 p, const float3 ray, out float t) {
@@ -162,14 +177,19 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     triangleHit.instanceID = getGeometryInstanceID();
     triangleHit.primitiveIndex = PrimitiveIndex();
     triangleHit.barycentrics = attribs.barycentrics;
-
     VertexData v = gScene.getVertexData(triangleHit);
-    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
+   
+    float opacity = rayData.sampleOpacity;
 
-    rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - sd.opacity);
-    float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
+    //Fetch opacity if it is invalid
+    if (opacity < 0) {
+        uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+        let lod = ExplicitLodTextureSampler(0.f);
+        opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+    }
+        
+    rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - opacity);
+    float4 posH = mul(gViewProj, float4(v.posW, 1.f));
     rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
     rayData.dist = RayTCurrent();
 }
@@ -446,7 +466,8 @@ void rayGen()
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
-        rayData.dist = -1;
+        rayData.dist = ray.TMax;
+        rayData.sampleOpacity = -1.0;
 
         //Trace ray
         TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
