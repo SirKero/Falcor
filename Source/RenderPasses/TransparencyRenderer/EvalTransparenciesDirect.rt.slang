@@ -119,18 +119,21 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
     VertexData v = gScene.getVertexData(triangleHit);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-    float2 ddx, ddy;
-    //LOD
-    if (kLODMode == TexLODMode::RayCones)
-    {
-        computeAnisotropicAxesRayCones(triangleHit, v, WorldRayDirection(), RayTCurrent(), kScreenSpacePixelSpreadAngle, ddx, ddy);
-        lod = ExplicitGradientTextureSampler(ddx, ddy);
-    }
-    else if (kLODMode == TexLODMode::RayDiffs)
-    {
-        computeRayDifferentials(triangleHit, WorldRayDirection(), RayTCurrent(), gScene.camera, kInvFrameDim, ddx, ddy);
-        lod = ExplicitGradientTextureSampler(ddx, ddy);
-    }
+    #if ENABLE_TRANSPARENCY_LOD
+        float2 ddx = float2(0);
+        float2 ddy = float2(0);
+        //LOD
+        if (kLODMode == TexLODMode::RayCones)
+        {
+            computeAnisotropicAxesRayCones(triangleHit, v, -WorldRayDirection(), RayTCurrent(), kScreenSpacePixelSpreadAngle, ddx, ddy);
+            lod = ExplicitGradientTextureSampler(ddx, ddy);
+        }
+        else if (kLODMode == TexLODMode::RayDiffs)
+        {
+            computeRayDifferentials(triangleHit, -WorldRayDirection(), RayTCurrent(), gScene.camera, kInvFrameDim, ddx, ddy);
+            lod = ExplicitGradientTextureSampler(ddx, ddy);
+        }
+    #endif
 
     if (!gScene.materials.alphaTest(v, materialID, lod, kMinOpacity)) {
         //Update payload

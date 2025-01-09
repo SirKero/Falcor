@@ -139,16 +139,34 @@ void miss(inout RayData rayData)
 [shader("anyhit")]
 void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    //TODO add LOD; improve alpha test (only one texture fetch)
-    // Alpha test for non-opaque geometry.
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
+    //  Alpha test for non-opaque geometry.
+    TriangleHit triangleHit;
+    triangleHit.instanceID = getGeometryInstanceID();
+    triangleHit.primitiveIndex = PrimitiveIndex();
+    triangleHit.barycentrics = attribs.barycentrics;
 
-    if (!gScene.materials.isAlphaTestSupported(materialID))
-        IgnoreHit();
+    VertexData v = gScene.getVertexData(triangleHit);
+    const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
 
-    let lod = ExplicitLodTextureSampler(0.f);
+    //if (!gScene.materials.isAlphaTestSupported(materialID))
+    //    return;
+
+    ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+    float2 ddx = float2(0);
+    float2 ddy = float2(0);
+    // LOD
+    if (kShadowLODMode == TexLODMode::RayCones)
+    {
+        computeAnisotropicAxesRayCones(triangleHit, v, -WorldRayDirection(), RayTCurrent(), gSpreadAngle, ddx, ddy);
+        lod = ExplicitGradientTextureSampler(ddx, ddy);
+    }
+    /* //TODO camera parameter is not correct for shadow maps
+    else if (kShadowLODMode == TexLODMode::RayDiffs)
+    {
+        computeRayDifferentials(triangleHit, -WorldRayDirection(), RayTCurrent(), gScene.camera, kInvFrameDim, ddx, ddy); 
+        lod = ExplicitGradientTextureSampler(ddx, ddy);
+    }
+    */
     float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
 
     if (opacity < kMinOpacity)
@@ -178,16 +196,12 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     triangleHit.primitiveIndex = PrimitiveIndex();
     triangleHit.barycentrics = attribs.barycentrics;
     VertexData v = gScene.getVertexData(triangleHit);
-   
-    float opacity = rayData.sampleOpacity;
 
-    //Fetch opacity if it is invalid
-    if (opacity < 0) {
-        uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-        let lod = ExplicitLodTextureSampler(0.f);
-        opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+    float opacity = rayData.sampleOpacity;
+    if (RayTCurrent() < rayData.dist) {
+        opacity = 1.0;
     }
-        
+            
     rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - opacity);
     float4 posH = mul(gViewProj, float4(v.posW, 1.f));
     rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
@@ -467,7 +481,7 @@ void rayGen()
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
         rayData.dist = ray.TMax;
-        rayData.sampleOpacity = -1.0;
+        rayData.sampleOpacity = 1.0;
 
         //Trace ray
         TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
