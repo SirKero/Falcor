@@ -51,8 +51,9 @@ enum class SceneDebuggerMode : uint32_t
     // Material properties
     GuideNormal,
     Roughness,
-    FlatShaded,
     Metallic,
+    Opacity,
+    FlatShaded,
 };
 
 FALCOR_ENUM_INFO(SceneDebuggerMode, {
@@ -76,6 +77,7 @@ FALCOR_ENUM_INFO(SceneDebuggerMode, {
     { SceneDebuggerMode::GuideNormal, "GuideNormal" },
     { SceneDebuggerMode::Roughness, "Roughness" },
     { SceneDebuggerMode::Metallic, "Metallic" },
+    { SceneDebuggerMode::Opacity, "Opacity" },
     { SceneDebuggerMode::FlatShaded, "FlatShaded" },
 });
 FALCOR_ENUM_REGISTER(SceneDebuggerMode);

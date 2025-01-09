@@ -73,4 +73,5 @@ private:
     ref<Buffer>             mpMeshToBlasID;
     ref<Buffer>             mpInstanceInfo;
     bool                    mPixelDataAvailable = false;
+    bool                    mUseAlphaTest = true; 
 };

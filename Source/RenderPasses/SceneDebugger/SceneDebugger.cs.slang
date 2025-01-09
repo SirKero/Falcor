@@ -34,7 +34,7 @@ import SharedTypes;
 
 struct SceneDebugger
 {
-    static const int kUseAlphaTest = 1;
+    static const int kUseAlphaTest = USE_ALPHA_TEST;
 
     SceneDebuggerParams params;
     StructuredBuffer<uint> meshToBlasID;
@@ -279,7 +279,10 @@ struct SceneDebugger
             return float3(bsdfProperties.roughness);
         case SceneDebuggerMode::Metallic:
             float3 metallicReturn = metallic >= 0 ? float3(metallic) : float3(1, 0, 0);
-            return float3(metallicReturn);
+            return metallicReturn;
+        case SceneDebuggerMode::Opacity:
+            float3 opacity = float3(sd.opacity);
+            return opacity;
         case SceneDebuggerMode::FlatShaded:
         {
             // DEMO21:

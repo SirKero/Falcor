@@ -159,7 +159,12 @@ void SceneDebugger::setScene(RenderContext* pRenderContext, const ref<Scene>& pS
         desc.addShaderLibrary(kShaderFile).csEntry("main");
         desc.addTypeConformances(mpScene->getTypeConformances());
         desc.setShaderModel(kShaderModel);
-        mpDebugPass = ComputePass::create(mpDevice, desc, mpScene->getSceneDefines());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add("USE_ALPHA_TEST", mUseAlphaTest ? "1" : "0");
+
+        mpDebugPass = ComputePass::create(mpDevice, desc, defines);
 
         // Create lookup table for mesh to BLAS ID.
         auto blasIDs = mpScene->getMeshBlasIDs();
@@ -196,6 +201,8 @@ void SceneDebugger::execute(RenderContext* pRenderContext, const RenderData& ren
     }
     // DEMO21:
     //mpScene->getCamera()->setJitter(0.f, 0.f);
+
+    mpDebugPass->getProgram()->addDefine("USE_ALPHA_TEST", mUseAlphaTest ? "1" : "0");
 
     mpScene->setRaytracingShaderData(pRenderContext, mpDebugPass->getRootVar());
 
@@ -238,6 +245,8 @@ void SceneDebugger::renderUI(Gui::Widgets& widget)
     {
         widget.var("Density scale", mParams.densityScale, 0.f, 1000.f, 0.1f);
     }
+
+    widget.checkbox("Alpha Test", mUseAlphaTest);
 
     widget.textWrapped("Description:\n" + getModeDesc((SceneDebuggerMode)mParams.mode));
 
