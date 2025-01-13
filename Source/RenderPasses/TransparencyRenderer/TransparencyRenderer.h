@@ -87,6 +87,20 @@ public:
         }
     );
 
+    enum class CameraRenderMode : uint
+    {
+        DirectRT = 0,
+        PathTracer = 1
+    };
+
+    FALCOR_ENUM_INFO(
+        CameraRenderMode,
+        {
+            {CameraRenderMode::DirectRT, "DirectRT"},
+            {CameraRenderMode::PathTracer, "PathTracer"},
+        }
+    );
+
 private:
     //Defines for the light evaluation. Can update every frame
     DefineList getLightEvalDefines();
@@ -95,12 +109,15 @@ private:
     void evalDirect(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluates the transparencies until the first opaque surface
     void evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData);
+    //Path tracing pass
+    void evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData);
 
     // Internal state
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
     std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
 
+    CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
     TexLODMode mRayLodMode = TexLODMode::Mip0;
     bool mEnableTransparencyPassLODMode = true;
@@ -143,8 +160,10 @@ private:
 
     RayTracingPipeline mEvalTransparencyDirectRay; // Ray Tracing pass for evaluating the Transparencies along the primary ray
     ref<ComputePass> mpEvalDirectPass; //Compute Pass for direct light
+    RayTracingPipeline mTransparencyPathTracer; //Pipeline for the path tracer
     
 };
 
 FALCOR_ENUM_REGISTER(TransparencyRenderer::ShadowRenderMethod);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::LightSampleMode);
+FALCOR_ENUM_REGISTER(TransparencyRenderer::CameraRenderMode);

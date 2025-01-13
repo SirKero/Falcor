@@ -45,6 +45,7 @@ namespace
     const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/";
     const std::string kShaderEvalDirect = kShaderFolder + "EvalDirect.cs.slang";
     const std::string kShaderEvalTransparenciesDirect = kShaderFolder + "EvalTransparenciesDirect.rt.slang";
+    const std::string kShaderPathTracer = kShaderFolder + "PathTracer.rt.slang";
 
     const std::string kShaderModel = "6_6"; //Shader model for compute shader
 
@@ -177,10 +178,18 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
 
-    evalDirectTransparency(pRenderContext, renderData);
-
-    evalDirect(pRenderContext, renderData);
-
+    //Render
+    switch (mCameraRenderMode)
+    {
+    case CameraRenderMode::DirectRT:
+        evalDirectTransparency(pRenderContext, renderData);
+        evalDirect(pRenderContext, renderData);
+        break;
+    case CameraRenderMode::PathTracer:
+        evalPathTracer(pRenderContext, renderData);
+        break;
+    }
+     
     // Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->debugPass(pRenderContext, renderData, renderData.getTexture(kOutputDebug), renderData.getTexture(kOutputColor));
@@ -192,14 +201,26 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
 
-    if (auto group = widget.group("Shading Settings"))
+    dirty |= widget.dropdown("Render Method", mCameraRenderMode);
+
+
+    if (auto group = widget.group("Render Settings"))
     {
-        dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
-        dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
-        dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
-        dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
-        dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
-        dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
+        switch (mCameraRenderMode)
+        {
+        case CameraRenderMode::DirectRT:
+            dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
+            dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
+            dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+            dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
+            dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
+            dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
+            break;
+        case CameraRenderMode::PathTracer:
+            dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
+            dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+            break;
+        }       
     }
 
     bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
@@ -435,4 +456,91 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
 
      // Execute
     mpScene->raytrace(pRenderContext, mEvalTransparencyDirectRay.pProgram.get(), mEvalTransparencyDirectRay.pVars, uint3(targetDim, 1));
+}
+
+void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData) {
+    FALCOR_PROFILE(pRenderContext, "Transparency Path Tracer");
+
+    //Create Pipeline
+    if (!mTransparencyPathTracer.pProgram)
+    {
+        // Shader setup
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderPathTracer);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxPayloadSize(36u);
+        desc.setMaxTraceRecursionDepth(1u);
+
+        mTransparencyPathTracer.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mTransparencyPathTracer.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen"));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        // Only Triangle meshes are supported
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        // Initial defines and program
+        DefineList defines;
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(mpScene->getSceneDefines());
+
+        mTransparencyPathTracer.pProgram = RtProgram::create(mpDevice, desc, defines);
+    }
+    FALCOR_ASSERT(mTransparencyPathTracer.pProgram);
+
+    mTransparencyPathTracer.pProgram->addDefines(getLightEvalDefines());
+    mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
+    mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
+    mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); // For updating depth and motion
+
+    //TODO add support for LOD modes
+
+    // Init Vars
+    if (!mTransparencyPathTracer.pVars)
+    {
+        mTransparencyPathTracer.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        mTransparencyPathTracer.pVars =
+            RtProgramVars::create(mpDevice, mTransparencyPathTracer.pProgram, mTransparencyPathTracer.pBindingTable);
+        auto var = mTransparencyPathTracer.pVars->getRootVar();
+        mpSampleGenerator->setShaderData(var);
+    }
+
+    FALCOR_ASSERT(mTransparencyPathTracer.pVars);
+
+    // Bind shader data
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    auto var = mTransparencyPathTracer.pVars->getRootVar();
+
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+        mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
+
+    if (mEnableOpaqueShadowMaps)
+        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
+
+    var["CB"]["gFrameCount"] = mFrameCount;
+
+    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
+    auto bind = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData.getTexture(desc.name);
+        }
+    };
+    for (auto& channel : kInputChannels)
+        bind(channel);
+    for (auto& channel : kInputGeometryInfoChannels)
+        bind(channel);
+    for (auto& channel : kOutputGeometryInfoChannels)
+        bind(channel);
+    var["gOutputColor"] = renderData.getTexture(kOutputColor);
+
+    // Execute
+    mpScene->raytrace(pRenderContext, mTransparencyPathTracer.pProgram.get(), mTransparencyPathTracer.pVars, uint3(targetDim, 1));
 }

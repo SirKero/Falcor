@@ -41,6 +41,7 @@ target_sources(TransparencyRenderer PRIVATE
 	EvaluateAnalyticLight.slang
 	EvalDirect.cs.slang
 	EvalTransparenciesDirect.rt.slang
+	PathTracer.rt.slang
 	RayLodHelper.slang
 )
 
