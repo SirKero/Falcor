@@ -219,6 +219,9 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         case CameraRenderMode::PathTracer:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+            dirty |= widget.var("Max Bounces", mPTMaxBounces, 0u, UINT_MAX);
+            widget.tooltip("Maximum number of Bounces. Also includes semi-transparent hits");
+            dirty |= widget.checkbox("Use Russian Roulette", mPTUseRussianRoulette);
             break;
         }       
     }
@@ -496,6 +499,8 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
     mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
     mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
     mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); // For updating depth and motion
+    mTransparencyPathTracer.pProgram->addDefine("MAX_BOUNCES", std::to_string(mPTMaxBounces));
+    mTransparencyPathTracer.pProgram->addDefine("USE_RUSSIAN_ROULETTE", mPTUseRussianRoulette ? "1" : "0");
 
     //TODO add support for LOD modes
 

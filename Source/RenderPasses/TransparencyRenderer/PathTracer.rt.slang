@@ -26,8 +26,8 @@ static const uint kMaxElements = 256; // For now 256 max transparent elements on
 static const bool kAdjustShadingNormals = true;
 
 // TODO set as CPU defines
-static const uint kMaxBounces = 256;           //Max Bounces
-static const bool kUseRussianRoulette = false; //Russian Roulette
+static const uint kMaxBounces = MAX_BOUNCES;           //Max Bounces
+static const bool kUseRussianRoulette = USE_RUSSIAN_ROULETTE; //Russian Roulette
 
 /** Payload for alpha ray (20B + 16B if lod is enabled)
 */
@@ -87,6 +87,19 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
 
     return sd;
+}
+
+/** Russian Roulette function that can abort a path early
+    Return "true" if the path should be aborted (absorbed)
+*/
+bool russianRoulette(inout float3 thp, inout SampleGenerator sg) {
+    float prob = luminance(thp);
+    float rnd = sampleNext1D(sg);
+    bool rr = rnd > prob;
+    if (!rr) {
+        thp /= prob;
+    }
+    return rr;
 }
 
 [shader("miss")]
@@ -179,7 +192,7 @@ void rayGen()
     ray.TMax = tMax;
     TransparencyRayData rayData = TransparencyRayData(tMax);
 
-    for(uint i=0; i<kMaxBounces && !pd.terminated; i++){
+    for(uint i=0; i<=kMaxBounces && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = 0;
         TraceRay(gScene.rtAccel, rayFlags, 0xFF, 0, rayTypeCount, 0, ray, rayData);
@@ -221,17 +234,31 @@ void rayGen()
             pd.origin = sd.computeNewRayOrigin(!bsdfSample.isLobe(LobeType::Transmission));
             pd.direction = bsdfSample.wo;
             pd.thp *= bsdfSample.weight;
-            //pd.thp /= sd.opacity;
+            /* Cancels out
+            pd.thp /= sd.opacity;
+            pd.thp *= sd.opacity;
+            */
             ray.TMin = 0.0;
             rayData = TransparencyRayData(ray.TMax);
         }
-        else{
+        else {
+            /* Cancels out
+            pd.thp /= (1.0 - sd.opacity);
             pd.thp *= (1.0 - sd.opacity);
+            */
             ray.TMin = rayData.dist + 1e-10;
         }
 
-        if (all(pd.thp <= kMinOpacity))
-            pd.terminated = true;
+        if (kUseRussianRoulette) {
+            pd.terminated |= russianRoulette(pd.thp, pd.sg);
+        }
+        /*
+        else {
+            //Abort if 
+            if (all(pd.thp <= kMinOpacity))
+                pd.terminated = true;
+        }
+        */
 
         //Update ray
         rayData = TransparencyRayData(ray.TMax);
