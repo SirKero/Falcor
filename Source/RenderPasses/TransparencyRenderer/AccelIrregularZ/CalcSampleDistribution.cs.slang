@@ -30,7 +30,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
 
     //Calc dynamic amount of rays
     if (gCalcTotalDispatchCount) {
-        if (thdID.z > 0) //Only one thread is calculating the following
+        if (thdID.z > 0 || thdID.x > 0 || thdID.y > 0) //Only one thread is calculating the following
             return;
 
         // Get importance and ray count from each light

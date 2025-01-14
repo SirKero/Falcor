@@ -365,7 +365,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     }
     //Distribute Samples
     {
-        FALCOR_PROFILE(pRenderContext, "Distribute Shadow Samples");
+        FALCOR_PROFILE(pRenderContext, "Calc Shadow Sample distribution");
         // Create Compute Pass
         if (!mCalcSampleDistribution)
         {

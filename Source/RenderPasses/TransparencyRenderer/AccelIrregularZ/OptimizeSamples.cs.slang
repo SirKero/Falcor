@@ -79,7 +79,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         for (uint i = 0; i < 4; i++) {
             // Add to total weight when less then one TODO Distribution bug
             if (totalSampleWeight < numValidSamples && values[i] > 0)
-                values[i] = 1.0;
+                values[i] = 1.0; //values[i] > 0.3 ? 1.0 : 0.0; TODO
             if (values[i] > 1) {
                 values[i] = floor(sqrt(values[i]));
                 values[i] *= values[i];
