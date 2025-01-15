@@ -28,26 +28,23 @@ void main(uint3 thdID: SV_DispatchThreadID)
     values[1] = gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y)];
     values[2] = gSampleDistribution0[lightID][uint2(pixelLower.x, pixelLower.y + 1)];
     values[3] = gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y + 1)];
-
+  
     float totalSampleWeight = values.x + values.y + values.z + values.w; //Total weight before redistribution.
 
     // check properties
     uint numValidSamples = 0;
-    uint numNeedReweigting = 0;
     for (uint i = 0; i < 4; i++) {
         if (values[i] > 0) {
             numValidSamples++;
-            if (values[i] < 1.0)
-                numNeedReweigting++;
         }
     }
 
-    bool reweight = true;
+    bool redistribute = true;
     // Check if reweighting is possible
-    if (totalSampleWeight < numValidSamples || numNeedReweigting == 0 || gMipLevel > 0) //
-        reweight = false;
+    if (totalSampleWeight < numValidSamples) //
+        redistribute = false;
 
-    if (reweight) {
+    if (redistribute) {
         // Increase all weight smaller than 0 to 1
         float remainingWeight = totalSampleWeight;
         float totalWeightOverOne = 0.0;
@@ -64,8 +61,9 @@ void main(uint3 thdID: SV_DispatchThreadID)
         totalSampleWeight = 0;
         for (uint i = 0; i < 4 && totalWeightOverOne > 0; i++) {
             if (values[i] > 1.0) {
-                float portion = 1.0 + max(((values[i] - 1.0) / totalWeightOverOne) * remainingWeight , 0.0);
-                if (gMipLevel == 0) {
+                float portion = 1.0 + max(((values[i] - 1.0) / totalWeightOverOne) * remainingWeight, 0.0);
+                if (gMipLevel == 0)
+                {
                     portion = floor(sqrt(portion));
                     portion *= portion;
                     portion = min(portion, kMaxSamplesPerPixel);
@@ -74,24 +72,15 @@ void main(uint3 thdID: SV_DispatchThreadID)
             }
             totalSampleWeight += values[i];
         }            
-    } else if (gMipLevel == 0) {
+    } else {
         [unroll]
         for (uint i = 0; i < 4; i++) {
-            // Add to total weight when less then one TODO Distribution bug
-            if (totalSampleWeight < numValidSamples && values[i] > 0)
-                values[i] = 1.0; //values[i] > 0.3 ? 1.0 : 0.0; TODO
-            if (values[i] > 1) {
-                values[i] = floor(sqrt(values[i]));
-                values[i] *= values[i];
-                values[i] = min(values[i], kMaxSamplesPerPixel);
-            }
+            values[i] = 0;
         }
-            
-        totalSampleWeight = values.x + values.y + values.z + values.w; //Cap was maybe applied
     }
 
     // Write to tex
-    if (gMipLevel == 0 || reweight) {
+    {
         gSampleDistribution0[lightID][pixelLower] = values[0];
         gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y)] = values[1];
         gSampleDistribution0[lightID][uint2(pixelLower.x, pixelLower.y + 1)] = values[2];
@@ -99,4 +88,5 @@ void main(uint3 thdID: SV_DispatchThreadID)
     }
 
     gSampleDistribution1[lightID][pixel] = totalSampleWeight;
+
 }

@@ -471,10 +471,16 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             }
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
             var["CB"]["gDispatchSize"] = dispatchDim.xy();
-            var["CB"]["gMipLevel"] = m - 1;
+            var["CB"]["gMipLevel"] = 0; // m - 1;
             var["CB"]["gLightCount"] = lights.size();
 
             mpOptimizeSamples->execute(pRenderContext, dispatchDim);
+            //TODO needed?
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                pRenderContext->uavBarrier(mSampleDistribution[i].get());
+            }
+            
         }
     }
 

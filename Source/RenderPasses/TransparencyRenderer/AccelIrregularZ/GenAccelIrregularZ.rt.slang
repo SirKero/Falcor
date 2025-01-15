@@ -356,22 +356,28 @@ void rayGen()
             uint weightIdx = idx1D; // Uint weight for traversal
             uint choosenSampleCount = 1;
             uint prevMipRes = 1; // Mip res for previous iteration
-            for (int m = gMipCount - 2; m >= 0; m--) {
-                float4 mipSamples;
-                mipSamples[0] = gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m));
-                mipSamples[1] = gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
-                mipSamples[2] = gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
-                mipSamples[3] = gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
-                uint currSamples = 0;
-                uint selectedSubpixel = 0;
-                uint numSamples = 0;
-                for (uint x = 0; x < 4; x++) {
+            const uint highestMip = gMipCount - 2;
+            for (int m = highestMip; m >= 0; m--) {
+                uint4 mipSamples;
+                mipSamples[0] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m))));
+                mipSamples[1] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
+                mipSamples[2] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
+                mipSamples[3] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+                uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+                uint currSamples = 0; //Total for select in loop
+                uint selectedSubpixel = 0;  //Selected subpixel id
+                uint numSamples = 0;        // Number of samples for that subpixel index
+                for (uint x = 0; x < 4 && totalSamples > 0; x++) {
                     numSamples = uint(round(mipSamples[x]));
                     currSamples += numSamples;
                     selectedSubpixel = x;
                     if (weightIdx < currSamples)
                         break;
                 }
+                // If total is reduced, abort and use the higher level
+                if (m < highestMip && totalSamples <= 0)
+                    break;
+
                 // Update weight idx
                 uint prevSampleIdx = currSamples - numSamples;
                 weightIdx -= prevSampleIdx;

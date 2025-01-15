@@ -56,7 +56,8 @@ void main(uint3 thdID: SV_DispatchThreadID)
         // Write new ray counts to textures
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             float w = importances[i] / totalImportance;
-            gSmp[i][pixel] = min(floor(w * totalRayCount), kMaxSamples);
+            //gSmp[i][pixel] = min(floor(w * totalRayCount), kMaxSamples);
+            gSmp[i][pixel] = kMaxSamples; //TODO temporary
         }
     }
     //Pull ray count to lower levels
