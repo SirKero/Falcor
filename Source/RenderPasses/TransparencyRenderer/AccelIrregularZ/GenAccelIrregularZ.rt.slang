@@ -78,27 +78,11 @@ static const float kMinOpacity = 1e-7;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
-static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
 static const float kMergeDistance = ACCEL_MERGE_BOX_DIST;
+static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 
-// DX11 Standard multisampling pattern (https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_standard_multisample_quality_levels?redirectedfrom=MSDN)
-// Offsets are (xMin, xMax, yMin, yMax)
-static const float2 kMSAAPattern2[4] = { float2(-0.25, -0.25), float2(0.25, 0.25), float2(-0.25, 0.25), float2(0.25, -0.25) };
-
-static const float2 kMSAAPattern4[4] = { float2(-0.125, -0.375), float2(0.375, -0.125), float2(-0.375, 0.125), float2(0.125, 0.375)
-                                      };
-static const float2 kMSAAPattern8[8] = { float2(0.0625, -0.1875),  float2(-0.0625, 0.1875), float2(0.3125, 0.0625), float2(-0.1875, -0.3125),
-                                        float2(-0.3125, 0.3125), float2(-0.4375, -0.0625), float2(0.1875, 0.4375),   float2(0.4375, -0.4375)
-                                      };
-/* Unused
-static const float2 kMSAAPattern16[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
-                                         float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
-                                         float2(-0.125, 0.375), float2(0.0, -0.4375),   float2(-0.25, 0.375),     float2(-0.375, 0.25),
-                                         float2(-0.5, 0.0),      float2(0.4375, -0.25),    float2(0.375, 0.4375), float2(-0.4375, -0.5)
-                                       };
-*/
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -241,7 +225,7 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
-    float2 pixelOffset = float2(0);
+    float2 pixelOffset = float2(0.5);
     float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
 
     const uint2 smRes = gSMRes;
@@ -400,8 +384,11 @@ void rayGen()
         mipMulFactor = 1 << selectedMipLevel; // Multiplier for Mip level
     }
 
-    uint jitterIdx = idx1D % kNumHaltonSamples;
-    pixelOffset = gJitterSamples[jitterIdx];                     // pixel offset in [0,1]
+    if (kUseHaltonSamplePattern) {
+        uint jitterIdx = idx1D % kNumHaltonSamples;
+        pixelOffset = gJitterSamples[jitterIdx]; // pixel offset in [0,1]
+    }
+    
     uint samplesSq = uint(sqrt(sampleCount)); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
     const float subpixelSize = 1.0 / samplesSq;
     float2 subpixelLoc = float2(index % samplesSq, index / samplesSq);

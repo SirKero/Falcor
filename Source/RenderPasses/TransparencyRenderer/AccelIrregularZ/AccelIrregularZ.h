@@ -63,13 +63,11 @@ public:
     {
         Center = 0,
         Halton = 1,
-        MSAA = 2
     };
 
     FALCOR_ENUM_INFO(SMSamplePattern,{
             {SMSamplePattern::Center, "Center"},
             {SMSamplePattern::Halton, "Halton"},
-            {SMSamplePattern::MSAA, "MSAA"},
         }
     );
 

@@ -505,11 +505,11 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
-    mGenAccelShadowPip.pProgram->addDefine("USE_MSAA_JITTER", mSamplePattern == SMSamplePattern::MSAA ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
+    mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
 
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
@@ -731,15 +731,11 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
 
         group.dropdown("Subpixel Sample Pattern", mSamplePattern);
         group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
-        if (mSamplePattern == SMSamplePattern::MSAA)
-        {
-            group.text("8x8 Subpixel sampling box size (fix for MSAA)");
-        }
-        else
+        if (mSamplePattern == SMSamplePattern::Halton)
         {
             if (group.var("HaltonSamples", mNumHaltonSamples, 1u, 1024u, 1u))
                 mGenAccelShadowPip.pVars.reset();
-            group.tooltip("Box size for the subpixel sampling. E.g. 3 -> 3x3 box.");
+            group.tooltip("Number of Halton Samples");
         }
 
         //group.checkbox("Use PCF", mAccelUsePCF);
