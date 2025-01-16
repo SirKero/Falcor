@@ -66,6 +66,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mpShadowAccelerationStrucure.reset();
         mAccessTextures.clear();
         mSampleDistribution.clear();
+        mpLastFrameMaxSampleCount.reset();
         mPixelSample.clear();
         mpPixelSampleCounter.reset();
         //The following buffers need to be cleared when light count changes
@@ -221,6 +222,17 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             }
         }
 
+        if (!mpLastFrameMaxSampleCount)
+        {
+            std::vector<uint> initData(numBuffers,0);
+            mpLastFrameMaxSampleCount = Buffer::create(
+                mpDevice, sizeof(uint) * numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, initData.data()
+            );
+            mpLastFrameMaxSampleCount->setName("LastFrameMaxSampleDistribution");
+        }
+
+
         uint pixelSamplesSize = uint(mResolution.x * mResolution.y * mSampleOverestimate);
         if (mPixelSample.empty() || mPixelSample[0]->getElementCount() < pixelSamplesSize)
         {
@@ -374,12 +386,16 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
             DefineList defines;
             defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+            defines.add("MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y));
 
             mCalcSampleDistribution = ComputePass::create(mpDevice, desc, defines, true);
         }
 
         //Calc ray count dispatch
         auto var = mCalcSampleDistribution->getRootVar();
+        mCalcSampleDistribution->getProgram()->addDefine(
+            "MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y) 
+        );
 
         if (mEnableDynamicRayCountCalc && mFrameCount > 0)
         {
@@ -388,6 +404,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             var["CB"]["gCalcTotalDispatchCount"] = true;
             var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mDynRCGuardPercentage);
             var["CB"]["gChangePercentage"] = mDynRCChangePercentage; // 50% for now
+
+            var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
             for (uint i = 0; i < lights.size(); i++)
             {
                 var["gImpt"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
@@ -461,13 +479,14 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
         mpOptimizeSamples->getProgram()->addDefine("MAX_SAMPLES", std::to_string(mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr));
         auto var = mpOptimizeSamples->getRootVar();
-        
+
+        var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
         for (uint m = 1; m < mSampleDistribution[0]->getMipCount(); m++)
         {
             for (uint i = 0; i < lights.size(); i++)
             {
-                var["gSampleDistribution0"][i].setUav(mSampleDistribution[i]->getUAV(m - 1));
-                var["gSampleDistribution1"][i].setUav(mSampleDistribution[i]->getUAV(m));
+                var["gSampleDistribution0"][i].setUav(mSampleDistribution[i]->getUAV(m - 1,0,1));
+                var["gSampleDistribution1"][i].setUav(mSampleDistribution[i]->getUAV(m,0,1));
             }
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
             var["CB"]["gDispatchSize"] = dispatchDim.xy();

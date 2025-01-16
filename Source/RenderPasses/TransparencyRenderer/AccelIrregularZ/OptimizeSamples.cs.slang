@@ -7,6 +7,7 @@
 RWTexture2D<float> gSampleDistribution0[COUNT_LIGHTS];
 RWTexture2D<float> gSampleDistribution1[COUNT_LIGHTS];
 
+RWBuffer<uint> gLastFrameSampleCount;
 cbuffer CB {
     uint2 gDispatchSize;
     uint gMipLevel; //Mip level 1 lower than dispatch size
@@ -28,20 +29,22 @@ void main(uint3 thdID: SV_DispatchThreadID)
     values[1] = gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y)];
     values[2] = gSampleDistribution0[lightID][uint2(pixelLower.x, pixelLower.y + 1)];
     values[3] = gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y + 1)];
-  
-    float totalSampleWeight = values.x + values.y + values.z + values.w; //Total weight before redistribution.
 
+    // float totalSampleWeight = values.x + values.y + values.z + values.w; //Total weight before redistribution.
+    float totalSampleWeight = 0.0;
     // check properties
     uint numValidSamples = 0;
+    bool hasPrevRedistributed = any(values < 0); //True if a pixel was redistributed in the last iteration
     for (uint i = 0; i < 4; i++) {
         if (values[i] > 0) {
             numValidSamples++;
         }
+        totalSampleWeight  += abs(values[i]);
     }
 
     bool redistribute = true;
     // Check if reweighting is possible
-    if (totalSampleWeight < numValidSamples) //
+    if (totalSampleWeight < numValidSamples || hasPrevRedistributed) //
         redistribute = false;
 
     if (redistribute) {
@@ -62,17 +65,30 @@ void main(uint3 thdID: SV_DispatchThreadID)
         for (uint i = 0; i < 4 && totalWeightOverOne > 0; i++) {
             if (values[i] > 1.0) {
                 float portion = 1.0 + max(((values[i] - 1.0) / totalWeightOverOne) * remainingWeight, 0.0);
-                if (gMipLevel == 0)
+                //if (gMipLevel == 0)
                 {
                     portion = floor(sqrt(portion));
                     portion *= portion;
-                    portion = min(portion, kMaxSamplesPerPixel);
                 }
                 values[i] = portion;
             }
             totalSampleWeight += values[i];
-        }            
-    } else {
+        }
+    } else if (hasPrevRedistributed) {
+        totalSampleWeight = 0;
+        [unroll]
+        for (uint i = 0; i < 4; i++) {
+            if (values[i] > 0.0) {
+                values[i] = max(values[i], 1.0);
+                values[i] = floor(sqrt(values[i]));
+                values[i] *= values[i];
+            } else if (values[i] < 0) {
+                values[i] = abs(values[i]);
+            }
+            totalSampleWeight  += values[i];
+        }
+    }
+    else {
         [unroll]
         for (uint i = 0; i < 4; i++) {
             values[i] = 0;
@@ -87,6 +103,8 @@ void main(uint3 thdID: SV_DispatchThreadID)
         gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y + 1)] = values[3];
     }
 
-    gSampleDistribution1[lightID][pixel] = totalSampleWeight;
+    bool storeNegative = redistribute || hasPrevRedistributed;
+    storeNegative &= all(gDispatchSize > 1);
+    gSampleDistribution1[lightID][pixel] = storeNegative ? -totalSampleWeight : totalSampleWeight;
 
 }

@@ -146,6 +146,7 @@ private:
     std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
     std::vector<ref<Buffer>> mPixelSample;                                     //A pixel sample for the gen pass
     ref<Buffer> mpPixelSampleCounter;                                           //Counter for the current number of buffers
+    ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
     
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture

@@ -354,9 +354,10 @@ void rayGen()
             uint2 mipIdx = uint2(0); // Top left
             uint2 selectedMipIdx = mipIdx;
             uint weightIdx = idx1D; // Uint weight for traversal
-            uint choosenSampleCount = 1;
+            uint choosenSampleCount = 0;
             uint prevMipRes = 1; // Mip res for previous iteration
             const uint highestMip = gMipCount - 2;
+            uint selectedMipLevel = highestMip;
             for (int m = highestMip; m >= 0; m--) {
                 uint4 mipSamples;
                 mipSamples[0] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m))));
@@ -368,14 +369,14 @@ void rayGen()
                 uint selectedSubpixel = 0;  //Selected subpixel id
                 uint numSamples = 0;        // Number of samples for that subpixel index
                 for (uint x = 0; x < 4 && totalSamples > 0; x++) {
-                    numSamples = uint(round(mipSamples[x]));
+                    numSamples = mipSamples[x];
                     currSamples += numSamples;
                     selectedSubpixel = x;
                     if (weightIdx < currSamples)
                         break;
                 }
                 // If total is reduced, abort and use the higher level
-                if (m < highestMip && totalSamples <= 0)
+                if (totalSamples < choosenSampleCount)
                     break;
 
                 // Update weight idx
@@ -389,6 +390,7 @@ void rayGen()
                 if (selectedSubpixel > 1) // 2 or 3
                     mipIdx.y += 1;
 
+                selectedMipLevel = m;
                 selectedMipIdx = mipIdx;
                 mipIdx *= 2; // Update for new resolution
                 prevMipRes *= 2;
@@ -399,6 +401,7 @@ void rayGen()
 
             sampleCount = choosenSampleCount;
             index = idx1D % choosenSampleCount;
+            mipMulFactor = 1 << selectedMipLevel; // Multiplier for Mip level
         }
 
         uint jitterIdx = idx1D % (kMaxSamplesPerPixel.x * kMaxSamplesPerPixel.y); // TODO separate jitter from sample count

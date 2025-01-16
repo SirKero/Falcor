@@ -8,11 +8,12 @@ Texture2D<uint> gImptMip[COUNT_LIGHTS];
 RWTexture2D<float> gSmp[COUNT_LIGHTS];   //Distributed Sample (Rays) texture
 Texture2D<float> gSmpMip[COUNT_LIGHTS];
 
-Buffer<uint> gAABBCount;    //Last frames aabb count
+Buffer<uint> gAABBCount; // Last frames aabb count
+RWBuffer<uint> gLastFrameSampleCount; //Max number of distributed samples
 
 static const uint kMaxAtomicWeight = 64; // Should be the same as in AccelIrregularZ.slang (where the atomic counter is increased)
 static const uint kMinSamples = 4096;    // Min 64x64 samples
-static const uint kMaxSamples = 512 * 512; //Cannot distribute more than this per shadow map
+static const uint kMaxSamples = MAX_SAMPLES; //Cannot distribute more than this per shadow map
 
 cbuffer CB {
     uint2 gDstSize;
@@ -40,7 +41,10 @@ void main(uint3 thdID: SV_DispatchThreadID)
         float totalImportance = 0.0;
         int aabbCount = gAABBCount[0];
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
-            rayCounts[i] = gSmp[i][pixel];
+            rayCounts[i] = gLastFrameSampleCount[i];
+            // Fallback
+            if(rayCounts[i] == 0) 
+                rayCounts[i] = gSmp[i][pixel];
             totalRayCount += rayCounts[i];
             importances[i] = gImpt[i][pixel] / float(kMaxAtomicWeight);
             totalImportance += importances[i];
@@ -56,8 +60,10 @@ void main(uint3 thdID: SV_DispatchThreadID)
         // Write new ray counts to textures
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             float w = importances[i] / totalImportance;
-            //gSmp[i][pixel] = min(floor(w * totalRayCount), kMaxSamples);
-            gSmp[i][pixel] = kMaxSamples; //TODO temporary
+            float newCount = min(floor(w * totalRayCount), kMaxSamples);
+            gSmp[i][pixel] = newCount;
+            gLastFrameSampleCount[i] = uint(newCount);
+            //gSmp[i][pixel] = kMaxSamples; //TODO temporary
         }
     }
     //Pull ray count to lower levels
