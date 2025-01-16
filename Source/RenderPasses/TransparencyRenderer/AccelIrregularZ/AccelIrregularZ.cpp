@@ -36,7 +36,6 @@ namespace
     const std::string kGenShader = kShaderFolder + "GenAccelIrregularZ.rt.slang";
     const std::string kAccessMipsShader = kShaderFolder + "GenAccessMips.cs.slang";
     const std::string kCalcSampleDistributionShader = kShaderFolder + "CalcSampleDistribution.cs.slang";
-    const std::string kDistributeSamplesShader = kShaderFolder + "DistributeSamples.cs.slang";
     const std::string kOptimizeSamplesShader = kShaderFolder + "OptimizeSamples.cs.slang";
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
@@ -67,8 +66,6 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mAccessTextures.clear();
         mSampleDistribution.clear();
         mpLastFrameMaxSampleCount.reset();
-        mPixelSample.clear();
-        mpPixelSampleCounter.reset();
         //The following buffers need to be cleared when light count changes
         mAccelShadowCounter.clear();
         mAccelShadowCounterCPU.clear();
@@ -234,27 +231,6 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
 
 
         uint pixelSamplesSize = uint(mResolution.x * mResolution.y * mSampleOverestimate);
-        if (mPixelSample.empty() || mPixelSample[0]->getElementCount() < pixelSamplesSize)
-        {
-            mPixelSample.resize(numBuffers);
-            for (uint i = 0; i < numBuffers; i++)
-            {
-                mPixelSample[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint4), pixelSamplesSize,
-                    ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
-                );
-                mPixelSample[i]->setName("PixelSampleBuf" + std::to_string(i));
-            }
-        }
-        if (!mpPixelSampleCounter)
-        {
-            std::vector<uint> initData(numBuffers, 0);
-            mpPixelSampleCounter = Buffer::createStructured(
-                mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                Buffer::CpuAccess::None, &initData, false
-            );
-            mpPixelSampleCounter->setName("PixelSampleConter");
-        }        
     }
 }
 
@@ -516,67 +492,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
     };
 
-
-    // Create a pixel sample list TODO remove
-    if(mUseSeperateSampleDistributionPass)
-    {
-        FALCOR_PROFILE(pRenderContext, "Create Pixel Samples");
-        if (!mGenAccelShadowPip.pVars)
-            mpDistributeSamples.reset();
-        // Clear Counter
-        pRenderContext->clearUAV(mpPixelSampleCounter->getUAV(0u, lights.size()).get(), uint4(0));
-
-        // Create Compute Pass
-        if (!mpDistributeSamples)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kDistributeSamplesShader).csEntry("main").setShaderModel("6_6");
-
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-            defines.add("USE_MSAA_JITTER", mSamplePattern == SMSamplePattern::MSAA ? "1" : "0");
-            /*
-            defines.add(
-                "MAX_SAMPLES_PER_PIXEL_X", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 8 : mMaxSamplesPerPixelSqr)
-            );
-            defines.add(
-                "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
-            );
-            */
-            defines.add("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
-
-            mpDistributeSamples = ComputePass::create(mpDevice, desc, defines, true);
-        }
-
-        mpDistributeSamples->getProgram()->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
-        auto var = mpDistributeSamples->getRootVar();
-
-        // Upload jittered sampled
-        setHaltonJitterSamples(var); //TODO switch to buffer
-    
-        var["gPixelSampleCounter"] = mpPixelSampleCounter;
-        for (uint i = 0; i < lights.size(); i++)
-        {
-            var["gSampleDistribution"][i] = mSampleDistribution[i];
-            var["gPixelSample"][i] = mPixelSample[i];
-        }
-
-        //uint3 dispatchDim = uint3(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr, lights.size()); //Old Version(see shader)
-        uint3 dispatchDim = uint3(mResolution.x, mResolution.y, lights.size()); //New one
-        if (mOptimizeSampleDistribution)
-        {
-            dispatchDim.x = dispatchDim.x * mSampleOverestimate;
-            dispatchDim.y = dispatchDim.y * mSampleOverestimate;
-        }
-            
-        var["CB"]["gSMRes"] = mResolution;
-        var["CB"]["gDispatchDim"] = dispatchDim.xy();
-        var["CB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
-        var["CB"]["gFrameCount"] = mFrameCount;
-
-        mpDistributeSamples->execute(pRenderContext, dispatchDim);
-    }
-
     // Clear Counter
     uint clearSize = mUseOneAABBForAllLights ? 1 : lights.size();
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, clearSize).get(), uint4(0));
@@ -592,7 +507,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
     mGenAccelShadowPip.pProgram->addDefine("USE_MSAA_JITTER", mSamplePattern == SMSamplePattern::MSAA ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
-    mGenAccelShadowPip.pProgram->addDefine("USE_SAMPLE_DISTRIBUTION_IN_GEN", mUseSeperateSampleDistributionPass ? "0" : "1");
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
@@ -618,8 +532,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     auto var = mGenAccelShadowPip.pVars->getRootVar();
 
     // Set Halton Jitter (same for every light)
-    if (!mUseSeperateSampleDistributionPass)
-        setHaltonJitterSamples(var);
+    setHaltonJitterSamples(var); //TODO seperate buffer that does not change every frame
 
     // Trace the pass for every light
     for (uint i = 0; i < lights.size(); i++)
@@ -648,19 +561,9 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gPointSampler"] = mpPointSampler;
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
-        var["gPixelSample"] = mPixelSample[i];
-        var["gPixelSampleCounter"] = mpPixelSampleCounter;
 
         // Get dimensions of ray dispatch.
         uint2 targetDim = mResolution;
-        /*
-        if (!mUseSeperateSampleDistributionPass)
-        {
-            targetDim = mSamplePattern == SMSamplePattern::MSAA
-                            ? uint2(mResolution.x * 8, mResolution.y)
-                            : uint2(mResolution.x * mMaxSamplesPerPixelSqr, mResolution.y * mMaxSamplesPerPixelSqr);
-        }
-        else*/
         if (mOptimizeSampleDistribution)
         {
             targetDim = uint2(float2(targetDim) * mSampleOverestimate);
@@ -826,11 +729,6 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         //group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         //group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
 
-        group.checkbox("Use seperate Sample Distribution Pass", mUseSeperateSampleDistributionPass);
-        group.tooltip(
-            "Enables a seperate pass that distributes the sample into a buffer. Seems faster as there is less divergence in the raytracing "
-            "shader"
-        );
         group.dropdown("Subpixel Sample Pattern", mSamplePattern);
         group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
         if (mSamplePattern == SMSamplePattern::MSAA)
