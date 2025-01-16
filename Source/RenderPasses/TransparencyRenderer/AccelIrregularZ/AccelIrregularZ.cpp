@@ -473,11 +473,9 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
             DefineList defines;
             defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-            defines.add("MAX_SAMPLES", std::to_string(mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr));
 
             mpOptimizeSamples = ComputePass::create(mpDevice, desc, defines, true);
         }
-        mpOptimizeSamples->getProgram()->addDefine("MAX_SAMPLES", std::to_string(mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr));
         auto var = mpOptimizeSamples->getRootVar();
 
         var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
@@ -493,32 +491,25 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             var["CB"]["gMipLevel"] = 0; // m - 1;
             var["CB"]["gLightCount"] = lights.size();
 
-            mpOptimizeSamples->execute(pRenderContext, dispatchDim);
-            //TODO needed?
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                pRenderContext->uavBarrier(mSampleDistribution[i].get());
-            }
-            
+            mpOptimizeSamples->execute(pRenderContext, dispatchDim);            
         }
     }
 
     // Init the sample points for Halton Jitter
-    const uint maxSamplesSq = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
-    if (mSamplePattern == SMSamplePattern::Halton && mHaltonSampleCount.size() != maxSamplesSq)
+    if (mSamplePattern == SMSamplePattern::Halton && mHaltonSampleCount.size() != mNumHaltonSamples)
     {
-        mHaltonSampleCount.resize(maxSamplesSq);
-        for (uint i = 0; i < maxSamplesSq; i++)
+        mHaltonSampleCount.resize(mNumHaltonSamples);
+        for (uint i = 0; i < mNumHaltonSamples; i++)
             mHaltonSampleCount[i] = i;
     }
     auto setHaltonJitterSamples = [&](ShaderVar& shaderVar) {
-        for (uint i = 0; i < maxSamplesSq; i++)
+        for (uint i = 0; i < mNumHaltonSamples; i++)
         {
             float2 sample = float2(0.5);
             if (mSamplePattern == SMSamplePattern::Halton)
             {
                 sample = {halton(mHaltonSampleCount[i], 2), halton(mHaltonSampleCount[i], 3)}; // sample in [0,1]
-                mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % 64; // TODO reset count as option?
+                mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % mNumHaltonSamples;
             }
 
             shaderVar["JitterSamples"]["gJitterSamples"][i] = sample;
@@ -526,7 +517,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     };
 
 
-    // Create a pixel sample list
+    // Create a pixel sample list TODO remove
     if(mUseSeperateSampleDistributionPass)
     {
         FALCOR_PROFILE(pRenderContext, "Create Pixel Samples");
@@ -544,12 +535,14 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             DefineList defines;
             defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
             defines.add("USE_MSAA_JITTER", mSamplePattern == SMSamplePattern::MSAA ? "1" : "0");
+            /*
             defines.add(
                 "MAX_SAMPLES_PER_PIXEL_X", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 8 : mMaxSamplesPerPixelSqr)
             );
             defines.add(
                 "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
             );
+            */
             defines.add("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
 
             mpDistributeSamples = ComputePass::create(mpDevice, desc, defines, true);
@@ -559,7 +552,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         auto var = mpDistributeSamples->getRootVar();
 
         // Upload jittered sampled
-        setHaltonJitterSamples(var);
+        setHaltonJitterSamples(var); //TODO switch to buffer
     
         var["gPixelSampleCounter"] = mpPixelSampleCounter;
         for (uint i = 0; i < lights.size(); i++)
@@ -598,12 +591,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
     mGenAccelShadowPip.pProgram->addDefine("USE_MSAA_JITTER", mSamplePattern == SMSamplePattern::MSAA ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine(
-        "MAX_SAMPLES_PER_PIXEL_X", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 8 : mMaxSamplesPerPixelSqr)
-    );
-    mGenAccelShadowPip.pProgram->addDefine(
-        "MAX_SAMPLES_PER_PIXEL_Y", std::to_string(mSamplePattern == SMSamplePattern::MSAA ? 1 : mMaxSamplesPerPixelSqr)
-    );
+    mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenAccelShadowPip.pProgram->addDefine("USE_SAMPLE_DISTRIBUTION_IN_GEN", mUseSeperateSampleDistributionPass ? "0" : "1");
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
@@ -851,7 +839,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         }
         else
         {
-            if (group.var("Subpixel sampling box size", mMaxSamplesPerPixelSqr, 1u, 1024u, 1u))
+            if (group.var("HaltonSamples", mNumHaltonSamples, 1u, 1024u, 1u))
                 mGenAccelShadowPip.pVars.reset();
             group.tooltip("Box size for the subpixel sampling. E.g. 3 -> 3x3 box.");
         }
@@ -974,7 +962,6 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
     var["CB"]["gCullMax"] = float3(mAccelDebugShowAS.clipX.y, mAccelDebugShowAS.clipY.y, mAccelDebugShowAS.clipZ.y);
     var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
     var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
-    var["CB"]["gMaxSampleCount"] = mMaxSamplesPerPixelSqr * mMaxSamplesPerPixelSqr;
     var["CB"]["gDirectionalIdx"] = directionalIndex;
 
     //Set the viewProj matrices

@@ -88,7 +88,7 @@ private:
 
     //Sample Gen (+Jitter)
     std::vector<uint> mHaltonSampleCount;
-    uint mMaxSamplesPerPixelSqr = 64; //Sample box size (e.g 3 = 3x3 box)
+    uint mNumHaltonSamples = 64; //
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mUseSeperateSampleDistributionPass = false; //Use a seperate sample distribution pass
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights

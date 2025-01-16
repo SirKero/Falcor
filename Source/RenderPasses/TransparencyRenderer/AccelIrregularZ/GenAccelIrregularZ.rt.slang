@@ -25,12 +25,8 @@ import Utils.Geometry.GeometryHelpers;
 #define ACCEL_USE_FRUSTUM_CULLING 0
 #endif
 
-#ifndef MAX_SAMPLES_PER_PIXEL_X
-#define MAX_SAMPLES_PER_PIXEL_X 8
-#endif
-
-#ifndef MAX_SAMPLES_PER_PIXEL_Y
-#define MAX_SAMPLES_PER_PIXEL_Y 1
+#ifndef NUM_HALTON_SAMPLES
+#define NUM_HALTON_SAMPLES 1
 #endif
 
 /** Payload for shadow ray. (16B)
@@ -66,7 +62,7 @@ cbuffer CB
 }
 
 cbuffer JitterSamples {
-    float2 gJitterSamples[MAX_SAMPLES_PER_PIXEL_X * MAX_SAMPLES_PER_PIXEL_Y];
+    float2 gJitterSamples[NUM_HALTON_SAMPLES];
 }
 
 RWStructuredBuffer<AABB> gAABB;
@@ -86,7 +82,7 @@ static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const bool kUseMSAAJitterPattern = USE_MSAA_JITTER;
-static const uint2 kMaxSamplesPerPixel = uint2(MAX_SAMPLES_PER_PIXEL_X, MAX_SAMPLES_PER_PIXEL_Y);
+static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
 static const float kMergeDistance = ACCEL_MERGE_BOX_DIST;
 
@@ -345,7 +341,7 @@ void rayGen()
             index = uint(idx1D % uint(choosenSampleCount));
             bool randOffset = (index / sampleCount) >= 1; // TODO add
             if (randOffset) return;
-            sampleCount = min(sampleCount, kMaxSamplesPerPixel.x * kMaxSamplesPerPixel.y); // cap to sample count
+            sampleCount = sampleCount % kNumHaltonSamples;
             index = index % sampleCount;
         }
         else // Optimized Version. Distributed samples are forced uints
@@ -404,7 +400,7 @@ void rayGen()
             mipMulFactor = 1 << selectedMipLevel; // Multiplier for Mip level
         }
 
-        uint jitterIdx = idx1D % (kMaxSamplesPerPixel.x * kMaxSamplesPerPixel.y); // TODO separate jitter from sample count
+        uint jitterIdx = idx1D % kNumHaltonSamples;
         pixelOffset = gJitterSamples[jitterIdx];                     // pixel offset in [0,1]
         uint samplesSq = uint(sqrt(sampleCount)); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
         const float subpixelSize = 1.0 / samplesSq;

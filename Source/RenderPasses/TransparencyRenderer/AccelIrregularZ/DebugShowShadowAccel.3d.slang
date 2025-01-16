@@ -25,9 +25,8 @@ cbuffer CB
     float3      gCullMax;       //XYZ culling max
     float       gBlendT;
     uint        gVisMode;       // Vizualization mode
-    uint        gMaxSampleCount;//Max number of samples per pixel
     uint        gDirectionalIdx; //Light with this index is directional
-    uint       _pad;
+    uint2       _pad;
    
 }
 
@@ -244,14 +243,6 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 
     //TODO fix
     uint sampleCountMult = 1;
-    switch (gMaxSampleCount) {
-        case 4:
-        case 8:
-            sampleCountMult = 2;
-            break;
-        default:
-            sampleCountMult = 1;
-    }
 
     uint pixelID = uint(ceil(aabb.minPoint.x * aabb.minPoint.y * sampleCountMult));
 

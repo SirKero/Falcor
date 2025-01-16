@@ -13,8 +13,7 @@ cbuffer CB {
     uint gMipLevel; //Mip level 1 lower than dispatch size
     uint gLightCount;
 }
-
-static const uint kMaxSamplesPerPixel = MAX_SAMPLES; //Max sample count on the lowest level                         
+                      
 
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
