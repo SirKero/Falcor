@@ -182,7 +182,10 @@ void DLSSPass::initializeDLSS(RenderContext* pRenderContext)
     NVSDK_NGX_PerfQuality_Value perfQuality = NVSDK_NGX_PerfQuality_Value_Balanced;
     switch (mProfile)
     {
-    case Profile::MaxPerf:
+    case Profile::UltraPerformance:
+        perfQuality = NVSDK_NGX_PerfQuality_Value_UltraPerformance;
+        break;
+    case Profile::MaxPerformance:
         perfQuality = NVSDK_NGX_PerfQuality_Value_MaxPerf;
         break;
     case Profile::Balanced:
@@ -190,6 +193,12 @@ void DLSSPass::initializeDLSS(RenderContext* pRenderContext)
         break;
     case Profile::MaxQuality:
         perfQuality = NVSDK_NGX_PerfQuality_Value_MaxQuality;
+        break;
+    //case Profile::UltraQuality:  //Not Available
+    //    perfQuality = NVSDK_NGX_PerfQuality_Value_UltraQuality;
+    //    break;
+    case Profile::DLAA:
+        perfQuality = NVSDK_NGX_PerfQuality_Value_DLAA;
         break;
     }
 

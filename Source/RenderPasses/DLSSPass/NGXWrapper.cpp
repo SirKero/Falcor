@@ -330,9 +330,6 @@ bool NGXWrapper::evaluateDLSS(
     if (!mpFeature)
         return false;
 
-    // In DLSS v2, the target is already upsampled (while in v1, the upsampling is handled in a later pass)
-    FALCOR_ASSERT(pResolvedColor->getWidth() > pUnresolvedColor->getWidth() && pResolvedColor->getHeight() > pUnresolvedColor->getHeight());
-
     bool success = true;
 
     switch (mpDevice->getType())
