@@ -61,6 +61,6 @@
         <package name="nrd" version="4.9.3-falcor-windows-x86_64" remotes="nrd-windows" platforms="windows-x86_64" />
     </dependency>
     <dependency name="dlss" linkPath="external/packman/dlss">
-        <package name="dlss" version="3.1.0" platforms="windows-x86_64 linux-x86_64" />
+        <package name="dlss" version="3.5.0" platforms="windows-x86_64 linux-x86_64" />
     </dependency>
 </project>
