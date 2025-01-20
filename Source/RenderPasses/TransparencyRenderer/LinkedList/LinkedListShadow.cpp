@@ -91,6 +91,8 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
 
     auto& lights = mpScene->getLights();
 
+    // Update size
+    mLinkedElementCount = mResolution.x * mResolution.y * mLinkedListElementPerPixel;
     // Create / Destroy resources
     {
         mpLinkedList.resize(lights.size());
@@ -263,7 +265,8 @@ bool LinkedListShadow::renderUI(Gui::Widgets& widget)
     {
         dirty |= TransparencyShadowMethod::renderUI(widget);
 
-        dirty |= widget.var("Max Elements", mLinkedElementCount, 1u, std::numeric_limits<uint32_t>::max());
+        widget.var("Elements per Pixel", mLinkedListElementPerPixel, 1u, std::numeric_limits<uint32_t>::max());
+        widget.text("Total Elements: " + std::to_string(mLinkedElementCount));
         dirty |= widget.checkbox("Use PCF", mUseLinkedListPcf);
         dirty |= widget.checkbox("Store as Array", mUseLinkedListArray);
         if (mUseLinkedListArray)

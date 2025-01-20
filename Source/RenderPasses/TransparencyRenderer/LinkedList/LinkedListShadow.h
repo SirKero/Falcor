@@ -72,7 +72,8 @@ private:
     std::vector<ref<Texture>> mpLinkedListArrayOffsets;
     bool mUseLinkedListPcf = false;
     bool mUseLinkedListArray = false;
-    uint32_t mLinkedElementCount = mResolution.x * mResolution.y * 16; // (~70mb with 16 byte data => 4 floats)
+    uint mLinkedListElementPerPixel = 16;
+    uint32_t mLinkedElementCount = mResolution.x * mResolution.y * mLinkedListElementPerPixel; // (~70mb with 16 byte data => 4 floats)
     RayTracingPipeline mGenLinkedListPip;
     ref<Buffer> mpLinkedListCounter;
     ref<Buffer> mpLinkedListCounter2;
