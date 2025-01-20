@@ -204,6 +204,8 @@ void DLSSPass::initializeDLSS(RenderContext* pRenderContext)
 
     auto optimalSettings = mpNGXWrapper->queryOptimalSettings(mInputSize, perfQuality);
 
+    mSharpness = optimalSettings.sharpness;
+
     mDLSSOutputSize = uint2(float2(mInputSize) * float2(mInputSize) / float2(optimalSettings.optimalRenderSize));
     mpOutput = Texture::create2D(
         mpDevice, mDLSSOutputSize.x, mDLSSOutputSize.y, ResourceFormat::RGBA32Float, 1, 1, nullptr,
