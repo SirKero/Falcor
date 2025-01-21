@@ -1017,10 +1017,12 @@ ref<Material> PreviewSurfaceConverter::convert(
         pMaterial->setSpecularParams(float4(0.f, spec.roughness.uniformValue.r, spec.metallic.uniformValue.r, 1.f));
     }
 
+    bool baseColorTexIsOpacityTex = spec.baseColor.texturePath.compare(spec.opacity.texturePath) == 0;
+
     if (spec.opacity.uniformValue.r < 1.f || opacityTexture)
     {
         // Handle non-unit opacity
-        if (spec.opacityThreshold > 0.f)
+        if (spec.opacityThreshold > 0.f || baseColorTexIsOpacityTex)
         {
             // Opacity encodes cutout values
             // Pack opacity into the alpha channel
@@ -1033,7 +1035,8 @@ ref<Material> PreviewSurfaceConverter::convert(
             {
                 spec.baseColor.uniformValue = float4(spec.baseColor.uniformValue.xyz(), spec.opacity.uniformValue.r);
             }
-            pMaterial->setAlphaThreshold(spec.opacityThreshold);
+            //pMaterial->setAlphaThreshold(spec.opacityThreshold);
+            pMaterial->setAlphaThreshold(0.5f); //More conform with falcors alpha system
         }
         else if (opacityTexture)
         {
@@ -1048,6 +1051,7 @@ ref<Material> PreviewSurfaceConverter::convert(
                 createSpecularTransmissionTexture(spec.opacity, opacityTexture, pRenderContext);
             pMaterial->setTransmissionTexture(transmissionTexture);
             pMaterial->setSpecularTransmission(1.f);
+            
         }
         else
         {
