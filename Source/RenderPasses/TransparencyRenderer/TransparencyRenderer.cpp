@@ -182,8 +182,11 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     switch (mCameraRenderMode)
     {
     case CameraRenderMode::DirectRT:
-        evalDirectTransparency(pRenderContext, renderData);
-        evalDirect(pRenderContext, renderData);
+        {
+            FALCOR_PROFILE(pRenderContext, "Evaluate Direct");
+            evalDirectTransparency(pRenderContext, renderData);
+            evalDirectOpaque(pRenderContext, renderData);
+        }
         break;
     case CameraRenderMode::PathTracer:
         evalPathTracer(pRenderContext, renderData);
@@ -300,9 +303,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     return defines;
 }
 
-void TransparencyRenderer::evalDirect(RenderContext* pRenderContext, const RenderData& renderData)
+void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "Shade Direct hit");
+    FALCOR_PROFILE(pRenderContext, "Shade Opaque");
 
     if (!mpEvalDirectPass)
     {

@@ -106,7 +106,7 @@ private:
     DefineList getLightEvalDefines();
 
     //Evaluate direct light with an Compute Shader
-    void evalDirect(RenderContext* pRenderContext, const RenderData& renderData);
+    void evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluates the transparencies until the first opaque surface
     void evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData);
     //Path tracing pass
