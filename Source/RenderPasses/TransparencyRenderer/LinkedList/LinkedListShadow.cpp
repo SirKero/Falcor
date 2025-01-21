@@ -80,10 +80,12 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
 
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
-        defines.add("MAX_INDEX", std::to_string(mLinkedElementCount));
 
         mGenLinkedListPip.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
+
+    mGenLinkedListPip.pProgram->addDefine("MAX_INDEX", std::to_string(mLinkedElementCount));
+
     if (!mpLinkedListNeighborsPass)
     {
         mpLinkedListNeighborsPass = ComputePass::create(mpDevice, kShaderLinkedListNeighbors);
