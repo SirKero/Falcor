@@ -363,6 +363,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             DefineList defines;
             defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
             defines.add("MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y));
+            defines.add("USE_ONE_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
 
             mCalcSampleDistribution = ComputePass::create(mpDevice, desc, defines, true);
         }
@@ -372,6 +373,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         mCalcSampleDistribution->getProgram()->addDefine(
             "MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y) 
         );
+        mCalcSampleDistribution->getProgram()->addDefine("USE_ONE_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
 
         if (mEnableDynamicRayCountCalc && mFrameCount > 0)
         {
@@ -394,7 +396,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
                 lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
             }
                  
-            var["gAABBCount"] = mAccelShadowCounter[lastFrameInFlight];
+            var["gElementCount"] = mAccelShadowCounter[lastFrameInFlight];
             mCalcSampleDistribution->execute(pRenderContext, uint3(1,1,1));
         }
 
