@@ -41,6 +41,7 @@ import AccelIrregularZ.AccelIrregularZ;
 
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
+static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
 
 // For RIS light sampling
 struct RISReservoir {
@@ -129,7 +130,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] origin Ray origin for the shadow ray.
     \param[in] dir Direction from shading point towards the light source (normalized).
     \param[in] distance Distance to the light source.
-    \return True if light is visible, false otherwise.
+    \return Visibility in [0,1]
 */
 float traceShadowRay(float3 origin, float3 dir, float distance)
 {
@@ -154,8 +155,10 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
 
             VertexData v = gScene.getVertexData(triangleHit);
             uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-            //LOD mode handling TODO this is incorrect as it assumes the pixel is the camera 
             ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+
+            //LOD mode handling TODO this is incorrect as it assumes the pixel is the camera
+            /*
             if (kShadowLODMode == TexLODMode::RayCones)
             {
                 float2 ddx, ddy;
@@ -168,10 +171,11 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
                 computeRayDifferentials(triangleHit, ray.Direction, rayQuery.CandidateTriangleRayT(), gScene.camera, kInvFrameDim, ddx, ddy);
                 lod = ExplicitGradientTextureSampler(ddx, ddy);
             }
-            
-            ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -ray.Direction, lod);
+            */
 
-            visibility *= saturate(1.0 - sd.opacity);
+            float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+
+            visibility *= saturate(1.0 - opacity);
 
             if (visibility <= 0.0)
                 rayQuery.Abort();
@@ -179,6 +183,54 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
     }
 
     //No need to check comitted status, as no hit is accepted
+
+    return visibility;
+}
+
+/** Traces a shadow ray towards a light source with ray queries. Uses the sample generator to randomly abort the ray
+    \param[in] origin Ray origin for the shadow ray.
+    \param[in] dir Direction from shading point towards the light source (normalized).
+    \param[in] distance Distance to the light source.
+    \param[inout] Sample Generator
+    \return Visbility that is either 0 or 1
+*/
+float traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout SampleGenerator sg)
+{
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = dir;
+    ray.TMin = 0.f;
+    ray.TMax = distance;
+
+    float visibility = 1.0; //Visible
+
+    RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
+    rayQuery.TraceRayInline(gScene.rtAccel, 0, 0xff, ray);
+
+    while (rayQuery.Proceed()) {
+        if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
+            // Get shading data
+            TriangleHit triangleHit;
+            triangleHit.instanceID = GeometryInstanceID(rayQuery.CandidateInstanceID(), rayQuery.CandidateGeometryIndex());
+            triangleHit.primitiveIndex = rayQuery.CandidatePrimitiveIndex();
+            triangleHit.barycentrics = rayQuery.CandidateTriangleBarycentrics();
+
+            VertexData v = gScene.getVertexData(triangleHit);
+            uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+            // LOD mode handling TODO this is incorrect as it assumes the pixel is the camera
+            ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+
+            float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+            float roulett = sampleNext1D(sg);
+
+            if (roulett <= opacity) {
+                visibility = 0.0;
+                rayQuery.Abort();
+            }
+        }
+    }
+
+    // No need to check comitted status, as no hit is accepted
 
     return visibility;
 }
@@ -255,7 +307,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
         if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (shadow < 0) && kEnableFallbackRay) {
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
-            shadow = traceShadowRay(origin, ls.dir, ls.distance);
+            if(kUseStochasticRayTracing)
+                shadow = traceShadowRayStochastic(origin, ls.dir, ls.distance, sg);
+            else
+                shadow = traceShadowRay(origin, ls.dir, ls.distance);
         }
 
         // Clamp shadow in [0,1]

@@ -240,6 +240,9 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     widget.checkbox("Enable Fallback Shadows", mEnableFallbackRayTracedShadows);
     widget.tooltip("Some techniques allow for ray traced shadows as a fallback. They can be toggled on/off manually here");
 
+    widget.checkbox("Enable Stochastic Shadow Ray", mShadowUseStochasticRayTracing);
+    widget.tooltip("Toggle Stochastic Ray Tracing for the Visibility ray. Applies to all techniques that use stochastic ray tracing");
+
     if (mEnableOpaqueShadowMaps && mpShadowMap)
     {
         if (auto group = widget.group("Opaque Shadow Map Settings"))
@@ -291,6 +294,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
+    defines.add("USE_STOCHASTIC_RAY_TRACING", mShadowUseStochasticRayTracing ? "1" : "0");
 
     //LOD
     defines.add("RAY_LOD_MODE", std::to_string((uint)mRayLodMode));
