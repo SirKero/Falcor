@@ -33,6 +33,7 @@
 #include "LinkedList/LinkedListShadow.h"
 #include "AccelShadowKBuffer/AccelShadowKBuffer.h"
 #include "AccelIrregularZ/AccelIrregularZ.h"
+#include "LinkedListIrregularZ/LinkedListIrregularZ.h"
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
@@ -275,6 +276,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         mShadowMethods.push_back(std::make_shared<LinkedListShadow>(mpDevice, mpScene)); // LinkedList (1)
         mShadowMethods.push_back(std::make_shared<AccelShadowKBuffer>(mpDevice,mpScene)); //AccelShadow KBuffer (2)
         mShadowMethods.push_back(std::make_shared<AccelIrregularZ>(mpDevice, mpScene)); // Accel IrregularZ (3)
+        mShadowMethods.push_back(std::make_shared<LinkedListIrregularZ>(mpDevice, mpScene)); // Linked List IrregularZ (4)
 
         if (mpScene->getLightCount() == 1)
             mLightSampleMode = LightSampleMode::Uniform; //Cheapest light sample mode

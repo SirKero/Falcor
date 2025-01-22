@@ -1,0 +1,131 @@
+/***************************************************************************
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without
+ # modification, are permitted provided that the following conditions
+ # are met:
+ #  * Redistributions of source code must retain the above copyright
+ #    notice, this list of conditions and the following disclaimer.
+ #  * Redistributions in binary form must reproduce the above copyright
+ #    notice, this list of conditions and the following disclaimer in the
+ #    documentation and/or other materials provided with the distribution.
+ #  * Neither the name of NVIDIA CORPORATION nor the names of its
+ #    contributors may be used to endorse or promote products derived
+ #    from this software without specific prior written permission.
+ #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
+ # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ **************************************************************************/
+#pragma once
+#include "../TransparencyShadowMethod.h"
+#include "Rendering/ShadowMaps/Blur/SMGaussianBlur.h"
+
+class LinkedListIrregularZ : public TransparencyShadowMethod
+{
+public:
+    virtual ~LinkedListIrregularZ() = default;
+
+    LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScene);
+
+    /** Generate resources needed to evaluate the Shadow Method
+     */
+    virtual void generate(RenderContext* pRenderContext, const RenderData& renderData) override;
+
+    /** Returns defines needed for the method
+     */
+    virtual DefineList getDefines() override;
+
+    /** Set the needed shader data for the method (textures,buffer, etc)
+     */
+    virtual void setShaderData(const ShaderVar& var) override;
+
+    /** Render UI for the method
+     */
+    virtual bool renderUI(Gui::Widgets& widget) override;
+
+    /** Optional Debug pass
+     */
+    //virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
+
+    const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
+
+     enum class SMSamplePattern : uint
+    {
+        Center = 0,
+        Halton = 1,
+    };
+
+    FALCOR_ENUM_INFO(SMSamplePattern,{
+            {SMSamplePattern::Center, "Center"},
+            {SMSamplePattern::Halton, "Halton"},
+        }
+    );
+
+private:
+    void prepareResources(RenderContext* pRenderContext);
+    std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes();
+
+    //Runtime
+    uint mFrameCount = 0;
+
+    //Sync Resources
+    static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
+    static const uint kMinAABBUpdateCount = 128; //Shadow map should not be updated if there is less than this amount of AABBs
+    ref<GpuFence> mpFence;                 ///< Fence for CPU/GPU syncs
+    uint mStagingCount = 0;
+
+    //Sample Gen (+Jitter)
+    std::vector<uint> mHaltonSampleCount;
+    uint mNumHaltonSamples = 64; //Number of halton samples
+    SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
+    bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
+    float mSampleOverestimate = 1.25f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
+    bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
+
+    //Dynamic ray count on gpu
+    bool mEnableDynamicRayCountCalc = true;
+    bool mResetRayCount = false;
+    float mDynRCGuardPercentage = 0.9f; //take 90% of the total
+    float mDynRCChangePercentage = 1.f; //How much of the optimal value should be taken
+
+    // Accel shadow settings
+    uint mApproxNumElementsPerPixel = 4u;
+    std::vector<uint> mUIElementCounter;
+    std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync
+    uint mLinkedListNodeBufferSize = 0;
+    bool mAccelShadowUseCPUCounterOptimization = true;
+    float mAccelShadowOverestimation = 1.3f;
+    uint mLinkedListDataFormatSize = 3; //TODO set automatically
+    bool mRebuildDataBuffer = true;
+    bool mAccelUsePCF = false;
+    RayFlags mAccelRayFlags = RayFlags::None;
+    float mMergeBoxDist = 0.f; //Distance the accel boxes are merged
+
+    LightMVP mStaggeredDirectionalLightMVP = {};
+    int mDirectionalLightIndex = -1; //Used to set LightMVP
+
+    ref<Sampler> mpPointSampler;
+    std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
+
+    std::vector<ref<Buffer>> mLinkedListCounter;                              // Counter for inserting points
+    std::vector<ref<Buffer>> mLinkedListCounterCPU;                           // Counter for inserting points
+    std::vector<ref<Buffer>> mLinkedListData;                                 // Transparency Data
+    std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
+    std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
+    ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
+    
+    ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
+    ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
+    ref<ComputePass> mpOptimizeSamples;             //Optimize Sample distribution
+    RayTracingPipeline mGenLinkedListShadowPip; //RayTracingPipeline
+};
+FALCOR_ENUM_REGISTER(LinkedListIrregularZ::SMSamplePattern);

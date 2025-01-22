@@ -18,6 +18,7 @@ import AccelShadow.AccelShadow;
 import LinkedList.LinkedListShadow;
 import AccelShadowKBuffer.AccelShadowKBuffer;
 import AccelIrregularZ.AccelIrregularZ;
+import LinkedListIrregularZ.LinkedListIrregularZ;
 
 // Shadow Eval Modes
 #define SHADOW_EVAL_MODE_RAYTRACING 0
@@ -25,6 +26,7 @@ import AccelIrregularZ.AccelIrregularZ;
 #define SHADOW_EVAL_MODE_LinkedList 2
 #define SHADOW_EVAL_MODE_AccelKBuffer 3
 #define SHADOW_EVAL_MODE_AccelIrregularZ 4
+#define SHADOW_EVAL_MODE_LinkedListIrregularZ 5
 
 #ifndef SHADOW_EVAL_MODE
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
@@ -300,6 +302,8 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
             shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
             shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(brdf_lum));
+        #elif SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_LinkedListIrregularZ
+            shadow = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(brdf_lum));
         #endif
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
