@@ -216,13 +216,14 @@ void rayGen()
     float totalSamples = float(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
     totalSamples = min(totalSamples, frameDim.x * frameDim.y);
     const uint idx1D = pixel.x + pixel.y * frameDim.x; // Create an 1D weight from 2D
-    /*
+    
     if (idx1D > totalSamples)
         return;
     
     int mipMulFactor = 1; // Default Mip 0
     uint index = idx1D;
     uint sampleCount = 1;
+    int subpixelIndex = 0;
 
     if (!kUseOptimizedSampleDistribution)
     {
@@ -307,6 +308,7 @@ void rayGen()
         uint2 selectedMipIdx = mipIdx;
         uint weightIdx = idx1D; // Uint weight for traversal
         uint choosenSampleCount = 0;
+        int pixelIndex = 0; //Start index for the selected pixel
         uint prevMipRes = 1; // Mip res for previous iteration
         const uint highestMip = gMipCount - 2;
         uint selectedMipLevel = highestMip;
@@ -336,6 +338,10 @@ void rayGen()
             weightIdx -= prevSampleIdx;
             choosenSampleCount = numSamples;
 
+            // Get start pixel index
+            for (uint i = 0; i < selectedSubpixel; i++)
+                pixelIndex += mipSamples[i];
+
             // Update idx for next it
             if (selectedSubpixel == 1 || selectedSubpixel == 3)
                 mipIdx.x += 1;
@@ -350,6 +356,7 @@ void rayGen()
         // Get pixel on default resolution
         float2 relPixel = float2(selectedMipIdx) / prevMipRes;
         pixel = uint2((relPixel * smRes) + 0.5);
+        subpixelIndex = max(idx1D - pixelIndex,0);
 
         sampleCount = choosenSampleCount;
         index = idx1D % choosenSampleCount;
@@ -363,7 +370,7 @@ void rayGen()
     
     uint samplesSq = uint(sqrt(sampleCount)); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
     const float subpixelSize = 1.0 / samplesSq;
-    float2 subpixelLoc = float2(index % samplesSq, index / samplesSq);
+    float2 subpixelLoc = float2(subpixelIndex % samplesSq, subpixelIndex / samplesSq);
     float2 borderMin = subpixelLoc * subpixelSize;
     // X
     float2 border = float2(borderMin.x, borderMin.x + subpixelSize) - 0.5; // From [0, 1] to [-0.5,0.5]
@@ -377,7 +384,7 @@ void rayGen()
     pixelOffset *= mipMulFactor;
     boxPixelOffset *= mipMulFactor;
     pixelCenterOffest *= mipMulFactor;
-    */
+    
     //
     // Dispatch Sample / Create Shadow Map
     //

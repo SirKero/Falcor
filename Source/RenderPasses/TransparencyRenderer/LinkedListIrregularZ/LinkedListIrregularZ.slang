@@ -33,6 +33,7 @@ struct AccelIrregularZShader
         uint2 gSMSize;
         float gNear;
         float gFar;
+        uint gMipCount; 
     }
 
     cbuffer ShadowVPs
@@ -41,8 +42,10 @@ struct AccelIrregularZShader
         float4x4 gStaggeredDirVP; //Only valid if there is a directional light
     }
 
-    StructuredBuffer<LinkedListNode> gAccelShadowData[COUNT_LIGHTS];
+    StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
+    Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
+    
 
     float getLinkedVisibility(LinkedListNode n, float dist, uint lightIdx)
     {
@@ -52,7 +55,7 @@ struct AccelIrregularZShader
         {
             visibility = n.visibility;
             if (n.next == 0) break;
-            n = gAccelShadowData[lightIdx][n.next];
+            n = gLinkedListData[lightIdx][n.next];
         }
 
         return visibility;
@@ -83,8 +86,8 @@ struct AccelIrregularZShader
             }
             validShadow = false;
         }
-  
-        const float2 shadowPixel = floor((shadowPos.xy * gSMSize) - 0.5) ; // shadowPos.xy * gSMSize; //TODO strange fix for normal
+
+        const float2 shadowPixel = shadowPos.xy * gSMSize; // floor((shadowPos.xy * gSMSize) - 0.5) ; //  //TODO strange fix for normal
         float dist = isDirectional ? shadowPos.z : shadowPos.w;
 
         // Add access
@@ -110,18 +113,79 @@ struct AccelIrregularZShader
         if (!validShadow)
             return -1.f;
 
+        float visibility = 1.0;
+
         //TODO go through the mip chain and get the corresponding head buffer index
         uint index = uShadowPixel.y * gSMSize.x + uShadowPixel.x;
+        float2 smUV = shadowPos.xy;
+        uint2 mipIdx = uint2(0); // Top left
+        uint2 selectedMipIdx = mipIdx;
+        uint selectedIndex = 0;  // Start index at zero
+        uint choosenSampleCount = 0;
+        const uint highestMip = gMipCount - 2;
+        uint selectedMipLevel = highestMip;
+        for (int m = highestMip; m >= 0; m--) {
+            uint4 mipSamples;
+            mipSamples[0] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x, mipIdx.y, m))));
+            mipSamples[1] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
+            mipSamples[2] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
+            mipSamples[3] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+            uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+            uint pixelLoc = 0;
+            if (smUV.x > 0.5)
+                pixelLoc += 1;
+            if (smUV.y > 0.5)
+                pixelLoc += 2;
 
-        float visibility = 1.0;
-        //dist = dist - 1e-2;       // TODO better bias
-        
-        LinkedListNode n = gAccelShadowData[lightIdx][index];
+            // Check if level is valid and abort if that is the case
+            if (totalSamples < choosenSampleCount)
+                break;
+
+            choosenSampleCount = mipSamples[pixelLoc]; //Update
+
+            // Add to pixel offset
+            for (uint i = 0; i < pixelLoc; i++)
+                selectedIndex += mipSamples[i];
+
+            // Update relative index weight
+            smUV *= 2.0;
+            if (pixelLoc == 1 || pixelLoc == 3) //x > 0.5
+                smUV.x -= 1.0;
+            if (pixelLoc > 1) // y > 0.5
+                smUV.y -= 1.0;
+            smUV = saturate(smUV); //Guarantee [0,1]
+
+            // Update mip idx for next iteration 
+            if (pixelLoc == 1 || pixelLoc == 3)
+                mipIdx.x += 1;
+            if (pixelLoc > 1) // 2 or 3
+                mipIdx.y += 1;
+
+            selectedMipLevel = m;
+            selectedMipIdx = mipIdx;
+            mipIdx *= 2; // Update for new resolution
+        }
+
+        if (choosenSampleCount == 0)
+            return visibility; //Unshadowed (1.0)
+
+        //Get final offset (subpixels) for the index
+        if (choosenSampleCount > 1) {
+            uint samplesSq = uint(round(sqrt(choosenSampleCount))); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
+            const float subpixelSize = 1.0 / samplesSq;
+            uint2 subpixelOffset = uint2(smUV / subpixelSize);
+            subpixelOffset.y *= samplesSq;
+            
+            selectedIndex += subpixelOffset.x + subpixelOffset.y;
+        }
+       
+
+        LinkedListNode n = gLinkedListData[lightIdx][selectedIndex];
         // traverse visibility until dist is reached
         while (n.depth < dist) {
             visibility = n.visibility;
             if (n.next == 0) break;
-            n = gAccelShadowData[lightIdx][n.next];
+            n = gLinkedListData[lightIdx][n.next];
         }
         
         return visibility;

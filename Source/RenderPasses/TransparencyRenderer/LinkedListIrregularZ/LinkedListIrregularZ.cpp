@@ -517,12 +517,12 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
         // Get dimensions of ray dispatch.
         uint2 targetDim = mResolution;
-        /*
+        
         if (mOptimizeSampleDistribution)
         {
             targetDim = uint2(float2(targetDim) * mSampleOverestimate);
         }
-        */       
+               
         FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
         // Spawn the rays.
@@ -570,6 +570,7 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
+    shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
 
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
@@ -581,7 +582,8 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     const auto accelDataSize = lights.size();
     for (uint i = 0; i < accelDataSize; i++)
     {
-        shadowVar["gAccelShadowData"][i] = mLinkedListData[i];
+        shadowVar["gSampleDistribution"][i] = mSampleDistribution[i];
+        shadowVar["gLinkedListData"][i] = mLinkedListData[i];
     }
 
 }
