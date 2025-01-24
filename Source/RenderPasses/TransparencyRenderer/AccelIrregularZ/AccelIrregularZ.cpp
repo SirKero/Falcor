@@ -457,7 +457,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
         auto var = mpOptimizeSamples->getRootVar();
 
-        var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
         for (uint m = 1; m < mSampleDistribution[0]->getMipCount(); m++)
         {
             for (uint i = 0; i < lights.size(); i++)

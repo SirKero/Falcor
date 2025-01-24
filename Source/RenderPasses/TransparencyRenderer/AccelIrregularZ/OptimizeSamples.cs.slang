@@ -4,10 +4,16 @@
 #define COUNT_LIGHTS 1
 #endif
 
+#ifndef CLEAR_COUNTER
+#define CLEAR_COUNTER 0
+#endif
+
 RWTexture2D<float> gSampleDistribution0[COUNT_LIGHTS];
 RWTexture2D<float> gSampleDistribution1[COUNT_LIGHTS];
 
-RWBuffer<uint> gLastFrameSampleCount;
+RWBuffer<uint> gCounter; // Can be nullptr;
+
+static const bool kClearCounter = CLEAR_COUNTER;
 cbuffer CB {
     uint2 gDispatchSize;
     uint gMipLevel; //Mip level 1 lower than dispatch size
@@ -106,4 +112,6 @@ void main(uint3 thdID: SV_DispatchThreadID)
     storeNegative &= all(gDispatchSize > 1);
     gSampleDistribution1[lightID][pixel] = storeNegative ? -totalSampleWeight : totalSampleWeight;
 
+    if (kClearCounter && all(gDispatchSize == 1))
+        gCounter[lightID] = uint(totalSampleWeight);
 }

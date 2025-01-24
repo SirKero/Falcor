@@ -30,10 +30,11 @@ struct AccelIrregularZShader
 
     cbuffer SMCB
     {
-        uint2 gSMSize;
-        float gNear;
-        float gFar;
-        uint gMipCount; 
+        uint2 gSMSize;       //Shadow Map Size
+        float gNear;         //Shadow Near
+        float gFar;          //Shadow far
+        uint gMipCount;      //Count of mip in the sample distribution texture
+        uint gMaxBufferSize; //Max size of the buffer
     }
 
     cbuffer ShadowVPs
@@ -178,13 +179,16 @@ struct AccelIrregularZShader
             
             selectedIndex += subpixelOffset.x + subpixelOffset.y;
         }
-       
+
+        //Check if index is bigger than max size. Can happen if sample count increases drastically compaired to previous frame
+        if (selectedIndex >= gMaxBufferSize)
+            return visibility;
 
         LinkedListNode n = gLinkedListData[lightIdx][selectedIndex];
         // traverse visibility until dist is reached
         while (n.depth < dist) {
             visibility = n.visibility;
-            if (n.next == 0) break;
+            if (n.next == 0 || n.next >= gMaxBufferSize) break;
             n = gLinkedListData[lightIdx][n.next];
         }
         

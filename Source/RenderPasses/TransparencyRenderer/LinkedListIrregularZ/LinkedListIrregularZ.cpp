@@ -410,12 +410,13 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
             DefineList defines;
             defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+            defines.add("CLEAR_COUNTER", "1");
 
             mpOptimizeSamples = ComputePass::create(mpDevice, desc, defines, true);
         }
         auto var = mpOptimizeSamples->getRootVar();
 
-        var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
+        var["gCounter"] = mLinkedListCounter[frameInFlight];
         for (uint m = 1; m < mSampleDistribution[0]->getMipCount(); m++)
         {
             for (uint i = 0; i < lights.size(); i++)
@@ -453,10 +454,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         }
     };
 
-    // Clear Counter
-    uint clearSize = lights.size();
-    pRenderContext->clearUAV(mLinkedListCounter[frameInFlight]->getUAV(0u, clearSize).get(), uint4(mResolution.x * mResolution.y));
-       
     // Defines
     mGenLinkedListShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel));
     //mGenLinkedListShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mLinkedListDataFormatSize));
@@ -572,6 +569,8 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
     shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
+    shadowVar["SMCB"]["gMaxBufferSize"] = mLinkedListNodeBufferSize;
+    
 
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
