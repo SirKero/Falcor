@@ -71,7 +71,6 @@ void main(uint3 thdID: SV_DispatchThreadID)
             float newCount = min(floor(w * totalRayCount), kMaxSamples * gMaxSampleOverestimate);
             gSmp[i][pixel] = newCount;
             gLastFrameSampleCount[i] = uint(newCount);
-            //gSmp[i][pixel] = kMaxSamples; //TODO temporary
         }
     }
     //Pull ray count to lower levels

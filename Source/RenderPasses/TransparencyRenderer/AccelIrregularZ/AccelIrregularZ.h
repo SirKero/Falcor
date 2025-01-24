@@ -89,13 +89,13 @@ private:
     uint mNumHaltonSamples = 64; //Number of halton samples
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
-    float mSampleOverestimate = 1.25f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
+    float mSampleOverestimate = 1.75f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
     bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
 
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;
     bool mResetRayCount = false;
-    float mDynRCGuardPercentage = 0.8f; //take 80% of the total
+    float mDynRCGuardPercentage = 0.9f; //10% buffer for possible changes
     float mDynRCChangePercentage = 0.6f; //How much of the optimal value should be taken
 
     // Accel shadow settings
@@ -105,7 +105,7 @@ private:
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
-    float mAccelShadowOverestimation = 1.75f;
+    float mAccelShadowOverestimation = 1.25f;
     uint mAccelDataFormatSize = 2; // Size of the data struct for the accel data
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;

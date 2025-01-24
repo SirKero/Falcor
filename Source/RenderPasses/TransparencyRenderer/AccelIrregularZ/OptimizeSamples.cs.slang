@@ -20,13 +20,15 @@ cbuffer CB {
     uint gLightCount;
 }
                       
-
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
 {
     const uint2 pixel = thdID.xy;
     const uint lightID = thdID.z;
-    
+
+    if (any(pixel >= gDispatchSize))
+        return;
+
     // Load the 4 pixels from the mip before
     const uint2 pixelLower = pixel * 2;
     float4 values = float4(0);

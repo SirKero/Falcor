@@ -279,7 +279,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
 
     auto& lights = mpScene->getLights();
-    uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount : 0; // For sync if optimization is used
+    uint frameInFlight = mStagingCount; //Counter GPU CPU sync
 
     //Create Access Mips
     {
@@ -349,11 +349,9 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
                 var["gSmp"][i].setUav(mSampleDistribution[i]->getUAV(mip));
             }
             int lastFrameInFlight = 0;
-            if (mAccelShadowUseCPUCounterOptimization)
-            {
-                lastFrameInFlight = mStagingCount - 1;
-                lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
-            }
+            lastFrameInFlight = mStagingCount - 1;
+            lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
+            
                  
             var["gElementCount"] = mLinkedListCounter[lastFrameInFlight];
             mCalcSampleDistribution->execute(pRenderContext, uint3(1,1,1));
@@ -529,8 +527,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
     const uint numAABBs = lights.size();
 
-    // Sync Photon copy data
-    if (mAccelShadowUseCPUCounterOptimization)
+    //Copy data from GPU to CPU counter
     {
         // Copy to CPU
         pRenderContext->copyBufferRegion(
@@ -606,20 +603,19 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
                     if (i > 0)
                         group2.separator();
                     group2.text(mpScene->getLight(i)->getName());
-                    group2.text("Elements:        " + std::to_string(mLinkedListNodeBufferSize));
+                    group2.text("Element Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
                     std::string accelMem = std::to_string((mLinkedListNodeBufferSize * sizeof(float) * mLinkedListDataFormatSize) / 1e6f);
-                    group2.text("Data Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
+                    group2.text("Element Buffer Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
                     group2.text(
-                        "Needed Elements: " + std::to_string(uint(mUIElementCounter[i] * mAccelShadowOverestimation)) + " (" +
-                        std::to_string(mUIElementCounter[i]) + ")"
+                        "Used Elements: " + std::to_string(uint(mUIElementCounter[i]))
                     );
                     std::string neededMem = std::to_string(
-                        (mUIElementCounter[i] * mAccelShadowOverestimation * sizeof(float) * mLinkedListDataFormatSize) / 1e6f
+                        (mUIElementCounter[i] * sizeof(float) * mLinkedListDataFormatSize) / 1e6f
                     );
                     std::string fillRate =
-                        std::to_string(((mUIElementCounter[i] * mAccelShadowOverestimation) / float(mLinkedListNodeBufferSize)) * 100.f);
+                        std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
                     group2.text(
-                        "Needed Data Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
+                        "Used Element Buffer Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
                         fillRate.substr(0, fillRate.find(".") + 2) + "%)"
                     );
                 }
@@ -639,14 +635,6 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
             group.tooltip("Multiplier for the change value in the Sample Distribution");
         }
 
-        /* Unused
-        group.checkbox("Use CPU Counter optimization", mAccelShadowUseCPUCounterOptimization);
-        group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size.");
-        if (mAccelShadowUseCPUCounterOptimization)
-        {
-            group.var("CPU Counter overestimation", mAccelShadowOverestimation, 1.0f, 2.0f, 0.001f);
-        }
-        */
 
         group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
         group.tooltip("Optimizes the sample distribution texture with an extra compute pass");

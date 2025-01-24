@@ -319,7 +319,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
 
     auto& lights = mpScene->getLights();
-    uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount : 0; // For sync if optimization is used
+    uint frameInFlight = mStagingCount; // For sync if optimization is used
 
     //Create Access Mips
     {
@@ -391,12 +391,9 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
                 var["gSmp"][i].setUav(mSampleDistribution[i]->getUAV(mip));
             }
             int lastFrameInFlight = 0;
-            if (mAccelShadowUseCPUCounterOptimization)
-            {
-                lastFrameInFlight = mStagingCount - 1;
-                lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
-            }
-                 
+            lastFrameInFlight = mStagingCount - 1;
+            lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
+                             
             var["gElementCount"] = mAccelShadowCounter[lastFrameInFlight];
             mCalcSampleDistribution->execute(pRenderContext, uint3(1,1,1));
         }
@@ -579,8 +576,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
     const uint numAABBs = mUseOneAABBForAllLights ? 1 : lights.size();
 
-    // Sync Photon copy data
-    if (mAccelShadowUseCPUCounterOptimization)
+    //Copy Counter from GPU to CPU
     {
         // Copy to CPU
         pRenderContext->copyBufferRegion(
@@ -599,14 +595,24 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         std::memcpy(mAccelShadowNumPoints.data(), data, sizeof(uint) * numAABBs);
         mAccelShadowCounterCPU[mStagingCount]->unmap();
     }
-
+   
     // Build the Acceleration structure
     std::vector<uint64_t> aabbCount;
+    uint totalCount = 0;
+    for (uint i = 0; i < numAABBs && mAccelShadowUseCPUCounterOptimization; i++)
+        totalCount += mAccelShadowNumPoints[i];
+
     for (uint i = 0; i < numAABBs; i++)
     {
-        uint numPoints = mAccelShadowUseCPUCounterOptimization
-                             ? std::min(uint(mAccelShadowNumPoints[i] * mAccelShadowOverestimation), mAccelShadowMaxNumPoints)
-                             : mAccelShadowMaxNumPoints;
+        uint numPoints = mAccelShadowMaxNumPoints;
+        if (mAccelShadowUseCPUCounterOptimization)
+        {
+            float diffPercentage = ((mAccelShadowMaxNumPoints - mAccelShadowNumPoints[i]) / mAccelShadowMaxNumPoints);
+            uint maxPossibleCount = diffPercentage > 0.0 && mEnableDynamicRayCountCalc
+                                        ? uint(totalCount * diffPercentage * mDynRCChangePercentage)
+                                        : 0.25f * mAccelShadowMaxNumPoints;
+            numPoints = std::min(uint(mAccelShadowNumPoints[i] + maxPossibleCount), mAccelShadowMaxNumPoints);
+        }
         aabbCount.push_back(numPoints);
     }
     mpShadowAccelerationStrucure->update(pRenderContext, aabbCount);
@@ -668,22 +674,27 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                     if (i > 0)
                         group2.separator();
                     group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
-                    group2.text("Elements:        " + std::to_string(mAccelShadowMaxNumPoints));
+                    group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
                     std::string accelMem = std::to_string((mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f);
+                    std::string dataMem = std::to_string((mAccelShadowMaxNumPoints * mAccelDataFormatSize) / 1e6f);
+                    std::string totalMem = std::to_string((mAccelShadowMaxNumPoints * mAccelDataFormatSize * sizeof(AABB)) / 1e6f);
                     group2.text("AABB Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
-                    group2.text("Data Memory:      TBD"); // TODO
-                    group2.text(
-                        "Needed Elements: " + std::to_string(uint(mAccelShadowNumPoints[i] * mAccelShadowOverestimation)) + " (" +
-                        std::to_string(mAccelShadowNumPoints[i]) + ")"
-                    );
-                    std::string neededMem = std::to_string((mAccelShadowNumPoints[i] * mAccelShadowOverestimation * sizeof(AABB)) / 1e6f);
+                    group2.text("Data Memory:     " + dataMem.substr(0, dataMem.find(".") + 3) + " MB");
+                    group2.text("Total Memory:    " + totalMem.substr(0, totalMem.find(".") + 3) + " MB");
+
+                    group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
+                    std::string neededAABBMem = std::to_string((mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f);
+                    std::string neededDataMem = std::to_string((mAccelShadowNumPoints[i] * mAccelDataFormatSize) / 1e6f);
+                    std::string neededTotalMem = std::to_string((mAccelShadowNumPoints[i] * mAccelDataFormatSize * sizeof(AABB)) / 1e6f);
                     std::string fillRate =
-                        std::to_string(((mAccelShadowNumPoints[i] * mAccelShadowOverestimation) / float(mAccelShadowMaxNumPoints)) * 100.f);
+                        std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
+                    group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB" );
+                    group2.text("Used Data Memory:   " + neededDataMem.substr(0, neededDataMem.find(".") + 3) + " MB");
                     group2.text(
-                        "Needed AABB Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
+                        "Used Total Memory:   " + neededTotalMem.substr(0, neededTotalMem.find(".") + 3) + " MB (" +
                         fillRate.substr(0, fillRate.find(".") + 2) + "%)"
                     );
-                    group2.text("Needed Data Memory:    TBD");
+
                 }
                 group2.separator();
             }
@@ -832,8 +843,7 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
 
     uint frameInFlight = 0;
     // Staging count was increased at the end of the generation code, so take one less
-    if (mAccelShadowUseCPUCounterOptimization)
-        frameInFlight = mStagingCount == 0 ? kFramesInFlight - 1 : mStagingCount - 1;
+    frameInFlight = mStagingCount == 0 ? kFramesInFlight - 1 : mStagingCount - 1;
 
     //Get index of directional light if the scene contains it
     uint directionalIndex = UINT_MAX;
