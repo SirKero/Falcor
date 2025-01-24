@@ -73,6 +73,7 @@ public:
 private:
     void prepareResources(RenderContext* pRenderContext);
     std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes();
+    float halton(uint32_t index, uint32_t base);
 
     //Runtime
     uint mFrameCount = 0;

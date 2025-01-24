@@ -234,7 +234,7 @@ std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes()
  * @param[in] index Index of the queried element, starting from 0.
  * @param[in] base Base for the digit inversion. Should be the next unused prime number.
  */
-inline float halton(uint32_t index, uint32_t base)
+float LinkedListIrregularZ::halton(uint32_t index, uint32_t base)
 {
     // Reversing digit order in the given base in floating point.
     float result = 0.0f;
