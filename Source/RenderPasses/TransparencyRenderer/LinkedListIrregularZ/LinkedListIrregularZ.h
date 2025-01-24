@@ -95,8 +95,8 @@ private:
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;
     bool mResetRayCount = false;
-    float mDynRCGuardPercentage = 0.9f; //take 90% of the total
-    float mDynRCChangePercentage = 1.f; //How much of the optimal value should be taken
+    float mDynRCGuardPercentage = 0.8f; //take 90% of the total
+    float mDynRCChangePercentage = 0.6f; //How much of the optimal value should be taken
 
     // Accel shadow settings
     uint mApproxNumElementsPerPixel = 4u;
@@ -104,7 +104,7 @@ private:
     std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync
     uint mLinkedListNodeBufferSize = 0;
     bool mAccelShadowUseCPUCounterOptimization = true;
-    float mAccelShadowOverestimation = 1.3f;
+    float mAccelShadowOverestimation = 1.75f;
     uint mLinkedListDataFormatSize = 3; //TODO set automatically
     bool mRebuildDataBuffer = true;
     bool mAccelUsePCF = false;

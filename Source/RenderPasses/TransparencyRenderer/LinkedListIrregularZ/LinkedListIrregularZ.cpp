@@ -340,6 +340,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             var["CB"]["gCalcTotalDispatchCount"] = true;
             var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mApproxNumElementsPerPixel * mDynRCGuardPercentage);
             var["CB"]["gChangePercentage"] = mDynRCChangePercentage; // 50% for now
+            var["CB"]["gMaxSampleOverestimate"] = mSampleOverestimate * mSampleOverestimate; // Squared as this is applied to x and y of dispatch resolution
 
             var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
             for (uint i = 0; i < lights.size(); i++)

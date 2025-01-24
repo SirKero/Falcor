@@ -24,7 +24,8 @@ cbuffer CB {
     uint2 gDstSize;
     int gMaxNumAABBs;
     float gChangePercentage;    //(0,1] how much can the ray dispatch change
-    bool gCalcTotalDispatchCount; //Should only be true on the max mip level
+    bool gCalcTotalDispatchCount; // Should only be true on the max mip level
+    float gMaxSampleOverestimate;
 }
 
 [numthreads(16, 16, 1)]
@@ -67,7 +68,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         // Write new ray counts to textures
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             float w = importances[i] / totalImportance;
-            float newCount = min(floor(w * totalRayCount), kMaxSamples);
+            float newCount = min(floor(w * totalRayCount), kMaxSamples * gMaxSampleOverestimate);
             gSmp[i][pixel] = newCount;
             gLastFrameSampleCount[i] = uint(newCount);
             //gSmp[i][pixel] = kMaxSamples; //TODO temporary
