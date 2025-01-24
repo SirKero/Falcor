@@ -73,7 +73,6 @@ public:
 private:
     void prepareResources(RenderContext* pRenderContext);
     std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes();
-    float halton(uint32_t index, uint32_t base);
 
     //Runtime
     uint mFrameCount = 0;
@@ -121,6 +120,7 @@ private:
     std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
     std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
     ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
+    ref<Buffer> mpHaltonBuffer;
     
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture

@@ -21,10 +21,6 @@ import Utils.Geometry.GeometryHelpers;
 #define MAX_IDX 1
 #endif
 
-#ifndef NUM_HALTON_SAMPLES
-#define NUM_HALTON_SAMPLES 1
-#endif
-
 /** Payload for shadow ray. (16B)
 */
 struct RayData
@@ -57,14 +53,11 @@ cbuffer CB
     float4x4 gInvViewProj; // Inverse view projection
 }
 
-cbuffer JitterSamples {
-    float2 gJitterSamples[NUM_HALTON_SAMPLES];
-}
-
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<LinkedListNode> gData;
 RWTexture2D<uint> gAccessCounter;
 Texture2D<float> gSampleDistribution;
+Buffer<float2> gHaltonSamples;
 
 SamplerState gPointSampler;
 
@@ -362,16 +355,17 @@ void rayGen()
         index = idx1D % choosenSampleCount;
         mipMulFactor = 1 << selectedMipLevel; // Multiplier for Mip level
     }
-
-    if (kUseHaltonSamplePattern) {
-        uint jitterIdx = idx1D % kNumHaltonSamples;
-        pixelOffset = gJitterSamples[jitterIdx]; // pixel offset in [0,1]
-    }
     
     uint samplesSq = uint(sqrt(sampleCount)); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
     const float subpixelSize = 1.0 / samplesSq;
     float2 subpixelLoc = float2(subpixelIndex % samplesSq, subpixelIndex / samplesSq);
     float2 borderMin = subpixelLoc * subpixelSize;
+
+    if (kUseHaltonSamplePattern) {
+        uint jitterIdx = (subpixelLoc.x + (subpixelLoc.y * samplesSq) + gFrameCount) % kNumHaltonSamples;
+        pixelOffset = gHaltonSamples[jitterIdx]; // pixel offset in [0,1]
+    }
+
     // X
     float2 border = float2(borderMin.x, borderMin.x + subpixelSize) - 0.5; // From [0, 1] to [-0.5,0.5]
     pixelOffset.x = border.x + pixelOffset.x * subpixelSize; // Offset from [0,1] in pixel to [0,1] in subpixel

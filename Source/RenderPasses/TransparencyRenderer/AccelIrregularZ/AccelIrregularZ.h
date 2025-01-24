@@ -85,7 +85,6 @@ private:
     uint mStagingCount = 0;
 
     //Sample Gen (+Jitter)
-    std::vector<uint> mHaltonSampleCount;
     uint mNumHaltonSamples = 64; //Number of halton samples
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
@@ -142,6 +141,7 @@ private:
     std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
     std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
     ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
+    ref<Buffer> mpHaltonBuffer;                                             //Buffer with precalculated Halton numbers
     
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture

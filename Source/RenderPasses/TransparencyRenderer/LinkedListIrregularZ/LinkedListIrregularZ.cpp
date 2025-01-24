@@ -195,6 +195,21 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
             );
             mpLastFrameMaxSampleCount->setName("LastFrameMaxSampleDistributionLLI");
         }
+
+        if (!mpHaltonBuffer || mpHaltonBuffer->getElementCount() != mNumHaltonSamples)
+        {
+            // Generate Halton Samples on CPU
+            auto haltonSampler = HaltonSamplePattern::create(mNumHaltonSamples);
+            std::vector<float2> haltonInitData(mNumHaltonSamples);
+            for (uint i = 0; i < mNumHaltonSamples; i++)
+                haltonInitData[i] = haltonSampler->next() + 0.5f; // Halton samples are in [-0.5, 0.5) but we want the samples in [0,1)
+
+            // Create and upload GPU buffer
+            mpHaltonBuffer = Buffer::createTyped<float2>(
+                mpDevice, mNumHaltonSamples, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, haltonInitData.data()
+            );
+            mpHaltonBuffer->setName("HaltonDataBuffer");
+        }
     }
 }
 
@@ -227,26 +242,6 @@ std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes()
     frustumPlanes[3] = float4(N, math::dot(N, data.posW));
 
     return frustumPlanes;
-}
-
-/**
- * Returns elements of the Halton low-discrepancy sequence.
- * @param[in] index Index of the queried element, starting from 0.
- * @param[in] base Base for the digit inversion. Should be the next unused prime number.
- */
-float LinkedListIrregularZ::halton(uint32_t index, uint32_t base)
-{
-    // Reversing digit order in the given base in floating point.
-    float result = 0.0f;
-    float factor = 1.0f;
-
-    for (; index > 0; index /= base)
-    {
-        factor /= base;
-        result += factor * (index % base);
-    }
-
-    return result;
 }
 
 void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
@@ -431,27 +426,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         }
     }
 
-    // Init the sample points for Halton Jitter
-    if (mSamplePattern == SMSamplePattern::Halton && mHaltonSampleCount.size() != mNumHaltonSamples)
-    {
-        mHaltonSampleCount.resize(mNumHaltonSamples);
-        for (uint i = 0; i < mNumHaltonSamples; i++)
-            mHaltonSampleCount[i] = i;
-    }
-    auto setHaltonJitterSamples = [&](ShaderVar& shaderVar) {
-        for (uint i = 0; i < mNumHaltonSamples; i++)
-        {
-            float2 sample = float2(0.5);
-            if (mSamplePattern == SMSamplePattern::Halton)
-            {
-                sample = {halton(mHaltonSampleCount[i], 2), halton(mHaltonSampleCount[i], 3)}; // sample in [0,1]
-                mHaltonSampleCount[i] = (mHaltonSampleCount[i] + 1) % mNumHaltonSamples;
-            }
-
-            shaderVar["JitterSamples"]["gJitterSamples"][i] = sample;
-        }
-    };
-
     // Defines
     mGenLinkedListShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel));
     //mGenLinkedListShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mLinkedListDataFormatSize));
@@ -482,9 +456,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     FALCOR_ASSERT(mGenLinkedListShadowPip.pVars);
     auto var = mGenLinkedListShadowPip.pVars->getRootVar();
 
-    // Set Halton Jitter (same for every light)
-    setHaltonJitterSamples(var); //TODO seperate buffer that does not change every frame
-
     // Trace the pass for every light
     for (uint i = 0; i < lights.size(); i++)
     {
@@ -510,6 +481,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         var["gPointSampler"] = mpPointSampler;
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
+        var["gHaltonSamples"] = mpHaltonBuffer;
 
         // Get dimensions of ray dispatch.
         uint2 targetDim = mResolution;
