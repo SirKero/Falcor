@@ -105,8 +105,7 @@ private:
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
-    bool mAccelShadowUseCPUCounterOptimization = true;
-    float mAccelShadowOverestimation = 1.25f;
+    bool mAccelShadowUseCPUCounterOptimization = false;
     uint mAccelDataFormatSize = 2; // Size of the data struct for the accel data
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;

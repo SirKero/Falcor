@@ -727,8 +727,8 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
         group.tooltip("Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same Frame)");
 
-        group.checkbox("Use CPU Counter optimization", mAccelShadowUseCPUCounterOptimization);
-        group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size.");
+        group.checkbox("Use Element Counter to fit Accelertation Structure", mAccelShadowUseCPUCounterOptimization);
+        group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size. Only recommended if there are multiple AABB buffers that are empty or partially filled");
        
         group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
         group.tooltip("Optimizes the sample distribution texture with an extra compute pass");
