@@ -280,8 +280,11 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         // Eval BSDF
         float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
-        float brdf_lum = luminance(brdf);
-        if (brdf_lum <= 0) {
+        float importance = luminance(thp);              //Works best
+        //float importance = luminance(thp * thp);
+        //float importance = luminance((1.0 / ls.pdf) * (thp * thp) * brdf);
+        //float importance = luminance(brdf);
+        if (all(brdf <= 0)) {
             #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
                         continue;
             #else
@@ -300,10 +303,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
             shadow = gLinkedListShadow.eval(lightIndex, sd.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
             shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
-        #elif SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_AccelIrregularZ
-            shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(brdf_lum));
-        #elif SHADOW_EVAL_MODE ==  SHADOW_EVAL_MODE_LinkedListIrregularZ
-            shadow = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(brdf_lum));
+        #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelIrregularZ
+            shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
+        #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedListIrregularZ
+            shadow = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
         #endif
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)

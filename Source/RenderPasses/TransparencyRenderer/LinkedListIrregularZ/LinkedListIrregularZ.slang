@@ -66,10 +66,10 @@ struct AccelIrregularZShader
      * \param[in] index of the current light
      * \param[in] world position of the current hit
      * \param[in] is the light directional (ortho projection)
-     * \param[in] unshadowed luminance estimate of the point. Is used to weight the access texture. Should be in (0, 1]
+     * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
      * \return visibility in [0,1]
      */
-    float eval(uint lightIdx, float3 posW, bool isDirectional = false, float luminance = 1.0) {
+    float eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -106,7 +106,7 @@ struct AccelIrregularZShader
         else
             uShadowPixel = uint2(shadowPixel);
 
-        uint backprojectionWeight = clamp(uint(luminance * kMaxAtomicWeight),1, kMaxAtomicWeight);
+        uint backprojectionWeight = clamp(uint(importance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         if(validBackprojection)
             InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
 
