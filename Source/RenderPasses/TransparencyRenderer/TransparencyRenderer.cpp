@@ -350,6 +350,7 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = renderData.getDefaultTextureDims();
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -361,6 +362,7 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     };
     for (auto channel : kInputChannels)
         bind(channel);
+    var["gMotionVector"] = renderData.getTexture(kOutputMV);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gTransparencyThp"] = mpTransparencyThp;
 

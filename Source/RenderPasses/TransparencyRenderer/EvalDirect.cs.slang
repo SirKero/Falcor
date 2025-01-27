@@ -3,12 +3,14 @@
 cbuffer CB
 {
     uint gFrameCount; // Current it for sample gen
+    uint2 gFrameDim;    //FrameDimensions
 }
 
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gViewW; // Optional
 Texture2D<float4> gTransparencyThp;
+RWTexture2D<float2> gMotionVector;     //Can be overwritten if scene was missed
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
@@ -17,6 +19,7 @@ static const bool kAdjustShadingNormals = true;
 static const float kMinOpacity = 1e-7;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
 static const float kEnvMapStrength = ENV_MAP_STRENGTH;
+static const bool kCalcEnvMapMotionVectors = true;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -36,6 +39,14 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
+// posV: view space position (negative z)
+// return: texture uv [0, 1]
+float2 ViewSpaceToUV(float3 posV)
+{
+    const float2 imageScale = 0.5 * float2(gScene.camera.data.frameWidth / gScene.camera.data.focalLength, gScene.camera.data.frameHeight / gScene.camera.data.focalLength);
+    float2 ndc = posV.xy / (imageScale * posV.z);
+    return ndc * float2(-0.5, 0.5) + 0.5; // since posV.z is negative, the sign order is inversed
+}
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
@@ -94,6 +105,12 @@ void main(uint2 pixel: SV_DispatchThreadID)
     else //Enviroment map lookup
     {
         colorOut = gScene.envMap.eval(viewDir) * kEnvMapStrength;
+        if (kCalcEnvMapMotionVectors) {
+            float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, gFrameDim, /*no jitter*/ false).dir;
+            float3 prevEnvMapDir = mul(gScene.camera.data.prevViewMat, float4(rayDirNoJitter, 0.0)).xyz;
+            float2 prevUV = ViewSpaceToUV(prevEnvMapDir);
+            gMotionVector[pixel] = prevUV - (float2(pixel) + 0.5) / float2(gFrameDim);
+        }
     }
     float3 prevColor = gOutputColor[pixel].xyz;
     gOutputColor[pixel] = float4(colorOut * transparencyThp + prevColor, 1.0);
