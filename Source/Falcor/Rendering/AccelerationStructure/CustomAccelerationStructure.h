@@ -81,8 +81,8 @@ public:
 
     /** Clears the AABBs. Clears the min.x value to NaN by default (reduces traversal times)
      */
-    void clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer, bool clearToNaN = true);
-    void clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN = true);
+    void clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer, bool clearToNaN = true, ref<Buffer> pCounterBuffer = nullptr);
+    void clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN = true, ref<Buffer> pCounterBuffer = nullptr);
 
 private:
     /*  * Creates the acceleration structure.

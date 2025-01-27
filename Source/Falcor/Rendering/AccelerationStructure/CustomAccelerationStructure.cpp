@@ -354,14 +354,14 @@ namespace Falcor
         pRenderContext->uavBarrier(mTlas.pTlas.get());
     }
 
-    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer, bool clearToNaN)
+    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer, bool clearToNaN, ref<Buffer> pCounterBuffer)
     {
         std::vector<ref<Buffer>> pAABBs = {pAABBBuffer};
-        clearAABBBuffers(pRenderContext, pAABBs);
+        clearAABBBuffers(pRenderContext, pAABBs, clearToNaN, pCounterBuffer);
     }
 
     //TODO add a gpu counter or cpu counter input to only clear a selected range 
-    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN) {
+    void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN, ref<Buffer> pCounterBuffer) {
         FALCOR_PROFILE(pRenderContext, "ClearAccelAABBBuffers");
 
         if (pAABBBuffers.empty())
@@ -374,13 +374,18 @@ namespace Falcor
             desc.addShaderLibrary(kAABBClearShaderFile).csEntry("main").setShaderModel("6_6");
 
             DefineList defines;
+            defines.add("USE_COUNTER_TO_CLEAR", pCounterBuffer ? "1" : "0");
 
             mpClearAABBsPass = ComputePass::create(mpDevice, desc, defines, true);
         }
+
+        mpClearAABBsPass->getProgram()->addDefine("USE_COUNTER_TO_CLEAR", pCounterBuffer ? "1" : "0");
+
         auto var = mpClearAABBsPass->getRootVar();
 
-        for (auto& pAABB : pAABBBuffers)
+        for (uint i=0; i< pAABBBuffers.size(); i++)
         {
+            auto& pAABB = pAABBBuffers[i];
             uint3 dispatchSize = uint3(1);
             if (pAABB->isStructured() || pAABB->isTyped())
                 dispatchSize.x = (pAABB->getElementCount());
@@ -390,6 +395,9 @@ namespace Falcor
             var["CB"]["gMax"] = dispatchSize.x;
             var["CB"]["gOffset"] = 0;
             var["CB"]["gClearToNaN"] = clearToNaN;
+            var["CB"]["gCounterIdx"] = i;
+
+            var["gCounter"] = pCounterBuffer; //Can be nullptr
             var["gAABB"] = pAABB;
 
             mpClearAABBsPass->execute(pRenderContext, dispatchSize);

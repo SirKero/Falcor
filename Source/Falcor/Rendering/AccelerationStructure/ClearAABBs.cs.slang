@@ -4,16 +4,23 @@ cbuffer CB {
     uint gMax; //Max number of elements
     uint gOffset; // Index offset
     bool gClearToNaN; // If true minPoint.x is cleared to nan
-    uint _pad;
+    bool gCounterIdx; //Index for the counter
 }
 
 RWStructuredBuffer<AABB> gAABB;
+Buffer<uint> gCounter;
 
+static const bool kUseCounter = USE_COUNTER_TO_CLEAR;
 
 [numthreads(256, 1, 1)]
 void main(uint thdID: SV_DispatchThreadID)
 {
     const uint aabbIdx = thdID + gOffset;
+    if (kUseCounter) {
+        const uint counter = gCounter[gCounterIdx];
+        if (thdID < counter)
+            return;
+    }
     if (aabbIdx >= gMax)
         return;
     AABB aabb = {};

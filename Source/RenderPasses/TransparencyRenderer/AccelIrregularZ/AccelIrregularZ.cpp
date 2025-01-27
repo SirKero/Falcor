@@ -186,7 +186,6 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
                 CustomAccelerationStructure::UpdateMode::TLASOnly
             );
             mpShadowAccelerationStrucure->setMinBLASUpdateCount(kMinAABBUpdateCount);
-            mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB);
         }
 
         if (mAccessTextures.empty())
@@ -504,12 +503,12 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
     }
 
+    //Clear AABBs
+    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
     // Clear Counter
     uint clearSize = mUseOneAABBForAllLights ? 1 : lights.size();
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, clearSize).get(), uint4(0));
-    //Clear AABBs
-    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB);
-       
+
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
