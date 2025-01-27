@@ -172,14 +172,12 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     rayData.dist = RayTCurrent();
 }
 
-
 inline uint getInsertIndex() {
     uint insertIdx = 0;
     const uint lightIdx = gLightIdx;
     InterlockedAdd(gCounter[lightIdx], 1u, insertIdx);
     return insertIdx;
 }
-
 
 //
 // Shader entry point for ray generation shader.
@@ -430,7 +428,6 @@ void rayGen()
     prevNode.next = 0;
     uint prevNodeIndex = idx1D;
     uint nodeIndex = prevNodeIndex;
-    gData[prevNodeIndex] = prevNode; //Clear TODO remove
 
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
@@ -442,9 +439,10 @@ void rayGen()
         TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
-        if (i == 0 && rayData.dist < 0)
-            return;
-
+        if (i == 0 && rayData.dist < 0) {
+            break;
+        }
+            
         //End ray tracing for the next frame
         if (lastTransmittances.y <= kMinOpacity || rayData.dist < 0) {
             useRayTracing = false;
@@ -497,7 +495,9 @@ void rayGen()
     boxZ.y = boxZ.x;
     boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
 
-    bool storeLastBox = lastTransmittances.x < 1.0 && rayData.dist >= 0;
+    bool storeLastBox = (lastTransmittances.x < 1.0 && rayData.dist >= 0);
+    storeLastBox |= (prevNodeIndex == idx1D) && lastTransmittances.y >= 1.0; //Guarantees that the head buffer is set
+
     if (lastTransmittances.y < 1.0) {
         if(storeLastBox){
             nodeIndex = getInsertIndex();
@@ -512,6 +512,7 @@ void rayGen()
         prevNode.next = 0;
         prevNodeIndex = nodeIndex;
     }
+
     // Store last box
     if (storeLastBox) {
         gData[prevNodeIndex] = prevNode;
