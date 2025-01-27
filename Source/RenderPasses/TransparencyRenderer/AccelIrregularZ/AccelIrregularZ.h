@@ -74,6 +74,8 @@ public:
 private:
     void prepareResources(RenderContext* pRenderContext);
     std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes();
+    //Funktion that generates the profiler passes in case they are not executed this frame
+    void dummyProfileGeneration(RenderContext* pRenderContext);
 
     //Runtime
     uint mFrameCount = 0;
@@ -113,6 +115,9 @@ private:
     bool mAccelUseNearestDepth = false;  //Use nearest depth instead of average
     RayFlags mAccelRayFlags = RayFlags::None;
     float mMergeBoxDist = 0.f; //Distance the accel boxes are merged
+
+    uint mSkipFrameCount = 0; //Counter for skipping frames
+    uint mSkipGenerationFrameCount = 1; //Number of generated frames is 1/X
 
     LightMVP mStaggeredDirectionalLightMVP = {};
     int mDirectionalLightIndex = -1; //Used to set LightMVP

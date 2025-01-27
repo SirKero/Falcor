@@ -244,11 +244,48 @@ std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes()
     return frustumPlanes;
 }
 
+void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
+{
+    {
+        FALCOR_PROFILE(pRenderContext, "GenerateAccessMips");
+    }
+    {
+        FALCOR_PROFILE(pRenderContext, "CalcShadowSampleDistribution");
+    }
+    if (mBlurSampleDistribution && mpGaussianBlur)
+    {
+        mpGaussianBlur->profileDummy(pRenderContext);
+    }
+    if (mOptimizeSampleDistribution)
+    {
+        FALCOR_PROFILE(pRenderContext, "OptimizeDistributedSamples");
+    }
+    auto& lights = mpScene->getLights();
+    for (uint i = 0; i < lights.size(); i++)
+    {
+        if (!lights[i]->isActive())
+            break;
+        FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        {
+            FALCOR_PROFILE(pRenderContext, "raytraceScene");
+        }
+    }
+}
+
 void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "Generate Shadow Linked List");
+    FALCOR_PROFILE(pRenderContext, "GenerateShadowLinkedList");
 
     prepareResources(pRenderContext);
+
+    // Abort early if disabled
+    bool skipGeneration = (mSkipFrameCount % mSkipGenerationFrameCount) != 0;
+    mSkipFrameCount++;
+    if (skipGeneration)
+    {
+        dummyProfileGeneration(pRenderContext);
+        return;
+    }
 
     // Handle light MVP for directional lights
     if (mHasDirectionalLight)
@@ -278,7 +315,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
     //Create Access Mips
     {
-        FALCOR_PROFILE(pRenderContext, "Generate Access Mips");
+        FALCOR_PROFILE(pRenderContext, "GenerateAccessMips");
         //Create Gen Mips pass
         if (!mGenAccessMips)
         {
@@ -308,7 +345,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     }
     //Distribute Samples
     {
-        FALCOR_PROFILE(pRenderContext, "Calc Shadow Sample distribution");
+        FALCOR_PROFILE(pRenderContext, "CalcShadowSampleDistribution");
         // Create Compute Pass
         if (!mCalcSampleDistribution)
         {
@@ -394,7 +431,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     //Optimize Samples
     if (mOptimizeSampleDistribution)
     {
-        FALCOR_PROFILE(pRenderContext, "Optimize distributed Samples");
+        FALCOR_PROFILE(pRenderContext, "OptimizeDistributedSamples");
         // Create Compute Pass
         if (!mpOptimizeSamples)
         {
@@ -607,6 +644,10 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
             group.tooltip("Multiplier for the change value in the Sample Distribution");
         }
 
+        group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
+        group.tooltip(
+            "Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same Frame)"
+        );
 
         group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
         group.tooltip("Optimizes the sample distribution texture with an extra compute pass");

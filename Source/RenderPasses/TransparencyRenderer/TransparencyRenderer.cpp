@@ -184,7 +184,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     {
     case CameraRenderMode::DirectRT:
         {
-            FALCOR_PROFILE(pRenderContext, "Evaluate Direct");
+            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
             evalDirectTransparency(pRenderContext, renderData);
             evalDirectOpaque(pRenderContext, renderData);
         }
@@ -311,7 +311,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
 
 void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "Shade Opaque");
+    FALCOR_PROFILE(pRenderContext, "ShadeOpaque");
 
     if (!mpEvalDirectPass)
     {
@@ -370,7 +370,7 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
 }
 
 void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData) {
-    FALCOR_PROFILE(pRenderContext, "Transparency on Primary Ray");
+    FALCOR_PROFILE(pRenderContext, "TransparencyOnPrimaryRay");
 
     const auto& screenSize = renderData.getDefaultTextureDims();
     //Textures
@@ -471,7 +471,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
 }
 
 void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData) {
-    FALCOR_PROFILE(pRenderContext, "Transparency Path Tracer");
+    FALCOR_PROFILE(pRenderContext, "TransparencyPathTracer");
 
     //Create Pipeline
     if (!mTransparencyPathTracer.pProgram)

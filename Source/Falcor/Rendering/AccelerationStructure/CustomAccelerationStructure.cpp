@@ -362,7 +362,7 @@ namespace Falcor
 
     //TODO add a gpu counter or cpu counter input to only clear a selected range 
     void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN) {
-        FALCOR_PROFILE(pRenderContext, "Clear Accel AABB Buffers");
+        FALCOR_PROFILE(pRenderContext, "ClearAccelAABBBuffers");
 
         if (pAABBBuffers.empty())
             return;
