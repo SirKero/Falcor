@@ -25,20 +25,20 @@ import Utils.Geometry.GeometryHelpers;
 #define ACCEL_USE_FRUSTUM_CULLING 0
 #endif
 
-/** Payload for shadow ray. (16B)
+/** Payload for shadow ray. (32B)
 */
 struct RayData
 {
+    float3 currentTransmittance;
     float dist;
+    float3 sampleTransmittance;
     float depth;
-    float currentTransmittance;
-    float sampleOpacity;
 
     __init() {
         this.dist = -1.0;
         this.depth = 1.0;
-        this.currentTransmittance = 1.0;
-        this.sampleOpacity = -1.0;
+        this.currentTransmittance = float3(1.0);
+        this.sampleTransmittance = float3(0.0);
     }
 };
 
@@ -69,6 +69,7 @@ SamplerState gPointSampler;
 
 static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;
 static const float kMinOpacity = 1e-7;
+static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
@@ -119,9 +120,6 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
     VertexData v = gScene.getVertexData(triangleHit);
     const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
 
-    if (!gScene.materials.isAlphaTestSupported(materialID))
-        return;
-
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
     float2 ddx = float2(0);
     float2 ddy = float2(0);
@@ -138,13 +136,32 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
         lod = ExplicitGradientTextureSampler(ddx, ddy);
     }
     */
-    float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
 
-    if (opacity < kMinOpacity)
+    float3 transmittance = float3(0.0);
+
+    if(kUseColorTransparency){
+        ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
+        //uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        // Emissive lights
+        BSDFProperties bsdfProperties = mi.getProperties(sd);
+        float3 color = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo;
+        //Normalize color
+        float maxColor = max(max(color.x, color.y), color.z);
+        color /= maxColor;
+        if(sd.opacity < kMinOpacity)
+            transmittance = 1.0;
+        else
+            transmittance = color * (1.0 - sd.opacity);
+    }else{
+        transmittance = 1.0 - float3(gScene.materials.getMaterialOpacity(v, materialID, lod));
+    }
+
+    if (all(transmittance > kMaxTransmittance))
         IgnoreHit();
 
     if (RayTCurrent() < rayData.dist) {
-        rayData.sampleOpacity = opacity;
+        rayData.sampleTransmittance = transmittance;
         rayData.dist = RayTCurrent();
     }
 }
@@ -168,12 +185,13 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     triangleHit.barycentrics = attribs.barycentrics;
     VertexData v = gScene.getVertexData(triangleHit);
 
-    float opacity = rayData.sampleOpacity;
+    float3 transmittance = rayData.sampleTransmittance;
+    //Case opaque object that does not call the anyHit
     if (RayTCurrent() < rayData.dist) {
-        opacity = 1.0;
+        transmittance = 0.0;
     }
-            
-    rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - opacity);
+    
+    rayData.currentTransmittance = rayData.currentTransmittance * transmittance;
     float4 posH = mul(gViewProj, float4(v.posW, 1.f));
     rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
     rayData.dist = RayTCurrent();
@@ -187,7 +205,7 @@ inline uint getInsertIndex() {
 }
 
 //Writes the shadow map sample. Returns a bool if the insert was sucessfull
-inline bool writeSample(float2 pixelSample, float4 boxPixelOffset, float boxMinDepth, float boxMaxDepth, float transmittance, float hitDepth) {
+inline bool writeSample(float2 pixelSample, float4 boxPixelOffset, float boxMinDepth, float boxMaxDepth, float3 transmittance, float hitDepth) {
     float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxMinDepth);
     float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxMaxDepth);
 
@@ -197,7 +215,11 @@ inline bool writeSample(float2 pixelSample, float4 boxPixelOffset, float boxMinD
         return false; //Cannot append box
 
     gAABB[insertIdx] = aabb;
-    gData[insertIdx] = SHADOW_DATA_FORMAT(transmittance);
+    #if USE_COLOR_TRANSPARENCY
+        gData[insertIdx] = transmittance;
+    #else
+        gData[insertIdx] = transmittance.x;
+    #endif
     return true;
 }
 
@@ -438,14 +460,15 @@ void rayGen()
     bool useRayTracing = true;
     float2 boxZ = float2(0.0); //Last two middle depths
     float lastHitDepth = 0.0;
-    float2 lastTransmittances = float2(1.0); // Store the last two transmittances
+    float3 currTranmittance = float3(1.0);  //Tranmission end of current sample
+    float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
     bool mergeLastBox = false;               // Merge the box from the prevoius frame
     const float far = ray.TMax;
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
         rayData.dist = ray.TMax;
-        rayData.sampleOpacity = 1.0;
+        rayData.sampleTransmittance = 0.0;
 
         //Trace ray
         TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
@@ -455,13 +478,13 @@ void rayGen()
             return;
 
         //End ray tracing for the next frame
-        if (lastTransmittances.y <= kMinOpacity || rayData.dist < 0) {
+        if (all(prevTransmittance <= kMinOpacity) || rayData.dist < 0) {
             useRayTracing = false;
         }
 
         // Merge boxes for non-opaque hits if they are too close to another
         float distDiff = rayData.depth - lastHitDepth;
-        bool mergeBox = i > 1 && distDiff < kMergeDistance && (rayData.currentTransmittance > kMinOpacity); 
+        bool mergeBox = i > 1 && distDiff < kMergeDistance && any(rayData.currentTransmittance > kMinOpacity); 
         // Update box dims
         if (rayData.dist > 0) {
             if (!mergeLastBox)
@@ -471,7 +494,7 @@ void rayGen()
 
         // Write output data
         if (rayData.dist > 0 && i > 1 && (!mergeBox)) {
-            if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, lastTransmittances.y, lastHitDepth))
+            if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, prevTransmittance, lastHitDepth))
                  return;
         }
         // Update for next iteration
@@ -479,10 +502,11 @@ void rayGen()
             ray.TMin = rayData.dist + 1e-7;
             lastHitDepth = rayData.depth;
             if(!mergeBox)
-                lastTransmittances.y = lastTransmittances.x;
+                prevTransmittance = currTranmittance;
             else
-                lastTransmittances.y = lerp(lastTransmittances.y, lastTransmittances.x, 0.05);
-            lastTransmittances.x = rayData.currentTransmittance;
+                prevTransmittance = lerp(prevTransmittance, currTranmittance, 0.05);
+           
+            currTranmittance = rayData.currentTransmittance;
             mergeLastBox = mergeBox;            
         }
     }
@@ -495,13 +519,13 @@ void rayGen()
     boxZ.y = boxZ.x;
     boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
 
-    if (lastTransmittances.y < 1.0) {
-        if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, lastTransmittances.y, lastHitDepth))
+    if (any(prevTransmittance < 1.0)) {
+        if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, prevTransmittance, lastHitDepth))
             return;
     }
     // Store last box
-    if (lastTransmittances.x < 1.0 && rayData.dist >= 0) {
-        if (!writeSample(pixelSample, boxPixelOffset, boxZ.x, far, lastTransmittances.x, rayData.depth))
+    if (any(currTranmittance < 1.0) && rayData.dist >= 0) {
+        if (!writeSample(pixelSample, boxPixelOffset, boxZ.x, far, currTranmittance, rayData.depth))
             return;
     }
 }

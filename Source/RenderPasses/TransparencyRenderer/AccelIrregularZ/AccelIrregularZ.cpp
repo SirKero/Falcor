@@ -73,10 +73,10 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mAccelShadowNumPoints.clear();
     }
 
-    if (mRebuildAccelDataBuffer || mResolutionChanged)
+    if ((mTransparencyBufferUsesColor != mUseColoredTransparency) || mResolutionChanged)
     {
         mAccelShadowData.clear();
-        mRebuildAccelDataBuffer = false;
+        mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
 
     updateSMMatrices(pRenderContext);
@@ -87,8 +87,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kGenShader);
-        desc.setMaxPayloadSize(16u); //
-                                     //(4) + align(4)
+        desc.setMaxPayloadSize(32u); 
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1u);
 
@@ -104,7 +103,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
 
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
-        defines.add("USE_COLOR_TRANSPARENCY", mTransparencyBufferUseColoredTransparency ? "1" : "0");
+        defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
         defines.add("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
 
         mGenAccelShadowPip.pProgram = RtProgram::create(mpDevice, desc, defines);
@@ -161,7 +160,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         if (mAccelShadowData.empty())
         {
             mAccelShadowData.resize(numAccelBuffers);
-            uint dataSize = mTransparencyBufferUseColoredTransparency ? 3 : 1;
+            uint dataSize = mUseColoredTransparency ? 3 : 1;
             dataSize *= sizeof(float);
             for (uint i = 0; i < numAccelBuffers; i++)
             {
@@ -513,7 +512,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
-    mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mTransparencyBufferUseColoredTransparency ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
@@ -634,7 +633,7 @@ DefineList AccelIrregularZ::getDefines()
 {
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
-    defines.add("USE_COLOR_TRANSPARENCY", mTransparencyBufferUseColoredTransparency ? "1" : "0");
+    defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
     defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
     defines.add("ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
@@ -682,7 +681,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                 {
                     if (i > 0)
                         group2.separator();
-                    uint dataBufferSize = mTransparencyBufferUseColoredTransparency ? 12u : 4u;
+                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
                     group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
                     group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
                     std::string accelMem = std::to_string((mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f);
@@ -746,8 +745,6 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         }
 
 
-        mRebuildAccelDataBuffer |= group.checkbox("Use Color Transparency", mTransparencyBufferUseColoredTransparency);
-        group.tooltip("Data formats; For more info see AccelShadowData.slang");
         //group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         //group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
 
@@ -815,7 +812,7 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
         desc.setShaderModel("6_6");
 
         auto defines = mpScene->getSceneDefines();
-        defines.add("USE_COLOR_TRANSPARENCY", mTransparencyBufferUseColoredTransparency ? "1" : "0");
+        defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
         defines.add("USE_ONE_AABB_FOR_ALL", mUseOneAABBForAllLights ? "1" : "0");
         defines.add("COUNT_LIGHTS", std::to_string(mpScene->getLightCount()));
         // Create Program and state
@@ -842,7 +839,7 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
     mRasterShowAccelPass.pState->setFbo(mRasterShowAccelPass.pFBO);
 
     // Runtime Defines
-    mRasterShowAccelPass.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mTransparencyBufferUseColoredTransparency ? "1" : "0");
+    mRasterShowAccelPass.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mRasterShowAccelPass.pProgram->addDefine("USE_ONE_AABB_FOR_ALL", mUseOneAABBForAllLights ? "1" : "0");
 
     // Vars

@@ -68,6 +68,10 @@ public:
     */
     void setShadowLODMode(TexLODMode lodMode) { mRayLodMode = lodMode; }
 
+    /* Set Colored Transparency mode
+    */
+    void setColoredTransparency(bool enabled) { mUseColoredTransparency = enabled; }
+
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
@@ -100,6 +104,7 @@ protected:
     float mDirectionalMaxCameraDist = 20.f; //Max camera dist taken for directional lights
     float2 mNearFar = float2(1.f, 60.f);    //Near and far for spot
     bool mResolutionChanged = false;         //True if the resolution changed
+    bool mUseColoredTransparency = false;   //Enable colored transparency
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
 

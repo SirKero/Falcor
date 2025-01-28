@@ -106,8 +106,7 @@ private:
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = false;
-    bool mTransparencyBufferUseColoredTransparency = false;
-    bool mRebuildAccelDataBuffer = true;
+    bool mTransparencyBufferUsesColor = false; //Checks if the transparency buffer data size matches the global setting
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
     bool mAccelUseFrustumCulling = false;

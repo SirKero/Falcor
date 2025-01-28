@@ -21,20 +21,20 @@ import Utils.Geometry.GeometryHelpers;
 #define MAX_IDX 1
 #endif
 
-/** Payload for shadow ray. (16B)
+/** Payload for shadow ray. (32B)
 */
 struct RayData
 {
+    float3 currentTransmittance;
     float dist;
+    float3 sampleTransmittance;
     float depth;
-    float currentTransmittance;
-    float sampleOpacity;
 
     __init() {
         this.dist = -1.0;
         this.depth = 1.0;
-        this.currentTransmittance = 1.0;
-        this.sampleOpacity = -1.0;
+        this.currentTransmittance = float3(1.0);
+        this.sampleTransmittance = float3(0.0);
     }
 };
 
@@ -63,6 +63,7 @@ SamplerState gPointSampler;
 
 static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;
 static const float kMinOpacity = 1e-7;
+static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
@@ -131,25 +132,33 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
         lod = ExplicitGradientTextureSampler(ddx, ddy);
     }
     */
-    float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+    float3 transmittance = float3(0.0);
 
-    if (opacity < kMinOpacity)
+    if(kUseColorTransparency){
+        ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
+        //uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        // Emissive lights
+        BSDFProperties bsdfProperties = mi.getProperties(sd);
+        float3 color = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo;
+        //Normalize color
+        float maxColor = max(max(color.x, color.y), color.z);
+        color /= maxColor;
+        if(sd.opacity < kMinOpacity)
+            transmittance = 1.0;
+        else
+            transmittance = color * (1.0 - sd.opacity);
+    }else{
+        transmittance = 1.0 - float3(gScene.materials.getMaterialOpacity(v, materialID, lod));
+    }
+
+    if (all(transmittance > kMaxTransmittance))
         IgnoreHit();
 
     if (RayTCurrent() < rayData.dist) {
-        rayData.sampleOpacity = opacity;
+        rayData.sampleTransmittance = transmittance;
         rayData.dist = RayTCurrent();
     }
-}
-
-bool intersectPlane(const float3 N, const float3 p, const float3 ray, out float t) {
-    t = 0.0;
-    float denom = dot(N, ray);
-    if (abs(denom) > 1e-4) {
-        t = dot(p, N) / denom;
-        return t >= 0;
-    }
-    return false;
 }
 
 [shader("closesthit")]
@@ -161,12 +170,13 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     triangleHit.barycentrics = attribs.barycentrics;
     VertexData v = gScene.getVertexData(triangleHit);
 
-    float opacity = rayData.sampleOpacity;
+    float3 transmittance = rayData.sampleTransmittance;
+    //Case opaque object that does not call the anyHit
     if (RayTCurrent() < rayData.dist) {
-        opacity = 1.0;
+        transmittance = 0.0;
     }
             
-    rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - opacity);
+    rayData.currentTransmittance = rayData.currentTransmittance * transmittance;
     float4 posH = mul(gViewProj, float4(v.posW, 1.f));
     rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
     rayData.dist = RayTCurrent();
@@ -418,7 +428,8 @@ void rayGen()
     bool useRayTracing = true;
     float2 boxZ = float2(0.0); //Last two middle depths
     float lastHitDepth = 0.0;
-    float2 lastTransmittances = float2(1.0); // Store the last two transmittances
+    float3 currTranmittance = float3(1.0);  //Tranmission end of current sample
+    float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
     bool mergeLastBox = false;               // Merge the box from the prevoius frame
     const float far = ray.TMax;
 
@@ -433,7 +444,7 @@ void rayGen()
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
         rayData.dist = ray.TMax;
-        rayData.sampleOpacity = 1.0;
+        rayData.sampleTransmittance = 0.0;
 
         //Trace ray
         TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
@@ -444,13 +455,13 @@ void rayGen()
         }
             
         //End ray tracing for the next frame
-        if (lastTransmittances.y <= kMinOpacity || rayData.dist < 0) {
+        if (all(prevTransmittance <= kMinOpacity) || rayData.dist < 0) {
             useRayTracing = false;
         }
 
         // Merge boxes for non-opaque hits if they are too close to another
         float distDiff = rayData.depth - lastHitDepth;
-        bool mergeBox = i > 1 && distDiff < kMergeDistance && (rayData.currentTransmittance > kMinOpacity); 
+        bool mergeBox = i > 1 && distDiff < kMergeDistance && any(rayData.currentTransmittance > kMinOpacity); 
         // Update box dims
         if (rayData.dist > 0) {
             if (!mergeLastBox)
@@ -473,15 +484,19 @@ void rayGen()
             ray.TMin = rayData.dist + 1e-7;
             lastHitDepth = rayData.depth;
             if(!mergeBox)
-                lastTransmittances.y = lastTransmittances.x;
+                prevTransmittance = currTranmittance;
             else
-                lastTransmittances.y = lerp(lastTransmittances.y, lastTransmittances.x, 0.05);
-            lastTransmittances.x = rayData.currentTransmittance;
+                prevTransmittance = lerp(prevTransmittance, currTranmittance, 0.05);
+            currTranmittance = rayData.currentTransmittance;
             mergeLastBox = mergeBox;
 
             //Update node
             prevNode.depth = min(rayData.depth + 1e-1, boxZ.x);
-            prevNode.visibility = lastTransmittances.y;
+            #if USE_COLOR_TRANSPARENCY
+                prevNode.visibility = prevTransmittance;
+            #else
+                prevNode.visibility = prevTransmittance.x;
+            #endif
             prevNode.next = 0;
             prevNodeIndex = nodeIndex;
         }
@@ -495,10 +510,10 @@ void rayGen()
     boxZ.y = boxZ.x;
     boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
 
-    bool storeLastBox = (lastTransmittances.x < 1.0 && rayData.dist >= 0);
-    storeLastBox |= (prevNodeIndex == idx1D) && lastTransmittances.y >= 1.0; //Guarantees that the head buffer is set
+    bool storeLastBox = (any(currTranmittance < 1.0) && rayData.dist >= 0);
+    storeLastBox |= (prevNodeIndex == idx1D) && all(prevTransmittance >= 1.0); //Guarantees that the head buffer is set
 
-    if (lastTransmittances.y < 1.0) {
+    if (any(prevTransmittance < 1.0)) {
         if(storeLastBox){
             nodeIndex = getInsertIndex();
             if(nodeIndex > MAX_IDX)
@@ -508,7 +523,11 @@ void rayGen()
         prevNode.next = storeLastBox ? nodeIndex : 0;
         gData[prevNodeIndex] = prevNode;
         prevNode.depth = boxZ.y;
-        prevNode.visibility = lastTransmittances.x;
+        #if USE_COLOR_TRANSPARENCY
+            prevNode.visibility = currTranmittance;
+        #else
+            prevNode.visibility = currTranmittance.x;
+        #endif
         prevNode.next = 0;
         prevNodeIndex = nodeIndex;
     }

@@ -137,6 +137,7 @@ private:
     bool mOpaqueShadowMapModeChanged = false;
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
+    bool mUseColorTransparency = false; //Enables transparency with color
 
     //Path Tracer specific settings
     uint mPTMaxBounces = 256;

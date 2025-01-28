@@ -71,10 +71,10 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mUIElementCounter.clear();
     }
 
-    if (mRebuildDataBuffer || mResolutionChanged)
+    if (mTransparencyBufferUsesColor != mUseColoredTransparency || mResolutionChanged)
     {
         mLinkedListData.clear();
-        mRebuildDataBuffer = false;
+        mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
 
     updateSMMatrices(pRenderContext);
@@ -85,8 +85,7 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kGenShader);
-        desc.setMaxPayloadSize(16u); //
-                                     //(4) + align(4)
+        desc.setMaxPayloadSize(32u);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1u);
 
@@ -102,7 +101,7 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
 
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
-        //defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mLinkedListDataFormatSize));
+        defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
         defines.add("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
 
         mGenLinkedListShadowPip.pProgram = RtProgram::create(mpDevice, desc, defines);
@@ -146,10 +145,11 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
         if (mLinkedListData.empty())
         {
             mLinkedListData.resize(numAccelBuffers);
+            uint dataStructSize = mUseColoredTransparency ? 5 : 3;
             for (uint i = 0; i < numAccelBuffers; i++)
             {
                 mLinkedListData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint) * mLinkedListDataFormatSize, mLinkedListNodeBufferSize,
+                    mpDevice, sizeof(uint) * dataStructSize, mLinkedListNodeBufferSize,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mLinkedListData[i]->setName("LinkedListIrrShadowNodes" + std::to_string(i));
@@ -465,7 +465,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
     // Defines
     mGenLinkedListShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel));
-    //mGenLinkedListShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mLinkedListDataFormatSize));
+    mGenLinkedListShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenLinkedListShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
@@ -564,6 +564,7 @@ DefineList LinkedListIrregularZ::getDefines()
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
+    defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     return defines;
 }
 

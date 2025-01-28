@@ -10,21 +10,8 @@ __exported import Scene.Intersection;
 #define COUNT_LIGHTS 1
 #endif
 
-struct AccelShadowRayData {
-    float visibility;
-    float hitDepth;
 
-    __init() {
-        this.visibility = 1.0;
-        this.hitDepth = -1.0;
-    }
-}
-
-struct AccelShadowAttribs {
-    float2 pixel;
-}
-
-struct AccelIrregularZShader
+struct LinkedListIrregularZShader
 {
     static const uint kMaxAtomicWeight = 64;                      // Max value to be added on the atomic counter
 
@@ -47,21 +34,6 @@ struct AccelIrregularZShader
     Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     
-
-    float getLinkedVisibility(LinkedListNode n, float dist, uint lightIdx)
-    {
-        float visibility = 1.0;
-        // from the way we construct the linked list neighbors, we know that we start with n.depth < depth
-        while (n.depth < dist)
-        {
-            visibility = n.visibility;
-            if (n.next == 0) break;
-            n = gLinkedListData[lightIdx][n.next];
-        }
-
-        return visibility;
-    }
-
     /** Caculates the shadow value by evaluating the shadow acceleration structure
      * \param[in] index of the current light
      * \param[in] world position of the current hit
@@ -69,7 +41,7 @@ struct AccelIrregularZShader
      * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
      * \return visibility in [0,1]
      */
-    float eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -114,9 +86,9 @@ struct AccelIrregularZShader
         if (!validShadow)
             return -1.f;
 
-        float visibility = 1.0;
+        float3 visibility = 1.0;
 
-        //TODO go through the mip chain and get the corresponding head buffer index
+        //Go through the mip chain to get the head buffer index of the sample
         uint index = uShadowPixel.y * gSMSize.x + uShadowPixel.x;
         float2 smUV = shadowPos.xy;
         uint2 mipIdx = uint2(0); // Top left
@@ -167,6 +139,7 @@ struct AccelIrregularZShader
             mipIdx *= 2; // Update for new resolution
         }
 
+        //No head buffer entry found (unshadowed)
         if (choosenSampleCount == 0)
             return visibility; //Unshadowed (1.0)
 

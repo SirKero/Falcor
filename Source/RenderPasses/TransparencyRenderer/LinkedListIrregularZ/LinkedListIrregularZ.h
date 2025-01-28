@@ -110,6 +110,7 @@ private:
     bool mAccelUsePCF = false;
     RayFlags mAccelRayFlags = RayFlags::None;
     float mMergeBoxDist = 0.f; //Distance the accel boxes are merged
+    bool mTransparencyBufferUsesColor = false; // Checks if the transparency buffer data size matches the global setting
 
     uint mSkipFrameCount = 0;           // Counter for skipping frames
     uint mSkipGenerationFrameCount = 1; // Number of generated frames is 1/X

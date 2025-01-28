@@ -44,6 +44,7 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
+static const bool kTRUseColoredTransparency = TR_USE_COLORED_TRANSPARENCY;
 
 // For RIS light sampling
 struct RISReservoir {
@@ -134,7 +135,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float traceShadowRay(float3 origin, float3 dir, float distance)
+float3 traceShadowRay(float3 origin, float3 dir, float distance)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -142,7 +143,7 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
     ray.TMin = 0.f;
     ray.TMax = distance;
 
-    float visibility = 1.0;
+    float3 visibility = 1.0;
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
     rayQuery.TraceRayInline(gScene.rtAccel, 0, 0xff, ray);
@@ -175,11 +176,27 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
             }
             */
 
-            float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+            if(kTRUseColoredTransparency){
+                ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -ray.Direction, lod);
+                //uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+                let mi = gScene.materials.getMaterialInstance(sd, lod);
+                // Emissive lights
+                BSDFProperties bsdfProperties = mi.getProperties(sd);
+                float3 color = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo;
+                //Normalize color
+                float maxColor = max(max(color.x, color.y), color.z);
+                color /= maxColor;
+                if(sd.opacity < kMinOpacity)
+                    visibility *= 1.0;
+                else
+                    visibility *= color * (1.0 - sd.opacity);
+            }else{
+                float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+                visibility *= saturate(1.0 - opacity);
+            }
+            
 
-            visibility *= saturate(1.0 - opacity);
-
-            if (visibility <= 0.0)
+            if (all(visibility <= kMinOpacity))
                 rayQuery.Abort();
         }
     }
@@ -196,7 +213,7 @@ float traceShadowRay(float3 origin, float3 dir, float distance)
     \param[inout] Sample Generator
     \return Visbility that is either 0 or 1
 */
-float traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout SampleGenerator sg)
+float3 traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout SampleGenerator sg)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -204,7 +221,7 @@ float traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout 
     ray.TMin = 0.f;
     ray.TMax = distance;
 
-    float visibility = 1.0; //Visible
+    float3 visibility = 1.0; //Visible
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
     rayQuery.TraceRayInline(gScene.rtAccel, 0, 0xff, ray);
@@ -222,13 +239,40 @@ float traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout 
             // LOD mode handling TODO this is incorrect as it assumes the pixel is the camera
             ITextureSampler lod = ExplicitLodTextureSampler(0.f);
 
-            float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
-            float roulett = sampleNext1D(sg);
+            if(kTRUseColoredTransparency){
+                ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -ray.Direction, lod);
+                //uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+                let mi = gScene.materials.getMaterialInstance(sd, lod);
+                // Emissive lights
+                BSDFProperties bsdfProperties = mi.getProperties(sd);
+                float3 color = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo;
+                //Normalize color
+                float maxColor = max(max(color.x, color.y), color.z);
+                color /= maxColor;
+                float3 sampleVis = 1.0;
+                if(sd.opacity >= kMinOpacity)
+                    sampleVis = color * (1.0 - sd.opacity);
 
-            if (roulett <= opacity) {
-                visibility = 0.0;
-                rayQuery.Abort();
+                //Play russian roulette with every color channel
+                float3 roulett = sampleNext3D(sg);
+                for(uint i =0; i<3;i++){
+                    if(roulett[i] > sampleVis[i])
+                        visibility[i] = 0;
+                }
+                if(all(visibility <= 0))
+                    rayQuery.Abort();
             }
+            else //Singe channel version
+            {
+                float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
+                float roulett = sampleNext1D(sg);
+                //Use russian roulette to set the color to zero
+                if (roulett <= opacity) {
+                    visibility = 0.0;
+                    rayQuery.Abort();
+                }
+            }
+           
         }
     }
 
