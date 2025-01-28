@@ -179,16 +179,6 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     rayData.dist = RayTCurrent();
 }
 
-void writeData(const uint index, const AccelShadowData shadowData) {
-    #if SHADOW_DATA_FORMAT_SIZE == 1
-        gData[index] = shadowData.packAsUint();
-    #elif SHADOW_DATA_FORMAT_SIZE == 2
-        gData[index] = shadowData.packAsUint2(); // Transmittance last sample
-    #elif SHADOW_DATA_FORMAT_SIZE == 4
-        gData[index] = shadowData.packAsUint4(); // Transmittance last sample
-    #endif
-}
-
 inline uint getInsertIndex() {
     uint insertIdx = 0;
     const uint lightIdx = kUseOneAABBForAllLights ? 0 : gLightIdx;
@@ -207,7 +197,7 @@ inline bool writeSample(float2 pixelSample, float4 boxPixelOffset, float boxMinD
         return false; //Cannot append box
 
     gAABB[insertIdx] = aabb;
-    writeData(insertIdx, AccelShadowData(transmittance, hitDepth));
+    gData[insertIdx] = SHADOW_DATA_FORMAT(transmittance);
     return true;
 }
 

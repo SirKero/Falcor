@@ -59,7 +59,7 @@ public:
 
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 
-     enum class SMSamplePattern : uint
+    enum class SMSamplePattern : uint
     {
         Center = 0,
         Halton = 1,
@@ -106,12 +106,11 @@ private:
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
     bool mAccelShadowUseCPUCounterOptimization = false;
-    uint mAccelDataFormatSize = 2; // Size of the data struct for the accel data
+    bool mTransparencyBufferUseColoredTransparency = false;
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
     bool mAccelUseFrustumCulling = false;
-    bool mAccelUseNearestDepth = false;  //Use nearest depth instead of average
     RayFlags mAccelRayFlags = RayFlags::None;
     float mMergeBoxDist = 0.f; //Distance the accel boxes are merged
 

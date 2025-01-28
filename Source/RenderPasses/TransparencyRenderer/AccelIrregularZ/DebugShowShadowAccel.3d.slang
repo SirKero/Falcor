@@ -77,7 +77,7 @@ static const float3 kColorMap[21] = {
 struct GsOut
 {
     float4 posH : SV_Position;
-    float transparency : TRANSPARENCY;
+    SHADOW_DATA_FORMAT transparency : TRANSPARENCY;
     nointerpolation uint boxIdx : AABB_IDX;
 };
 
@@ -212,7 +212,7 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
     if (isnan(aabb.minPoint.x))
         return;
 
-    AccelShadowData shadowData = AccelShadowData(gShadowData[aabbIdx]);
+    SHADOW_DATA_FORMAT transparency = gShadowData[aabbIdx];
 
     // Get Matrix index
     uint matrixIdx = gSelectedLight;
@@ -246,11 +246,12 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 
     uint pixelID = uint(ceil(aabb.minPoint.x * aabb.minPoint.y * sampleCountMult));
 
+    float hitDepth = (aabb.maxPoint.z + aabb.minPoint.z) / 2.0;
     // Create depth plane
     if (gVisMode == VIS_MODE_DEPTH) {
         [unroll]
         for (uint i = 0; i < 4; i++) {
-            points[i].z = shadowData.hitDepth;
+            points[i].z = hitDepth;
         }
     }
 
@@ -272,7 +273,7 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
         }
         
         vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
-        vert[i].transparency = shadowData.transparency;
+        vert[i].transparency = transparency;
         if (gVisMode == VIS_MODE_AABBINDEX)
             vert[i].boxIdx = aabbIdx;
         else

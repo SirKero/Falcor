@@ -294,34 +294,34 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         // Test visibility by tracing a shadow ray.
         bool isDirectional = lightType == (uint)LightType::Directional; // Slight different calculations for ortho
-        float shadow = 1.0;
+        float3 visibility = float3(1.0);
 
         // Shadow maps
         #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
-            shadow = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
+            visibility = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedList
-            shadow = gLinkedListShadow.eval(lightIndex, sd.posW);
+            visibility = gLinkedListShadow.eval(lightIndex, sd.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
-            shadow = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
+            visibility = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelIrregularZ
-            shadow = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
+            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedListIrregularZ
-            shadow = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
+            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
         #endif
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
 
         // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (shadow < 0) && kEnableFallbackRay) {
+        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (visibility.x < 0) && kEnableFallbackRay) {
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
             if(kUseStochasticRayTracing)
-                shadow = traceShadowRayStochastic(origin, ls.dir, ls.distance, sg);
+                visibility = traceShadowRayStochastic(origin, ls.dir, ls.distance, sg);
             else
-                shadow = traceShadowRay(origin, ls.dir, ls.distance);
+                visibility = traceShadowRay(origin, ls.dir, ls.distance);
         }
 
         // Clamp shadow in [0,1]
-        shadow = clamp(shadow, 0.0, 1.0);
+        visibility = clamp(visibility, 0.0, 1.0);
 
         #if EVAL_OPAQUE_SHADOW_MAP
             LightData lightData = gScene.getLight(lightIndex);
@@ -333,7 +333,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
             shadow = min(shadow, opaqueShadow);
         #endif
         // Evaluate contribution.
-        Li += brdf * shadow * ls.Li * invPdf;
+        Li += brdf * visibility * ls.Li * invPdf;
     }
 
     return Li;

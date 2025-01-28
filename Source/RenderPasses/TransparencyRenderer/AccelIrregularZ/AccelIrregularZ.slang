@@ -34,12 +34,12 @@ struct AccelShadowRayData {
 }
 #else
 struct AccelShadowRayData {
-    float visibility;
-    float hitDepth;
+    SHADOW_DATA_FORMAT visibility;
+    float sampleCount;
 
     __init() {
-        this.visibility = 1.0;
-        this.hitDepth = -1.0;
+        this.visibility = 0.0;
+        this.sampleCount = 0.0;
     }
 }
 #endif
@@ -50,7 +50,6 @@ struct AccelShadowAttribs {
 
 struct AccelIrregularZShader
 {
-    static const bool kUseNearestDepth = ACCEL_USE_NEAREST_DEPTH;
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;  // TODO currently ignored and always assumed true
     static const uint kMaxAtomicWeight = 64;                      // Max value to be added on the atomic counter
     static const bool kUseOneAABBForAllLight = ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS;
@@ -73,25 +72,9 @@ struct AccelIrregularZShader
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
 
-    inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const AccelShadowData shadowData, const AccelShadowAttribs attribs, const float3 origin) {
-        // Take the sample that is the nearest
-        if (kUseNearestDepth) {
-            const float linZ = origin.z;
-
-            if (rayData.hitDepth < 0 || shadowData.hitDepth < rayData.hitDepth) {
-                rayData.visibility = shadowData.transparency;
-                rayData.hitDepth = shadowData.hitDepth;
-            }
-        } // Take average of all hit samples
-        else {
-            if (rayData.hitDepth < 0) {
-                rayData.visibility = shadowData.transparency;
-                rayData.hitDepth = 1.0;
-            } else {
-                rayData.visibility += shadowData.transparency;
-                rayData.hitDepth += 1.0;
-            }
-        }     
+    inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const SHADOW_DATA_FORMAT transparency) {
+        rayData.visibility += transparency;
+        rayData.sampleCount++;
     }
 
     void traceAccelShadowInline(inout AccelShadowRayData rayData, uint lightIdx, const RayDesc ray) {
@@ -112,8 +95,8 @@ struct AccelIrregularZShader
             if (!aabb.contains(ray.Origin))
                 continue;
 
-            AccelShadowData shadowData = AccelShadowData(gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()]);
-            handelAccelShadowHit(rayData, shadowData, attribs, ray.Origin);
+            SHADOW_DATA_FORMAT transparency = gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
+            handelAccelShadowHit(rayData, transparency);
         }
     }
 
@@ -124,7 +107,7 @@ struct AccelIrregularZShader
      * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
      * \return visibility in [0,1]
      */
-    float eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -138,7 +121,7 @@ struct AccelIrregularZShader
         // Check if inside the SM
         if (any(shadowPos.xy < 0.0) || any(shadowPos.xy > 1.0)) {
             if (!isDirectional) {
-                return 0.f;
+                return float3(0.f);
             }
             validShadow = false;
         }
@@ -173,7 +156,7 @@ struct AccelIrregularZShader
 
         //Raytraced shadows as fallback
         if (!validShadow)
-            return -1.f;
+            return float3(-1.f);
 
         // If only one AABB is used for all lights, offset the pixel pos
         if (kUseOneAABBForAllLight)
@@ -193,13 +176,8 @@ struct AccelIrregularZShader
         //else
         //    TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 2 /* hitIdx */, 1, 2 /* missIdx */, ray, rayData);
 
-        float visibility = rayData.visibility;
-
-        if (!kUseNearestDepth) {
-            if (rayData.hitDepth > 0)
-                visibility /= rayData.hitDepth;
-        }
-        
+        SHADOW_DATA_FORMAT visibility = (rayData.sampleCount > 0) ? (rayData.visibility / rayData.sampleCount) : 1.0;
+            
         return visibility;
     }
     

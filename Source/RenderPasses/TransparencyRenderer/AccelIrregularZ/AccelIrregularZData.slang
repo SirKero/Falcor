@@ -1,7 +1,16 @@
-#ifndef SHADOW_DATA_FORMAT_SIZE
-#define SHADOW_DATA_FORMAT_SIZE 4
+#ifndef USE_COLOR_TRANSPARENCY
+#define USE_COLOR_TRANSPARENCY 0
 #endif
 
+#if USE_COLOR_TRANSPARENCY
+#define SHADOW_DATA_FORMAT float3
+#else
+#define SHADOW_DATA_FORMAT float
+#endif
+
+static const bool kUseColorTransparency = USE_COLOR_TRANSPARENCY;
+
+/*
 #if SHADOW_DATA_FORMAT_SIZE == 1
 #define SHADOW_DATA_FORMAT uint
 #elif SHADOW_DATA_FORMAT_SIZE == 2
@@ -11,7 +20,8 @@
 #else
 #error Unknows Format Size
 #endif
-
+*/
+//Old format
 struct AccelShadowData {
     float transparency;
     float hitDepth;
