@@ -11,6 +11,8 @@ def render_graph_TransparencyRenderDLSS():
     g.create_pass('ToneMapperDLSS', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Aces', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
     g.create_pass('VideoRecorder', 'VideoRecorder', {})
     g.create_pass('PathBenchmark', 'PathBenchmark', {})
+    g.create_pass('FSRPass', 'FSRPass', {})
+    g.create_pass('ToneMapperFSR', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Aces', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
     g.add_edge('TransparencyRenderer.outDepth', 'DLSSPass.depth')
     g.add_edge('VBufferRT.vbuffer', 'TransparencyRenderer.vbuffer')
     g.add_edge('TransparencyRenderer.outMotion', 'DLSSPass.mvec')
@@ -23,8 +25,14 @@ def render_graph_TransparencyRenderDLSS():
     g.add_edge('VBufferRT.depth', 'TransparencyRenderer.inDepth')
     g.add_edge('VideoRecorder', 'PathBenchmark')
     g.add_edge('PathBenchmark', 'VBufferRT')
+    g.add_edge('FSRPass.output', 'ToneMapperFSR.src')
+    g.add_edge('TransparencyRenderer.outColor', 'FSRPass.color')
+    g.add_edge('TransparencyRenderer.outDepth', 'FSRPass.depth')
+    g.add_edge('TransparencyRenderer.outMotion', 'FSRPass.mvec')
     g.mark_output('ToneMapperDLSS.dst')
+    g.mark_output('ToneMapperFSR.dst')
     g.mark_output('ToneMapperAccum.dst')
+    
     return g
 
 TransparencyRenderDLSS = render_graph_TransparencyRenderDLSS()
