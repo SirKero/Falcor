@@ -60,7 +60,7 @@ bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
     if (mResolutionChanged)
         mResolution.y = mResolution.x;
 
-    mUpdateSMMatrices |= widget.var("Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
+    //mUpdateSMMatrices |= widget.var("Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
     if (mHasDirectionalLight)
     {
         widget.var("Directional Light Max Camera Dist", mDirectionalMaxCameraDist, 0.001f, FLT_MAX);
@@ -185,4 +185,12 @@ void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) 
     lightMVP.invViewProjection = math::inverse(lightMVP.viewProjection);
     lightMVP.invProjection = math::inverse(lightMVP.projection);
     lightMVP.invView = math::inverse(lightMVP.view);
+}
+
+void TransparencyShadowMethod::setNearFar(const float2 nearFar) {
+    if (mNearFar.x != nearFar.x || mNearFar.y != nearFar.y)
+    {
+        mNearFar = nearFar;
+        mUpdateSMMatrices = true;
+    }
 }

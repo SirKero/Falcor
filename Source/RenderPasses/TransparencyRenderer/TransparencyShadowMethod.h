@@ -70,7 +70,11 @@ public:
 
     /* Set Colored Transparency mode
     */
-    void setColoredTransparency(bool enabled) { mUseColoredTransparency = enabled; }
+    void setColoredTransparency(const bool enabled) { mUseColoredTransparency = enabled; }
+
+    /* Set Near Far for lights
+     */
+    void setNearFar(const float2 nearFar);
 
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);

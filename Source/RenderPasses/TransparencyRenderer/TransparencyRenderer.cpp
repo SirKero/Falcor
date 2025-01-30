@@ -176,6 +176,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     {
         method->setShadowLODMode(mShadowLodMode);
         method->setColoredTransparency(mUseColorTransparency);
+        method->setNearFar(mNearFar);
     }        
 
     //Generate Shadow Structure
@@ -248,7 +249,10 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     widget.tooltip("Toggle Stochastic Ray Tracing for the Visibility ray. Applies to all techniques that use stochastic ray tracing");
 
     widget.checkbox("Enable Colored Transparency", mUseColorTransparency);
-    widget.tooltip("Enabled Colord transparency for all methods that support it");
+    widget.tooltip("Enabled Colored transparency for all methods that support it");
+
+    widget.var("Global Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
+    widget.tooltip("Global Near/Far values for all lights");
 
     if (mEnableOpaqueShadowMaps && mpShadowMap)
     {
