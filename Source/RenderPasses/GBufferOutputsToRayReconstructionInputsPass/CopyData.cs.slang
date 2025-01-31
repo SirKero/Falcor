@@ -25,6 +25,6 @@ void main(uint2 pixel: SV_DispatchThreadID)
     // Write
     gOutDiffuse[pixel] = float4(inDiffuseOpacity.xyz, 1.0);
     gOutSpecular[pixel] = float4(inSpecRoughness.xyz, 1.0);
-    gOutLinearZ[pixel] = (inLinZ.x-gCameraNear)/(gCameraFar-gCameraNear);
+    gOutLinearZ[pixel] = (inLinZ.x-gCameraNear)/(gCameraFar-gCameraNear); //Add toggle
     gOutRoughness[pixel] = inSpecRoughness.w;
 }
