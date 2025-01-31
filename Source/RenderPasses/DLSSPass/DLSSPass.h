@@ -60,6 +60,32 @@ public:
         }
     );
 
+    enum class Preset : uint32_t
+    {
+        Default,
+        PresetA,
+        PresetB,
+        PresetC,
+        PresetD,
+        PresetE,
+        PresetF,
+        PresetJ,
+    };
+
+    FALCOR_ENUM_INFO(
+        Preset,
+        {
+            {Preset::Default, "Default(CNN)"},
+            {Preset::PresetA, "PresetA(CNN)"},
+            {Preset::PresetB, "PresetB(CNN)"},
+            {Preset::PresetC, "PresetC(CNN)"},
+            {Preset::PresetD, "PresetD(CNN)"},
+            {Preset::PresetE, "PresetE(CNN)"},
+            {Preset::PresetF, "PresetF(CNN)"},
+            {Preset::PresetJ, "PresetJ(Transformer)"},
+        }
+    );
+
     enum class MotionVectorScale : uint32_t
     {
         Absolute, ///< Motion vectors are provided in absolute screen space length (pixels).
@@ -91,6 +117,7 @@ private:
     // Options
     bool mEnabled = true;
     Profile mProfile = Profile::DLAA;
+    Preset mPreset = Preset::Default;
     MotionVectorScale mMotionVectorScale = MotionVectorScale::Relative;
     bool mIsHDR = true;
     bool mUseJitterMVFlag = false;   //This seems to fix the ghosting issue
@@ -113,3 +140,4 @@ private:
 
 FALCOR_ENUM_REGISTER(DLSSPass::Profile);
 FALCOR_ENUM_REGISTER(DLSSPass::MotionVectorScale);
+FALCOR_ENUM_REGISTER(DLSSPass::Preset);
