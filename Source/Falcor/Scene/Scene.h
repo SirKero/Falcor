@@ -1368,6 +1368,12 @@ namespace Falcor
         SDFGridConfig mSDFGridConfig;                               ///< SDF grid configuration.
         SDFGridConfig mPrevSDFGridConfig;
 
+        //Particles
+        std::vector<ParticlePointDesc> mParticlePointDesc;          ///< List of Particle Points
+        ref<Buffer> mpParticlePointBuffer;                          ///< GPU Buffer for particle Points. These will be triangalized and stored in a Index and Vertex buffer
+        bool mParticlesMoved = false;                               ///< Flag indicating that particles were moved last frame
+        bool mParticlesChanged = false;                             ///< Flag indicating that particles were added/removed since last frame.      
+
         // Custom primitives
         std::vector<CustomPrimitiveDesc> mCustomPrimitiveDesc;      ///< Copy of custom primitive data GPU buffer (mpCustomPrimitivesBuffer).
         std::vector<AABB> mCustomPrimitiveAABBs;                    ///< User-defined custom primitive AABBs.

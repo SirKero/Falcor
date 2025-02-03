@@ -434,6 +434,17 @@ namespace Falcor
         */
         void setCachedMeshes(std::vector<CachedMesh>&& cachedMeshes);
 
+        //Particles
+
+        /** Adds a particle system. Number of elements cannot be changed later. The sytem is initialized as two meshes with the particle data.
+            One mesh should always face the camera, the other is a 3D cross for non direct purposes. All particles are initialized at the same world space point
+        * \param name name for the particle system
+        * \param materialID ID of the material for the particle
+        * \param numParticles maximal number of particles the system should have. All particles are always initialized
+        * \param spawnPosition initial position for the particles
+        */
+        void addParticleSystem(const std::string name, const ref<Material>& pMaterial, const uint numParticles, const float3 spawnPosition = float3(0, -10, 0));
+
         // Custom primitives
 
         /** Add an AABB defining a custom primitive.
@@ -694,6 +705,8 @@ namespace Falcor
             bool isStatic = false;                  ///< True if mesh is non-instanced and static (not dynamic or animated).
             bool isFrontFaceCW = false;             ///< Indicate whether front-facing side has clockwise winding in object space.
             bool isDisplaced = false;               ///< True if mesh has displacement map.
+            bool isParticleCameraFacing = false;    ///< True if the mesh is from the particle system (camera facing)
+            bool isParticleUniversal = false;       ///< True if the mesh is from the particle system (3D cross for universal use (e.g. GI, Shadows, reflections)
             bool isAnimated = false;                ///< True if mesh has vertex animations.
             bool isCastShadow = true;              ///< True if mesh should throw a shadow
             bool isOpaque = true;                   ///< True if the mesh is opaque

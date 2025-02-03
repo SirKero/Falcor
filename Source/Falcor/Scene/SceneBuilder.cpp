@@ -722,6 +722,140 @@ namespace Falcor
         mSceneData.cachedMeshes = std::move(cachedMeshes);
     }
 
+    void SceneBuilder::addParticleSystem(const std::string name, const ref<Material>& pMaterial,const uint numParticles,const float3 spawnPosition)
+    {
+        const float initialRadius = 1.f;
+
+        MeshSpec specCameraFacing;
+        MeshSpec specUniversal;
+
+        // Add the mesh to the scene.
+        specCameraFacing.topology = Vao::Topology::TriangleList;
+        specCameraFacing.materialId = addMaterial(pMaterial);
+        specCameraFacing.isFrontFaceCW = true;
+        //spec.skeletonNodeID = {NodeID::Invalid()}; //Not used
+
+        //Set properties
+        specCameraFacing.isStatic = false;          //TODO right?
+        specCameraFacing.use16BitIndices = false;  //TODO could make sense to switch to 16 bits as the full 32 are probably never needed
+
+        specUniversal = specCameraFacing;
+        specCameraFacing.name = name + "_cam";
+        specUniversal.name = name + "_uni";
+        specCameraFacing.isParticleCameraFacing = true;
+        specUniversal.isParticleUniversal = true;
+
+        //Create initial vertex and index data
+
+        //Helper to create the quad
+        auto createStaticQuad = [](std::array<float3, 4> positions) {
+            std::array<StaticVertexData, 4> quad;
+            // Position
+            quad[0].position = positions[0];    // Top left
+            quad[1].position = positions[1];    // Top Right
+            quad[2].position = positions[2];    // Bottom Right
+            quad[3].position = positions[3];    // Bottom Left
+            // TexCoord
+            quad[0].texCrd = float2(0);      // Top left
+            quad[1].texCrd = float2(0, 1);    // Top Right
+            quad[2].texCrd = float2(1, 1);   // Bottom Right
+            quad[3].texCrd = float2(1, 0);    // Bottom Left
+            // Normal, tangent
+            float3 normal = math::normalize(math::cross(quad[1].position - quad[0].position, quad[2].position - quad[0].position));
+            float4 tangent = float4(math::normalize(quad[1].position - quad[0].position), 1);
+            for (uint j = 0; j < 4; j++)
+            {
+                quad[j].normal = normal;
+                quad[j].tangent = tangent;
+            }
+
+            return quad;
+        };
+
+        //XY quad
+        std::array<float3, 4> positions;
+        positions[0] = spawnPosition + float3(-initialRadius, initialRadius, 0);         // Top left
+        positions[1] = spawnPosition + float3(initialRadius, initialRadius, 0);         // Top Right
+        positions[2] = spawnPosition + float3(initialRadius, -initialRadius, 0);         // Bottom Right
+        positions[3] = spawnPosition + float3(-initialRadius, -initialRadius, 0);       // Bottom Left
+        std::array<StaticVertexData, 4> quadXY = createStaticQuad(positions);
+        //YZ quad
+        positions[0] = spawnPosition + float3(0, initialRadius, -initialRadius);  // Top left
+        positions[1] = spawnPosition + float3(0, initialRadius, initialRadius);   // Top Right
+        positions[2] = spawnPosition + float3(0, -initialRadius, initialRadius);  // Bottom Right
+        positions[3] = spawnPosition + float3(0, -initialRadius, -initialRadius); // Bottom Left
+        std::array<StaticVertexData, 4> quadYZ = createStaticQuad(positions);
+        //XZ quad
+        positions[0] = spawnPosition + float3(-initialRadius,0 , initialRadius);   // Top left
+        positions[1] = spawnPosition + float3(initialRadius, 0, initialRadius);   // Top Right
+        positions[2] = spawnPosition + float3(initialRadius,0, -initialRadius);  // Bottom Right
+        positions[3] = spawnPosition + float3(-initialRadius,0, -initialRadius); // Bottom Left
+        std::array<StaticVertexData, 4> quadXZ = createStaticQuad(positions);
+        
+        //CameraFacing (one quad)
+        specCameraFacing.vertexCount = 4u * numParticles;
+        specCameraFacing.staticVertexCount = specCameraFacing.vertexCount; //TODO correct?
+        specCameraFacing.indexCount = 6u * numParticles;
+        specCameraFacing.indexData.resize(specCameraFacing.indexCount);
+        specCameraFacing.staticData.resize(specCameraFacing.vertexCount);
+        for (uint i = 0; i < numParticles; i++)
+        {
+            //Copy data
+            const uint verticesOffset = (i * 4u);
+            for (uint j = 0; j < 4; j++)
+                specCameraFacing.staticData[verticesOffset + j] = quadXY[j];
+            const uint idxOff = i * 6u;
+            specCameraFacing.indexData[idxOff + 0] = verticesOffset;
+            specCameraFacing.indexData[idxOff + 1] = verticesOffset + 1;
+            specCameraFacing.indexData[idxOff + 2] = verticesOffset + 2;
+            specCameraFacing.indexData[idxOff + 3] = verticesOffset;
+            specCameraFacing.indexData[idxOff + 4] = verticesOffset + 2;
+            specCameraFacing.indexData[idxOff + 5] = verticesOffset + 3;
+        }
+
+        //Universal (3 quads, world grid aligned)
+        specUniversal.vertexCount = 12u * numParticles;
+        specUniversal.staticVertexCount = specUniversal.vertexCount; // TODO correct?
+        specUniversal.indexCount = 18u * numParticles;
+        specUniversal.indexData.resize(specUniversal.indexCount);
+        specUniversal.staticData.resize(specUniversal.vertexCount);
+        for (uint i = 0; i < numParticles; i++)
+        {
+            for (uint quadDir = 0; quadDir < 3; quadDir++)
+            {
+                auto& quad = quadDir == 0 ? quadXY : quadDir == 1 ? quadYZ : quadXZ;
+                // Copy data
+                const uint verticesOffset = ((i * 12u) + (quadDir * 4u));
+                for (uint j = 0; j < 4; j++)
+                    specUniversal.staticData[verticesOffset + j] = quad[j];
+                const uint idxOff = (i * 18u) + (quadDir * 6u);
+                specUniversal.indexData[idxOff + 0] = verticesOffset;
+                specUniversal.indexData[idxOff + 1] = verticesOffset + 1;
+                specUniversal.indexData[idxOff + 2] = verticesOffset + 2;
+                specUniversal.indexData[idxOff + 3] = verticesOffset;
+                specUniversal.indexData[idxOff + 4] = verticesOffset + 2;
+                specUniversal.indexData[idxOff + 5] = verticesOffset + 3;
+            }
+        }
+
+        mMeshes.push_back(specCameraFacing);
+        MeshID camMeshID = MeshID(mMeshes.size() - 1);
+        mMeshes.push_back(specUniversal);
+        MeshID uniMeshID = MeshID(mMeshes.size() - 1);
+
+        if (mMeshes.size() > std::numeric_limits<uint32_t>::max())
+        {
+            throw RuntimeError("Trying to build a scene that exceeds supported number of meshes");
+        }
+
+        Node camNode = {specCameraFacing.name, float4x4::identity(), float4x4::identity()};
+        NodeID camNodeID = addNode(camNode);
+        addMeshInstance(camNodeID, camMeshID);
+        Node uniNode = {specUniversal.name, float4x4::identity(), float4x4::identity()};
+        NodeID uniNodeID = addNode(uniNode);
+        addMeshInstance(uniNodeID, uniMeshID);
+    }
+
     void SceneBuilder::addCustomPrimitive(uint32_t userID, const AABB& aabb)
     {
         // Currently each custom primitive has exactly one AABB. This may change in the future.
@@ -2981,6 +3115,7 @@ namespace Falcor
         sceneBuilder.def_property("cameraSpeed", &SceneBuilder::getCameraSpeed, &SceneBuilder::setCameraSpeed);
         sceneBuilder.def("importScene", &SceneBuilder::import, "path"_a, "dict"_a = pybind11::dict());
         sceneBuilder.def("addTriangleMesh", &SceneBuilder::addTriangleMesh, "triangleMesh"_a, "material"_a);
+        sceneBuilder.def("addParticleSystem", &SceneBuilder::addParticleSystem, "name"_a, "material"_a, "numParticles"_a, "spawnPosition"_a = float3(0,-10,0));
         sceneBuilder.def("addSDFGrid", &SceneBuilder::addSDFGrid, "sdfGrid"_a, "material"_a);
         sceneBuilder.def("addMaterial", &SceneBuilder::addMaterial, "material"_a);
         sceneBuilder.def("replaceMaterial", &SceneBuilder::replaceMaterial, "material"_a, "replacement"_a);
