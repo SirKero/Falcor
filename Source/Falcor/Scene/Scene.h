@@ -288,6 +288,8 @@ namespace Falcor
             bool isDisplaced = false;           ///< True if group uses displacement mapping.
             bool isCastShadow = true;          ///< True if group mesh should cast shadows
             bool isOpaque = true;              ///< True if group mesh is opaque
+            bool isParticleCamera = false;     ///< True if the mesh is a particle that is camera oriented. 
+            bool isParticleUniversal = false;  ///< True if the mesh is a particle that is univerally usable.
         };
 
         /** Scene graph node.

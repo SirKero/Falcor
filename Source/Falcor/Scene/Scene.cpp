@@ -3219,6 +3219,8 @@ namespace Falcor
                 const auto& meshList = mMeshGroups[i].meshList;
                 const bool isStatic = mMeshGroups[i].isStatic;
                 const bool isDisplaced = mMeshGroups[i].isDisplaced;
+                const bool isParticle = mMeshGroups[i].isParticleCamera || mMeshGroups[i].isParticleUniversal; // Particles have some special
+                                                                                                            // properties
                 auto& blas = mBlasData[i];
                 auto& geomDescs = blas.geomDescs;
                 geomDescs.resize(meshList.size());
@@ -3233,7 +3235,7 @@ namespace Falcor
                     const MeshID meshID = meshList[j];
                     const MeshDesc& mesh = mMeshDesc[meshID.get()];
                     bool frontFaceCW = mesh.isFrontFaceCW();
-                    blas.hasDynamicMesh |= mesh.isDynamic();
+                    blas.hasDynamicMesh |= mesh.isDynamic() | isParticle;
 
                     RtGeometryDesc& desc = geomDescs[j];
 
@@ -3264,7 +3266,7 @@ namespace Falcor
 
                         // If this is an opaque mesh, set the opaque flag
                         auto pMaterial = mpMaterials->getMaterial(MaterialID::fromSlang(mesh.materialID));
-                        desc.flags = pMaterial->isOpaque() ? RtGeometryFlags::Opaque : RtGeometryFlags::None;
+                        desc.flags = pMaterial->isOpaque() && !isParticle ? RtGeometryFlags::Opaque : RtGeometryFlags::None;
                         desc.flags |= mAdditionalASGeometryFlags;
 
                         // Set the position data
@@ -3304,7 +3306,7 @@ namespace Falcor
                     }
                 }
 
-                FALCOR_ASSERT(!(isStatic && blas.hasDynamicMesh));
+                FALCOR_ASSERT(!(isStatic && blas.hasDynamicMesh && !isParticle));
 
                 if (triangleWindings == 0x3)
                 {
@@ -3900,7 +3902,9 @@ namespace Falcor
         {
             const auto& meshList = mMeshGroups[i].meshList;
             const bool isStatic = mMeshGroups[i].isStatic;
-            const bool isCastShadow = mMeshGroups[i].isCastShadow;
+            const bool isNotCastShadow = !mMeshGroups[i].isCastShadow;
+            const bool isParticleCamera = mMeshGroups[i].isParticleCamera;
+            const bool isParticleUniversal = mMeshGroups[i].isParticleUniversal;
 
             FALCOR_ASSERT(mBlasData[i].blasGroupIndex < mBlasGroups.size());
             const auto& pBlas = mBlasGroups[mBlasData[i].blasGroupIndex].pBlas;
@@ -3908,7 +3912,19 @@ namespace Falcor
 
             RtInstanceDesc desc = {};
             desc.accelerationStructure = pBlas->getGpuAddress() + mBlasData[i].blasByteOffset;
-            desc.instanceMask = isCastShadow ? 1 : 2;
+            //Set instance mask. Only last 4 bits are used. They are set as follows: PtcUni | PtcCam | Shadow | Normal
+            if (isNotCastShadow || isParticleCamera || isParticleUniversal)
+            {
+                desc.instanceMask = 0;
+                desc.instanceMask |= isNotCastShadow ? 1 << 1 : 0;
+                desc.instanceMask |= isParticleCamera ? 1 << 2 : 0;
+                desc.instanceMask |= isParticleUniversal ? 1 << 3 : 0; //TODO A bit for each direction?
+            }
+            else
+            {
+                desc.instanceMask = 1; // Normal Geometry 
+            }
+            
             desc.instanceContributionToHitGroupIndex = perMeshHitEntry ? instanceContributionToHitGroupIndex : 0;
 
             instanceContributionToHitGroupIndex += rayTypeCount * (uint32_t)meshList.size();

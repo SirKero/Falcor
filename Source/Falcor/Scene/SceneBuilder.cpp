@@ -737,6 +737,7 @@ namespace Falcor
 
         //Set properties
         specCameraFacing.isStatic = false;          //TODO right?
+        specCameraFacing.isOpaque = false;          //Particles are usually not opaque
         specCameraFacing.use16BitIndices = false;  //TODO could make sense to switch to 16 bits as the full 32 are probably never needed
 
         specUniversal = specCameraFacing;
@@ -1927,6 +1928,8 @@ namespace Falcor
         meshList staticNonOpaqueNonShadowCastingMeshes;
         meshList staticDisplacedMeshes;
         meshList dynamicDisplacedMeshes;
+        meshList particlesCameraMeshes;
+        meshList particlesUniversalMeshes;
         size_t nonInstancedMeshCount = 0;
 
         for (MeshID meshID{ 0 }; meshID.get() < (uint32_t)mMeshes.size(); ++meshID)
@@ -1944,6 +1947,8 @@ namespace Falcor
             if (!pMaterial->isOpaque()) mesh.isOpaque = false;
 
             if (mesh.isStatic && mesh.isDisplaced) staticDisplacedMeshes.push_back(meshID);
+            else if (mesh.isParticleCameraFacing) particlesCameraMeshes.push_back(meshID);
+            else if (mesh.isParticleUniversal) particlesUniversalMeshes.push_back(meshID);
             else if (mesh.isStatic && !mesh.isCastShadow && mesh.isOpaque) staticOpaqueNonShadowCastingMeshes.push_back(meshID);
             else if (mesh.isStatic && !mesh.isCastShadow && !mesh.isOpaque) staticNonOpaqueNonShadowCastingMeshes.push_back(meshID);
             else if (mesh.isStatic && mesh.isOpaque) staticOpaqueMeshes.push_back(meshID);
@@ -1958,8 +1963,8 @@ namespace Falcor
         for (const auto& it : nodeToMeshList) nonInstancedDynamicMeshCount += it.second.size();
         FALCOR_ASSERT(
             staticOpaqueMeshes.size() + staticNonOpaqueMeshes.size() + staticOpaqueNonShadowCastingMeshes.size() +
-                staticNonOpaqueNonShadowCastingMeshes.size() + staticDisplacedMeshes.size() +
-                dynamicDisplacedMeshes.size() + nonInstancedDynamicMeshCount ==
+                staticNonOpaqueNonShadowCastingMeshes.size() + staticDisplacedMeshes.size() + dynamicDisplacedMeshes.size() +
+                particlesCameraMeshes.size() + particlesUniversalMeshes.size() + nonInstancedDynamicMeshCount ==
             nonInstancedMeshCount
         );
 
@@ -2041,6 +2046,7 @@ namespace Falcor
         logInfo("Found {} displaced non-instanced meshes, arranged in 1 mesh group.", staticDisplacedMeshes.size());
         logInfo("Found {} dynamic non-instanced meshes, arranged in {} mesh groups.", nonInstancedDynamicMeshCount, nodeToMeshList.size());
         logInfo("Found {} instanced meshes, arranged in {} mesh groups.", instancedMeshCount, instancesToOpaqueMeshList.size() + instancesToNonOpaqueMeshList.size() + instancesToOpaqueNonShadowCastingMeshList.size() + instancesToNonOpaqueNonShadowCastingMeshList.size());
+        logInfo("Found {} particle spawner meshes, arranged in 2 mesh groups.", particlesCameraMeshes.size() + particlesUniversalMeshes.size());
 
         // Build final result. Format is a list of Mesh ID's per mesh group.
 
@@ -2050,14 +2056,14 @@ namespace Falcor
             {
                 //The group should contain the same
                 auto& mesh = mMeshes[meshes[0].get()];
-                mMeshGroups.push_back({meshes, mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque});
+                mMeshGroups.push_back({meshes, mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque, mesh.isParticleCameraFacing, mesh.isParticleUniversal});
             }
             else
             {
                 for (const auto& meshID : meshes)
                 {
                     auto& mesh = mMeshes[meshID.get()];
-                    mMeshGroups.push_back(MeshGroup{meshList({meshID}), mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque});
+                    mMeshGroups.push_back(MeshGroup{meshList({meshID}), mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque, mesh.isParticleCameraFacing, mesh.isParticleUniversal});
                 }
                 
             }
@@ -2119,6 +2125,16 @@ namespace Falcor
         if (!dynamicDisplacedMeshes.empty())
         {
             addMeshes(dynamicDisplacedMeshes, is_set(mFlags, Flags::RTDontMergeDynamic));
+        }
+
+        // Each particle mesh goes in a single group
+        if (!particlesCameraMeshes.empty())
+        {
+            addMeshes(particlesCameraMeshes, true); // Always split
+        }
+        if (!particlesUniversalMeshes.empty())
+        {
+            addMeshes(particlesUniversalMeshes, true); // Always split
         }
 
         // Instanced displaced meshes are grouped based on instance lists.
