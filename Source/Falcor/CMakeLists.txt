@@ -474,6 +474,8 @@ target_sources(Falcor PRIVATE
     Scene/Material/PBRT/PBRTCoatedDiffuseMaterial.h
     Scene/Material/PBRT/PBRTCoatedDiffuseMaterial.cpp
 
+	Scene/Particles/UpdateParticles.cs.slang
+	
     Scene/SDFs/NormalizedDenseSDFGrid/NDSDFGrid.cpp
     Scene/SDFs/NormalizedDenseSDFGrid/NDSDFGrid.h
     Scene/SDFs/NormalizedDenseSDFGrid/NDSDFGrid.slang

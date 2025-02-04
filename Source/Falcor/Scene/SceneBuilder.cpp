@@ -838,20 +838,30 @@ namespace Falcor
         }
 
         //Create Mesh instances
-        for (auto& spec : specs)
+        std::array<MeshID, 4> meshIDs;
+        for (uint i=0; i<specs.size(); i++)
         {
-            mMeshes.push_back(spec);
-            MeshID meshID = MeshID(mMeshes.size() - 1);
+            mMeshes.push_back(specs[i]);
+            meshIDs[i] = MeshID(mMeshes.size() - 1);
 
             if (mMeshes.size() > std::numeric_limits<uint32_t>::max())
             {
                 throw RuntimeError("Trying to build a scene that exceeds supported number of meshes");
             }
 
-            Node node = {spec.name, float4x4::identity(), float4x4::identity()};
+            Node node = {specs[i].name, float4x4::identity(), float4x4::identity()};
             NodeID nodeID = addNode(node);
-            addMeshInstance(nodeID, meshID);
+            addMeshInstance(nodeID, meshIDs[i]);
         }
+
+        //Add particle system meta data
+        Scene::ParticleSystem partSys{};
+        partSys.name = name;
+        partSys.numberParticles = numParticles;
+        partSys.spawnPosition = spawnPosition;
+        partSys.meshIDs = meshIDs;
+
+        mSceneData.particleSystems.push_back(partSys);
     }
 
     void SceneBuilder::addCustomPrimitive(uint32_t userID, const AABB& aabb)

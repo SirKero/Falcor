@@ -320,6 +320,18 @@ namespace Falcor
             float4x4 localToBindSpace;  ///< For bones. Skeleton to bind space transformation. AKA the inverse-bind transform.
         };
 
+        /** Metadata for a particle system
+        */
+        struct ParticleSystem
+        {
+            std::string name = "";
+            uint numberParticles = 1;
+            float3 spawnPosition = float3(0, -10, 0);
+            float intitialRadius = 1.f;
+            std::array<MeshID, 4> meshIDs;
+            bool active = false;
+        };
+
         /** Full set of required data to create a scene object.
             This data is typically prepared by SceneBuilder before creating a Scene object.
         */
@@ -358,6 +370,9 @@ namespace Falcor
             std::vector<uint32_t> meshIndexData;                    ///< Vertex indices for all meshes in either 32-bit or 16-bit format packed tightly, decided per mesh.
             std::vector<PackedStaticVertexData> meshStaticData;     ///< Vertex attributes for all meshes in packed format.
             std::vector<SkinningVertexData> meshSkinningData;       ///< Additional vertex attributes for skinned meshes.
+
+            //Particles
+            std::vector<ParticleSystem> particleSystems;            ///<List of particle system descriptions
 
             // Curve data
             std::vector<CurveDesc> curveDesc;                       ///< List of curve descriptors.
@@ -1302,6 +1317,7 @@ namespace Falcor
         UpdateFlags updateMaterials(bool forceUpdate);
         UpdateFlags updateGeometry(RenderContext* pRenderContext, bool forceUpdate);
         UpdateFlags updateProceduralPrimitives(bool forceUpdate);
+        UpdateFlags updateParticles(RenderContext* pRenderContext, bool forceUpdate);
         UpdateFlags updateRaytracingAABBData(bool forceUpdate);
         UpdateFlags updateDisplacement(RenderContext* pRenderContext, bool forceUpdate);
         UpdateFlags updateSDFGrids(RenderContext* pRenderContext);
@@ -1386,10 +1402,10 @@ namespace Falcor
         SDFGridConfig mPrevSDFGridConfig;
 
         //Particles
-        std::vector<ParticlePointDesc> mParticlePointDesc;          ///< List of Particle Points
+        std::vector<ParticleSystem> mParticleSystems;               ///< List of particle systems
+        ref<ComputePass> mpUpdateParticlesPass;                     ///< Compute pass to update the particles from the point buffer
         ref<Buffer> mpParticlePointBuffer;                          ///< GPU Buffer for particle Points. These will be triangalized and stored in a Index and Vertex buffer
-        bool mParticlesMoved = false;                               ///< Flag indicating that particles were moved last frame
-        bool mParticlesChanged = false;                             ///< Flag indicating that particles were added/removed since last frame.      
+        bool mParticlesMoved = false;                               ///< Flag indicating that particles were moved last frame 
 
         // Custom primitives
         std::vector<CustomPrimitiveDesc> mCustomPrimitiveDesc;      ///< Copy of custom primitive data GPU buffer (mpCustomPrimitivesBuffer).

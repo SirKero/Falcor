@@ -190,6 +190,8 @@ namespace Falcor
         mCustomPrimitiveDesc = std::move(sceneData.customPrimitiveDesc);
         mCustomPrimitiveAABBs = std::move(sceneData.customPrimitiveAABBs);
 
+        mParticleSystems = std::move(sceneData.particleSystems);
+
         // Setup additional resources.
         mFrontClockwiseRS[RasterizerState::CullMode::None] = RasterizerState::create(RasterizerState::Desc().setFrontCounterCW(false).setCullMode(RasterizerState::CullMode::None));
         mFrontClockwiseRS[RasterizerState::CullMode::Back] = RasterizerState::create(RasterizerState::Desc().setFrontCounterCW(false).setCullMode(RasterizerState::CullMode::Back));
@@ -711,6 +713,7 @@ namespace Falcor
         {
             ResourceBindFlags vbBindFlags = ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::Vertex;
             pStaticBuffer = Buffer::createStructured(mpDevice, sizeof(PackedStaticVertexData), (uint32_t)vertexCount, vbBindFlags, Buffer::CpuAccess::None, nullptr, false);
+            pStaticBuffer->setName("Scene::StaticVerticesBuffer");
         }
 
         Vao::BufferVec pVBs(kVertexBufferCount);
@@ -727,12 +730,14 @@ namespace Falcor
             std::vector<uint16_t> drawIDs(drawCount);
             for (uint32_t i = 0; i < drawCount; i++) drawIDs[i] = i;
             pDrawIDBuffer = Buffer::create(mpDevice, drawCount * sizeof(uint16_t), ResourceBindFlags::Vertex, Buffer::CpuAccess::None, drawIDs.data());
+            pDrawIDBuffer->setName("Scene::VertexDrawIDBuffer");
         }
         else if (drawIDFormat == ResourceFormat::R32Uint)
         {
             std::vector<uint32_t> drawIDs(drawCount);
             for (uint32_t i = 0; i < drawCount; i++) drawIDs[i] = i;
             pDrawIDBuffer = Buffer::create(mpDevice, drawCount * sizeof(uint32_t), ResourceBindFlags::Vertex, Buffer::CpuAccess::None, drawIDs.data());
+            pDrawIDBuffer->setName("Scene::VertexDrawIDBuffer");
         }
         else FALCOR_UNREACHABLE();
 
@@ -1447,6 +1452,96 @@ namespace Falcor
         return flags;
     }
 
+    Scene::UpdateFlags Scene::updateParticles(RenderContext* pRenderContext, bool forceUpdate) {
+        Scene::UpdateFlags flags = Scene::UpdateFlags::None;
+
+        //Return early if there is no particle system
+        if (mParticleSystems.empty())
+            return flags;
+
+        //Check if one particle system is active
+        bool oneActive = true; //TODO test toggle to false
+        for (const auto& ps : mParticleSystems)
+            oneActive |= ps.active;
+
+        if (!oneActive)
+            return flags;
+
+        //Create/Recreate particle system data
+        if (forceUpdate || !mpParticlePointBuffer)
+        {
+            //Count total number of particles
+            uint totalParticles = 0;
+            std::vector<ParticlePointDesc> initialData;
+            for (auto& ps : mParticleSystems)
+            {
+                totalParticles += ps.numberParticles;
+                //Fill initial data
+                for (uint i = 0; i < ps.numberParticles; i++)
+                {
+                    ParticlePointDesc pointDesc;
+                    pointDesc.position = ps.spawnPosition;
+                    pointDesc.radius = ps.intitialRadius;
+                    initialData.push_back(pointDesc);
+                }
+            }
+                
+            FALCOR_ASSERT(totalParticles > 0);
+
+            //Create Buffer
+            mpParticlePointBuffer = Buffer::createStructured(
+                mpDevice, sizeof(ParticlePointDesc), totalParticles, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, initialData.data(), false
+            );
+            mpParticlePointBuffer->setName("Scene::ParticlePointBuffer");        
+        }
+
+        // Update the particle systems
+        FALCOR_PROFILE(pRenderContext, "UpdateParticles");
+        flags |= UpdateFlags::MeshesChanged;
+
+        //Create compute shader if it does not exist
+        if (!mpUpdateParticlesPass)
+        {
+            Program::Desc desc;
+            std::string shaderFile = "Scene/Particles/UpdateParticles.cs.slang";
+            desc.addShaderLibrary(shaderFile).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+            defines.add(getSceneDefines());
+
+            mpUpdateParticlesPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        //Bind buffer valid for all pass execution
+        auto var = mpUpdateParticlesPass->getRootVar();
+
+        var["gParticlePoints"] = mpParticlePointBuffer;
+        var["gVertexBuffer"] = mpMeshVao->getVertexBuffer(kStaticDataBufferIndex);
+        //var["gIndexBuffer"] =  mpMeshVao->getIndexBuffer();
+
+        uint indexOffset = 0;
+        for (auto& ps : mParticleSystems)
+        {
+            //Get Mesh information
+            uint4 vbOffsets;
+            for (uint i = 0; i < 4; i++)
+            {
+                auto& mesh = getMesh(ps.meshIDs[i]);
+                vbOffsets[i] = mesh.vbOffset;
+            }
+                
+            var["CB"]["gIndexOffset"] = indexOffset;
+            var["CB"]["gNumParticles"] = ps.numberParticles;
+            var["CB"]["gVBOffsets"] = vbOffsets; 
+
+            mpUpdateParticlesPass->execute(pRenderContext, float3(ps.numberParticles, 1, 1));
+            indexOffset += ps.numberParticles;
+        }
+
+        return flags;
+    }
+
     void Scene::updateGeometryTypes()
     {
         mGeometryTypes = GeometryTypeFlags(0);
@@ -2025,6 +2120,7 @@ namespace Falcor
     {
         UpdateFlags flags = updateProceduralPrimitives(forceUpdate);
         flags |= updateDisplacement(pRenderContext, forceUpdate);
+        flags |= updateParticles(pRenderContext, forceUpdate);
 
         if (forceUpdate || mCustomPrimitivesChanged)
         {
@@ -3219,8 +3315,8 @@ namespace Falcor
                 const auto& meshList = mMeshGroups[i].meshList;
                 const bool isStatic = mMeshGroups[i].isStatic;
                 const bool isDisplaced = mMeshGroups[i].isDisplaced;
-                const bool isParticle = mMeshGroups[i].isParticle(); // Particles have some special
-                                                                                                            // properties
+                const bool isParticle = mMeshGroups[i].isParticle(); // Particles have some special properties
+
                 auto& blas = mBlasData[i];
                 auto& geomDescs = blas.geomDescs;
                 geomDescs.resize(meshList.size());
@@ -3882,7 +3978,7 @@ namespace Falcor
                 else
                 {
                     // We'll rebuild in place. The BLAS should not be compacted, check that size matches prebuild info.
-                    FALCOR_ASSERT(blas.blasByteSize == blas.prebuildInfo.resultDataMaxSize);
+                    FALCOR_ASSERT(blas.blasByteSize == align_to(kAccelerationStructureByteAlignment, blas.prebuildInfo.resultDataMaxSize));
                 }
                 pRenderContext->buildAccelerationStructure(asDesc, 0, nullptr);
             }
