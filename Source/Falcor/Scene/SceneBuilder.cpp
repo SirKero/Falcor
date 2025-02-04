@@ -726,25 +726,28 @@ namespace Falcor
     {
         const float initialRadius = 1.f;
 
-        MeshSpec specCameraFacing;
-        MeshSpec specUniversal;
+        std::array<MeshSpec, 4> specs; //One spec/mesh for each orientation
 
-        // Add the mesh to the scene.
-        specCameraFacing.topology = Vao::Topology::TriangleList;
-        specCameraFacing.materialId = addMaterial(pMaterial);
-        specCameraFacing.isFrontFaceCW = true;
-        //spec.skeletonNodeID = {NodeID::Invalid()}; //Not used
+        //Set mesh info that is shared between all orientation specs
+        for (uint i=0; i<specs.size(); i++)
+        {
+            auto& spec = specs[i];
+            spec.topology = Vao::Topology::TriangleList;
+            spec.materialId = addMaterial(pMaterial);
+            spec.isFrontFaceCW = true;
+            // spec.skeletonNodeID = {NodeID::Invalid()}; //Not used
 
-        //Set properties
-        specCameraFacing.isStatic = false;          //TODO right?
-        specCameraFacing.isOpaque = false;          //Particles are usually not opaque
-        specCameraFacing.use16BitIndices = false;  //TODO could make sense to switch to 16 bits as the full 32 are probably never needed
+            // Set properties
+            spec.isOpaque = false;                    // Particles are usually not opaque
+            spec.use16BitIndices = false;             // TODO could make sense to switch to 16 bits as the full 32 are probably never needed
 
-        specUniversal = specCameraFacing;
-        specCameraFacing.name = name + "_cam";
-        specUniversal.name = name + "_uni";
-        specCameraFacing.isParticleCameraFacing = true;
-        specUniversal.isParticleUniversal = true;
+            spec.particleOrentation = (Scene::ParticleOrientationMode)(i + 1u);
+        }
+        //Set names. Same order as enum (Scene::ParticleOrientationMode)
+        specs[0].name = name + "_cam";
+        specs[1].name = name + "_XY";
+        specs[2].name = name + "_YZ";
+        specs[3].name = name + "_XZ";
 
         //Create initial vertex and index data
 
@@ -793,68 +796,62 @@ namespace Falcor
         positions[3] = spawnPosition + float3(-initialRadius,0, -initialRadius); // Bottom Left
         std::array<StaticVertexData, 4> quadXZ = createStaticQuad(positions);
         
-        //CameraFacing (one quad)
-        specCameraFacing.vertexCount = 4u * numParticles;
-        specCameraFacing.staticVertexCount = specCameraFacing.vertexCount; //TODO correct?
-        specCameraFacing.indexCount = 6u * numParticles;
-        specCameraFacing.indexData.resize(specCameraFacing.indexCount);
-        specCameraFacing.staticData.resize(specCameraFacing.vertexCount);
-        for (uint i = 0; i < numParticles; i++)
+        //Fill in initial data for all meshes
+        for (uint ori = 0; ori<specs.size(); ori++)
         {
-            //Copy data
-            const uint verticesOffset = (i * 4u);
-            for (uint j = 0; j < 4; j++)
-                specCameraFacing.staticData[verticesOffset + j] = quadXY[j];
-            const uint idxOff = i * 6u;
-            specCameraFacing.indexData[idxOff + 0] = verticesOffset;
-            specCameraFacing.indexData[idxOff + 1] = verticesOffset + 1;
-            specCameraFacing.indexData[idxOff + 2] = verticesOffset + 2;
-            specCameraFacing.indexData[idxOff + 3] = verticesOffset;
-            specCameraFacing.indexData[idxOff + 4] = verticesOffset + 2;
-            specCameraFacing.indexData[idxOff + 5] = verticesOffset + 3;
-        }
-
-        //Universal (3 quads, world grid aligned)
-        specUniversal.vertexCount = 12u * numParticles;
-        specUniversal.staticVertexCount = specUniversal.vertexCount; // TODO correct?
-        specUniversal.indexCount = 18u * numParticles;
-        specUniversal.indexData.resize(specUniversal.indexCount);
-        specUniversal.staticData.resize(specUniversal.vertexCount);
-        for (uint i = 0; i < numParticles; i++)
-        {
-            for (uint quadDir = 0; quadDir < 3; quadDir++)
+            auto& spec = specs[ori];
+            spec.vertexCount = 4u * numParticles;
+            spec.staticVertexCount = spec.vertexCount; // TODO correct?
+            spec.indexCount = 6u * numParticles;
+            spec.indexData.resize(spec.indexCount);
+            spec.staticData.resize(spec.vertexCount);
+            for (uint i = 0; i < numParticles; i++)
             {
-                auto& quad = quadDir == 0 ? quadXY : quadDir == 1 ? quadYZ : quadXZ;
                 // Copy data
-                const uint verticesOffset = ((i * 12u) + (quadDir * 4u));
+                const uint verticesOffset = (i * 4u);
                 for (uint j = 0; j < 4; j++)
-                    specUniversal.staticData[verticesOffset + j] = quad[j];
-                const uint idxOff = (i * 18u) + (quadDir * 6u);
-                specUniversal.indexData[idxOff + 0] = verticesOffset;
-                specUniversal.indexData[idxOff + 1] = verticesOffset + 1;
-                specUniversal.indexData[idxOff + 2] = verticesOffset + 2;
-                specUniversal.indexData[idxOff + 3] = verticesOffset;
-                specUniversal.indexData[idxOff + 4] = verticesOffset + 2;
-                specUniversal.indexData[idxOff + 5] = verticesOffset + 3;
+                {
+                    switch (ori)
+                    {
+                    case 0:
+                    case 1:
+                        spec.staticData[verticesOffset + j] = quadXY[j];
+                        break;
+                    case 2:
+                        spec.staticData[verticesOffset + j] = quadYZ[j];
+                        break;
+                    case 3:
+                        spec.staticData[verticesOffset + j] = quadXZ[j];
+                    default:
+                        break;
+                    }
+                }
+                    
+                const uint idxOff = i * 6u;
+                spec.indexData[idxOff + 0] = verticesOffset;
+                spec.indexData[idxOff + 1] = verticesOffset + 1;
+                spec.indexData[idxOff + 2] = verticesOffset + 2;
+                spec.indexData[idxOff + 3] = verticesOffset;
+                spec.indexData[idxOff + 4] = verticesOffset + 2;
+                spec.indexData[idxOff + 5] = verticesOffset + 3;
             }
         }
 
-        mMeshes.push_back(specCameraFacing);
-        MeshID camMeshID = MeshID(mMeshes.size() - 1);
-        mMeshes.push_back(specUniversal);
-        MeshID uniMeshID = MeshID(mMeshes.size() - 1);
-
-        if (mMeshes.size() > std::numeric_limits<uint32_t>::max())
+        //Create Mesh instances
+        for (auto& spec : specs)
         {
-            throw RuntimeError("Trying to build a scene that exceeds supported number of meshes");
-        }
+            mMeshes.push_back(spec);
+            MeshID meshID = MeshID(mMeshes.size() - 1);
 
-        Node camNode = {specCameraFacing.name, float4x4::identity(), float4x4::identity()};
-        NodeID camNodeID = addNode(camNode);
-        addMeshInstance(camNodeID, camMeshID);
-        Node uniNode = {specUniversal.name, float4x4::identity(), float4x4::identity()};
-        NodeID uniNodeID = addNode(uniNode);
-        addMeshInstance(uniNodeID, uniMeshID);
+            if (mMeshes.size() > std::numeric_limits<uint32_t>::max())
+            {
+                throw RuntimeError("Trying to build a scene that exceeds supported number of meshes");
+            }
+
+            Node node = {spec.name, float4x4::identity(), float4x4::identity()};
+            NodeID nodeID = addNode(node);
+            addMeshInstance(nodeID, meshID);
+        }
     }
 
     void SceneBuilder::addCustomPrimitive(uint32_t userID, const AABB& aabb)
@@ -1928,8 +1925,7 @@ namespace Falcor
         meshList staticNonOpaqueNonShadowCastingMeshes;
         meshList staticDisplacedMeshes;
         meshList dynamicDisplacedMeshes;
-        meshList particlesCameraMeshes;
-        meshList particlesUniversalMeshes;
+        meshList particleMeshes;
         size_t nonInstancedMeshCount = 0;
 
         for (MeshID meshID{ 0 }; meshID.get() < (uint32_t)mMeshes.size(); ++meshID)
@@ -1947,8 +1943,7 @@ namespace Falcor
             if (!pMaterial->isOpaque()) mesh.isOpaque = false;
 
             if (mesh.isStatic && mesh.isDisplaced) staticDisplacedMeshes.push_back(meshID);
-            else if (mesh.isParticleCameraFacing) particlesCameraMeshes.push_back(meshID);
-            else if (mesh.isParticleUniversal) particlesUniversalMeshes.push_back(meshID);
+            else if (mesh.isParticle()) particleMeshes.push_back(meshID);
             else if (mesh.isStatic && !mesh.isCastShadow && mesh.isOpaque) staticOpaqueNonShadowCastingMeshes.push_back(meshID);
             else if (mesh.isStatic && !mesh.isCastShadow && !mesh.isOpaque) staticNonOpaqueNonShadowCastingMeshes.push_back(meshID);
             else if (mesh.isStatic && mesh.isOpaque) staticOpaqueMeshes.push_back(meshID);
@@ -1964,7 +1959,7 @@ namespace Falcor
         FALCOR_ASSERT(
             staticOpaqueMeshes.size() + staticNonOpaqueMeshes.size() + staticOpaqueNonShadowCastingMeshes.size() +
                 staticNonOpaqueNonShadowCastingMeshes.size() + staticDisplacedMeshes.size() + dynamicDisplacedMeshes.size() +
-                particlesCameraMeshes.size() + particlesUniversalMeshes.size() + nonInstancedDynamicMeshCount ==
+                particleMeshes.size() + nonInstancedDynamicMeshCount ==
             nonInstancedMeshCount
         );
 
@@ -2046,7 +2041,7 @@ namespace Falcor
         logInfo("Found {} displaced non-instanced meshes, arranged in 1 mesh group.", staticDisplacedMeshes.size());
         logInfo("Found {} dynamic non-instanced meshes, arranged in {} mesh groups.", nonInstancedDynamicMeshCount, nodeToMeshList.size());
         logInfo("Found {} instanced meshes, arranged in {} mesh groups.", instancedMeshCount, instancesToOpaqueMeshList.size() + instancesToNonOpaqueMeshList.size() + instancesToOpaqueNonShadowCastingMeshList.size() + instancesToNonOpaqueNonShadowCastingMeshList.size());
-        logInfo("Found {} particle spawner meshes, arranged in 2 mesh groups.", particlesCameraMeshes.size() + particlesUniversalMeshes.size());
+        logInfo("Found {} particle spawner, arranged in {} mesh groups.", particleMeshes.size() / 4, particleMeshes.size());
 
         // Build final result. Format is a list of Mesh ID's per mesh group.
 
@@ -2056,14 +2051,14 @@ namespace Falcor
             {
                 //The group should contain the same
                 auto& mesh = mMeshes[meshes[0].get()];
-                mMeshGroups.push_back({meshes, mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque, mesh.isParticleCameraFacing, mesh.isParticleUniversal});
+                mMeshGroups.push_back({meshes, mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque, mesh.particleOrentation});
             }
             else
             {
                 for (const auto& meshID : meshes)
                 {
                     auto& mesh = mMeshes[meshID.get()];
-                    mMeshGroups.push_back(MeshGroup{meshList({meshID}), mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque, mesh.isParticleCameraFacing, mesh.isParticleUniversal});
+                    mMeshGroups.push_back(MeshGroup{meshList({meshID}), mesh.isStatic, mesh.isDisplaced, mesh.isCastShadow, mesh.isOpaque, mesh.particleOrentation});
                 }
                 
             }
@@ -2128,13 +2123,9 @@ namespace Falcor
         }
 
         // Each particle mesh goes in a single group
-        if (!particlesCameraMeshes.empty())
+        if (!particleMeshes.empty())
         {
-            addMeshes(particlesCameraMeshes, true); // Always split
-        }
-        if (!particlesUniversalMeshes.empty())
-        {
-            addMeshes(particlesUniversalMeshes, true); // Always split
+            addMeshes(particleMeshes, true); // Always split
         }
 
         // Instanced displaced meshes are grouped based on instance lists.

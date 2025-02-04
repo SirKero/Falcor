@@ -3219,7 +3219,7 @@ namespace Falcor
                 const auto& meshList = mMeshGroups[i].meshList;
                 const bool isStatic = mMeshGroups[i].isStatic;
                 const bool isDisplaced = mMeshGroups[i].isDisplaced;
-                const bool isParticle = mMeshGroups[i].isParticleCamera || mMeshGroups[i].isParticleUniversal; // Particles have some special
+                const bool isParticle = mMeshGroups[i].isParticle(); // Particles have some special
                                                                                                             // properties
                 auto& blas = mBlasData[i];
                 auto& geomDescs = blas.geomDescs;
@@ -3903,8 +3903,7 @@ namespace Falcor
             const auto& meshList = mMeshGroups[i].meshList;
             const bool isStatic = mMeshGroups[i].isStatic;
             const bool isNotCastShadow = !mMeshGroups[i].isCastShadow;
-            const bool isParticleCamera = mMeshGroups[i].isParticleCamera;
-            const bool isParticleUniversal = mMeshGroups[i].isParticleUniversal;
+            const bool isParticle = mMeshGroups[i].isParticle();
 
             FALCOR_ASSERT(mBlasData[i].blasGroupIndex < mBlasGroups.size());
             const auto& pBlas = mBlasGroups[mBlasData[i].blasGroupIndex].pBlas;
@@ -3913,12 +3912,12 @@ namespace Falcor
             RtInstanceDesc desc = {};
             desc.accelerationStructure = pBlas->getGpuAddress() + mBlasData[i].blasByteOffset;
             //Set instance mask. Only last 4 bits are used. They are set as follows: PtcUni | PtcCam | Shadow | Normal
-            if (isNotCastShadow || isParticleCamera || isParticleUniversal)
+            if (isNotCastShadow || isParticle)
             {
+                uint bitShiftParticle = (uint)mMeshGroups[i].particleOrientation + 1; //Only valid if isPartice is true
                 desc.instanceMask = 0;
                 desc.instanceMask |= isNotCastShadow ? 1 << 1 : 0;
-                desc.instanceMask |= isParticleCamera ? 1 << 2 : 0;
-                desc.instanceMask |= isParticleUniversal ? 1 << 3 : 0; //TODO A bit for each direction?
+                desc.instanceMask |= isParticle ? 1 << bitShiftParticle : 0;
             }
             else
             {

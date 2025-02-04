@@ -705,11 +705,10 @@ namespace Falcor
             bool isStatic = false;                  ///< True if mesh is non-instanced and static (not dynamic or animated).
             bool isFrontFaceCW = false;             ///< Indicate whether front-facing side has clockwise winding in object space.
             bool isDisplaced = false;               ///< True if mesh has displacement map.
-            bool isParticleCameraFacing = false;    ///< True if the mesh is from the particle system (camera facing)
-            bool isParticleUniversal = false;       ///< True if the mesh is from the particle system (3D cross for universal use (e.g. GI, Shadows, reflections)
             bool isAnimated = false;                ///< True if mesh has vertex animations.
             bool isCastShadow = true;              ///< True if mesh should throw a shadow
             bool isOpaque = true;                   ///< True if the mesh is opaque
+            Scene::ParticleOrientationMode particleOrentation = Scene::ParticleOrientationMode::None; ///< Mode for particle orientation. None means that this is no particle
             AABB boundingBox;                       ///< Mesh bounding-box in object space.
             std::set<NodeID> instances;             ///< IDs of all nodes that instantiate this mesh.
 
@@ -738,6 +737,11 @@ namespace Falcor
             bool isDynamic() const
             {
                 return isSkinned() || isAnimated;
+            }
+
+            bool isParticle() const
+            {
+                return particleOrentation != Scene::ParticleOrientationMode::None;
             }
         };
 

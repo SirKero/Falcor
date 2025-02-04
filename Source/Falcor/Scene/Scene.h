@@ -193,6 +193,17 @@ namespace Falcor
             NumericContinuous = 2,
         };
 
+        /** Possible orientations for the particle. If particles are enabled, meshes for every direction will be generated
+        */
+        enum class ParticleOrientationMode : uint32_t
+        {
+            None = 0, //No Particle
+            Camera = 1,
+            XY_Plane = 2,
+            YZ_Plane = 3,
+            XZ_Plane = 4,
+        };
+
         struct SDFGridConfig
         {
             SDFGrid::Type implementation = SDFGrid::Type::None;
@@ -288,8 +299,12 @@ namespace Falcor
             bool isDisplaced = false;           ///< True if group uses displacement mapping.
             bool isCastShadow = true;          ///< True if group mesh should cast shadows
             bool isOpaque = true;              ///< True if group mesh is opaque
-            bool isParticleCamera = false;     ///< True if the mesh is a particle that is camera oriented. 
-            bool isParticleUniversal = false;  ///< True if the mesh is a particle that is univerally usable.
+            ParticleOrientationMode particleOrientation = ParticleOrientationMode::None; ///< Stored Orentation of the Particle
+
+            bool isParticle() const
+            {
+                return particleOrientation != ParticleOrientationMode::None;
+            }
         };
 
         /** Scene graph node.
