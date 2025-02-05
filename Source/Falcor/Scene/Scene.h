@@ -330,6 +330,7 @@ namespace Falcor
             float intitialRadius = 1.f;
             std::array<MeshID, 4> meshIDs;
             bool active = false;
+            uint particleBufferOffset = 0;
         };
 
         /** Full set of required data to create a scene object.
@@ -1204,6 +1205,14 @@ namespace Falcor
         /** Sets a forced geometry flag for the whole scene. Else RtGeometryFlags::Opaque is used for opaque materials and RtGeometryFlags::None for non-opaque.
         */
         void setRtASAdditionalGeometryFlag(RtGeometryFlags flags) { mAdditionalASGeometryFlags = flags; }
+
+        /** Gets the particle system
+        */
+        std::vector<ParticleSystem>& getParticleSystem() { return mParticleSystems; }
+
+        /** Gets the particle point buffer used by the particle system
+        */
+        const ref<Buffer>& getParticlePointsBuffer() const { return mpParticlePointBuffer; }
 
     private:
         friend class AnimationController;

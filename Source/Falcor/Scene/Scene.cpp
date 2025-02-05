@@ -1459,14 +1459,6 @@ namespace Falcor
         if (mParticleSystems.empty())
             return flags;
 
-        //Check if one particle system is active
-        bool oneActive = true; //TODO test toggle to false
-        for (const auto& ps : mParticleSystems)
-            oneActive |= ps.active;
-
-        if (!oneActive)
-            return flags;
-
         //Create/Recreate particle system data
         if (forceUpdate || !mpParticlePointBuffer)
         {
@@ -1475,6 +1467,7 @@ namespace Falcor
             std::vector<ParticlePointDesc> initialData;
             for (auto& ps : mParticleSystems)
             {
+                ps.particleBufferOffset = totalParticles;
                 totalParticles += ps.numberParticles;
                 //Fill initial data
                 for (uint i = 0; i < ps.numberParticles; i++)
@@ -1495,6 +1488,14 @@ namespace Falcor
             );
             mpParticlePointBuffer->setName("Scene::ParticlePointBuffer");        
         }
+
+        // Check if one particle system is active
+        bool oneActive = false;
+        for (const auto& ps : mParticleSystems)
+            oneActive |= ps.active;
+
+        if (!oneActive)
+            return flags;
 
         // Update the particle systems
         FALCOR_PROFILE(pRenderContext, "UpdateParticles");
