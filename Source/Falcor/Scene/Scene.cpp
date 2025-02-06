@@ -1521,6 +1521,14 @@ namespace Falcor
         var["gVertexBuffer"] = mpMeshVao->getVertexBuffer(kStaticDataBufferIndex);
         //var["gIndexBuffer"] =  mpMeshVao->getIndexBuffer();
 
+        // Get Camera Data and upload to constant buffer
+        const auto& camera = getCamera();
+        const float3 cameraU = math::normalize(camera->getData().cameraU);
+        const float3 cameraV = math::normalize(camera->getData().cameraV);
+
+        var["ConstantCameraBuffer"]["gCamU"] = cameraU; 
+        var["ConstantCameraBuffer"]["gCamV"] = cameraV; 
+
         uint indexOffset = 0;
         for (auto& ps : mParticleSystems)
         {

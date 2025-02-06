@@ -79,6 +79,7 @@ void ParticlePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pSc
         {
             ps.active = true;
             ParticleSettings particleSetting{};
+            particleSetting.spawnPosition = ps.spawnPosition;
             mParticleSettings.push_back(particleSetting);
             totalSize += ps.numberParticles;
         }
@@ -185,6 +186,7 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
         var["CB"]["gMaxLifetime"] = pSett.lifetime;
         var["CB"]["gGravity"] = pSett.gravity;
         var["CB"]["gSpawnRadius"] = pSett.spawnRadius;
+        var["CB"]["gSpreadAngle"] = pSett.spreadAngle;
 
         mpUpdateParticlePointsPass->execute(pRenderContext, uint3(ps.numberParticles, 1, 1));
     }
@@ -228,6 +230,7 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             group.var("InitialVelocity", pSett.initialVelocity);
             group.var("Gravity", pSett.gravity);
             group.var("SpawnRadius", pSett.spawnRadius, 0.f);
+            group.var("SpreadAngle", pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
         }
     }
 }

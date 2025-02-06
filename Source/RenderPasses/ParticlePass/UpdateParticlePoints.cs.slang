@@ -1,3 +1,5 @@
+#include "Utils/Math/MathConstants.slangh"
+
 import Scene.SceneTypes;
 import Utils.Sampling.SampleGenerator;
 import ParticleDataTypes;
@@ -18,10 +20,40 @@ cbuffer CB
 
     float gGravity;
     float gSpawnRadius;
+    float gSpreadAngle;
 }
 
 RWStructuredBuffer<ParticlePointDesc> gParticlePointDesc;
 RWStructuredBuffer<ParticleAnimateData> gParticleAnimateData; //Extra per point data
+
+/** Generates a random spread direction with polar coordinates
+    https://stackoverflow.com/questions/72006596/how-to-expand-particle-system-angle-spread-to-3-dimensions
+*/
+float3 rnd_dir(float3 t, float spread, inout SampleGenerator sg) {
+    float a, r, x, y, z;
+    a = sampleNext1D(sg) * spread * 0.5; // random angle within spread [0,PI]
+    if (a > M_PI_2) {
+        a = M_PI - a;
+        a = sqrt(a * M_2_PI) *  M_PI_2;
+        a = M_PI - a;
+    } else {
+        a = sqrt(a * M_2_PI) * M_PI_2;
+    }
+    x = cos(a);                         // convert angle to main axis coordinate
+    r = sqrt(1.0 - (x * x));            // max radius of cone cap still inside unit sphere
+    a = sampleNext1D(sg) * 2.0 * M_PI;  // random polar angle inside the cone cap [rad]
+    y = r * cos(a);
+    z = r * sin(a);
+
+    //TBN Matrix 
+    float3 b, n;
+    t = normalize(t);
+    n = float3(1, 0, 0);
+    if (abs(dot(n, t)) > 0.75) n = float3(0, 1, 0);
+    n = normalize(cross(n, t));
+    b = normalize(cross(n, t));
+    return (t * x) + (b * y) + (n * z);
+}
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId: SV_DispatchThreadID)
@@ -44,10 +76,13 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
         rnd = (rnd * 2.0) - 1.0; // From [0,1] to [-1,1]
         particlePoint.position = startPosition + rnd * gSpawnRadius;
         particlePoint.radius = gBaseRadius;
-        particleData.lifetime = 0.f;
+        particleData.lifetime = max(particleData.lifetime - gMaxLifetime, 0);
         particleData.velocity = gInitialVelocity;
-        //TODO Generate random offset. Use spherical coordinates
-
+        if (gSpreadAngle > 0) {
+            float lengthVel = length(particleData.velocity); //Get power of velocity
+            float3 rndDir = rnd_dir(particleData.velocity, gSpreadAngle, sg); 
+            particleData.velocity = rndDir * lengthVel;
+        }
     }
 
     // Update position and apply gravity

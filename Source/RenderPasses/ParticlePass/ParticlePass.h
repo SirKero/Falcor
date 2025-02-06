@@ -57,6 +57,7 @@ private:
         float3 initialVelocity = float3(0, 1, 0);
         float gravity = 0.1f;
         float spawnRadius = 0.1f;
+        float spreadAngle = 1.2f;
     };
 
     double lastFrameTime = 0.0; //For clock

@@ -7,6 +7,12 @@ cbuffer CB
     uint4 gVBOffsets;       //Offsets for the vertex buffer
 }
 
+cbuffer ConstantCameraBuffer
+{
+    float3 gCamU;   //U vec of the camera (right)
+    float3 gCamV;   //V vec of the camera (up)
+}
+
 StructuredBuffer<ParticlePointDesc> gParticlePoints;
 RWStructuredBuffer<PackedStaticVertexData> gVertexBuffer;
 //TODO Previous Vertices for motion vectors?
@@ -41,10 +47,18 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     verts[3].curveRadius = 0.0;
 
     //Camera plane (0) TODO
+    /*
     verts[0].position = prt.position + float3(-prt.radius, prt.radius,0);
     verts[1].position = prt.position + float3(prt.radius, prt.radius,0);
     verts[2].position = prt.position + float3(prt.radius, -prt.radius,0);
     verts[3].position = prt.position + float3(-prt.radius, -prt.radius,0);
+    */
+    float3 offsetRight = (gCamU * prt.radius);
+    float3 offetTop = (gCamV * prt.radius);
+    verts[0].position = prt.position - offsetRight + offetTop;
+    verts[1].position = prt.position + offsetRight + offetTop;
+    verts[2].position = prt.position + offsetRight - offetTop;
+    verts[3].position = prt.position - offsetRight - offetTop;
     normal = normalize(cross(verts[1].position - verts[0].position, verts[2].position - verts[0].position));
     tangent = float4(normalize(verts[1].position - verts[0].position), 1);
     [unroll]
