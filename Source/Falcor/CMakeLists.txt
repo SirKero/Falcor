@@ -344,6 +344,7 @@ target_sources(Falcor PRIVATE
     Scene/Raster.slang
     Scene/Raytracing.slang
     Scene/RaytracingInline.slang
+	Scene/RaytracingInstanceMaskHelper.slang
     Scene/Scene.cpp
     Scene/Scene.h
     Scene/Scene.slang

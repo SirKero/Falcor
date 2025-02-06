@@ -439,6 +439,7 @@ void rayGen()
     prevNode.next = 0;
     uint prevNodeIndex = idx1D;
     uint nodeIndex = prevNodeIndex;
+    const uint instanceMask = getBestParticleShadowPlane(normalize(ray.Direction));
 
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
@@ -447,7 +448,7 @@ void rayGen()
         rayData.sampleTransmittance = 0.0;
 
         //Trace ray
-        TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, kRayFlags, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0) {

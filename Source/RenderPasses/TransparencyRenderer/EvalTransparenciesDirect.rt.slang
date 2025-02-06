@@ -213,7 +213,7 @@ void rayGen()
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = RAY_FLAG_CULL_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
-        TraceRay(gScene.rtAccel, rayFlags, 3 | 4, 0, rayTypeCount, 0, ray, rayData);
+        TraceRay(gScene.rtAccel, rayFlags, kInstanceCameraParticle, 0, rayTypeCount, 0, ray, rayData);
 
         //Miss
         if(rayData.dist < 0){

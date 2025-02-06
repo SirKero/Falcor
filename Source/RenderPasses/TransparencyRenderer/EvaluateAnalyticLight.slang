@@ -146,7 +146,8 @@ float3 traceShadowRay(float3 origin, float3 dir, float distance)
     float3 visibility = 1.0;
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    rayQuery.TraceRayInline(gScene.rtAccel, 0, kShadowRayInstanceMask, ray);
+    const uint instanceMask = getBestParticleShadowPlane(normalize(ray.Direction));
+    rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
         if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
@@ -224,7 +225,8 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout
     float3 visibility = 1.0; //Visible
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    rayQuery.TraceRayInline(gScene.rtAccel, 0, kShadowRayInstanceMask, ray);
+    const uint instanceMask = getBestParticleShadowPlane(normalize(ray.Direction));
+    rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
         if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {

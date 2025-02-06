@@ -464,6 +464,7 @@ void rayGen()
     float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
     bool mergeLastBox = false;               // Merge the box from the prevoius frame
     const float far = ray.TMax;
+    const uint instanceMask = getBestParticleShadowPlane(normalize(ray.Direction));
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
@@ -471,7 +472,8 @@ void rayGen()
         rayData.sampleTransmittance = 0.0;
 
         //Trace ray
-        TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+
+        TraceRay(gScene.rtAccel, kRayFlags, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0)

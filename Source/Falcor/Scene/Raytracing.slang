@@ -28,18 +28,12 @@
 import Utils.Attributes;
 import Rendering.Materials.TexLODHelpers;
 __exported import Scene.Shading;
+__exported import Scene.RaytracingInstanceMaskHelper;
 
 cbuffer DxrPerFrame
 {
     uint rayTypeCount;
 };
-
-//TODO move somewhere where InlineRaytracing can access
-static const uint kShadowRayInstanceMask = 0xFD; //Instance Mask without castShadow geometry
-static const uint kInstanceMaskBitNormalGeometry = 1; //Instance Mask without castShadow geometry
-static const uint kInstanceMaskBitCastShadow = 2; //Instance Mask without castShadow geometry
-static const uint kInstanceMaskBitParticleCamera = 4; //Instance Mask without castShadow geometry
-static const uint kInstanceMaskBitParticleUniversal = 8; //Instance Mask without castShadow geometry
 
 /** Convenience wrapper for TraceRay() that sets the Scene parameters internally.
     \param[in] rayFlags Ray flags. Set to RAY_FLAG_NONE if not used.
