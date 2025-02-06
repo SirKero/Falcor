@@ -1501,6 +1501,7 @@ namespace Falcor
         RtGeometryFlags mAdditionalASGeometryFlags = RtGeometryFlags::None;  ///< Additional Geometry flag that is used for every pass
         UpdateMode mTlasUpdateMode = UpdateMode::Rebuild;   ///< How the TLAS should be updated when there are changes in the scene.
         UpdateMode mBlasUpdateMode = UpdateMode::Refit;     ///< How the BLAS should be updated when there are changes to meshes.
+        UpdateMode mBlasParticleUpdateMode = UpdateMode::Rebuild;  ///< How the particle BLAS should be updated when there are changes to meshes.
 
         std::vector<RtInstanceDesc> mInstanceDescs;         ///< Shared between TLAS builds to avoid reallocating CPU memory.
 
@@ -1539,6 +1540,7 @@ namespace Falcor
             bool hasDynamicMesh = false;                    ///< Whether the BLAS contains a skinned or vertex-animated mesh, which means the BLAS may need to be updated.
             bool hasDynamicCurve = false;                   ///< Whether the BLAS contains an animated curve cache, which means the BLAS may need to be updated.
             bool useCompaction = false;                     ///< Whether the BLAS should be compacted after build.
+            bool isParticle = false;                        ///< For update mode
             UpdateMode updateMode = UpdateMode::Refit;      ///< Update mode this BLAS was created with.
 
             bool hasDynamicGeometry() const

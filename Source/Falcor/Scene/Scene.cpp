@@ -3322,6 +3322,7 @@ namespace Falcor
                 auto& geomDescs = blas.geomDescs;
                 geomDescs.resize(meshList.size());
                 blas.hasProceduralPrimitives = false;
+                blas.isParticle = isParticle;
 
                 // Track what types of triangle winding exist in the final BLAS.
                 // The SceneBuilder should have ensured winding is consistent, but keeping the check here as a safeguard.
@@ -3553,7 +3554,7 @@ namespace Falcor
             // For all other BLASes, compaction just adds overhead.
             // TODO: Add compaction on/off switch for profiling.
             // TODO: Disable compaction for skinned meshes if update performance becomes a problem.
-            blas.updateMode = mBlasUpdateMode;
+            blas.updateMode = blas.isParticle ? mBlasParticleUpdateMode : mBlasUpdateMode;
             blas.useCompaction = (!blas.hasDynamicGeometry()) || blas.updateMode != UpdateMode::Rebuild;
 
             // Setup build parameters.
