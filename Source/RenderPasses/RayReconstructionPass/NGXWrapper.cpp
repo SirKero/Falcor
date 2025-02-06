@@ -356,8 +356,10 @@ namespace Falcor
             params.pInMotionVectorsReflections = getHandle(pSpecMotion);
             // pInDlssDEvalParams->GBufferSurface.pInAttrib[NVSDK_NGX_GBUFFER_SPECULAR_MVEC] ?
             params.pInSpecularHitDistance = getHandle(pSpecHitDist);
-            params.pInWorldToViewMatrix = reinterpret_cast<float*>(&viewMatrix);
-            params.pInViewToClipMatrix = reinterpret_cast<float*>(&projectionMatrix);
+            auto transposeViewMatrix = math::transpose(viewMatrix);
+            params.pInWorldToViewMatrix = reinterpret_cast<float*>(&transposeViewMatrix);
+            auto transposeProjMatrix = math::transpose(projectionMatrix);
+            params.pInViewToClipMatrix = reinterpret_cast<float*>(&transposeProjMatrix);
             params.pInTransparencyLayer = getHandle(pTransparent);
 
             params.InRenderSubrectDimensions.Width = pOut->getWidth();
@@ -389,6 +391,11 @@ namespace Falcor
         }
 
         return success;
+    }
+
+    void NGXWrapper::changeDLSSPreset(NVSDK_NGX_RayReconstruction_Hint_Render_Preset renderPreset)
+    {
+        NVSDK_NGX_Parameter_SetUI(mpParameters, NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA, renderPreset);
     }
 
 } // namespace Falcor

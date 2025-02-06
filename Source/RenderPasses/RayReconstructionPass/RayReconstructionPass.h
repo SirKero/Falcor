@@ -37,6 +37,19 @@ class RayReconstructionPass : public RenderPass
 public:
     FALCOR_PLUGIN_CLASS(RayReconstructionPass, "RayReconstructionPass", "Denoising and Anti-Aliasing");
 
+    enum class Preset : uint32_t
+    {
+        Default = 0,
+        Transformer = 1,
+    };
+    FALCOR_ENUM_INFO(
+        Preset,
+        {
+            {Preset::Default, "Default"},
+            {Preset::Transformer, "Transformer"},
+        }
+    );
+
     static ref<RayReconstructionPass> create(ref<Device> pDevice, const Properties& props) { return make_ref<RayReconstructionPass>(pDevice, props); }
 
     RayReconstructionPass(ref<Device> pDevice, const Properties& props);
@@ -57,4 +70,7 @@ private:
     std::unique_ptr<NGXWrapper> mpNGXWrapper;
     bool mRecreate = false;
     bool mReset = false; // reset accumulation
+    Preset mPreset = Preset::Default;
 };
+
+FALCOR_ENUM_REGISTER(RayReconstructionPass::Preset);

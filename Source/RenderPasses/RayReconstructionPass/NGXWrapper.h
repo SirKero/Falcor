@@ -86,6 +86,8 @@ namespace Falcor
             float4x4 projectionMatrix
         ) const;
 
+        void changeDLSSPreset(NVSDK_NGX_RayReconstruction_Hint_Render_Preset renderPreset);
+
     private:
         void initializeNGX(const std::filesystem::path& applicationDataPath, const std::filesystem::path& featureSearchPath);
         void shutdownNGX();

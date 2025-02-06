@@ -109,6 +109,19 @@ void RayReconstructionPass::execute(RenderContext* pRenderContext, const RenderD
     if(!mpNGXWrapper->isDLSSDInitialized() || mRecreate)
     {
         mpNGXWrapper->releaseDLSSD();
+
+        auto preset = NVSDK_NGX_RayReconstruction_Hint_Render_Preset::NVSDK_NGX_RayReconstruction_Hint_Render_Preset_Default;
+        switch (mPreset)
+        {
+        case RayReconstructionPass::Preset::Default:
+            preset = NVSDK_NGX_RayReconstruction_Hint_Render_Preset::NVSDK_NGX_RayReconstruction_Hint_Render_Preset_Default;
+            break;
+        case RayReconstructionPass::Preset::Transformer:
+            preset = NVSDK_NGX_RayReconstruction_Hint_Render_Preset::NVSDK_NGX_RayReconstruction_Hint_Render_Preset_D;
+            break;
+        }
+        mpNGXWrapper->changeDLSSPreset(preset);
+
         mpNGXWrapper->initializeDLSSD(
             pRenderContext,
             uint2(pOut->getWidth(), pOut->getHeight()),
@@ -136,6 +149,8 @@ void RayReconstructionPass::renderUI(Gui::Widgets& widget)
 {
     widget.checkbox("Enabled", mEnabled);
     if (!mEnabled) return;
+
+    mRecreate |= widget.dropdown("Preset", mPreset);
 
     if(widget.button("Reset"))
     {
