@@ -4022,7 +4022,7 @@ namespace Falcor
             {
                 uint bitShiftParticle = (uint)mMeshGroups[i].particleOrientation + 1; //Only valid if isPartice is true
                 desc.instanceMask = 0;
-                desc.instanceMask |= isNotCastShadow ? 1 << 1 : 0;
+                desc.instanceMask |= isNotCastShadow && !isParticle ? 1 << 1 : 0; //Particles ignore the castShadow Material flag
                 desc.instanceMask |= isParticle ? 1 << bitShiftParticle : 0;
             }
             else

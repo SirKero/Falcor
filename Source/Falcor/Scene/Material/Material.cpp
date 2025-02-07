@@ -66,6 +66,7 @@ namespace Falcor
         mHeader.setAlphaThreshold(0.5h);
         mHeader.setActiveLobes(static_cast<uint32_t>(LobeType::All));
         mHeader.setIoR(1.h);
+        mHeader.setCastShadow(true);
     }
 
     bool Material::renderUI(Gui::Widgets& widget)
