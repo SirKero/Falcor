@@ -46,13 +46,13 @@ cbuffer CB
 {
     uint gFrameCount; // Current frame count
     float3 gLightPos; // Current Light Position
-    bool gIsDirectional; //Is light a directional light (posW invalid)
+    bool gIsDirectional; // Is light a directional light (posW invalid)
+    float3 gLightDir;    // LightDirection
     float gFar;
     uint gLightIdx;     //LightIndex
     uint gMipCount;     // Number of mips
     uint2 gSMRes;       // ShadowMap resolution
     float gSpreadAngle;
-    uint _pad;
     float4x4 gViewProj;
     float4x4 gInvViewProj; // Inverse view projection
 }
@@ -447,7 +447,7 @@ void rayGen()
         ray.TMin = 0;
         ray.TMax = length(toNear);
         ray.Origin = posWPixelNear.xyz;
-        ray.Direction = gLightPos; // World direction (stored in pos)
+        ray.Direction = gLightDir; 
     } else {
         ray.TMin = length(toNear); // Always start at depth 0
         ray.TMax = distance(gLightPos, posWPixelFar.xyz); // Real far for the pixel
@@ -464,7 +464,7 @@ void rayGen()
     float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
     bool mergeLastBox = false;               // Merge the box from the prevoius frame
     const float far = ray.TMax;
-    const uint instanceMask = getBestParticleShadowPlane(normalize(ray.Direction));
+    const uint instanceMask = getBestParticleShadowPlane(gLightDir);
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
         rayData.depth = -1;
