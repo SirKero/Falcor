@@ -28,6 +28,7 @@
 #pragma once
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
+#include "ParticleDataTypes.slang"
 
 using namespace Falcor;
 
@@ -65,16 +66,27 @@ private:
     void refreshFileList();
     bool loadConfigurationFile(std::string filename);
 
+    /** Fills the initial data buffer. Vector has the size of the global particle buffer
+      * If index is >=0 only data of the responding particle system is filled
+    */
+    std::vector<ParticleAnimateData> getInitialData(int index = -1);
+
     double lastFrameTime = 0.0; //For clock
+    uint mFrameCounter = 0;             //Frame Counter for the sample generator
+    bool mReinitializeBuffer = false;   //Resets the buffer data
+    bool mReset = false;                //Resets all Particle simimulations
 
     ref<Scene> mpScene; //reference to the scene
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
     std::vector<ParticleSettings> mParticleSettings;
+    std::vector<uint> mParticleBufferOffsets;   //Offset in the global particle buffer
+    uint mTotalBufferSize = 0;
+
     std::string mConfigurationName = "ParticleSettings";
     std::filesystem::path mScenePath;
     Gui::DropdownList mFileList;    //List of all files in the scene
     uint mSelectedFile = 0;
-    bool mReinitializeBuffer = false;
+
 
     ref<Buffer> mpParticleAnimateDataBuffer; //Extra date needed to animate the Particle Points
     ref<ComputePass> mpUpdateParticlePointsPass; //Compute pass to update the particle points

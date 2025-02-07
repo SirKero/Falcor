@@ -6,6 +6,7 @@ import ParticleDataTypes;
 
 cbuffer CB
 {
+    bool gReset;                //Should simulation be reseted
     uint gFrameCount;           //Frame Count for sample generator
     uint gParticleBufferOffset; // Offset in the global particle point buffer
     uint gNumParticles;     //Number of particles for this particle spawner
@@ -68,8 +69,14 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
 
     // Add delta time to lifetime
     particleData.lifetime += gDeltaT;
+    
 
     // Respawn particle
+    if (gReset || !particleData.isValid) {
+        particlePoint.position = gRestPosition;
+    }
+
+    //Spawn new particle
     if (particleData.lifetime > gMaxLifetime) {
         float3 startPosition = gInitialPosition;
         float3 rnd = sampleNext3D(sg);
@@ -78,6 +85,7 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
         particlePoint.radius = gBaseRadius;
         particleData.lifetime = max(particleData.lifetime - gMaxLifetime, 0);
         particleData.velocity = gInitialVelocity;
+        particleData.isValid = true;
         if (gSpreadAngle > 0) {
             float lengthVel = length(particleData.velocity); //Get power of velocity
             float3 rndDir = rnd_dir(particleData.velocity, gSpreadAngle, sg); 
@@ -86,8 +94,11 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
     }
 
     // Update position and apply gravity
-    particlePoint.position += particleData.velocity * gDeltaT;
-    particleData.velocity.y -= gGravity * gDeltaT;
+    if (particleData.isValid) {
+        particlePoint.position += particleData.velocity * gDeltaT;
+        particleData.velocity.y -= gGravity * gDeltaT;
+    }
+   
 
     gParticlePointDesc[prtIdx] = particlePoint;
     gParticleAnimateData[prtIdx] = particleData;

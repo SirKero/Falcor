@@ -26,7 +26,6 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "ParticlePass.h"
-#include "ParticleDataTypes.slang"
 #include "Utils/Timing/Clock.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
 #include <nlohmann/json.hpp>
@@ -119,52 +118,36 @@ void ParticlePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pSc
 
         // Reset old buffers
         mParticleSettings.clear();
+        mParticleBufferOffsets.clear();
         mpParticleAnimateDataBuffer.reset();
 
         //Set all particles in the scene to active and initialize default settings
         auto& particleSystems = mpScene->getParticleSystem();
-        uint totalSize = 0;
+        mTotalBufferSize = 0;
         for (auto& ps : particleSystems)
         {
             ps.active = true;
             ParticleSettings particleSetting{};
             particleSetting.spawnPosition = ps.spawnPosition;
             mParticleSettings.push_back(particleSetting);
-            totalSize += ps.numberParticles;
+            mParticleBufferOffsets.push_back(mTotalBufferSize);
+            mTotalBufferSize += ps.numberParticles;
         }
 
         //Load Settings from file if exist
-        if (totalSize > 0 && !mFileList.empty())
+        if (mTotalBufferSize > 0 && !mFileList.empty())
         {
             loadConfigurationFile(mFileList[0].label);
         }
             
-        if (totalSize > 0)
+        if (mTotalBufferSize > 0)
         {
             //Set initial data for the buffer
-            std::vector<ParticleAnimateData> initialData(totalSize);
-            uint offset = 0;
-            for (uint i = 0; i<particleSystems.size(); i++)
-            {
-                auto& ps = particleSystems[i];
-                auto& pSett = mParticleSettings[i];
-                float lifePerParticle = pSett.lifetime / ps.numberParticles;
-                float lastLifeTime = pSett.lifetime;
-                for (uint j = 0; j < ps.numberParticles; j++)
-                {
-                    ParticleAnimateData data{};
-                    data.lifetime = lastLifeTime;
-                    data.velocity = float3(0);
-                    initialData[j + offset] = data;
-
-                    lastLifeTime = math::max(lastLifeTime - lifePerParticle, 0.f);
-                }
-                offset += ps.numberParticles;
-            }
+            std::vector<ParticleAnimateData> initialData = getInitialData();
 
             //Create buffer
             mpParticleAnimateDataBuffer = Buffer::createStructured(
-                mpDevice, sizeof(ParticleAnimateData), totalSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(ParticleAnimateData), mTotalBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, initialData.data(), false
             );
             mpParticleAnimateDataBuffer->setName("ParticlePass::ParticleAnimateData");
@@ -187,7 +170,9 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
 
     if (mReinitializeBuffer)
     {
-        //TODO refill the buffer
+        std::vector<ParticleAnimateData> initialData = getInitialData();
+        mpParticleAnimateDataBuffer->setBlob(initialData.data(), 0, mTotalBufferSize * sizeof(ParticleAnimateData));
+        mReset = true;
         mReinitializeBuffer = false;
     }
 
@@ -236,6 +221,8 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
             continue;
         FALCOR_PROFILE(pRenderContext, ps.name);
         // Set constant buffer
+        var["CB"]["gReset"] = mReset;
+        var["CB"]["gFrameCount"] = mFrameCounter;
         var["CB"]["gParticleBufferOffset"] = ps.particleBufferOffset;
         var["CB"]["gNumParticles"] = ps.numberParticles;
         var["CB"]["gRestPosition"] = ps.spawnPosition;
@@ -251,6 +238,9 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
 
         mpUpdateParticlePointsPass->execute(pRenderContext, uint3(ps.numberParticles, 1, 1));
     }
+
+    mReset = false;
+    mFrameCounter++;
 }
 
 void ParticlePass::renderUI(Gui::Widgets& widget)
@@ -292,6 +282,8 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             group.var("Gravity", pSett.gravity);
             group.var("SpawnRadius", pSett.spawnRadius, 0.f);
             group.var("SpreadAngle", pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
+
+            mReinitializeBuffer |= group.button("Reset");
         }
     }
     if (!mFileList.empty())
@@ -404,4 +396,35 @@ bool ParticlePass::loadConfigurationFile(std::string filename) {
     }
 
     return true;
+}
+
+std::vector<ParticleAnimateData> ParticlePass::getInitialData(int index)
+{
+    std::vector<ParticleAnimateData> initialData(mTotalBufferSize);
+    auto& particleSystems = mpScene->getParticleSystem();
+
+    uint offset = index >= 0 ? mParticleBufferOffsets[index] : 0;
+    uint i = index >= 0 ? index : 0;
+    uint size = index >= 0 ? index + 1 : particleSystems.size();
+
+    for (i; i < size; i++)
+    {
+        auto& ps = particleSystems[i];
+        auto& pSett = mParticleSettings[i];
+        float lifePerParticle = pSett.lifetime / ps.numberParticles;
+        float lastLifeTime = pSett.lifetime;
+        for (uint j = 0; j < ps.numberParticles; j++)
+        {
+            ParticleAnimateData data{};
+            data.lifetime = lastLifeTime;
+            data.velocity = float3(0);
+            data.isValid = false;
+            initialData[j + offset] = data;
+
+            lastLifeTime = math::max(lastLifeTime - lifePerParticle, 0.f);
+        }
+        offset += ps.numberParticles;
+    }
+
+    return initialData;
 }
