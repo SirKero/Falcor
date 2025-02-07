@@ -35,6 +35,16 @@ class ParticlePass : public RenderPass
 {
 public:
     FALCOR_PLUGIN_CLASS(ParticlePass, "ParticlePass", "Animates the Particle Systems for a scene");
+        
+    struct ParticleSettings
+    {
+        float lifetime = 500.f;
+        float3 spawnPosition = float3(0, 0, 0);
+        float3 initialVelocity = float3(0, 1, 0);
+        float gravity = 0.1f;
+        float spawnRadius = 0.1f;
+        float spreadAngle = 1.2f;
+    };
 
     static ref<ParticlePass> create(ref<Device> pDevice, const Properties& props) { return make_ref<ParticlePass>(pDevice, props); }
 
@@ -50,21 +60,21 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
-    struct ParticleSettings
-    {
-        float lifetime = 500.f;
-        float3 spawnPosition = float3(0, 0, 0);
-        float3 initialVelocity = float3(0, 1, 0);
-        float gravity = 0.1f;
-        float spawnRadius = 0.1f;
-        float spreadAngle = 1.2f;
-    };
+    
+    void storeCurrentConfiguration();
+    void refreshFileList();
+    bool loadConfigurationFile(std::string filename);
 
     double lastFrameTime = 0.0; //For clock
 
     ref<Scene> mpScene; //reference to the scene
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
     std::vector<ParticleSettings> mParticleSettings;
+    std::string mConfigurationName = "ParticleSettings";
+    std::filesystem::path mScenePath;
+    Gui::DropdownList mFileList;    //List of all files in the scene
+    uint mSelectedFile = 0;
+    bool mReinitializeBuffer = false;
 
     ref<Buffer> mpParticleAnimateDataBuffer; //Extra date needed to animate the Particle Points
     ref<ComputePass> mpUpdateParticlePointsPass; //Compute pass to update the particle points

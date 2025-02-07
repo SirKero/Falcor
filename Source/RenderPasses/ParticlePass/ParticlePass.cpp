@@ -29,6 +29,26 @@
 #include "ParticleDataTypes.slang"
 #include "Utils/Timing/Clock.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
+#include <nlohmann/json.hpp>
+#include <fstream>
+
+using json = nlohmann::json;
+
+//Float3 json defines
+namespace Falcor::math
+{
+    void to_json(json& j, const float3& v)
+    {
+        j = {v.x, v.y, v.z};
+    }
+
+    void from_json(const json& j, float3& v)
+    {
+        j[0].get_to(v.x);
+        j[1].get_to(v.y);
+        j[2].get_to(v.z);
+    }
+}
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
@@ -39,7 +59,35 @@ namespace
 {
     const std::string kShaderUpdateParticles = "RenderPasses/ParticlePass/UpdateParticlePoints.cs.slang";
     const std::string kShaderModel = "6_6";
+
+    //JSON Keys
+    const std::string kJSONKeyLifetime = "lifetime";
+    const std::string kJSONKeySpawnPosition = "spawnPosition";
+    const std::string kJSONKeyInitialVelocity = "initialVelocity";
+    const std::string kJSONKeyGravity = "gravity";
+    const std::string kJSONKeySpawnRadius = "spawnRadius";
+    const std::string kJSONKeySpreadAngle = "spreadAngle";
 }
+
+//Json defines for settings type
+void from_json(const json& j, ParticlePass::ParticleSettings& settings) {
+    if (j.contains(kJSONKeyLifetime)) j[kJSONKeyLifetime].get_to(settings.lifetime);
+    if (j.contains(kJSONKeySpawnPosition)) j[kJSONKeySpawnPosition].get_to(settings.spawnPosition);
+    if (j.contains(kJSONKeyInitialVelocity)) j[kJSONKeyInitialVelocity].get_to(settings.initialVelocity);
+    if (j.contains(kJSONKeyGravity)) j[kJSONKeyGravity].get_to(settings.gravity);
+    if (j.contains(kJSONKeySpawnRadius)) j[kJSONKeySpawnRadius].get_to(settings.spawnRadius);
+    if (j.contains(kJSONKeySpreadAngle))j[kJSONKeySpreadAngle].get_to(settings.spreadAngle);
+ }
+
+ void to_json(json& j, const ParticlePass::ParticleSettings& settings)
+{
+    j[kJSONKeyLifetime] = settings.lifetime;
+    j[kJSONKeySpawnPosition] = settings.spawnPosition;
+    j[kJSONKeyInitialVelocity] = settings.initialVelocity;
+    j[kJSONKeyGravity] = settings.gravity;
+    j[kJSONKeySpawnRadius] = settings.spawnRadius;
+    j[kJSONKeySpreadAngle] = settings.spreadAngle;
+ }
 
 ParticlePass::ParticlePass(ref<Device> pDevice, const Properties& props)
     : RenderPass(pDevice)
@@ -66,13 +114,14 @@ void ParticlePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pSc
     if (pScene)
     {
         mpScene = pScene;
+        mScenePath = mpScene->getPath().parent_path();
+        refreshFileList(); //Get possible configuration
 
-        //TODO load in settings stored in a file?
         // Reset old buffers
         mParticleSettings.clear();
         mpParticleAnimateDataBuffer.reset();
 
-        //Set all particles in the scene to active
+        //Set all particles in the scene to active and initialize default settings
         auto& particleSystems = mpScene->getParticleSystem();
         uint totalSize = 0;
         for (auto& ps : particleSystems)
@@ -84,6 +133,12 @@ void ParticlePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pSc
             totalSize += ps.numberParticles;
         }
 
+        //Load Settings from file if exist
+        if (totalSize > 0 && !mFileList.empty())
+        {
+            loadConfigurationFile(mFileList[0].label);
+        }
+            
         if (totalSize > 0)
         {
             //Set initial data for the buffer
@@ -129,6 +184,12 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
     //Check if particle system is set, else return
     if (particleSystems.empty())
         return;
+
+    if (mReinitializeBuffer)
+    {
+        //TODO refill the buffer
+        mReinitializeBuffer = false;
+    }
 
     FALCOR_PROFILE(pRenderContext, "UpdateParticlePoints");
 
@@ -233,4 +294,114 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             group.var("SpreadAngle", pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
         }
     }
+    if (!mFileList.empty())
+    {
+        widget.dropdown("Particle Configs", mFileList, mSelectedFile);
+        if (widget.button("Load Config File"))
+            mReinitializeBuffer |= loadConfigurationFile(mFileList[mSelectedFile].label);
+    }
+        
+
+    widget.textbox("Particle Config Name", mConfigurationName);
+    bool storeConfig = widget.button("Store Current Configuration");
+    if (storeConfig)
+        storeCurrentConfiguration();
+}
+
+void ParticlePass::storeCurrentConfiguration() {
+    //Do nothing if scene is not set
+    if (!mpScene)
+        return;
+
+    auto& particleSystems = mpScene->getParticleSystem();
+    if (particleSystems.empty())
+        return;
+
+    //Check if name is empty and set a default name
+    std::string fileName = mConfigurationName;
+    if (fileName.empty())
+        fileName = "ParticleSettings";
+    fileName += ".prtsett";
+
+    auto pathToFile = mScenePath;
+    pathToFile.append(fileName);
+
+    std::ofstream ofs(pathToFile);
+    if (!ofs.good())
+    {
+        logWarning("Failed to open particle settings file '{}' for writing.", pathToFile);
+        return;
+    }
+
+    json j;
+    for (uint i = 0; i < mParticleSettings.size(); i++)
+        j[particleSystems[i].name] = mParticleSettings[i];
+
+    ofs << j.dump(4);
+    ofs.close();
+
+    logInfo("Successfully stored Particle Configuration at: '{}'", pathToFile);
+    refreshFileList();
+}
+
+void ParticlePass::refreshFileList()
+{
+    if (!mpScene)
+        return;
+
+    mFileList.clear();
+    Gui::DropdownValue v;
+    v.value = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(mScenePath))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".prtsett")
+        {
+            v.label = entry.path().filename().replace_extension().string();
+            mFileList.push_back(v);
+            ++v.value;
+        }
+    }
+    mSelectedFile = 0;
+}
+
+bool ParticlePass::loadConfigurationFile(std::string filename) {
+    if (!mpScene)
+        return false;
+
+    auto& particleSystems = mpScene->getParticleSystem();
+    FALCOR_ASSERT(particleSystems.size() == mParticleSettings.size()); //We assume that both the particle system and settings are initialized
+
+    //Create the path from the filename
+    FALCOR_ASSERT(!filename.empty());
+    filename += ".prtsett";
+    auto pathToFile = mScenePath;
+    pathToFile.append(filename);
+
+    std::ifstream ifs(pathToFile);
+    if (!ifs.good())
+    {
+        logWarning("Failed to open Particle Settings file '{}' for reading.", pathToFile);
+        return false;
+    }
+
+    //Parse json
+    try
+    {
+        json j = json::parse(ifs);
+        for (uint i = 0; i < particleSystems.size(); i++)
+        {
+            //Check if there is a entry with the particle system name
+            if (j.contains(particleSystems[i].name))
+            {
+                mParticleSettings[i] = j[particleSystems[i].name];
+            }
+        }
+    }
+    catch (const std::exception& e)
+    {
+        logWarning("Error when deserializing Particle Setting from '{}': {}", pathToFile, e.what());
+        return false;
+    }
+
+    return true;
 }
