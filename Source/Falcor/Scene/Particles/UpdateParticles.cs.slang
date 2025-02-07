@@ -59,7 +59,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     verts[1].position = prt.position + offsetRight + offetTop;
     verts[2].position = prt.position + offsetRight - offetTop;
     verts[3].position = prt.position - offsetRight - offetTop;
-    normal = normalize(cross(verts[1].position - verts[0].position, verts[2].position - verts[0].position));
+    normal = normalize(cross(verts[2].position - verts[0].position, verts[1].position - verts[0].position));
     tangent = float4(normalize(verts[1].position - verts[0].position), 1);
     [unroll]
     for(uint i=0; i<4; i++){

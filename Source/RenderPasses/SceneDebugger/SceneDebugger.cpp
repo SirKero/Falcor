@@ -248,6 +248,13 @@ void SceneDebugger::renderUI(Gui::Widgets& widget)
 
     widget.checkbox("Alpha Test", mUseAlphaTest);
 
+    widget.var("Instance Mask", mParams.instanceMask, 0u, 255u, 1u);
+    widget.tooltip(
+        "Instance Masks set by the Scene: \n Without castShadow: 253 \n ParticleCamera: 7 \n ParticleXY: 9 \n ParticleYZ: 17 \n "
+        "ParticleXZ: 33\n BitNormal: 1 \n BitCastShadow: 2 \n BitParticleCamera: 4 \n BitParticleXY: 8 \n BitParticleYZ: 16 \n "
+        "BitParticleXZ: 32"
+    );
+
     widget.textWrapped("Description:\n" + getModeDesc((SceneDebuggerMode)mParams.mode));
 
     // Show data for the currently selected pixel.
