@@ -61,9 +61,14 @@ namespace
 
     //JSON Keys
     const std::string kJSONKeyLifetime = "lifetime";
+    const std::string kJSONKeyLifetimeRandom = "lifetimeRandom";
+    const std::string kJSONKeyRadius = "radius";
+    const std::string kJSONKeyRandomRadius = "rndRadius";
     const std::string kJSONKeySpawnPosition = "spawnPosition";
     const std::string kJSONKeyInitialVelocity = "initialVelocity";
+    const std::string kJSONKeyRandomVelocity = "randomVelocity";
     const std::string kJSONKeyGravity = "gravity";
+    const std::string kJSONKeyGravityRandom = "gravityRandom";
     const std::string kJSONKeySpawnRadius = "spawnRadius";
     const std::string kJSONKeySpreadAngle = "spreadAngle";
 }
@@ -71,9 +76,14 @@ namespace
 //Json defines for settings type
 void from_json(const json& j, ParticlePass::ParticleSettings& settings) {
     if (j.contains(kJSONKeyLifetime)) j[kJSONKeyLifetime].get_to(settings.lifetime);
+    if (j.contains(kJSONKeyLifetimeRandom)) j[kJSONKeyLifetimeRandom].get_to(settings.randomLifetime);
+    if (j.contains(kJSONKeyRadius)) j[kJSONKeyRadius].get_to(settings.radius);
+    if (j.contains(kJSONKeyRandomRadius)) j[kJSONKeyRandomRadius].get_to(settings.randomRadiusOffset);
     if (j.contains(kJSONKeySpawnPosition)) j[kJSONKeySpawnPosition].get_to(settings.spawnPosition);
     if (j.contains(kJSONKeyInitialVelocity)) j[kJSONKeyInitialVelocity].get_to(settings.initialVelocity);
+    if (j.contains(kJSONKeyRandomVelocity)) j[kJSONKeyRandomVelocity].get_to(settings.velocityRandom);
     if (j.contains(kJSONKeyGravity)) j[kJSONKeyGravity].get_to(settings.gravity);
+    if (j.contains(kJSONKeyGravityRandom)) j[kJSONKeyGravityRandom].get_to(settings.gravityRandom);
     if (j.contains(kJSONKeySpawnRadius)) j[kJSONKeySpawnRadius].get_to(settings.spawnRadius);
     if (j.contains(kJSONKeySpreadAngle))j[kJSONKeySpreadAngle].get_to(settings.spreadAngle);
  }
@@ -81,9 +91,14 @@ void from_json(const json& j, ParticlePass::ParticleSettings& settings) {
  void to_json(json& j, const ParticlePass::ParticleSettings& settings)
 {
     j[kJSONKeyLifetime] = settings.lifetime;
+    j[kJSONKeyLifetimeRandom] = settings.randomLifetime;
+    j[kJSONKeyRadius] = settings.radius;
+    j[kJSONKeyRandomRadius] = settings.randomRadiusOffset;
     j[kJSONKeySpawnPosition] = settings.spawnPosition;
     j[kJSONKeyInitialVelocity] = settings.initialVelocity;
+    j[kJSONKeyRandomVelocity] = settings.velocityRandom;
     j[kJSONKeyGravity] = settings.gravity;
+    j[kJSONKeyGravityRandom] = settings.gravityRandom;
     j[kJSONKeySpawnRadius] = settings.spawnRadius;
     j[kJSONKeySpreadAngle] = settings.spreadAngle;
  }
@@ -129,6 +144,7 @@ void ParticlePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pSc
             ps.active = true;
             ParticleSettings particleSetting{};
             particleSetting.spawnPosition = ps.spawnPosition;
+            particleSetting.radius = ps.intitialRadius;
             mParticleSettings.push_back(particleSetting);
             mParticleBufferOffsets.push_back(mTotalBufferSize);
             mTotalBufferSize += ps.numberParticles;
@@ -247,13 +263,17 @@ void ParticlePass::dispatchParticlePass(RenderContext* pRenderContext, float del
         var["CB"]["gParticleBufferOffset"] = ps.particleBufferOffset;
         var["CB"]["gNumParticles"] = ps.numberParticles;
         var["CB"]["gRestPosition"] = ps.spawnPosition;
-        var["CB"]["gBaseRadius"] = ps.intitialRadius;
+        var["CB"]["gBaseRadius"] = pSett.radius;
+        var["CB"]["gRadiusOffset"] = pSett.randomRadiusOffset;
 
         var["CB"]["gDeltaT"] = deltaT;
         var["CB"]["gInitialPosition"] = pSett.spawnPosition;
         var["CB"]["gInitialVelocity"] = pSett.initialVelocity;
+        var["CB"]["gVelocityRandom"] = pSett.velocityRandom;
         var["CB"]["gMaxLifetime"] = pSett.lifetime;
+        var["CB"]["gRandomLifetime"] = pSett.randomLifetime;
         var["CB"]["gGravity"] = pSett.gravity;
+        var["CB"]["gGravityRandom"] = pSett.gravityRandom;
         var["CB"]["gSpawnRadius"] = pSett.spawnRadius;
         var["CB"]["gSpreadAngle"] = pSett.spreadAngle;
 
@@ -294,15 +314,23 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             group.checkbox("Enable", ps.active);
             group.text("Max Number of Particles: " + std::to_string(ps.numberParticles));
             group.var("BaseRadius", ps.intitialRadius);
+            group.var("Random Radius Offset", pSett.randomRadiusOffset, 0.f, FLT_MAX, 0.001f);
+            group.tooltip("Random radius offset applied when spawing the particle. BaseRadius + [-offset, offset]");
             group.var("RestPosition", ps.spawnPosition);
             group.tooltip("Position where all inactive particles are moved");
 
             group.var("Lifetime", pSett.lifetime, 0.0f, FLT_MAX, 0.1f);
             group.tooltip("Time a particle lives");
+            group.var("Lifetime Random", pSett.randomLifetime, 0.f, FLT_MAX, 0.1f);
+            group.tooltip("Random Offset for the lifetime. Lifetime + [-rnd, rnd]");
             group.var("SpawnPosition", pSett.spawnPosition);
             group.tooltip("Position where a active particle spawns. A particles spawns if their current lifetime exeeds the Lifetime");
             group.var("InitialVelocity", pSett.initialVelocity);
+            group.var("VelocityRandomOffset", pSett.velocityRandom, 0.f, FLT_MAX, 0.001f);
+            group.tooltip("Random Factor for Velocity applied when spawning the particle. Random Velocity between Velocity*[-Offset, Offset] is added to the initial velocity. Set to 0 to disable");
             group.var("Gravity", pSett.gravity);
+            group.var("Gravity Random", pSett.gravityRandom, 0.f, FLT_MAX, 0.001f);
+            group.tooltip("Absolute Random offset applied to gravity. Gravity + [-random,random]"); //TODO change to mass?
             group.var("SpawnRadius", pSett.spawnRadius, 0.f);
             group.var("SpreadAngle", pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
         }
@@ -447,7 +475,7 @@ std::vector<ParticleAnimateData> ParticlePass::getInitialData(int index)
         auto& ps = particleSystems[i];
         auto& pSett = mParticleSettings[i];
         float lifePerParticle = pSett.lifetime / ps.numberParticles;
-        float lastLifeTime = pSett.lifetime;
+        float lastLifeTime = 0;
         for (uint j = 0; j < ps.numberParticles; j++)
         {
             ParticleAnimateData data{};
@@ -456,7 +484,7 @@ std::vector<ParticleAnimateData> ParticlePass::getInitialData(int index)
             data.isValid = false;
             initialData[j + offset] = data;
 
-            lastLifeTime = math::max(lastLifeTime - lifePerParticle, 0.f);
+            lastLifeTime += lifePerParticle;
         }
         offset += ps.numberParticles;
     }

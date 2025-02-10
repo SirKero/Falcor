@@ -40,9 +40,14 @@ public:
     struct ParticleSettings
     {
         float lifetime = 500.f;
+        float randomLifetime = 30.f;
+        float radius = 1.f;
+        float randomRadiusOffset = 0.5f;
         float3 spawnPosition = float3(0, 0, 0);
         float3 initialVelocity = float3(0, 1, 0);
+        float velocityRandom = 0.5;
         float gravity = 0.1f;
+        float gravityRandom = 0.01f;
         float spawnRadius = 0.1f;
         float spreadAngle = 1.2f;
     };
