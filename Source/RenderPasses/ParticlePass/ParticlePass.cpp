@@ -119,8 +119,6 @@ RenderPassReflection ParticlePass::reflect(const CompileData& compileData)
 {
     // Define the required resources here
     RenderPassReflection reflector;
-    //reflector.addOutput("dst");
-    //reflector.addInput("src");
     return reflector;
 }
 
@@ -200,7 +198,6 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kShaderUpdateParticles).csEntry("main").setShaderModel(kShaderModel);
-        //desc.addTypeConformances(mpScene->getTypeConformances());
 
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
@@ -304,6 +301,11 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
         return;
     }
 
+    auto labelText = [](std::string text, uint idx) {
+        text = text + "##" + std::to_string(idx);
+        return text;
+    };
+
     widget.text("Particle Systems:");
     for (uint i=0; i<particleSystems.size(); i++)
     {
@@ -311,28 +313,28 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
         auto& pSett = mParticleSettings[i];
         if (auto group = widget.group(ps.name))
         {
-            group.checkbox("Enable", ps.active);
+            group.checkbox(labelText("Enable", i).c_str(), ps.active);
             group.text("Max Number of Particles: " + std::to_string(ps.numberParticles));
-            group.var("BaseRadius", ps.intitialRadius);
-            group.var("Random Radius Offset", pSett.randomRadiusOffset, 0.f, FLT_MAX, 0.001f);
+            group.var(labelText("BaseRadius", i).c_str(), pSett.radius, 1e-7f, FLT_MAX, 0.001f);
+            group.var(labelText("Random Radius Offset", i).c_str(), pSett.randomRadiusOffset, 0.f, FLT_MAX, 0.001f);
             group.tooltip("Random radius offset applied when spawing the particle. BaseRadius + [-offset, offset]");
-            group.var("RestPosition", ps.spawnPosition);
+            group.var(labelText("RestPosition", i).c_str(), ps.spawnPosition);
             group.tooltip("Position where all inactive particles are moved");
 
-            group.var("Lifetime", pSett.lifetime, 0.0f, FLT_MAX, 0.1f);
+            group.var(labelText("Lifetime", i).c_str(), pSett.lifetime, 0.0f, FLT_MAX, 0.1f);
             group.tooltip("Time a particle lives");
-            group.var("Lifetime Random", pSett.randomLifetime, 0.f, FLT_MAX, 0.1f);
+            group.var(labelText("Lifetime Random", i).c_str(), pSett.randomLifetime, 0.f, FLT_MAX, 0.1f);
             group.tooltip("Random Offset for the lifetime. Lifetime + [-rnd, rnd]");
-            group.var("SpawnPosition", pSett.spawnPosition);
+            group.var(labelText("SpawnPosition", i).c_str(), pSett.spawnPosition);
             group.tooltip("Position where a active particle spawns. A particles spawns if their current lifetime exeeds the Lifetime");
-            group.var("InitialVelocity", pSett.initialVelocity);
-            group.var("VelocityRandomOffset", pSett.velocityRandom, 0.f, FLT_MAX, 0.001f);
+            group.var(labelText("InitialVelocity", i).c_str(), pSett.initialVelocity);
+            group.var(labelText("VelocityRandomOffset", i).c_str(), pSett.velocityRandom, 0.f, FLT_MAX, 0.001f);
             group.tooltip("Random Factor for Velocity applied when spawning the particle. Random Velocity between Velocity*[-Offset, Offset] is added to the initial velocity. Set to 0 to disable");
-            group.var("Gravity", pSett.gravity);
-            group.var("Gravity Random", pSett.gravityRandom, 0.f, FLT_MAX, 0.001f);
+            group.var(labelText("Gravity", i).c_str(), pSett.gravity);
+            group.var(labelText("Gravity Random", i).c_str(), pSett.gravityRandom, 0.f, FLT_MAX, 0.001f);
             group.tooltip("Absolute Random offset applied to gravity. Gravity + [-random,random]"); //TODO change to mass?
-            group.var("SpawnRadius", pSett.spawnRadius, 0.f);
-            group.var("SpreadAngle", pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
+            group.var(labelText("SpawnRadius", i).c_str(), pSett.spawnRadius, 0.f);
+            group.var(labelText("SpreadAngle", i).c_str(), pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
         }
     }
     widget.separator();
