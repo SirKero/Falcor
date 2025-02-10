@@ -172,11 +172,11 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
     {
         std::vector<ParticleAnimateData> initialData = getInitialData();
         mpParticleAnimateDataBuffer->setBlob(initialData.data(), 0, mTotalBufferSize * sizeof(ParticleAnimateData));
+        pRenderContext->flush(true); //Ensures that the data is uploaded
         mReset = true;
         mReinitializeBuffer = false;
+        mUseSimulation = mEnableSimulateOnStartup;
     }
-
-    FALCOR_PROFILE(pRenderContext, "UpdateParticlePoints");
 
     //Update Point pass
     if (!mpUpdateParticlePointsPass)
@@ -193,26 +193,47 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
         mpUpdateParticlePointsPass = ComputePass::create(mpDevice, desc, defines, true);   
     }
 
-    FALCOR_ASSERT(mpUpdateParticlePointsPass);
-
-    //Get Resources
-    auto& pParticlePointsBuffer = mpScene->getParticlePointsBuffer();
-
     //Get deltaT
     auto& renderDict = renderData.getDictionary();
     auto pGlobalClock = static_cast<Clock*>(renderDict[kRenderGlobalClock]);
     double currentTime = pGlobalClock->getTime();
-    float deltaT = static_cast<float>(math::max(currentTime - lastFrameTime, 0.0));
+    float deltaT = static_cast<float>(math::min(math::max(currentTime - lastFrameTime, 0.0), 1.0)); //Cap deltaT at one second
     lastFrameTime = currentTime;
 
+    //Get Simulated deltaT instead
+    if (mUseSimulation)
+    {
+        //Get max lifetime of all particle systems
+        float maxLifetime = 0;
+        for (const auto& pSett : mParticleSettings)
+            maxLifetime = math::max(maxLifetime, pSett.lifetime);
+        deltaT = maxLifetime / float(mSimulationSteps);
+    }
+
+    //Dispatch either once of multiple times
+    uint dispatchCount = mUseSimulation ? mSimulationSteps : 1;
+    for (uint i = 0; i < dispatchCount; i++)
+        dispatchParticlePass(pRenderContext, deltaT);
+        
+    mUseSimulation = false;
+}
+
+void ParticlePass::dispatchParticlePass(RenderContext* pRenderContext, float deltaT) {
+    FALCOR_PROFILE(pRenderContext, "UpdateParticlePoints");
+
+    FALCOR_ASSERT(mpUpdateParticlePointsPass);
+    // Get Resources
+    auto& pParticlePointsBuffer = mpScene->getParticlePointsBuffer();
+    const auto& particleSystems = mpScene->getParticleSystem();
+
     auto var = mpUpdateParticlePointsPass->getRootVar();
-    //Set Shader data valid for all particle spawners
+    // Set Shader data valid for all particle spawners
     mpSampleGenerator->setShaderData(var);
     var["gParticlePointDesc"] = pParticlePointsBuffer;
     var["gParticleAnimateData"] = mpParticleAnimateDataBuffer;
 
-    //One dispatch per particle system
-    for (uint i=0; i<particleSystems.size(); i++)
+     // One dispatch per particle system
+    for (uint i = 0; i < particleSystems.size(); i++)
     {
         auto& ps = particleSystems[i];
         auto& pSett = mParticleSettings[i];
@@ -239,6 +260,8 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
         mpUpdateParticlePointsPass->execute(pRenderContext, uint3(ps.numberParticles, 1, 1));
     }
 
+    pRenderContext->uavBarrier(pParticlePointsBuffer.get());
+    pRenderContext->uavBarrier(mpParticleAnimateDataBuffer.get());
     mReset = false;
     mFrameCounter++;
 }
@@ -282,10 +305,22 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             group.var("Gravity", pSett.gravity);
             group.var("SpawnRadius", pSett.spawnRadius, 0.f);
             group.var("SpreadAngle", pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
-
-            mReinitializeBuffer |= group.button("Reset");
         }
     }
+    widget.separator();
+
+    mReinitializeBuffer |= widget.button("Reset All");
+
+    widget.checkbox("Enable Simulation on Reset", mEnableSimulateOnStartup);
+    if (mEnableSimulateOnStartup)
+    {
+        widget.var("Simulation Steps", mSimulationSteps, 1u, UINT_MAX, 1u);
+        widget.tooltip(
+            "Defines how many steps the simulation has. DeltaT for Simulation is determined by the max of all ParticleSystem Lifetimes / "
+            "steps."
+        );
+    }
+
     if (!mFileList.empty())
     {
         widget.dropdown("Particle Configs", mFileList, mSelectedFile);

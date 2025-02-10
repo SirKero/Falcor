@@ -66,6 +66,10 @@ private:
     void refreshFileList();
     bool loadConfigurationFile(std::string filename);
 
+    /** Dispatches the particle pass
+    */
+    void dispatchParticlePass(RenderContext* pRenderContext, float deltaT);
+
     /** Fills the initial data buffer. Vector has the size of the global particle buffer
       * If index is >=0 only data of the responding particle system is filled
     */
@@ -75,6 +79,10 @@ private:
     uint mFrameCounter = 0;             //Frame Counter for the sample generator
     bool mReinitializeBuffer = false;   //Resets the buffer data
     bool mReset = false;                //Resets all Particle simimulations
+
+    bool mEnableSimulateOnStartup = true;     //Simumlates the max lifetime on startup
+    bool mUseSimulation = true;         //Simulate the max lifetime
+    uint mSimulationSteps = 100;        //Number of iterations for the simulation (deltaT is maxLifetime/steps)
 
     ref<Scene> mpScene; //reference to the scene
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
