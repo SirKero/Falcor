@@ -71,6 +71,7 @@ namespace
     const std::string kJSONKeyGravityRandom = "gravityRandom";
     const std::string kJSONKeySpawnRadius = "spawnRadius";
     const std::string kJSONKeySpreadAngle = "spreadAngle";
+    const std::string kJSONKeyWind = "wind";
 }
 
 //Json defines for settings type
@@ -80,12 +81,24 @@ void from_json(const json& j, ParticlePass::ParticleSettings& settings) {
     if (j.contains(kJSONKeyRadius)) j[kJSONKeyRadius].get_to(settings.radius);
     if (j.contains(kJSONKeyRandomRadius)) j[kJSONKeyRandomRadius].get_to(settings.randomRadiusOffset);
     if (j.contains(kJSONKeySpawnPosition)) j[kJSONKeySpawnPosition].get_to(settings.spawnPosition);
-    if (j.contains(kJSONKeyInitialVelocity)) j[kJSONKeyInitialVelocity].get_to(settings.initialVelocity);
+    if (j.contains(kJSONKeyInitialVelocity))
+    {
+        j[kJSONKeyInitialVelocity].get_to(settings.initialVelocityDirection);
+        settings.initialVelocityStrength = math::length(settings.initialVelocityDirection);
+        settings.initialVelocityDirection =
+            settings.initialVelocityStrength > 0.f ? settings.initialVelocityDirection / settings.initialVelocityStrength : float3(0, 1, 0);
+    }
     if (j.contains(kJSONKeyRandomVelocity)) j[kJSONKeyRandomVelocity].get_to(settings.velocityRandom);
     if (j.contains(kJSONKeyGravity)) j[kJSONKeyGravity].get_to(settings.gravity);
     if (j.contains(kJSONKeyGravityRandom)) j[kJSONKeyGravityRandom].get_to(settings.gravityRandom);
     if (j.contains(kJSONKeySpawnRadius)) j[kJSONKeySpawnRadius].get_to(settings.spawnRadius);
     if (j.contains(kJSONKeySpreadAngle))j[kJSONKeySpreadAngle].get_to(settings.spreadAngle);
+    if (j.contains(kJSONKeyWind)) {
+        j[kJSONKeyWind].get_to(settings.windDirection);
+        settings.windStrength = math::length(settings.windDirection);
+        settings.windDirection =
+            settings.windStrength > 0.f ? settings.windDirection / settings.windStrength : float3(0, 1, 0);
+    }
  }
 
  void to_json(json& j, const ParticlePass::ParticleSettings& settings)
@@ -95,12 +108,13 @@ void from_json(const json& j, ParticlePass::ParticleSettings& settings) {
     j[kJSONKeyRadius] = settings.radius;
     j[kJSONKeyRandomRadius] = settings.randomRadiusOffset;
     j[kJSONKeySpawnPosition] = settings.spawnPosition;
-    j[kJSONKeyInitialVelocity] = settings.initialVelocity;
+    j[kJSONKeyInitialVelocity] = settings.initialVelocityDirection * settings.initialVelocityStrength;
     j[kJSONKeyRandomVelocity] = settings.velocityRandom;
     j[kJSONKeyGravity] = settings.gravity;
     j[kJSONKeyGravityRandom] = settings.gravityRandom;
     j[kJSONKeySpawnRadius] = settings.spawnRadius;
     j[kJSONKeySpreadAngle] = settings.spreadAngle;
+    j[kJSONKeyWind] = settings.windDirection * settings.windStrength;
  }
 
 ParticlePass::ParticlePass(ref<Device> pDevice, const Properties& props)
@@ -187,7 +201,7 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
         std::vector<ParticleAnimateData> initialData = getInitialData();
         mpParticleAnimateDataBuffer->setBlob(initialData.data(), 0, mTotalBufferSize * sizeof(ParticleAnimateData));
         pRenderContext->flush(true); //Ensures that the data is uploaded
-        mReset = true;
+        mReset = !mEnableSimulateOnStartup; //Normal reset is not needed with simulation
         mReinitializeBuffer = false;
         mUseSimulation = mEnableSimulateOnStartup;
     }
@@ -265,7 +279,7 @@ void ParticlePass::dispatchParticlePass(RenderContext* pRenderContext, float del
 
         var["CB"]["gDeltaT"] = deltaT;
         var["CB"]["gInitialPosition"] = pSett.spawnPosition;
-        var["CB"]["gInitialVelocity"] = pSett.initialVelocity;
+        var["CB"]["gInitialVelocity"] = pSett.initialVelocityDirection * pSett.initialVelocityStrength;
         var["CB"]["gVelocityRandom"] = pSett.velocityRandom;
         var["CB"]["gMaxLifetime"] = pSett.lifetime;
         var["CB"]["gRandomLifetime"] = pSett.randomLifetime;
@@ -273,6 +287,7 @@ void ParticlePass::dispatchParticlePass(RenderContext* pRenderContext, float del
         var["CB"]["gGravityRandom"] = pSett.gravityRandom;
         var["CB"]["gSpawnRadius"] = pSett.spawnRadius;
         var["CB"]["gSpreadAngle"] = pSett.spreadAngle;
+        var["CB"]["gWind"] = pSett.windDirection * pSett.windStrength;
 
         mpUpdateParticlePointsPass->execute(pRenderContext, uint3(ps.numberParticles, 1, 1));
     }
@@ -327,7 +342,9 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             group.tooltip("Random Offset for the lifetime. Lifetime + [-rnd, rnd]");
             group.var(labelText("SpawnPosition", i).c_str(), pSett.spawnPosition);
             group.tooltip("Position where a active particle spawns. A particles spawns if their current lifetime exeeds the Lifetime");
-            group.var(labelText("InitialVelocity", i).c_str(), pSett.initialVelocity);
+            if(group.var(labelText("InitialVelocityDirection", i).c_str(), pSett.initialVelocityDirection))
+                pSett.initialVelocityDirection = math::normalize(pSett.initialVelocityDirection);
+            group.var(labelText("InitialVelocityStrength", i).c_str(), pSett.initialVelocityStrength, 0.f);
             group.var(labelText("VelocityRandomOffset", i).c_str(), pSett.velocityRandom, 0.f, FLT_MAX, 0.001f);
             group.tooltip("Random Factor for Velocity applied when spawning the particle. Random Velocity between Velocity*[-Offset, Offset] is added to the initial velocity. Set to 0 to disable");
             group.var(labelText("Gravity", i).c_str(), pSett.gravity);
@@ -335,6 +352,9 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             group.tooltip("Absolute Random offset applied to gravity. Gravity + [-random,random]"); //TODO change to mass?
             group.var(labelText("SpawnRadius", i).c_str(), pSett.spawnRadius, 0.f);
             group.var(labelText("SpreadAngle", i).c_str(), pSett.spreadAngle, 0.f, static_cast<float>(M_PI) * 2.f, 0.001f);
+            if (group.var(labelText("Wind Direction", i).c_str(), pSett.windDirection))
+                pSett.windDirection = math::normalize(pSett.windDirection);
+            group.var(labelText("Wind Stength", i).c_str(), pSett.windStrength, 0.f, FLT_MAX, 0.001f);
         }
     }
     widget.separator();

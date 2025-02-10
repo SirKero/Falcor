@@ -21,11 +21,13 @@ cbuffer CB
     float gVelocityRandom;
 
     float gMaxLifetime;
+    float3 gWind;               //Wind
+        
     float gGravity;
     float gGravityRandom;
     float gSpawnRadius;
-
     float gSpreadAngle;
+
     float gRadiusOffset; // Random Radius offset
     float gRandomLifetime;  //Random Lifetime offset
 }
@@ -89,6 +91,8 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
     // Respawn particle
     if (gReset || !particleData.isValid) {
         particlePoint.position = gRestPosition;
+        particleData.velocity = float3(0);
+        particleData.isValid = false;
     }
 
     //Spawn new particle
@@ -115,6 +119,8 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
             }
         } else {
             particlePoint.position = gRestPosition;
+            particleData.velocity = float3(0);
+            particleData.isValid = false;
         } 
     }
 
@@ -126,6 +132,7 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
 
         particlePoint.position += particleData.velocity * gDeltaT;
         particleData.velocity.y -= (gGravity + gravRnd) * gDeltaT;
+        particleData.velocity += gWind * gDeltaT;
     }
    
 
