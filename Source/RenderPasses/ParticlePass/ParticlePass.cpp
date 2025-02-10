@@ -30,6 +30,7 @@
 #include "RenderGraph/RenderPassStandardFlags.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
+#include <random>
 
 using json = nlohmann::json;
 
@@ -224,7 +225,7 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
     auto& renderDict = renderData.getDictionary();
     auto pGlobalClock = static_cast<Clock*>(renderDict[kRenderGlobalClock]);
     double currentTime = pGlobalClock->getTime();
-    float deltaT = static_cast<float>(math::min(math::max(currentTime - lastFrameTime, 0.0), 1.0)); //Cap deltaT at one second
+    float deltaT = static_cast<float>(math::min(math::max(currentTime - lastFrameTime, 0.0001), 0.3)); //Cap deltaT at 300ms
     lastFrameTime = currentTime;
 
     //Get Simulated deltaT instead
@@ -233,8 +234,8 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
         //Get max lifetime of all particle systems
         float maxLifetime = 0;
         for (const auto& pSett : mParticleSettings)
-            maxLifetime = math::max(maxLifetime, pSett.lifetime);
-        deltaT = maxLifetime / float(mSimulationSteps);
+            maxLifetime = math::max(maxLifetime, pSett.lifetime + pSett.randomLifetime);
+        deltaT = (maxLifetime * 1.1f) / float(mSimulationSteps);
     }
 
     //Dispatch either once of multiple times
@@ -492,21 +493,23 @@ std::vector<ParticleAnimateData> ParticlePass::getInitialData(int index)
     uint i = index >= 0 ? index : 0;
     uint size = index >= 0 ? index + 1 : particleSystems.size();
 
+    //Init random number generator
+    std::random_device rd;
+    std::mt19937 mt(rd());
+    std::uniform_real_distribution<double> dist(-1.0, std::nextafter(1.0,DBL_MAX)); //Random Value in [-1,1]
+
     for (i; i < size; i++)
     {
         auto& ps = particleSystems[i];
         auto& pSett = mParticleSettings[i];
-        float lifePerParticle = pSett.lifetime / ps.numberParticles;
-        float lastLifeTime = 0;
+        float combinedLifetime = pSett.lifetime + pSett.randomLifetime;
         for (uint j = 0; j < ps.numberParticles; j++)
         {
             ParticleAnimateData data{};
-            data.lifetime = lastLifeTime;
+            data.lifetime = combinedLifetime * static_cast<float>(dist(mt));
             data.velocity = float3(0);
             data.isValid = false;
             initialData[j + offset] = data;
-
-            lastLifeTime += lifePerParticle;
         }
         offset += ps.numberParticles;
     }
