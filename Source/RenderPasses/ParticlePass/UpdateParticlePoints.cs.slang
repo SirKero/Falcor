@@ -81,9 +81,9 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
     if (prtIdx > gNumParticles)
         return;
 
-    SampleGenerator sg = SampleGenerator(uint2(prtIdx,0), gFrameCount); //TODO add seed in pixel.y ?
-    ParticlePointDesc particlePoint = gParticlePointDesc[prtIdx];
-    ParticleAnimateData particleData = gParticleAnimateData[prtIdx];
+    SampleGenerator sg = SampleGenerator(uint2(prtIdx, 0), gFrameCount); // TODO add seed in pixel.y ?
+    ParticlePointDesc particlePoint = gParticlePointDesc[gParticleBufferOffset + prtIdx];
+    ParticleAnimateData particleData = gParticleAnimateData[gParticleBufferOffset + prtIdx];
 
     // Add delta time to lifetime
     particleData.lifetime -= gDeltaT;
@@ -134,8 +134,7 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
         particleData.velocity.y -= (gGravity + gravRnd) * gDeltaT;
         particleData.velocity += gWind * gDeltaT;
     }
-   
 
-    gParticlePointDesc[prtIdx] = particlePoint;
-    gParticleAnimateData[prtIdx] = particleData;
+    gParticlePointDesc[gParticleBufferOffset + prtIdx] = particlePoint;
+    gParticleAnimateData[gParticleBufferOffset +prtIdx] = particleData;
 }
