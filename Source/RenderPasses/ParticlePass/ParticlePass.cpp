@@ -225,7 +225,7 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
     auto& renderDict = renderData.getDictionary();
     auto pGlobalClock = static_cast<Clock*>(renderDict[kRenderGlobalClock]);
     double currentTime = pGlobalClock->getTime();
-    float deltaT = static_cast<float>(math::min(math::max(currentTime - lastFrameTime, 0.0001), 0.3)); //Cap deltaT at 300ms
+    float deltaT = static_cast<float>(math::min(currentTime - lastFrameTime, 0.3)); //Cap deltaT at 300ms
     lastFrameTime = currentTime;
 
     //Get Simulated deltaT instead
