@@ -4,7 +4,10 @@ cbuffer CB
 {
     uint gIndexOffset;      //Offset particle buffer
     uint gNumParticles;     //Number of particles (dispatch size)
-    uint4 gVBOffsets;       //Offsets for the vertex buffer
+    bool gCopyPrev;         //Should copy prev?
+    uint _pad;
+    uint4 gVBOffsets;       // Offsets for the vertex buffer
+    uint4 gPrevVBOffset;    //Offset in the prev vertex buffer
 }
 
 cbuffer ConstantCameraBuffer
@@ -15,7 +18,7 @@ cbuffer ConstantCameraBuffer
 
 StructuredBuffer<ParticlePointDesc> gParticlePoints;
 RWStructuredBuffer<PackedStaticVertexData> gVertexBuffer;
-//TODO Previous Vertices for motion vectors?
+RWStructuredBuffer<PrevVertexData> gPrevVertexBuffer;
 
 [numthreads(64, 1, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -28,6 +31,19 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     //Get Particle
     ParticlePointDesc prt = gParticlePoints[gIndexOffset + particleIdx];
+
+    if(gCopyPrev){
+        [unroll]
+        for(uint pIdx = 0; pIdx < 4; pIdx++){
+            uint vertexID = gVBOffsets[pIdx] + particleIdx * 4;
+            uint prevVertexID = gPrevVBOffset[pIdx] + particleIdx * 4;
+            [unroll]
+            for(uint i=0; i<4; i++){
+                StaticVertexData prevVert = gVertexBuffer[vertexID + i].unpack();
+                gPrevVertexBuffer[prevVertexID].position = prevVert.position;
+            }
+        }
+    }
 
     //Verts
     StaticVertexData verts[4];
@@ -46,13 +62,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     verts[2].curveRadius = 0.0;
     verts[3].curveRadius = 0.0;
 
-    //Camera plane (0) TODO
-    /*
-    verts[0].position = prt.position + float3(-prt.radius, prt.radius,0);
-    verts[1].position = prt.position + float3(prt.radius, prt.radius,0);
-    verts[2].position = prt.position + float3(prt.radius, -prt.radius,0);
-    verts[3].position = prt.position + float3(-prt.radius, -prt.radius,0);
-    */
+    //Camera plane (0)
     float3 offsetRight = (gCamU * prt.radius);
     float3 offetTop = (gCamV * prt.radius);
     verts[0].position = prt.position - offsetRight + offetTop;

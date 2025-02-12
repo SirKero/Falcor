@@ -738,8 +738,10 @@ namespace Falcor
             // spec.skeletonNodeID = {NodeID::Invalid()}; //Not used
 
             // Set properties
+            spec.isStatic = false;
             spec.isOpaque = false;                    // Particles are usually not opaque
             spec.use16BitIndices = false;             // TODO could make sense to switch to 16 bits as the full 32 are probably never needed
+            spec.isAnimated = true;                   //Enable animation for motion vectors
 
             spec.particleOrentation = (Scene::ParticleOrientationMode)(i + 1u);
         }
@@ -1465,6 +1467,16 @@ namespace Falcor
             if (cache.tessellationMode != CurveTessellationMode::LinearSweptSphere)
             {
                 auto& mesh = mMeshes[cache.geometryID.get()];
+                FALCOR_ASSERT(!mesh.isDynamic());
+                mesh.isAnimated = true;
+                mesh.prevVertexCount = mesh.staticVertexCount;
+            }
+        }
+        for (auto& ps : mSceneData.particleSystems)
+        {
+            for (uint i = 0; i < ps.meshIDs.size(); i++)
+            {
+                auto& mesh = mMeshes[ps.meshIDs[i].get()];
                 FALCOR_ASSERT(!mesh.isDynamic());
                 mesh.isAnimated = true;
                 mesh.prevVertexCount = mesh.staticVertexCount;
@@ -2639,6 +2651,15 @@ namespace Falcor
             if (cache.tessellationMode != CurveTessellationMode::LinearSweptSphere)
             {
                 auto& mesh = mMeshes[cache.geometryID.get()];
+                mesh.prevVertexOffset = prevOffset;
+                prevOffset += mesh.prevVertexCount;
+            }
+        }
+        for (auto& ps : mSceneData.particleSystems)
+        {
+            for (uint i = 0; i < ps.meshIDs.size(); i++)
+            {
+                auto& mesh = mMeshes[ps.meshIDs[i].get()];
                 mesh.prevVertexOffset = prevOffset;
                 prevOffset += mesh.prevVertexCount;
             }

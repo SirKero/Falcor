@@ -1516,9 +1516,12 @@ namespace Falcor
 
         //Bind buffer valid for all pass execution
         auto var = mpUpdateParticlesPass->getRootVar();
+        
 
         var["gParticlePoints"] = mpParticlePointBuffer;
         var["gVertexBuffer"] = mpMeshVao->getVertexBuffer(kStaticDataBufferIndex);
+        var["gPrevVertexBuffer"] = mpAnimationController->getPrevVertexData();
+        bool validAnimationData = mpAnimationController->getPrevVertexData() != nullptr;
         //var["gIndexBuffer"] =  mpMeshVao->getIndexBuffer();
 
         // Get Camera Data and upload to constant buffer
@@ -1534,15 +1537,19 @@ namespace Falcor
         {
             //Get Mesh information
             uint4 vbOffsets;
+            uint4 prevVBOffset;
             for (uint i = 0; i < 4; i++)
             {
                 auto& mesh = getMesh(ps.meshIDs[i]);
                 vbOffsets[i] = mesh.vbOffset;
+                prevVBOffset[i] = mesh.prevVbOffset;
             }
                 
             var["CB"]["gIndexOffset"] = indexOffset;
             var["CB"]["gNumParticles"] = ps.numberParticles;
-            var["CB"]["gVBOffsets"] = vbOffsets; 
+            var["CB"]["gCopyPrev"] = validAnimationData;
+            var["CB"]["gVBOffsets"] = vbOffsets;
+            var["CB"]["gPrevVBOffset"] = prevVBOffset;
 
             mpUpdateParticlesPass->execute(pRenderContext, float3(ps.numberParticles, 1, 1));
             indexOffset += ps.numberParticles;
