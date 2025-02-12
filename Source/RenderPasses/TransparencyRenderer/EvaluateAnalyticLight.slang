@@ -135,7 +135,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float3 traceShadowRay(float3 origin, float3 dir, float distance)
+float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -146,7 +146,8 @@ float3 traceShadowRay(float3 origin, float3 dir, float distance)
     float3 visibility = 1.0;
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    rayQuery.TraceRayInline(gScene.rtAccel, 0, kShadowRayInstanceMask, ray);
+    const uint instanceMask = getBestParticleShadowPlane(lightDir);
+    rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
         if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
@@ -213,7 +214,7 @@ float3 traceShadowRay(float3 origin, float3 dir, float distance)
     \param[inout] Sample Generator
     \return Visbility that is either 0 or 1
 */
-float3 traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout SampleGenerator sg)
+float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -224,7 +225,8 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir, float distance, inout
     float3 visibility = 1.0; //Visible
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    rayQuery.TraceRayInline(gScene.rtAccel, 0, kShadowRayInstanceMask, ray);
+    const uint instanceMask = getBestParticleShadowPlane(lightDir);
+    rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
         if (rayQuery.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
@@ -359,9 +361,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (visibility.x < 0) && kEnableFallbackRay) {
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
             if(kUseStochasticRayTracing)
-                visibility = traceShadowRayStochastic(origin, ls.dir, ls.distance, sg);
+                visibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
             else
-                visibility = traceShadowRay(origin, ls.dir, ls.distance);
+                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
         }
 
         // Clamp shadow in [0,1]

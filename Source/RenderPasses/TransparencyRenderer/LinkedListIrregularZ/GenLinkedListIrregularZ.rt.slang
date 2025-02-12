@@ -42,7 +42,8 @@ cbuffer CB
 {
     uint gFrameCount; // Current frame count
     float3 gLightPos; // Current Light Position
-    bool gIsDirectional; //Is light a directional light (posW invalid)
+    bool gIsDirectional; // Is light a directional light (posW invalid)
+    float3 gLightDir;   //Light Direction
     float gFar;
     uint gLightIdx;     //LightIndex
     uint gMipCount;     // Number of mips
@@ -415,7 +416,7 @@ void rayGen()
         ray.TMin = 0;
         ray.TMax = length(toNear);
         ray.Origin = posWPixelNear.xyz;
-        ray.Direction = gLightPos; // World direction (stored in pos)
+        ray.Direction = gLightDir;
     } else {
         ray.TMin = length(toNear); // Always start at depth 0
         ray.TMax = distance(gLightPos, posWPixelFar.xyz); // Real far for the pixel
@@ -439,6 +440,7 @@ void rayGen()
     prevNode.next = 0;
     uint prevNodeIndex = idx1D;
     uint nodeIndex = prevNodeIndex;
+    const uint instanceMask = getBestParticleShadowPlane(gLightDir);
 
     // Loop to get all possible samples
     for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
@@ -447,7 +449,7 @@ void rayGen()
         rayData.sampleTransmittance = 0.0;
 
         //Trace ray
-        TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, kRayFlags, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0) {

@@ -503,8 +503,9 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         bool isDirectional = lights[i]->getType() == LightType::Directional;
 
         var["CB"]["gFrameCount"] = mFrameCount;
-        var["CB"]["gLightPos"] = isDirectional ? lights[i]->getData().dirW : mShadowMapMVP[i].pos;
+        var["CB"]["gLightPos"] = mShadowMapMVP[i].pos;
         var["CB"]["gIsDirectional"] = isDirectional;
+        var["CB"]["gLightDir"] = lights[i]->getData().dirW;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
         var["CB"]["gMipCount"] = mSampleDistribution[i]->getMipCount();

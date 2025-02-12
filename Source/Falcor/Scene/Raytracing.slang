@@ -28,13 +28,12 @@
 import Utils.Attributes;
 import Rendering.Materials.TexLODHelpers;
 __exported import Scene.Shading;
+__exported import Scene.RaytracingInstanceMaskHelper;
 
 cbuffer DxrPerFrame
 {
     uint rayTypeCount;
 };
-
-static const uint kShadowRayInstanceMask = 0x01;
 
 /** Convenience wrapper for TraceRay() that sets the Scene parameters internally.
     \param[in] rayFlags Ray flags. Set to RAY_FLAG_NONE if not used.
