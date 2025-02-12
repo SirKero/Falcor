@@ -514,6 +514,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
+    mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
+    mGenAccelShadowPip.pProgram->addDefine("OPAQUE_HIT_RAY_DEPTH_BIAS", std::to_string(mOpaqueHitRayDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
@@ -763,6 +765,12 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                 mGenAccelShadowPip.pVars.reset();
             group.tooltip("Number of Halton Samples");
         }
+
+        group.var("Midpoint Percentage", mMidpointPercentage, 0.f, 1.f, 0.001f);
+        group.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
+        group.var("OpaqueHitRayDepthBias", mOpaqueHitRayDepthBias, 1e-7f, FLT_MAX, 0.000001f, false, "%.7f");
+        group.tooltip("Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used");
+
 
         if (auto group2 = group.group("Stochastic Soft Shadows")) {
             group2.text("Info");
