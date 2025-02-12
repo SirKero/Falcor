@@ -54,6 +54,8 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     mpPointSampler = Sampler::create(mpDevice, samplerDesc);
     FALCOR_ASSERT(mpPointSampler);
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
+    FALCOR_ASSERT(mpSampleGenerator);
 }
 
 void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -522,7 +524,9 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
     mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
-
+    mGenAccelShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
+    
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
     mGenAccelShadowPip.pProgram->addDefine("USE_LOD", useLOD ? "1" : "0");
@@ -535,9 +539,10 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
     {
+        mGenAccelShadowPip.pProgram->addDefines(mpSampleGenerator->getDefines());
         mGenAccelShadowPip.pProgram->setTypeConformances(mpScene->getTypeConformances());
         mGenAccelShadowPip.pVars = RtProgramVars::create(mpDevice, mGenAccelShadowPip.pProgram, mGenAccelShadowPip.pBindingTable);
-        //mpSampleGenerator->setShaderData(mGenAccelShadowPip.pVars->getRootVar());
+        mpSampleGenerator->setShaderData(mGenAccelShadowPip.pVars->getRootVar());
     }
 
     FALCOR_ASSERT(mGenAccelShadowPip.pVars);
@@ -583,6 +588,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
         // Spawn the rays.
         mpScene->raytrace(pRenderContext, mGenAccelShadowPip.pProgram.get(), mGenAccelShadowPip.pVars, uint3(targetDim, 1));
+
+        mFrameCount++;
     }
 
     const uint numAABBs = mUseOneAABBForAllLights ? 1 : lights.size();
@@ -627,7 +634,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         aabbCount.push_back(numPoints);
     }
     mpShadowAccelerationStrucure->update(pRenderContext, aabbCount);
-    mFrameCount++;
 }
 
 DefineList AccelIrregularZ::getDefines()
@@ -757,6 +763,16 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                 mGenAccelShadowPip.pVars.reset();
             group.tooltip("Number of Halton Samples");
         }
+
+        if (auto group2 = group.group("Stochastic Soft Shadows")) {
+            group2.text("Info");
+            group2.tooltip("Creates soft shadows by randomly offset the starting position or direction");
+            group2.checkbox("Enable", mEnableRandomSoftShadows);
+            if (mEnableRandomSoftShadows)
+            {
+                group2.var("Position offset (Spot/Point)", mRandomSoftShadowsPositionRadius, 0.f, FLT_MAX, 0.001f, false, "%.6f");
+            }
+        } 
 
         //group.checkbox("Use PCF", mAccelUsePCF);
         group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");

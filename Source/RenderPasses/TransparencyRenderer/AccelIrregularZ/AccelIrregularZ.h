@@ -99,6 +99,10 @@ private:
     float mDynRCGuardPercentage = 0.9f; //10% buffer for possible changes
     float mDynRCChangePercentage = 0.6f; //How much of the optimal value should be taken
 
+    //Random Soft Shadows
+    bool mEnableRandomSoftShadows = false;          //Enables Random offset of start position for shadow maps
+    float mRandomSoftShadowsPositionRadius = 0.01f; //Random Radius for the start position
+
     // Accel shadow settings
     bool mUseOneAABBForAllLights = true;
     uint mAccelApproxNumElementsPerPixel = 4u;
@@ -133,6 +137,7 @@ private:
 
     ref<Sampler> mpPointSampler;
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
+    ref<SampleGenerator> mpSampleGenerator;
 
     std::vector<ref<Buffer>> mAccelShadowAABB;                                 // For Accel AABB points
     std::vector<ref<Buffer>> mAccelShadowCounter;                              // Counter for inserting points
