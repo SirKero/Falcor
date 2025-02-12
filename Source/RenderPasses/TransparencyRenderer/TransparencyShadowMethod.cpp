@@ -81,7 +81,7 @@ void TransparencyShadowMethod::updateSMMatrices(RenderContext* pRenderContext, b
         rebuildAll = true;
     }
 
-    // Update matrices
+    // Update view and projection matrices
     for (uint i = 0; i < lights.size(); i++)
     {
         auto changes = lights[i]->getChanges();
@@ -91,13 +91,20 @@ void TransparencyShadowMethod::updateSMMatrices(RenderContext* pRenderContext, b
         rebuild |= rebuildAll;
         if (rebuild)
         {
-            updateMVP(mShadowMapMVP[i], lights[i]);
+            updateViewProjection(mShadowMapMVP[i], lights[i]);
         }
     }
+
+    //Update Jitter
+    for (uint i = 0; i < lights.size(); i++)
+    {
+        updateMVPAndJitter(mShadowMapMVP[i]);
+    }
+
     mUpdateSMMatrices = false;
 }
 
-void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) {
+void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Light> pLight) {
     auto& lightData = pLight->getData();
     switch (pLight->getType())
     {
@@ -157,7 +164,7 @@ void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) 
         maxZ = std::max(maxZ, smViewAABB.maxPoint.z);
         minZ = std::min(minZ, smViewAABB.minPoint.z);
 
-        lightMVP.projection = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
+        lightMVP.projectionNoJitter = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
         lightMVP.spreadAngle = 1.0;
         break;
     }
@@ -168,7 +175,7 @@ void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) 
         float3 lightTarget = lightMVP.pos + lightData.dirW;
         const float3 up = abs(lightData.dirW.y) == 1 ? float3(0, 0, 1) : float3(0, 1, 0);
         lightMVP.view = math::matrixFromLookAt(lightData.posW, lightTarget, up);
-        lightMVP.projection = math::perspective(openingAngle * 2, 1.f, mNearFar.x, mNearFar.y);
+        lightMVP.projectionNoJitter = math::perspective(openingAngle * 2, 1.f, mNearFar.x, mNearFar.y);
         lightMVP.spreadAngle = std::atan(2.0f * std::tan(openingAngle * 0.5f) / mResolution.y);
         break;
     }
@@ -179,8 +186,13 @@ void TransparencyShadowMethod::updateMVP(LightMVP& lightMVP, ref<Light> pLight) 
         );
         break;
     }
+}
 
-    // Same for all valid lights
+void TransparencyShadowMethod::updateMVPAndJitter(LightMVP& lightMVP) {
+
+    float4x4 jitterMat = math::matrixFromTranslation(float3(2.0f * mJitter.x, 2.0f * mJitter.y, 0.0f));
+    lightMVP.projection = math::mul(jitterMat, lightMVP.projectionNoJitter);
+
     lightMVP.viewProjection = math::mul(lightMVP.projection, lightMVP.view);
     lightMVP.invViewProjection = math::inverse(lightMVP.viewProjection);
     lightMVP.invProjection = math::inverse(lightMVP.projection);

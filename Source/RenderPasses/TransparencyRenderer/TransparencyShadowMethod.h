@@ -76,6 +76,11 @@ public:
      */
     void setNearFar(const float2 nearFar);
 
+    /** Set Camera Jitter
+    */
+    void setJitter(float2 jitter) { mJitter = jitter; }
+
+
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
@@ -88,13 +93,16 @@ protected:
         float3 pos = float3(0);
         float spreadAngle = 0;
         float4x4 view = float4x4();
+        float4x4 projectionNoJitter = float4x4();
         float4x4 projection = float4x4();
         float4x4 viewProjection = float4x4();
         float4x4 invViewProjection = float4x4();
         float4x4 invProjection = float4x4();
         float4x4 invView = float4x4();
     };
-    virtual void updateMVP(LightMVP& lightMVP, ref<Light> pLight);
+    virtual void updateViewProjection(LightMVP& lightMVP, ref<Light> pLight);
+
+    virtual void updateMVPAndJitter(LightMVP& lightMVP);
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
@@ -109,6 +117,7 @@ protected:
     float2 mNearFar = float2(1.f, 60.f);    //Near and far for spot
     bool mResolutionChanged = false;         //True if the resolution changed
     bool mUseColoredTransparency = false;   //Enable colored transparency
+    float2 mJitter = float2(0, 0);          //Optional Light Camera Jitter
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
 

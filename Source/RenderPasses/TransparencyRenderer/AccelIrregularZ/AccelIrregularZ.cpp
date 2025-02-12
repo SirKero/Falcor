@@ -27,7 +27,9 @@
  **************************************************************************/
 #include "AccelIrregularZ.h"
 #include "Utils/Math/FalcorMath.h"
+#include "Utils/SampleGenerators/DxSamplePattern.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
+#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
 
 namespace
 {
@@ -80,6 +82,15 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mAccelShadowData.clear();
         mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
+
+    //Set Jitter and update Matricies
+    if (mpCPUSampleGenerator)
+    {
+        float2 jitter = mpCPUSampleGenerator->next();
+        jitter *= 1.0f / float2(mResolution);
+        setJitter(jitter);
+    }
+        
 
     updateSMMatrices(pRenderContext);
 
@@ -757,7 +768,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         //group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         //group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
 
-        group.dropdown("Subpixel Sample Pattern", mSamplePattern);
+        bool patternChanged = group.dropdown("Subpixel Sample Pattern", mSamplePattern);
         group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
         if (mSamplePattern == SMSamplePattern::Halton)
         {
@@ -765,6 +776,12 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                 mGenAccelShadowPip.pVars.reset();
             group.tooltip("Number of Halton Samples");
         }
+        else if (mSamplePattern != SMSamplePattern::Center)
+        {
+            patternChanged |= group.var("MatrixSamples", mNumCPUSampleGenSamples, 1u, 1024u, 1u);
+        }
+        if (patternChanged)
+            updateSamplePattern();
 
         group.var("Midpoint Percentage", mMidpointPercentage, 0.f, 1.f, 0.001f);
         group.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
@@ -915,3 +932,31 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
 
     pRenderContext->draw(mRasterShowAccelPass.pState.get(), mRasterShowAccelPass.pVars.get(), mAccelShadowMaxNumPoints, 0);
 }
+
+static ref<CPUSampleGenerator> createSamplePattern(AccelIrregularZ::SMSamplePattern type, uint32_t sampleCount)
+{
+    switch (type)
+    {
+    case AccelIrregularZ::SMSamplePattern::Center:
+    case AccelIrregularZ::SMSamplePattern::Halton:
+        return nullptr;
+    case AccelIrregularZ::SMSamplePattern::MatrixDirectX:
+        return DxSamplePattern::create(sampleCount);
+    case AccelIrregularZ::SMSamplePattern::MatrixHalton:
+        return HaltonSamplePattern::create(sampleCount);
+    case AccelIrregularZ::SMSamplePattern::MatrixStratified:
+        return StratifiedSamplePattern::create(sampleCount);
+    default:
+        FALCOR_UNREACHABLE();
+        return nullptr;
+    }
+}
+
+void AccelIrregularZ::updateSamplePattern() {
+    mpCPUSampleGenerator = createSamplePattern(mSamplePattern, mNumCPUSampleGenSamples);
+    if (mpCPUSampleGenerator)
+        mNumCPUSampleGenSamples = mpCPUSampleGenerator->getSampleCount();
+    else
+        setJitter(float2(0)); //reset jitter
+}
+
