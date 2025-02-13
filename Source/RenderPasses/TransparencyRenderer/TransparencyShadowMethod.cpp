@@ -70,7 +70,7 @@ bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
     return mResolutionChanged || mUpdateSMMatrices;
 }
 
-void TransparencyShadowMethod::updateSMMatrices(RenderContext* pRenderContext, bool rebuild)
+void TransparencyShadowMethod::updateSMMatrices(bool rebuild)
 {
     auto& lights = mpScene->getLights();
     // Check if resize is neccessary
@@ -193,6 +193,7 @@ void TransparencyShadowMethod::updateMVPAndJitter(LightMVP& lightMVP) {
     float4x4 jitterMat = math::matrixFromTranslation(float3(2.0f * mJitter.x, 2.0f * mJitter.y, 0.0f));
     lightMVP.projection = math::mul(jitterMat, lightMVP.projectionNoJitter);
 
+    lightMVP.viewProjectionNoJitter = math::mul(lightMVP.projectionNoJitter, lightMVP.view);
     lightMVP.viewProjection = math::mul(lightMVP.projection, lightMVP.view);
     lightMVP.invViewProjection = math::inverse(lightMVP.viewProjection);
     lightMVP.invProjection = math::inverse(lightMVP.projection);

@@ -85,7 +85,7 @@ protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
     //Function to update the Shadow Map Matrices
-    virtual void updateSMMatrices(RenderContext* pRenderContext, bool rebuild = false);
+    virtual void updateSMMatrices(bool rebuild = false);
 
     //Light MVP
     struct LightMVP
@@ -96,6 +96,7 @@ protected:
         float4x4 projectionNoJitter = float4x4();
         float4x4 projection = float4x4();
         float4x4 viewProjection = float4x4();
+        float4x4 viewProjectionNoJitter = float4x4();
         float4x4 invViewProjection = float4x4();
         float4x4 invProjection = float4x4();
         float4x4 invView = float4x4();

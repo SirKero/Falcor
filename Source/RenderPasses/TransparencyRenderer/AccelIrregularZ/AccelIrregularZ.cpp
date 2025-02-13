@@ -671,8 +671,8 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
-        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
-        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
+        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjectionNoJitter;
+        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjectionNoJitter;
         shadowVar["gAccessCounter"][i] = mAccessTextures[i];
     }
     const auto accelDataSize = mUseOneAABBForAllLights ? 1 : lights.size();
