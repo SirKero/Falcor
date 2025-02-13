@@ -34,9 +34,11 @@ RenderPassReflection NRDPassShadow::reflect(const CompileData& compileData)
 
     const uint2 sz = RenderPassHelpers::calculateIOSize(mOutputSizeSelection, mScreenSize, compileData.defaultTexDims);
 
-    reflector.addInput(kInputPenumbra, "Penumbra");
+    //Both inputs are assumed packed (#include "nrd/Shaders/Source/NRD.hlsli")
+    reflector.addInput(kInputPenumbra, "Penumbra"); //float SIGMA_FrontEnd_PackPenumbra( float distanceToOccluder, float tanOfLightAngularRadius ) or float SIGMA_FrontEnd_PackPenumbra( float distanceToOccluder, float distanceToLight, float lightSize )
+    reflector.addInput(kInputTranslucency, "Translucency").flags(RenderPassReflection::Field::Flags::Optional); //float4 SIGMA_FrontEnd_PackTranslucency( float distanceToOccluder, float3 translucency )
 
-    reflector.addOutput(kOutputFilteredShadow, "(Sigma)Filtered shadow").format(ResourceFormat::RGBA8Unorm).texture2D(sz.x, sz.y);
+    reflector.addOutput(kOutputFilteredShadow, "(Sigma)Filtered shadow").format(ResourceFormat::RGBA16Float).texture2D(sz.x, sz.y);
 
     reflectBase(sz, reflector);
 

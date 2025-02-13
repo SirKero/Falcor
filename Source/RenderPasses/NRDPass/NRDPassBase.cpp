@@ -45,6 +45,7 @@ extern "C" FALCOR_API_EXPORT void registerPlugin(PluginRegistry& registry)
 namespace
 {
     const char kShaderPackRadiance[] = "RenderPasses/NRDPass/PackRadiance.cs.slang";
+    const char kShaderPackSigma[] = "RenderPasses/NRDPass/PackSigma.cs.slang";
 
     // Serialized parameters.
     const char kEnabled[] = "enabled";
@@ -86,6 +87,11 @@ namespace
         {(uint)NRDPassBase::DenoisingMethod::ReblurOcclusionDiffuse, "OcclusionDiffuse"},
         {(uint)NRDPassBase::DenoisingMethod::ReblurOcclusionSpecular, "OcclusionSpecular"},
         {(uint)NRDPassBase::DenoisingMethod::ReblurOcclusionDiffuseSpecular, "OcclusionDiffuseSpecular"},
+    };
+
+    const Gui::DropdownList kDropdownSigma = {
+        {(uint)NRDPassBase::DenoisingMethod::Sigma, "Signa"},
+        {(uint)NRDPassBase::DenoisingMethod::SigmaTranslucency, "SigmaTranslucency"},
     };
 
 }
@@ -237,6 +243,13 @@ static bool isOcclusion(NRDPassBase::DenoisingMethod denoisingMethod)
     return check;
 }
 
+static bool isSigma(NRDPassBase::DenoisingMethod denoisingMethod) {
+    bool check = false;
+    check |= denoisingMethod == NRDPassBase::DenoisingMethod::Sigma;
+    check |= denoisingMethod == NRDPassBase::DenoisingMethod::SigmaTranslucency;
+    return check;
+}
+
 static bool denoiserIsDiffuse(NRDPassBase::DenoisingMethod denoisingMethod)
 {
     bool check = false;
@@ -286,7 +299,7 @@ void NRDPassBase::execute(RenderContext* pRenderContext, const RenderData& rende
             if (denoiserIsSpecular(mDenoisingMethod))
                 pRenderContext->blit(renderData.getTexture(kInputSpecularRadianceHitDist)->getSRV(), renderData.getTexture(kOutputFilteredSpecularRadianceHitDist)->getRTV());
         }
-        if (mDenoisingMethod == DenoisingMethod::Sigma)
+        if (isSigma(mDenoisingMethod))
         {
             pRenderContext->clearTexture(renderData.getTexture(kOutputFilteredShadow).get(), float4(1, 1, 1, 1));
         }
@@ -356,6 +369,8 @@ void NRDPassBase::renderUI(Gui::Widgets& widget)
         mRecreateDenoiser = widget.dropdown("Denoising method", kDropdownNormal, (uint&)mDenoisingMethod);
     else if (isOcclusion(mDenoisingMethod))
         mRecreateDenoiser = widget.dropdown("Denoising method (ReBLUR)", kDropdownOcclusion, (uint&)mDenoisingMethod);
+    else if (isSigma(mDenoisingMethod))
+        mRecreateDenoiser = widget.dropdown("Denoising method", kDropdownSigma, (uint&)mDenoisingMethod);
 
     if (isRelax(mDenoisingMethod))
     {
@@ -532,7 +547,7 @@ void NRDPassBase::renderUI(Gui::Widgets& widget)
             group.checkbox("Use Prepass Only For Specular Motion Estimation", mReblurSettings.usePrepassOnlyForSpecularMotionEstimation);
         }
     }
-    else if (mDenoisingMethod == DenoisingMethod::Sigma)
+    else if (isSigma(mDenoisingMethod))
     {
         if (auto group = widget.group("Sigma Shadow"))
         {
@@ -639,6 +654,8 @@ static nrd::Denoiser getNrdDenoiser(NRDPassBase::DenoisingMethod denoisingMethod
         return nrd::Denoiser::REBLUR_SPECULAR;
     case NRDPassBase::DenoisingMethod::Sigma:
         return nrd::Denoiser::SIGMA_SHADOW;
+    case NRDPassBase::DenoisingMethod::SigmaTranslucency:
+        return nrd::Denoiser::SIGMA_SHADOW_TRANSLUCENCY;
     case NRDPassBase::DenoisingMethod::ReblurOcclusionDiffuse:
         return nrd::Denoiser::REBLUR_DIFFUSE_OCCLUSION;
     case NRDPassBase::DenoisingMethod::ReblurOcclusionSpecular:
@@ -862,7 +879,7 @@ void NRDPassBase::createResources()
 
 void NRDPassBase::packRadiancePass(RenderContext* pRenderContext, const RenderData& renderData) {
     //Init the pack Radiance pass
-    if (!mpPackRadiancePass && (mDenoisingMethod != DenoisingMethod::Sigma))
+    if (!mpPackRadiancePass && !isSigma(mDenoisingMethod))
     {
         //Get Method; 0=Relax, 1 = Reblur, 2= Occlusion
         uint nrdMethod = isRelax(mDenoisingMethod) ? 0 : isReblur(mDenoisingMethod) ? 1 : 2;
@@ -925,9 +942,9 @@ void NRDPassBase::packRadiancePass(RenderContext* pRenderContext, const RenderDa
 
         nrd::SetDenoiserSettings(*mpInstance, nrd::Identifier(getNrdDenoiser(mDenoisingMethod)), static_cast<void*>(&mReblurSettings));
     }
-    else if (mDenoisingMethod == DenoisingMethod::Sigma)
+    else if (isSigma(mDenoisingMethod))
     {
-        nrd::SetDenoiserSettings(*mpInstance, nrd::Identifier(nrd::Denoiser::SIGMA_SHADOW), static_cast<void*>(&mSigmaSettings));
+        nrd::SetDenoiserSettings(*mpInstance, nrd::Identifier(getNrdDenoiser(mDenoisingMethod)), static_cast<void*>(&mSigmaSettings));
     }
     else
     {
@@ -1083,6 +1100,9 @@ void NRDPassBase::dispatch(RenderContext* pRenderContext, const RenderData& rend
                 break;
             case nrd::ResourceType::IN_PENUMBRA:
                 texture = renderData.getTexture(kInputPenumbra);
+                break;
+            case nrd::ResourceType::IN_TRANSLUCENCY:
+                texture = renderData.getTexture(kInputTranslucency);
                 break;
             case nrd::ResourceType::OUT_SHADOW_TRANSLUCENCY:
                 texture = renderData.getTexture(kOutputFilteredShadow);

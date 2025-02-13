@@ -52,6 +52,7 @@ public:
         ReblurDiffuse,
         ReblurSpecular,
         Sigma,
+        SigmaTranslucency,
         ReblurOcclusionDiffuse,
         ReblurOcclusionSpecular,
         ReblurOcclusionDiffuseSpecular,
@@ -65,6 +66,7 @@ public:
         {DenoisingMethod::ReblurDiffuse, "ReblurDiffuse"},
         {DenoisingMethod::ReblurSpecular, "ReblurSpecular"},
         {DenoisingMethod::Sigma, "Sigma"},
+        {DenoisingMethod::SigmaTranslucency, "SigmaTranslucency"},
         {DenoisingMethod::ReblurOcclusionDiffuse, "ReblurOcclusionDiffuse"},
         {DenoisingMethod::ReblurOcclusionSpecular, "ReblurOcclusionSpecular"},
         {DenoisingMethod::ReblurOcclusionDiffuseSpecular, "ReblurOcclusionDiffuseSpecular"},
@@ -97,7 +99,8 @@ protected:
     //  Input buffer names.
     static constexpr const char* kInputDiffuseRadianceHitDist = "diffuseRadianceHitDist";
     static constexpr const char* kInputSpecularRadianceHitDist = "specularRadianceHitDist";
-    static constexpr const char* kInputPenumbra = "penumbra";
+    static constexpr const char* kInputPenumbra = "penumbra";           //Assumed already packed
+    static constexpr const char* kInputTranslucency = "translucency";   //Assumed already packed
     static constexpr const char* kInputDiffuseHitDist = "diffuseHitDist";
     static constexpr const char* kInputSpecularHitDist = "specularHitDist";
     static constexpr const char* kInputMotionVectors = "mvec";
@@ -169,7 +172,7 @@ protected:
     float4x4 mPrevProjMatrix;
     float2 mPrevCameraJitter;
 
-    // Additional classic Falcor compute pass and resources for packing radiance and hitT for NRD.
+    // Additional classic Falcor compute pass and resources for packing radiance and hitT for NRD and Sigma Resources for both sigma passes.
     ref<ComputePass> mpPackRadiancePass;
 };
 
