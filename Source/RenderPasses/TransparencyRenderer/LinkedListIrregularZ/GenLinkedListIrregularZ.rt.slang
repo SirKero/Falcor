@@ -1,12 +1,13 @@
+#include "../RayLodHelper.slang"
 #include "LinkedListIrregularZData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
-#include "../RayLodHelper.slang"
 
 import Scene.Raytracing;
 import Scene.Intersection;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
+import Utils.Sampling.SampleGenerator;
 
 #ifndef MAX_ELEMENTS
 #define MAX_ELEMENTS 256
@@ -73,6 +74,9 @@ static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const float kMergeDistance = ACCEL_MERGE_BOX_DIST;
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
+static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
+static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
+// static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; //TODO For Directional lights
 
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
@@ -404,6 +408,15 @@ void rayGen()
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
     relFramePos.y *= -1.f;
 
+    float3 lightPos = gLightPos;
+    // Random offset for position
+    if (kUseRandomSoftShadows) {
+        SampleGenerator sg = SampleGenerator(DispatchRaysIndex().xy, gFrameCount);
+        float3 rndPosOffset = sampleNext3D(sg);
+        rndPosOffset = 2.0 * rndPosOffset - 1.0; // From [0,1] to [-1,1]
+        lightPos += rndPosOffset * kRandomSoftShadowsPosRadius;
+    }
+
     float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos, 0.f, 1.f));
     float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.f, 1.f));
 
@@ -413,7 +426,7 @@ void rayGen()
     if (gIsDirectional) {
         toNear = posWPixelFar.xyz - posWPixelNear.xyz;
     } else {
-        toNear = posWPixelNear.xyz - gLightPos;
+        toNear = posWPixelNear.xyz - lightPos;
     }
    
     //Prepare ray
@@ -424,9 +437,9 @@ void rayGen()
         ray.Origin = posWPixelNear.xyz;
         ray.Direction = gLightDir;
     } else {
-        ray.TMin = length(toNear); // Always start at depth 0
-        ray.TMax = distance(gLightPos, posWPixelFar.xyz); // Real far for the pixel
-        ray.Origin = gLightPos;
+        ray.TMin = length(toNear);                       // Always start at depth 0
+        ray.TMax = distance(lightPos, posWPixelFar.xyz); // Real far for the pixel
+        ray.Origin = lightPos;
         ray.Direction = normalize(toNear); // World direction
     }
     
