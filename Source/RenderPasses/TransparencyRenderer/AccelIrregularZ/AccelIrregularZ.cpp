@@ -92,7 +92,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
         
 
-    updateSMMatrices(pRenderContext);
+    updateSMMatrices();
 
     // Create AVSM trace program
     if (!mGenAccelShadowPip.pProgram)

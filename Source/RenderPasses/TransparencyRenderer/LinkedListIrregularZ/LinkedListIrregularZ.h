@@ -58,15 +58,23 @@ public:
 
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 
-     enum class SMSamplePattern : uint
+    enum class SMSamplePattern : uint
     {
         Center = 0,
         Halton = 1,
+        MatrixDirectX = 2,
+        MatrixHalton = 3,
+        MatrixStratified = 4,
     };
 
-    FALCOR_ENUM_INFO(SMSamplePattern,{
+    FALCOR_ENUM_INFO(
+        SMSamplePattern,
+        {
             {SMSamplePattern::Center, "Center"},
             {SMSamplePattern::Halton, "Halton"},
+            {SMSamplePattern::MatrixDirectX, "MatrixDirectX"},
+            {SMSamplePattern::MatrixHalton, "MatrixHalton"},
+            {SMSamplePattern::MatrixStratified, "MatrixStratified"},
         }
     );
 
@@ -76,6 +84,8 @@ private:
 
     // Funktion that generates the profiler passes in case they are not executed this frame
     void dummyProfileGeneration(RenderContext* pRenderContext);
+
+    void updateSamplePattern();
 
     //Runtime
     uint mFrameCount = 0;
@@ -87,6 +97,8 @@ private:
     uint mStagingCount = 0;
 
     //Sample Gen (+Jitter)
+    ref<CPUSampleGenerator> mpCPUSampleGenerator; ///< Sample generator for uniform camera jitter.
+    uint mNumCPUSampleGenSamples = 16;            // For CPU sample gen
     std::vector<uint> mHaltonSampleCount;
     uint mNumHaltonSamples = 64; //Number of halton samples
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern

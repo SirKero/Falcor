@@ -144,7 +144,7 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
     }
 
     //Update Matrices
-    updateSMMatrices(pRenderContext);
+    updateSMMatrices();
 }
 
 void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData& renderData)

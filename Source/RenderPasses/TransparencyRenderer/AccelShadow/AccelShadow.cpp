@@ -60,7 +60,7 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
         mRebuildAccelDataBuffer = false;
     }
 
-    updateSMMatrices(pRenderContext);
+    updateSMMatrices();
 
     // Create AVSM trace program
     if (!mGenAccelShadowPip.pProgram)
