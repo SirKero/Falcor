@@ -465,6 +465,8 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
     // Defines
     mGenLinkedListShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel));
+    mGenLinkedListShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
+    mGenLinkedListShadowPip.pProgram->addDefine("OPAQUE_HIT_RAY_DEPTH_BIAS", std::to_string(mOpaqueHitRayDepthBias));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
@@ -675,7 +677,11 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
             group.tooltip("Number of Halton Samples");
         }
 
-        //group.checkbox("Use PCF", mAccelUsePCF);
+        group.var("Midpoint Percentage", mMidpointPercentage, 0.f, 1.f, 0.001f);
+        group.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
+        group.var("OpaqueHitRayDepthBias", mOpaqueHitRayDepthBias, 1e-7f, FLT_MAX, 0.000001f, false, "%.7f");
+        group.tooltip("Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used");
+
         group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");
         group.tooltip(
             "Merges Accel Boxes together and takes the transparency of the first box. Can add bias (brightening). \n Set to 0 to disable."

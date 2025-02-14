@@ -100,7 +100,9 @@ private:
     float mDynRCGuardPercentage = 0.9f;  // 10% buffer for possible changes
     float mDynRCChangePercentage = 0.6f; //How much of the optimal value should be taken
 
-    // Accel shadow settings
+    //Shadow settings
+    float mMidpointPercentage = 0.9f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
+    float mOpaqueHitRayDepthBias = 0.05f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
     uint mApproxNumElementsPerPixel = 4u;
     std::vector<uint> mUIElementCounter;
     std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync

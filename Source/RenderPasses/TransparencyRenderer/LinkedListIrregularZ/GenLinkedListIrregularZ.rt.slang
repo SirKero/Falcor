@@ -62,6 +62,8 @@ Buffer<float2> gHaltonSamples;
 
 SamplerState gPointSampler;
 
+static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
+static const float kOpaqueHitRayDepthBias = OPAQUE_HIT_RAY_DEPTH_BIAS; // Depth bias applied to tmin to search for the next opaque hit (for midpoint sm)
 static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;
 static const float kMinOpacity = 1e-7;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
@@ -364,7 +366,10 @@ void rayGen()
         index = idx1D % choosenSampleCount;
         mipMulFactor = 1 << selectedMipLevel; // Multiplier for Mip level
     }
-    
+
+    if (sampleCount <= 0)
+        return;
+
     uint samplesSq = uint(sqrt(sampleCount)); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
     const float subpixelSize = 1.0 / samplesSq;
     float2 subpixelLoc = float2(subpixelIndex % samplesSq, subpixelIndex / samplesSq);
@@ -387,7 +392,8 @@ void rayGen()
     pixelOffset *= mipMulFactor;
     boxPixelOffset *= mipMulFactor;
     pixelCenterOffest *= mipMulFactor;
-    
+
+    const float pixelScale = mipMulFactor * subpixelSize;
     //
     // Dispatch Sample / Create Shadow Map
     //
@@ -468,7 +474,7 @@ void rayGen()
         if (rayData.dist > 0) {
             if (!mergeLastBox)
                 boxZ.y = boxZ.x;
-            boxZ.x = lastHitDepth + (distDiff) / 2;           
+            boxZ.x = lastHitDepth + distDiff * kMidpointPercentage;
         }
 
         // Write output data
@@ -483,7 +489,8 @@ void rayGen()
 
         // Update for next iteration
         if (rayData.dist > 0) {
-            ray.TMin = rayData.dist + 1e-7;
+            // A bit of a dirty fix for particles that overlap with solid geometry
+            ray.TMin = all(rayData.currentTransmittance <= kMinOpacity) ? rayData.dist + kOpaqueHitRayDepthBias * pixelScale : rayData.dist + 1e-7;
             lastHitDepth = rayData.depth;
             if(!mergeBox)
                 prevTransmittance = currTranmittance;
@@ -510,7 +517,7 @@ void rayGen()
 
     // Update box
     boxZ.y = boxZ.x;
-    boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
+    boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) * kMidpointPercentage;
 
     bool storeLastBox = (any(currTranmittance < 1.0) && rayData.dist >= 0);
     storeLastBox |= (prevNodeIndex == idx1D) && all(prevTransmittance >= 1.0); //Guarantees that the head buffer is set
