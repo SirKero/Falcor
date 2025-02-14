@@ -517,8 +517,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
     }
 
-    //Clear AABBs
-    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
     // Clear Counter
     uint clearSize = mUseOneAABBForAllLights ? 1 : lights.size();
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, clearSize).get(), uint4(0));
@@ -613,7 +611,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         pRenderContext->copyBufferRegion(
             mAccelShadowCounterCPU[mStagingCount].get(), 0, mAccelShadowCounter[mStagingCount].get(), 0, sizeof(uint32_t) * numAABBs
         );
-        pRenderContext->flush();
+
         // Frame in flight for the counter
         mAccelFenceWaitValues[mStagingCount] = mpFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
         mStagingCount = (mStagingCount + 1) % kFramesInFlight;
@@ -626,7 +624,10 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         std::memcpy(mAccelShadowNumPoints.data(), data, sizeof(uint) * numAABBs);
         mAccelShadowCounterCPU[mStagingCount]->unmap();
     }
-   
+
+    // Clear unused AABBs
+    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
+
     // Build the Acceleration structure
     std::vector<uint64_t> aabbCount;
     uint totalCount = 0;

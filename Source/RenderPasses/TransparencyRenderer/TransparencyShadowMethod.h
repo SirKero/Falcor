@@ -120,6 +120,8 @@ protected:
     bool mUseColoredTransparency = false;   //Enable colored transparency
     float2 mJitter = float2(0, 0);          //Optional Light Camera Jitter
 
+    float mCascadedSize = 50.f;
+
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
 
     //Pipelines / Programms

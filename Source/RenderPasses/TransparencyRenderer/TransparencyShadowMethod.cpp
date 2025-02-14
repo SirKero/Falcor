@@ -28,6 +28,13 @@
 #include "TransparencyShadowMethod.h"
 #include "Utils/Math/FalcorMath.h"
 
+/* There are different cascaded versions, all use a view matrix at the center of the scene as light view
+*  Version 0: More classical approach that tries to put the ortho extends on a grid. However due to variable sizes the sm ratio can change with movement
+*  Version 1: Uses fixed size for the cascade and tries to move the camera to the most suitable edge of the cascaded box. Is ill fitting when high above the air or looking up/down
+*  Version 2: Uses fixed size with the cameraposition snapped to a grid as the center. 
+*/
+#define CASCADE_VERSION 2
+
 namespace
 {
     const Gui::DropdownList kSMResolutionDropdown = {
@@ -65,6 +72,9 @@ bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
     {
         widget.var("Directional Light Max Camera Dist", mDirectionalMaxCameraDist, 0.001f, FLT_MAX);
         widget.tooltip("The maximum camera distance that is used to create the perspective shadow map");
+    #if CASCADE_VERSION > 0
+        widget.var("Size Cascaded", mCascadedSize);
+    #endif
     }
 
     return mResolutionChanged || mUpdateSMMatrices;
@@ -111,10 +121,15 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
     // Directional light. Create a prespective shadow map
     case LightType::Directional:
     {
+        const AABB& sceneBounds = mpScene->getSceneBounds();
+        float3 center = sceneBounds.center();
+        const float3 upVec = float3(0, 1, 0);
+        lightMVP.view = math::matrixFromLookAt(center, center + lightData.dirW, upVec); // Fixed point for view
+
         auto& cameraData = mpScene->getCamera()->getData();
         float camNear = cameraData.nearZ;
         float camFar = math::min(cameraData.farZ, mDirectionalMaxCameraDist); // TODO better limiter
-        float camFovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
+        float camFovY = focalLengthToFovY(cameraData.focalLength - 2.f, cameraData.frameHeight);
 
         // Get the 8 corners of the frustum Part
         const float4x4 proj = math::perspective(camFovY, cameraData.aspectRatio, camNear, camFar);
@@ -131,16 +146,8 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
                 }
             }
         }
-        // Get Centerpoint for view
-        float3 center = float3(0);
-        const float3 upVec = float3(0, 1, 0);
-        for (const auto& p : frustumCorners)
-            center += p.xyz();
-        center /= 8.f;
-        lightMVP.view = math::matrixFromLookAt(center, center + lightData.dirW, upVec); // Set view
 
         // Create a view space AABB to clamp cascaded values
-        const AABB& sceneBounds = mpScene->getSceneBounds();
         AABB smViewAABB = sceneBounds.transform(lightMVP.view);
 
         // Get Box for Orto
@@ -161,8 +168,111 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
             maxZ = std::max(maxZ, vp.z);
         }
         // Set the Z values to min and max for the scene so that all geometry in the way is rendered
+    #if CASCADE_VERSION == 2
+        //Fixed Z
+        maxZ = math::ceil(smViewAABB.maxPoint.z);
+        minZ = math::floor(smViewAABB.minPoint.z);
+
+        //Get Camera Position on a grid
+        float2 camPosLV = math::mul(lightMVP.view, float4(cameraData.posW, 1.f)).xy();
+        const float2 resF = float2(mResolution);
+        camPosLV = math::round(camPosLV * resF) / resF;
+
+        //Get xy offset adjusted to the grid
+        const float2 halfResF = resF / 2.f;
+        float2 halfResOffset = math::round(mCascadedSize * halfResF) / halfResF;
+        minX = camPosLV.x - halfResOffset.x;
+        maxX = camPosLV.x + halfResOffset.x;
+        minY = camPosLV.y - halfResOffset.y;
+        maxY = camPosLV.y + halfResOffset.y;
+
+    #elif CASCADE_VERSION == 1
+        maxZ = math::ceil(smViewAABB.maxPoint.z);
+        minZ = math::floor(smViewAABB.minPoint.z);
+        auto smallestDistance = [](const float4& dist, uint idx)
+        {
+            bool smallest = true;
+            for (uint i = 0; i < 4; i++)
+            {
+                if (i == idx)
+                    continue;
+                smallest &= dist[idx] <= dist[i];
+            }
+            return smallest;
+        };
+
+        float2 camPosLV = math::mul(lightMVP.view, float4(cameraData.posW, 1.f)).xy();
+        float4 distancesToCam = float4(camPosLV.x - minX, maxX - camPosLV.x, camPosLV.y - minY, maxY - camPosLV.y);
+        bool isBot = smallestDistance(distancesToCam, 2);
+        bool isTop = smallestDistance(distancesToCam, 3);
+        bool isLeft = smallestDistance(distancesToCam, 0);
+        bool isRight = smallestDistance(distancesToCam, 1);
+        // Fix camera pox on grid
+        const float2 resF = float2(mResolution);
+        camPosLV = math::round(camPosLV * resF) / resF;
+
+        if (isBot || isTop)
+        {
+            float2 distToCam = float2(camPosLV.x - minX, maxX - camPosLV.x);
+            float totalDist = distToCam.x + distToCam.y;
+            distToCam /= totalDist; //Normalize
+            minX = math::round(mCascadedSize * distToCam.x * resF.x) / resF.x;
+            maxX = math::round(mCascadedSize * distToCam.y * resF.x) / resF.x;
+            if (isTop)
+                distToCam = float2(0.95f, 0.05f);
+            else
+                distToCam = float2(0.05f, 0.95f);
+
+            minY = math::round(mCascadedSize * distToCam.x * resF.y) / resF.y;
+            maxY = math::round(mCascadedSize * distToCam.y * resF.y) / resF.y;
+        }
+        else //Left, Right
+        {
+            float2 distToCam = float2(camPosLV.y - minY, maxY - camPosLV.y);
+            float totalDist = distToCam.x + distToCam.y;
+            distToCam /= totalDist; // Normalize
+            minY = math::round(mCascadedSize * distToCam.x * resF.y) / resF.y;
+            maxY = math::round(mCascadedSize * distToCam.y * resF.y) / resF.y;
+            if (isRight)
+                distToCam = float2(0.95f, 0.05f);
+            else
+                distToCam = float2(0.05f, 0.95f);
+
+            minX = math::round(mCascadedSize * distToCam.x * resF.x) / resF.x;
+            maxX = math::round(mCascadedSize * distToCam.y * resF.x) / resF.x;
+        }
+
+        minX = camPosLV.x - minX;
+        maxX = camPosLV.x + maxX;
+        minY = camPosLV.y - minY;
+        maxY = camPosLV.y + maxY;
+    #elif CASCADE_VERSION == 0
         maxZ = std::max(maxZ, smViewAABB.maxPoint.z);
         minZ = std::min(minZ, smViewAABB.minPoint.z);
+
+        const float2 resF = float2(mResolution);
+        const float2 halfRes = float2(mResolution) / 2.f;
+        float2 axisCenter = float2((minX + maxX) / 2.f, (minY + maxY) / 2.f);
+        int2 axisOffset = int2(math::round((maxX - minX) * halfRes.x), math::round((maxY - minY) * halfRes.y));
+        int2 axisCenterI = int2(math::round(axisCenter.x * resF.x), math::round(axisCenter.y * resF.y));
+
+        int2 minCoordinates = int2(axisCenterI.x - axisOffset.x, axisCenterI.y - axisOffset.y);
+        int2 maxCoordinates = int2(axisCenterI.x + axisOffset.x, axisCenterI.y + axisOffset.y);
+        minX = minCoordinates.x / resF.x;
+        minY = minCoordinates.y / resF.y;
+        maxX = maxCoordinates.x / resF.x;
+        maxY = maxCoordinates.y / resF.y;
+
+        /*
+        const float2 resF = float2(mResolution);
+        int2 minCoordinates = int2(math::floor(minX * resF.x), math::floor(minY * resF.y));
+        int2 maxCoordinates = int2(math::ceil(maxX * resF.x), math::ceil(maxY * resF.y));
+        minX = minCoordinates.x/ resF.x;
+        minY = minCoordinates.y / resF.y;
+        maxX = maxCoordinates.x/ resF.x;
+        maxY = maxCoordinates.y / resF.y;
+        */
+    #endif
 
         lightMVP.projectionNoJitter = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
         lightMVP.spreadAngle = 1.0;
