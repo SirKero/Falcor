@@ -93,19 +93,19 @@ void main(uint2 pixel: SV_DispatchThreadID)
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         BSDFProperties bsdfProperties = mi.getProperties(sd);
         // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
-        colorOut += bsdfProperties.emission * sd.opacity;
+        colorOut += bsdfProperties.emission * sd.opacity * transparencyThp;
 
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
         colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp);
 
         // Ambient
-        colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength;
+        colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
     }
     else //Enviroment map lookup
     {
         colorOut = gScene.envMap.eval(viewDir) * kEnvMapStrength;
-        if (kCalcEnvMapMotionVectors) {
+        if (kCalcEnvMapMotionVectors && all(transparencyThp >= 1.0)) {
             float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, gFrameDim, /*no jitter*/ false).dir;
             float3 prevEnvMapDir = mul(gScene.camera.data.prevViewMat, float4(rayDirNoJitter, 0.0)).xyz;
             float2 prevUV = ViewSpaceToUV(prevEnvMapDir);
