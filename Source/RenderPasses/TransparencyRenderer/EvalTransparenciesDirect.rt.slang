@@ -30,6 +30,7 @@ static const float kMinOpacity = 1e-7;
 static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
+static const float kDepthMVOpacityThreshold = 0.7;   //If thp is above this value, the mv and depth are updated if there are multiple hits
 
 
 /** Payload for alpha ray (20B + 16B if lod is enabled)
@@ -209,6 +210,8 @@ void rayGen()
     ray.TMin =  gScene.camera.data.nearZ;
     ray.TMax = tMax;
     TransparencyRayData rayData = TransparencyRayData(tMax);
+    bool mVecUpdated = false;
+    bool depthUpdated = false;
 
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
@@ -258,16 +261,19 @@ void rayGen()
         rayData = TransparencyRayData(ray.TMax);
 
         // Update depth and motion vector if valid
-        if (i == 0 && is_valid(gOutDepth)) {
+        bool overThreshold = any(pd.thp > kDepthMVOpacityThreshold);
+        if (is_valid(gOutDepth) && (!depthUpdated || overThreshold )) {
             float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
             depth = curPosH.z / curPosH.w;
+            depthUpdated = true;
         }
-        if (i == 0 && is_valid(gOutMotion)) {
+        if (is_valid(gOutMotion) && (!mVecUpdated || overThreshold)) {
             // Compute motion vector.
             float3 prevPosW = gScene.getPrevPosW(hit.getTriangleHit());
             float2 pixelPos = pixel + float2(0.5f, 0.5f);
             float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
             mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
+            mVecUpdated = true;
         }
     }
     //Write data
