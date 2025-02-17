@@ -135,8 +135,13 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance)
+float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance, inout SampleGenerator sg)
 {
+    //Random dir (TODO properly implement)
+    if (false) {
+        dir = random_spread_direction(dir, 0.0001, sampleNext2D(sg));
+    }
+
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = dir;
@@ -363,7 +368,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
             if(kUseStochasticRayTracing)
                 visibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
             else
-                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
+                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance, sg);
         }
 
         // Clamp shadow in [0,1]

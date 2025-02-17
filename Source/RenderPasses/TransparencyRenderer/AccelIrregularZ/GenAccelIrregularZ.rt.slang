@@ -81,8 +81,8 @@ static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
 static const float kMergeDistance = ACCEL_MERGE_BOX_DIST;
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
-static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; //For Point and Spot
-//static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; //TODO For Directional lights
+static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
+static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; //For Directional lights
 
 
 
@@ -434,27 +434,33 @@ void rayGen()
     relFramePos.y *= -1.f;
 
     float3 lightPos = gLightPos;
+    float2 rndOffset = float2(0);
+    float2 rndOffset2 = float2(0);
+    float rndDepth = 1.0;
     // Random offset for position
     if (kUseRandomSoftShadows) {
         SampleGenerator sg = SampleGenerator(DispatchRaysIndex().xy, gFrameCount);
-        float3 rndPosOffset = sampleNext3D(sg);
-        rndPosOffset = 2.0 * rndPosOffset - 1.0; // From [0,1] to [-1,1]
-        lightPos += rndPosOffset * kRandomSoftShadowsPosRadius;
+        if (gIsDirectional) {
+            rndOffset = sample_disk_concentric(sampleNext2D(sg));
+            rndOffset *= 1.0 / gSMRes * kRandomSoftShadowsDirSpread;
+        } else {
+            float3 rndPosOffset = sample_sphere(sampleNext2D(sg));
+            lightPos += rndPosOffset * kRandomSoftShadowsPosRadius;
+        }
     }
-    
-    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos, 0.f, 1.f));
-    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.f, 1.f));
+
+    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos + rndOffset, 0.0, 1.0));
+    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.0, 1.0));
 
     posWPixelNear.xyz /= posWPixelNear.w;
     posWPixelFar.xyz /= posWPixelFar.w;
-    float3 toNear;
+    float3 rayDirection;
     if (gIsDirectional) {
-        toNear = posWPixelFar.xyz - posWPixelNear.xyz;
+        rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
     } else {
-        toNear = posWPixelNear.xyz - lightPos;
+        rayDirection = posWPixelNear.xyz - gLightPos;
     }
    
-
     // Add offset to the pixel position if one aabb is used
     // Currently this is solved simple by just adding an offset of the SM size * LightIndex in x direction
     if (kUseOneAABBForAllLights) {
@@ -464,17 +470,16 @@ void rayGen()
     RayDesc ray;
     if (gIsDirectional) {
         ray.TMin = 0;
-        ray.TMax = length(toNear);
+        ray.TMax = length(rayDirection);
         ray.Origin = posWPixelNear.xyz;
-        ray.Direction = gLightDir; 
+        ray.Direction = rayDirection / ray.TMax;
     } else {
-        ray.TMin = length(toNear);                       // Always start at depth 0
+        ray.TMin = length(rayDirection); // Always start at depth 0
         ray.TMax = distance(lightPos, posWPixelFar.xyz); // Real far for the pixel
         ray.Origin = lightPos;
-        ray.Direction = normalize(toNear); // World direction
+        ray.Direction = rayDirection / ray.TMin; // World direction
     }
     
-
     RayData rayData = RayData();
     bool useRayTracing = true;
     float2 boxZ = float2(0.0); //Last two middle depths

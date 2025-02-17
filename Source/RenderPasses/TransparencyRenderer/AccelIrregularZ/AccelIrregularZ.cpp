@@ -537,6 +537,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
+    mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
     
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
@@ -797,6 +798,8 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
             if (mEnableRandomSoftShadows)
             {
                 group2.var("Position offset (Spot/Point)", mRandomSoftShadowsPositionRadius, 0.f, FLT_MAX, 0.001f, false, "%.6f");
+                group2.var("Dir spread rad (Directional)", mRandomSoftShadowsDirSpread, 0.f, FLT_MAX, 0.001f, false, "%.6f");
+                group2.tooltip("Random pixel radius at the far plane of the directional shadow map");
             }
         } 
 

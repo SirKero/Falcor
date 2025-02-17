@@ -112,6 +112,7 @@ private:
     //Random Soft Shadows
     bool mEnableRandomSoftShadows = false;          //Enables Random offset of start position for shadow maps
     float mRandomSoftShadowsPositionRadius = 0.01f; //Random Radius for the start position
+    float mRandomSoftShadowsDirSpread = 1.f;      // Pixel radius on far plane for spread
 
     // Accel shadow settings
     float mMidpointPercentage = 0.9f; //Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
