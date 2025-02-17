@@ -70,6 +70,7 @@ public:
         PresetE,
         PresetF,
         PresetJ,
+        PresetK,
     };
 
     FALCOR_ENUM_INFO(
@@ -83,6 +84,7 @@ public:
             {Preset::PresetE, "PresetE(CNN)"},
             {Preset::PresetF, "PresetF(CNN)"},
             {Preset::PresetJ, "PresetJ(Transformer)"},
+            {Preset::PresetK, "PresetK(Transformer)"},
         }
     );
 
