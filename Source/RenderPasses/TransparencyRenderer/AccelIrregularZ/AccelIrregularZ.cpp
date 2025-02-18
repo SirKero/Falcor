@@ -790,20 +790,6 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         group.var("OpaqueHitRayDepthBias", mOpaqueHitRayDepthBias, 1e-7f, FLT_MAX, 0.000001f, false, "%.7f");
         group.tooltip("Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used");
 
-
-        if (auto group2 = group.group("Stochastic Soft Shadows")) {
-            group2.text("Info");
-            group2.tooltip("Creates soft shadows by randomly offset the starting position or direction");
-            group2.checkbox("Enable", mEnableRandomSoftShadows);
-            if (mEnableRandomSoftShadows)
-            {
-                group2.var("Position offset (Spot/Point)", mRandomSoftShadowsPositionRadius, 0.f, FLT_MAX, 0.001f, false, "%.6f");
-                group2.var("Dir spread rad (Directional)", mRandomSoftShadowsDirSpread, 0.f, FLT_MAX, 0.001f, false, "%.6f");
-                group2.tooltip("Random pixel radius at the far plane of the directional shadow map");
-            }
-        } 
-
-        //group.checkbox("Use PCF", mAccelUsePCF);
         group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");
         group.tooltip(
             "Merges Accel Boxes together and takes the transparency of the first box. Can add bias (brightening). \n Set to 0 to disable."

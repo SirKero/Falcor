@@ -140,6 +140,11 @@ private:
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
     bool mUseColorTransparency = false; //Enables transparency with color
 
+    //Soft Shadows
+    bool mEnableSoftShadows = false;
+    float mSoftShadowsPositionRadius = 0.001f;
+    float mSoftShadowsDirectionalSpread = 1.f;
+
     //Path Tracer specific settings
     uint mPTMaxBounces = 256;
     bool mPTUseRussianRoulette = true;

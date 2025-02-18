@@ -66,6 +66,8 @@ namespace
     const ChannelList kOutputChannels = {
         {kOutputColor, "gOutputColor", "Output color (sum of direct and indirect)", false, ResourceFormat::RGBA32Float},
         {kOutputDebug, "gDebugOut", "Output debug tex (sum of direct and indirect)", true, ResourceFormat::RGBA32Float},
+        {kOutputDebug, "gOutPenumbra", "For NRD Sigma denoiser", true, ResourceFormat::R16Float},
+        {kOutputDebug, "gOutTranslucency", "For NRD Sigma denoiser", true, ResourceFormat::RGBA16Float},
     };
 
     //Additional Geometry information that may need info about the first transparent hit
@@ -177,6 +179,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         method->setShadowLODMode(mShadowLodMode);
         method->setColoredTransparency(mUseColorTransparency);
         method->setNearFar(mNearFar);
+        method->setSoftShadowParameter(mEnableSoftShadows, mSoftShadowsPositionRadius, mSoftShadowsDirectionalSpread);
     }        
 
     //Generate Shadow Structure
@@ -254,6 +257,18 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     widget.var("Global Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
     widget.tooltip("Global Near/Far values for all lights");
 
+    if (auto group = widget.group("Soft Shadow Options"))
+    {
+        group.text("Info");
+        group.tooltip("Creates fake soft shadows by randomly offset the starting position or direction");
+        group.checkbox("Enable", mEnableSoftShadows);
+        if (mEnableSoftShadows)
+        {
+            group.var("Position offset radius (Spot/Point)", mSoftShadowsPositionRadius, 0.f, FLT_MAX, 0.001f, false, "%.6f");
+            group.var("Directional Spread (Dir)", mSoftShadowsDirectionalSpread, 0.f, FLT_MAX, 0.001f, false, "%.6f");
+        }
+    } 
+
     if (mEnableOpaqueShadowMaps && mpShadowMap)
     {
         if (auto group = widget.group("Opaque Shadow Map Settings"))
@@ -308,6 +323,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
     defines.add("USE_STOCHASTIC_RAY_TRACING", mShadowUseStochasticRayTracing ? "1" : "0");
     defines.add("TR_USE_COLORED_TRANSPARENCY", mUseColorTransparency ? "1" : "0");
+    defines.add("USE_SOFT_SHADOWS", mEnableSoftShadows ? "1" : "0");
+    defines.add("SOFT_SHADOWS_POS_RADIUS", std::to_string(mSoftShadowsPositionRadius));
+    defines.add("SOFT_SHADOWS_DIR_SPREAD", std::to_string(mSoftShadowsDirectionalSpread * 0.0001)); //TODO proper conversion
 
     //LOD
     defines.add("RAY_LOD_MODE", std::to_string((uint)mRayLodMode));
@@ -435,6 +453,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
+    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData)); //For NRD
     mEvalTransparencyDirectRay.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
     
     // Init Vars

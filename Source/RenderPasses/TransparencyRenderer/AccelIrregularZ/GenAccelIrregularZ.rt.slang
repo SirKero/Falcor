@@ -435,8 +435,6 @@ void rayGen()
 
     float3 lightPos = gLightPos;
     float2 rndOffset = float2(0);
-    float2 rndOffset2 = float2(0);
-    float rndDepth = 1.0;
     // Random offset for position
     if (kUseRandomSoftShadows) {
         SampleGenerator sg = SampleGenerator(DispatchRaysIndex().xy, gFrameCount);

@@ -80,6 +80,14 @@ public:
     */
     void setJitter(float2 jitter) { mJitter = jitter; }
 
+    /** Set Soft shadow parameters
+    */
+    void setSoftShadowParameter(bool enabled, float positionRadius, float directionalSpread)
+    {
+        mEnableRandomSoftShadows = enabled;
+        mRandomSoftShadowsPositionRadius = positionRadius;
+        mRandomSoftShadowsDirSpread = directionalSpread;
+    }
 
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
@@ -123,6 +131,11 @@ protected:
     float mCascadedSize = 50.f;
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
+
+    // Random Soft Shadows
+    bool mEnableRandomSoftShadows = false;          // Enables Random offset of start position for shadow maps
+    float mRandomSoftShadowsPositionRadius = 0.01f; // Random Radius for the start position
+    float mRandomSoftShadowsDirSpread = 1.f;        // Pixel radius on far plane for spread
 
     //Pipelines / Programms
     struct RayTracingPipeline

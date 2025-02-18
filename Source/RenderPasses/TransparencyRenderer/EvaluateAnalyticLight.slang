@@ -45,6 +45,9 @@ static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
 static const bool kTRUseColoredTransparency = TR_USE_COLORED_TRANSPARENCY;
+static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
+static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
+static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
 
 // For RIS light sampling
 struct RISReservoir {
@@ -135,13 +138,8 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance, inout SampleGenerator sg)
+float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance)
 {
-    //Random dir (TODO properly implement)
-    if (false) {
-        dir = random_spread_direction(dir, 0.0001, sampleNext2D(sg));
-    }
-
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = dir;
@@ -365,10 +363,18 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
         if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (visibility.x < 0) && kEnableFallbackRay) {
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
+            if (kUseSoftShadows) {
+                if (isDirectional) {
+                    ls.dir = random_spread_direction(ls.dir, kSoftShadowsDirSpread, sampleNext2D(sg));
+                } else {
+                    ls.posW += sample_sphere(sampleNext2D(sg)) * kSoftShadowsPosRadius;
+                    ls.dir = ls.posW - origin;
+                }
+            }
             if(kUseStochasticRayTracing)
                 visibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
             else
-                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance, sg);
+                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
         }
 
         // Clamp shadow in [0,1]

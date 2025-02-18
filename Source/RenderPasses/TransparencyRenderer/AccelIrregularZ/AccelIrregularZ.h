@@ -109,11 +109,6 @@ private:
     float mDynRCGuardPercentage = 0.9f; //10% buffer for possible changes
     float mDynRCChangePercentage = 0.6f; //How much of the optimal value should be taken
 
-    //Random Soft Shadows
-    bool mEnableRandomSoftShadows = false;          //Enables Random offset of start position for shadow maps
-    float mRandomSoftShadowsPositionRadius = 0.01f; //Random Radius for the start position
-    float mRandomSoftShadowsDirSpread = 1.f;      // Pixel radius on far plane for spread
-
     // Accel shadow settings
     float mMidpointPercentage = 0.9f; //Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
     float mOpaqueHitRayDepthBias = 0.05f; //Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used

@@ -489,6 +489,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
+    mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
     
 
     //LOD
@@ -704,17 +705,6 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
         group.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
         group.var("OpaqueHitRayDepthBias", mOpaqueHitRayDepthBias, 1e-7f, FLT_MAX, 0.000001f, false, "%.7f");
         group.tooltip("Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used");
-
-        if (auto group2 = group.group("Stochastic Soft Shadows"))
-        {
-            group2.text("Info");
-            group2.tooltip("Creates soft shadows by randomly offset the starting position or direction");
-            group2.checkbox("Enable", mEnableRandomSoftShadows);
-            if (mEnableRandomSoftShadows)
-            {
-                group2.var("Position offset (Spot/Point)", mRandomSoftShadowsPositionRadius, 0.f, FLT_MAX, 0.001f, false, "%.6f");
-            }
-        } 
 
         group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");
         group.tooltip(
