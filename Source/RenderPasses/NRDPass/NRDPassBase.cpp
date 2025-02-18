@@ -90,7 +90,7 @@ namespace
     };
 
     const Gui::DropdownList kDropdownSigma = {
-        {(uint)NRDPassBase::DenoisingMethod::Sigma, "Signa"},
+        {(uint)NRDPassBase::DenoisingMethod::Sigma, "Sigma"},
         {(uint)NRDPassBase::DenoisingMethod::SigmaTranslucency, "SigmaTranslucency"},
     };
 
