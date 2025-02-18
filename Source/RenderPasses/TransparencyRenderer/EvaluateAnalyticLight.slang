@@ -369,6 +369,8 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
                 } else {
                     ls.posW += sample_sphere(sampleNext2D(sg)) * kSoftShadowsPosRadius;
                     ls.dir = ls.posW - origin;
+                    ls.distance = length(ls.dir);
+                    ls.dir /= ls.distance;
                 }
             }
             if(kUseStochasticRayTracing)
