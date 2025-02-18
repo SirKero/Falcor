@@ -139,6 +139,7 @@ private:
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
     bool mUseColorTransparency = false; //Enables transparency with color
+    bool mNRDEnabled = false;   
 
     //Soft Shadows
     bool mEnableSoftShadows = false;

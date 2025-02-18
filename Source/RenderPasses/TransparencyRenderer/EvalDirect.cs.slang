@@ -10,7 +10,9 @@ cbuffer CB
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gViewW; // Optional
 Texture2D<float4> gTransparencyThp;
-RWTexture2D<float2> gMotionVector;     //Can be overwritten if scene was missed
+RWTexture2D<float2> gMotionVector; // Can be overwritten if scene was missed
+RWTexture2D<float> gOutPenumbra;
+RWTexture2D<float4> gOutTranslucency;
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
@@ -59,6 +61,12 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (all(transparencyThp < kMinOpacity))
         return;
 
+#if TR_USE_NRD
+    float nrdPenumbra = NRD_FP16_MAX;
+    float3 unshadowedLum = float3(0);
+    float nrdHitDist = 0;
+#endif
+
     if (hit.isValid())
     {
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
@@ -92,15 +100,26 @@ void main(uint2 pixel: SV_DispatchThreadID)
             hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         BSDFProperties bsdfProperties = mi.getProperties(sd);
+#if TR_USE_NRD
+        float3 emissive = bsdfProperties.emission * sd.opacity * transparencyThp;
+        float3 ambient = bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
+        float4 unshadowedLumHitDist = float4(0);
+        float penumbra = 0;
+        float3 Li = evalDirectAnalytic(sd, mi, sg, transparencyThp, unshadowedLumHitDist, penumbra);
+        colorOut = emissive + ambient + Li;
+        unshadowedLum = emissive + ambient + unshadowedLumHitDist.xyz;
+        nrdPenumbra = penumbra;
+        nrdHitDist = unshadowedLumHitDist.w;
+    #else
         // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
         colorOut += bsdfProperties.emission * sd.opacity * transparencyThp;
-
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
         colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp);
-
         // Ambient
         colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
+    #endif
+        
     }
     else //Enviroment map lookup
     {
@@ -112,6 +131,13 @@ void main(uint2 pixel: SV_DispatchThreadID)
             gMotionVector[pixel] = prevUV - (float2(pixel) + 0.5) / float2(gFrameDim);
         }
     }
-    float3 prevColor = gOutputColor[pixel].xyz;
-    gOutputColor[pixel] = float4(colorOut + prevColor, 1.0);
+    
+#if TR_USE_NRD
+    gOutPenumbra[pixel] = nrdPenumbra;
+    float3 translucency = colorOut / max(unshadowedLum, NRD_EPS);
+    gOutTranslucency[pixel] = SIGMA_FrontEnd_PackTranslucency(nrdHitDist, translucency);
+    gOutputColor[pixel] += float4(unshadowedLum, 1.0);
+#else
+    gOutputColor[pixel] += float4(colorOut, 1.0);
+#endif
 }

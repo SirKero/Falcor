@@ -213,6 +213,7 @@ void rayGen()
     bool mVecUpdated = false;
     bool depthUpdated = false;
 
+
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = RAY_FLAG_CULL_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;

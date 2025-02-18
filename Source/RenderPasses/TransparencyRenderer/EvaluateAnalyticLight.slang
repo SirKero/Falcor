@@ -1,6 +1,6 @@
+#include "RayLodHelper.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
-#include "RayLodHelper.slang"
 
 import Scene.Raytracing;
 import Scene.Intersection;
@@ -39,6 +39,17 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 
 #ifndef TR_RAY_QUERY_FLAG
 #define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
+#endif
+
+//NRD
+#ifndef TR_USE_NRD
+#define TR_USE_NRD 0
+#endif
+#if TR_USE_NRD
+#define NRD_COMPILER_DXC
+#define NRD_NORMAL_ENCODING 2
+#define NRD_ROUGHNESS_ENCODING 1
+#include "nrd/Shaders/Source/NRD.hlsli"
 #endif
 
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
@@ -138,7 +149,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance)
+float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance, inout float hitDistance)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -179,7 +190,7 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
                 lod = ExplicitGradientTextureSampler(ddx, ddy);
             }
             */
-
+            hitDistance += length(v.posW - ray.Origin);
             if(kTRUseColoredTransparency){
                 ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -ray.Direction, lod);
                 //uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -206,6 +217,10 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
     }
 
     //No need to check comitted status, as no hit is accepted
+    #if TR_USE_NRD
+    if (all(visibility >= 1.0))
+        hitDistance = NRD_FP16_MAX;
+    #endif
 
     return visibility;
 }
@@ -217,7 +232,7 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
     \param[inout] Sample Generator
     \return Visbility that is either 0 or 1
 */
-float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg)
+float3 traceShadowRayStochastic(float3 origin, float3 dir, float3 lightDir, float distance, inout SampleGenerator sg, inout float hitDistance)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -274,6 +289,7 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
                 //Use russian roulette to set the color to zero
                 if (roulett <= opacity) {
                     visibility = 0.0;
+                    hitDistance = length(v.posW - ray.Origin);
                     rayQuery.Abort();
                 }
             }
@@ -293,8 +309,11 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     \param[in,out] sg SampleGenerator object.
     \return Outgoing radiance in view direction.
 */
-float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0))
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp, inout float4 unshadowedLumHitDist, inout float nrdPenumbra)
 {
+    unshadowedLumHitDist = float4(0);
+    nrdPenumbra = 0;
+
     const uint lightCount = gScene.getLightCount();
     if (lightCount == 0) return float3(0.0);
 
@@ -303,7 +322,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
     float invPdf = 1.0;
     uint lightType = 0;
     float3 Li = float3(0);
-
+    
     #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // For all loop over all lights, for other methods 1SPP is evaluated
     for (lightIndex; lightIndex < lightCount; lightIndex++)
     #endif
@@ -345,6 +364,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         bool isDirectional = lightType == (uint)LightType::Directional; // Slight different calculations for ortho
         float3 visibility = float3(1.0);
 
+        float shadowHitDist = 0;
+#if TR_USE_NRD
+        shadowHitDist = NRD_FP16_MAX;
+    #endif
         // Shadow maps
         #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
             visibility = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
@@ -373,10 +396,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
                     ls.dir /= ls.distance;
                 }
             }
-            if(kUseStochasticRayTracing)
-                visibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
+            if (kUseStochasticRayTracing)
+                visibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg, shadowHitDist);
             else
-                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
+                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance, shadowHitDist);
         }
 
         // Clamp shadow in [0,1]
@@ -391,9 +414,25 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
             shadow = min(shadow, opaqueShadow);
         #endif
-        // Evaluate contribution.
+            // Evaluate contribution.
+    #if TR_USE_NRD
+        unshadowedLumHitDist.w += shadowHitDist;
+        unshadowedLumHitDist.xyz += brdf * ls.Li * invPdf;
+        if (isDirectional) {
+            nrdPenumbra += SIGMA_FrontEnd_PackPenumbra(shadowHitDist, kSoftShadowsDirSpread);
+        } else {
+            nrdPenumbra += SIGMA_FrontEnd_PackPenumbra(shadowHitDist, ls.distance, kSoftShadowsPosRadius);
+        }
+    #endif
         Li += brdf * visibility * ls.Li * invPdf;
     }
 
     return Li;
+}
+
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp)
+{
+    float4 unshadowedLumHitDist = float4(0);
+    float nrdPenumbra = 0;
+    return evalDirectAnalytic(sd, mi, sg, thp, unshadowedLumHitDist, nrdPenumbra);
 }

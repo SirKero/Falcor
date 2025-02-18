@@ -57,6 +57,8 @@ namespace
     const std::string kOutputDebug = "outDebug";
     const std::string kOutputDepth = "outDepth";
     const std::string kOutputMV = "outMotion";
+    const std::string kOutputNRDPenumbra = "outPenumbra";
+    const std::string kOutputNRDTranslucency = "outTranslucency";
 
     const ChannelList kInputChannels = {
         {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
@@ -66,8 +68,8 @@ namespace
     const ChannelList kOutputChannels = {
         {kOutputColor, "gOutputColor", "Output color (sum of direct and indirect)", false, ResourceFormat::RGBA32Float},
         {kOutputDebug, "gDebugOut", "Output debug tex (sum of direct and indirect)", true, ResourceFormat::RGBA32Float},
-        {kOutputDebug, "gOutPenumbra", "For NRD Sigma denoiser", true, ResourceFormat::R16Float},
-        {kOutputDebug, "gOutTranslucency", "For NRD Sigma denoiser", true, ResourceFormat::RGBA16Float},
+        {kOutputNRDPenumbra, "gOutPenumbra", "For NRD Sigma denoiser", true, ResourceFormat::R16Float},
+        {kOutputNRDTranslucency, "gOutTranslucency", "For NRD Sigma denoiser", true, ResourceFormat::RGBA16Float},
     };
 
     //Additional Geometry information that may need info about the first transparent hit
@@ -134,6 +136,9 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         clearOut(kOutputGeometryInfoChannels);
         return;
     }
+
+    //Check if NRD is used (NRD outputs used)
+    mNRDEnabled = (renderData[kOutputNRDPenumbra] != nullptr) && (renderData[kOutputNRDTranslucency] != nullptr);
 
     //Set render dimensions for LOD helper
     if (any(mRenderDims != renderData.getDefaultTextureDims()))
@@ -326,6 +331,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("USE_SOFT_SHADOWS", mEnableSoftShadows ? "1" : "0");
     defines.add("SOFT_SHADOWS_POS_RADIUS", std::to_string(mSoftShadowsPositionRadius));
     defines.add("SOFT_SHADOWS_DIR_SPREAD", std::to_string(mSoftShadowsDirectionalSpread * 0.0001)); //TODO proper conversion
+    defines.add("TR_USE_NRD", mNRDEnabled ? "1" : "0");
 
     //LOD
     defines.add("RAY_LOD_MODE", std::to_string((uint)mRayLodMode));
@@ -394,6 +400,8 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     var["gMotionVector"] = renderData.getTexture(kOutputMV);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gTransparencyThp"] = mpTransparencyThp;
+    var["gOutPenumbra"] = renderData.getTexture(kOutputNRDPenumbra);
+    var["gOutTranslucency"] = renderData.getTexture(kOutputNRDTranslucency);
 
     // Execute
     
