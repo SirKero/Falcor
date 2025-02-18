@@ -66,8 +66,6 @@ namespace
     const ChannelList kOutputChannels = {
         {kOutputColor, "gOutputColor", "Output color (sum of direct and indirect)", false, ResourceFormat::RGBA32Float},
         {kOutputDebug, "gDebugOut", "Output debug tex (sum of direct and indirect)", true, ResourceFormat::RGBA32Float},
-        {kOutputDebug, "gOutPenumbra", "For NRD Sigma denoiser", true, ResourceFormat::R16Float},
-        {kOutputDebug, "gOutTranslucency", "For NRD Sigma denoiser", true, ResourceFormat::RGBA16Float},
     };
 
     //Additional Geometry information that may need info about the first transparent hit
