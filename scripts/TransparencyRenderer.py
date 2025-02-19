@@ -11,8 +11,9 @@ def render_graph_TransparencyRenderDLSS():
     g.create_pass('PathBenchmark', 'PathBenchmark', {})
     g.create_pass('FSRPass', 'FSRPass', {})
     g.create_pass('ParticlePass', 'ParticlePass', {})
-    g.create_pass('SwitchPass', 'SwitchPass', {'count': 3, 'selected': 0, 'i0': 'DLSS', 'i1': 'FSR', 'i2': 'Accumulate'})
+    g.create_pass('SwitchPass', 'SwitchPass', {'count': 4, 'selected': 0, 'i0': 'DLSS', 'i1': 'FSR', 'i2': 'TAA', 'i3': 'Accumulate'})
     g.create_pass('ToneMapper', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Aces', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
+    g.create_pass('TAA', 'TAA', {'alpha': 0.10000000149011612, 'colorBoxSigma': 1.0, 'antiFlicker': True})
     g.add_edge('TransparencyRenderer.outDepth', 'DLSSPass.depth')
     g.add_edge('VBufferRT.vbuffer', 'TransparencyRenderer.vbuffer')
     g.add_edge('TransparencyRenderer.outMotion', 'DLSSPass.mvec')
@@ -29,8 +30,11 @@ def render_graph_TransparencyRenderDLSS():
     g.add_edge('ParticlePass', 'VideoRecorder')
     g.add_edge('DLSSPass.output', 'SwitchPass.i0')
     g.add_edge('FSRPass.output', 'SwitchPass.i1')
-    g.add_edge('AccumulatePass.output', 'SwitchPass.i2')
+    g.add_edge('TAA.colorOut', 'SwitchPass.i2')
+    g.add_edge('AccumulatePass.output', 'SwitchPass.i3')
     g.add_edge('SwitchPass.out', 'ToneMapper.src')
+    g.add_edge('TransparencyRenderer.outMotion', 'TAA.motionVecs')
+    g.add_edge('TransparencyRenderer.outColor', 'TAA.colorIn')
     g.mark_output('ToneMapper.dst')
     return g
 
