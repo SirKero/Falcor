@@ -20,7 +20,7 @@ import AccelShadowKBuffer.AccelShadowKBuffer;
 import AccelIrregularZ.AccelIrregularZ;
 import LinkedListIrregularZ.LinkedListIrregularZ;
 
-// Shadow Eval Modes
+// Shadow Eval Modes (see TransparencyRenderer.h)
 #define SHADOW_EVAL_MODE_RAYTRACING 0
 #define SHADOW_EVAL_MODE_Accel 1
 #define SHADOW_EVAL_MODE_LinkedList 2
@@ -32,7 +32,7 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
 #endif
 
-//LightSampleModes
+// LightSampleModes (see TransparencyRenderer.h)
 #define LIGHT_SAMPLE_MODE_UNIFORM 0
 #define LIGHT_SAMPLE_MODE_RIS 1
 #define LIGHT_SAMPLE_MODE_ALL 2
@@ -40,6 +40,20 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #ifndef TR_RAY_QUERY_FLAG
 #define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
 #endif
+
+//Imporance modes (see TransparencyRenderer.h)
+#define IMPORTANCE_MODE_OPACITY 0
+#define IMPORTANCE_MODE_OPACITY_THP 1
+#define IMPORTANCE_MODE_THP 2
+#define IMPORTANCE_MODE_THP_SQ 3
+#define IMPORTANCE_MODE_BRDF_THP 4
+#define IMPORTANCE_MODE_BRDF_THP_OPACITY 5
+#define IMPORTANCE_MODE_UNIFORM 6
+
+#ifndef IMPORTANCE_MODE
+#define IMPORTANCE_MODE IMPORTANCE_MODE_OPACITY_THP
+#endif
+
 
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
@@ -293,7 +307,7 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     \param[in,out] sg SampleGenerator object.
     \return Outgoing radiance in view direction.
 */
-float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0))
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0), const float opacity = 1.0)
 {
     const uint lightCount = gScene.getLightCount();
     if (lightCount == 0) return float3(0.0);
@@ -329,17 +343,33 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         // Eval BSDF
         float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
-        float importance = luminance(thp);              //Works best
-        //float importance = luminance(thp * thp);
-        //float importance = luminance((1.0 / ls.pdf) * (thp * thp) * brdf);
-        //float importance = luminance(brdf);
+
         if (all(brdf <= 0)) {
             #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
-                        continue;
+                continue;
             #else
-                        return float3(0.0);
+                return float3(0.0);
             #endif
         }
+
+        // Importance between 1 and 0
+        float importance = 0.0;
+        #if IMPORTANCE_MODE == IMPORTANCE_MODE_OPACITY
+            importance = opacity;
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_OPACITY_THP
+            importance = luminance(thp) * opacity;
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_THP
+            importance = luminance(thp);
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_THP_SQ
+            importance = luminance(thp * thp);
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_BRDF_THP
+            importance = luminance(thp * brdf);
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_BRDF_THP_OPACITY
+            importance = luminance(thp * brdf) * opacity;
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_UNIFORM
+            importance = 0; //Gets capped to lowest value
+        #endif
+        importance = saturate(importance);
 
         // Test visibility by tracing a shadow ray.
         bool isDirectional = lightType == (uint)LightType::Directional; // Slight different calculations for ortho
@@ -353,9 +383,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
             visibility = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelIrregularZ
-            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
+            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedListIrregularZ
-            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
+            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance);
         #endif
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)

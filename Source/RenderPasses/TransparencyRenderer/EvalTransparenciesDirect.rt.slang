@@ -244,7 +244,7 @@ void rayGen()
         pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
         // Analytic
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp * sd.opacity);
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity) * sd.opacity;
 
         // Ambient
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;

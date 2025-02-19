@@ -53,6 +53,7 @@ public:
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
+    //Possible shadow render methods
     enum class ShadowRenderMethod : uint
     {
         RayTracing = 0,
@@ -73,6 +74,7 @@ public:
         }
     );
 
+    //Light sample mode for analytic lights (see EvaluateAnalyticLight.slang)
     enum class LightSampleMode : uint
     {
         Uniform = 0,
@@ -89,6 +91,32 @@ public:
         }
     );
 
+    //Importance mode for the per pixel adaptive shadow maps (see EvaluateAnalyticLight.slang)
+    enum class ImportanceMode : uint
+    {
+        Opacity = 0,
+        Opacity_Thp = 1,
+        Thp = 2,
+        Thp_Thp = 3,
+        Brdf_Thp = 4,
+        Brdf_Opacity_Thp = 5,
+        Uniform = 6,
+    };
+
+    FALCOR_ENUM_INFO(
+        ImportanceMode,
+        {
+            {ImportanceMode::Opacity, "Opacity"},
+            {ImportanceMode::Opacity_Thp, "Opacity*Throughput"},
+            {ImportanceMode::Thp, "Throughput"},
+            {ImportanceMode::Thp_Thp, "ThroughputSquare"},
+            {ImportanceMode::Brdf_Thp, "BRDF*Throughput"},
+            {ImportanceMode::Brdf_Opacity_Thp, "BRDF*Opacity*Throughput"},
+            {ImportanceMode::Uniform, "Unweighted(Uniform)"},
+        }
+    );
+
+    //Renderers
     enum class CameraRenderMode : uint
     {
         DirectRT = 0,
@@ -139,6 +167,7 @@ private:
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
     bool mUseColorTransparency = false; //Enables transparency with color
+    ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
 
     //Soft Shadows
     bool mEnableSoftShadows = false;
@@ -181,3 +210,4 @@ private:
 FALCOR_ENUM_REGISTER(TransparencyRenderer::ShadowRenderMethod);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::LightSampleMode);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::CameraRenderMode);
+FALCOR_ENUM_REGISTER(TransparencyRenderer::ImportanceMode);

@@ -273,6 +273,11 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             mpShadowMap->renderUI(group);
     }
 
+    if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+    {
+        widget.dropdown("Importance Mode", mImportanceMode);
+    }
+
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing && !mShadowMethods.empty() && mShadowMethods[mSelectedShadowMethod])
     {
         mShadowMethods[mSelectedShadowMethod]->renderUI(widget);
@@ -321,6 +326,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
     defines.add("USE_STOCHASTIC_RAY_TRACING", mShadowUseStochasticRayTracing ? "1" : "0");
     defines.add("TR_USE_COLORED_TRANSPARENCY", mUseColorTransparency ? "1" : "0");
+    defines.add("IMPORTANCE_MODE", std::to_string((uint)mImportanceMode));
+
+    //Soft Shadows
     defines.add("USE_SOFT_SHADOWS", mEnableSoftShadows ? "1" : "0");
     defines.add("SOFT_SHADOWS_POS_RADIUS", std::to_string(mSoftShadowsPositionRadius));
     defines.add("SOFT_SHADOWS_DIR_SPREAD", std::to_string(mSoftShadowsDirectionalSpread * 0.0001)); //TODO proper conversion

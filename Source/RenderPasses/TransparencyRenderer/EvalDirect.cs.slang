@@ -97,7 +97,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
-        colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp);
+        colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity);
 
         // Ambient
         colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
