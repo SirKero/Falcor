@@ -120,13 +120,15 @@ public:
     enum class CameraRenderMode : uint
     {
         DirectRT = 0,
-        PathTracer = 1
+        DirectRT_Reflections = 1,
+        PathTracer = 2
     };
 
     FALCOR_ENUM_INFO(
         CameraRenderMode,
         {
             {CameraRenderMode::DirectRT, "DirectRT"},
+            {CameraRenderMode::DirectRT_Reflections, "DirectRT+RayReflections"},
             {CameraRenderMode::PathTracer, "PathTracer"},
         }
     );
@@ -139,6 +141,8 @@ private:
     void evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluates the transparencies until the first opaque surface
     void evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData);
+    //Ray Traced Reflections
+    void evalRayReflections(RenderContext* pRenderContext, const RenderData& renderData);
     //Path tracing pass
     void evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -204,7 +208,7 @@ private:
     RayTracingPipeline mEvalTransparencyDirectRay; // Ray Tracing pass for evaluating the Transparencies along the primary ray
     ref<ComputePass> mpEvalDirectPass; //Compute Pass for direct light
     RayTracingPipeline mTransparencyPathTracer; //Pipeline for the path tracer
-    
+    RayTracingPipeline mReflectionsPass;
 };
 
 FALCOR_ENUM_REGISTER(TransparencyRenderer::ShadowRenderMethod);

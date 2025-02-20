@@ -46,6 +46,7 @@ namespace
     const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/";
     const std::string kShaderEvalDirect = kShaderFolder + "EvalDirect.cs.slang";
     const std::string kShaderEvalTransparenciesDirect = kShaderFolder + "EvalTransparenciesDirect.rt.slang";
+    const std::string kShaderReflections = kShaderFolder + "RayReflections.rt.slang";
     const std::string kShaderPathTracer = kShaderFolder + "PathTracer.rt.slang";
 
     const std::string kShaderModel = "6_6"; //Shader model for compute shader
@@ -506,6 +507,93 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
 
      // Execute
     mpScene->raytrace(pRenderContext, mEvalTransparencyDirectRay.pProgram.get(), mEvalTransparencyDirectRay.pVars, uint3(targetDim, 1));
+}
+
+void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, const RenderData& renderData) {
+    FALCOR_PROFILE(pRenderContext, "RayReflections");
+
+    // Create Pipeline
+    if (!mReflectionsPass.pProgram)
+    {
+        // Shader setup
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReflections);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxPayloadSize(36u);
+        desc.setMaxTraceRecursionDepth(1u);
+
+        mReflectionsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mReflectionsPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen"));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        // Only Triangle meshes are supported
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        // Initial defines and program
+        DefineList defines;
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(mpScene->getSceneDefines());
+
+        mReflectionsPass.pProgram = RtProgram::create(mpDevice, desc, defines);
+    }
+
+    FALCOR_ASSERT(mReflectionsPass.pProgram);
+
+    bool useLodMode = mEnableTransparencyPassLODMode && ((mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs));
+    // Update define that can change at runtime
+    mReflectionsPass.pProgram->addDefines(getLightEvalDefines());
+    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
+    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
+    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); // For updating depth
+                                                                                                                       // and motion
+    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData));             // For NRD
+    mReflectionsPass.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
+
+    // Init Vars
+    if (!mReflectionsPass.pVars)
+    {
+        mReflectionsPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        mReflectionsPass.pVars = RtProgramVars::create(mpDevice, mReflectionsPass.pProgram, mReflectionsPass.pBindingTable);
+        auto var = mReflectionsPass.pVars->getRootVar();
+        mpSampleGenerator->setShaderData(var);
+    }
+
+    FALCOR_ASSERT(mReflectionsPass.pVars);
+
+    // Bind shader data
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    auto var = mReflectionsPass.pVars->getRootVar();
+
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+        mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
+
+    if (mEnableOpaqueShadowMaps)
+        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
+
+    var["CB"]["gFrameCount"] = mFrameCount;
+
+    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
+    auto bind = [&](const ChannelDesc& desc)
+    {
+        if (!desc.texname.empty())
+        {
+            var[desc.texname] = renderData.getTexture(desc.name);
+        }
+    };
+    for (auto& channel : kInputChannels)
+        bind(channel);
+    var["gOutputColor"] = renderData.getTexture(kOutputColor);
+    var["gThp"] = mpTransparencyThp;
+
+    // Execute
+    mpScene->raytrace(pRenderContext, mReflectionsPass.pProgram.get(), mReflectionsPass.pVars, uint3(targetDim, 1));
 }
 
 void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData) {
