@@ -137,6 +137,9 @@ private:
     //Defines for the light evaluation. Can update every frame
     DefineList getLightEvalDefines();
 
+    //Prepare additional textures and buffers
+    void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
+
     //Evaluate direct light with an Compute Shader
     void evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluates the transparencies until the first opaque surface
@@ -173,6 +176,9 @@ private:
     bool mUseColorTransparency = false; //Enables transparency with color
     ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
 
+    //Reflections
+    float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
+
     //Soft Shadows
     bool mEnableSoftShadows = false;
     float mSoftShadowsPositionRadius = 0.001f;
@@ -188,6 +194,7 @@ private:
 
     //Buffer/Textures
     ref<Texture> mpTransparencyThp; //Thp texture for transparency
+    ref<Texture> mpReflectionsMask; //Mask where ray reflections should be used
 
     //Passes
     // Pipelines / Programms

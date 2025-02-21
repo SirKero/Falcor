@@ -118,7 +118,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     }
 
     // If we have no scene, just clear the outputs and return.
-    if (!mpScene)
+    if (!mpScene || mpScene->getLights().empty())
     {
         auto clearOut = [&](const ChannelList& channelList)
         {
@@ -129,6 +129,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
                     pRenderContext->clearTexture(pDst);
             }
         };
+        
         clearOut(kOutputChannels);
         clearOut(kOutputGeometryInfoChannels);
         return;
@@ -144,14 +145,15 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         mEvalTransparencyDirectRay.resetPip();
         mOpaqueShadowMapModeChanged = false;
     }
-
-    bool sceneHasAnalyticLights = !mpScene->getLights().empty();
-
+    
     // Request the light collection if emissive lights are enabled.
     if (mpScene->getRenderSettings().useEmissiveLights)
     {
         mpScene->getLightCollection(pRenderContext);
     }
+
+    //Create Textures needed for the renderer
+    prepareResources(pRenderContext, renderData);
 
     //Generate optional opaque shadow map
     if (mEnableOpaqueShadowMaps && !mpShadowMap)
@@ -195,6 +197,14 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
             evalDirectOpaque(pRenderContext, renderData);
         }
         break;
+    case CameraRenderMode::DirectRT_Reflections:
+        {
+            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
+            evalDirectTransparency(pRenderContext, renderData);
+            evalDirectOpaque(pRenderContext, renderData);
+            evalRayReflections(pRenderContext, renderData);
+        }
+        break;
     case CameraRenderMode::PathTracer:
         evalPathTracer(pRenderContext, renderData);
         break;
@@ -222,6 +232,15 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
             dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+            dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
+            dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
+            dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
+            break;
+        case CameraRenderMode::DirectRT_Reflections:
+            dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
+            dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
+            dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+            dirty |= widget.var("Use RayReflections at spec percentage", mRayReflectionsRoughnessThreshold, 0.f, 1.f);
             dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
             dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
             dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
@@ -299,16 +318,21 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
     if (mpScene)
     {
         mpScene->setRtASAdditionalGeometryFlag(RtGeometryFlags::NoDuplicateAnyHitInvocation); // Add the NoDuplicateAnyHitInvocation flag to
+        const auto lightCount = mpScene->getLightCount();
+        if (lightCount == 0)
+            logWarning("No analytic light sources in scene. The Transparancy Renderer will not render anything!");
+        else
+        {
+            // Add the shadow methods
+            mShadowMethods.push_back(std::make_shared<AccelShadow>(mpDevice, mpScene));          // Accel Shadow (0)
+            mShadowMethods.push_back(std::make_shared<LinkedListShadow>(mpDevice, mpScene));     // LinkedList (1)
+            mShadowMethods.push_back(std::make_shared<AccelShadowKBuffer>(mpDevice, mpScene));   // AccelShadow KBuffer (2)
+            mShadowMethods.push_back(std::make_shared<AccelIrregularZ>(mpDevice, mpScene));      // Accel IrregularZ (3)
+            mShadowMethods.push_back(std::make_shared<LinkedListIrregularZ>(mpDevice, mpScene)); // Linked List IrregularZ (4)
 
-        //Add the shadow methods
-        mShadowMethods.push_back(std::make_shared<AccelShadow>(mpDevice, mpScene)); //Accel Shadow (0)
-        mShadowMethods.push_back(std::make_shared<LinkedListShadow>(mpDevice, mpScene)); // LinkedList (1)
-        mShadowMethods.push_back(std::make_shared<AccelShadowKBuffer>(mpDevice,mpScene)); //AccelShadow KBuffer (2)
-        mShadowMethods.push_back(std::make_shared<AccelIrregularZ>(mpDevice, mpScene)); // Accel IrregularZ (3)
-        mShadowMethods.push_back(std::make_shared<LinkedListIrregularZ>(mpDevice, mpScene)); // Linked List IrregularZ (4)
-
-        if (mpScene->getLightCount() == 1)
-            mLightSampleMode = LightSampleMode::Uniform; //Cheapest light sample mode
+            if (lightCount == 1)
+                mLightSampleMode = LightSampleMode::Uniform; // Cheapest light sample mode
+        }
     }
 }
 
@@ -345,6 +369,36 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     return defines;
 }
 
+void TransparencyRenderer::prepareResources(RenderContext* pRenderContext, const RenderData& renderData) {
+    // Textures
+    const auto& screenSize = renderData.getDefaultTextureDims();
+
+    auto needRebuild = [](const ref<Texture>& pTex, const uint2& size) {
+        bool rebuild = !pTex;
+        if (!rebuild)
+            rebuild |= pTex->getWidth() != size.x || pTex->getHeight() != size.y;
+        return rebuild;
+    };
+    
+    if (mCameraRenderMode != CameraRenderMode::PathTracer && needRebuild(mpTransparencyThp, screenSize))
+    {
+        mpTransparencyThp = Texture::create2D(
+            mpDevice, screenSize.x, screenSize.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpTransparencyThp->setName("TransparencyThp");
+    }
+
+    if (mCameraRenderMode == CameraRenderMode::DirectRT_Reflections && needRebuild(mpReflectionsMask, screenSize))
+    {
+        mpReflectionsMask = Texture::create2D(
+            mpDevice, screenSize.x, screenSize.y, ResourceFormat::R8Unorm, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpReflectionsMask->setName("ReflectionsMask");
+    }
+}
+
 void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "ShadeOpaque");
@@ -360,6 +414,8 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add(getLightEvalDefines());
+        defines.add("RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0");
+        defines.add("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
         
 
         mpEvalDirectPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -369,6 +425,11 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
 
     // If defines change, refresh the program
     mpEvalDirectPass->getProgram()->addDefines(getLightEvalDefines());
+    // Reflections
+    mpEvalDirectPass->getProgram()->addDefine(
+        "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
+    );
+    mpEvalDirectPass->getProgram()->addDefine("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
 
     //Dispatch Dims
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -401,6 +462,7 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     var["gMotionVector"] = renderData.getTexture(kOutputMV);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gTransparencyThp"] = mpTransparencyThp;
+    var["gRayReflectionMask"] = mpReflectionsMask;
 
     // Execute
     
@@ -409,17 +471,6 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
 
 void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "TransparencyOnPrimaryRay");
-
-    const auto& screenSize = renderData.getDefaultTextureDims();
-    //Textures
-    if (!mpTransparencyThp || mpTransparencyThp->getWidth() != screenSize.x || mpTransparencyThp->getHeight() != screenSize.y)
-    {
-        mpTransparencyThp = Texture::create2D(
-            mpDevice, screenSize.x, screenSize.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr,
-            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-        );
-        mpTransparencyThp->setName("TransparencyThp");
-    }
 
     // Create scene ray tracing program.
     if (!mEvalTransparencyDirectRay.pProgram)
@@ -548,11 +599,6 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
     // Update define that can change at runtime
     mReflectionsPass.pProgram->addDefines(getLightEvalDefines());
     mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
-    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
-    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); // For updating depth
-                                                                                                                       // and motion
-    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData));             // For NRD
-    mReflectionsPass.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
 
     // Init Vars
     if (!mReflectionsPass.pVars)
@@ -591,6 +637,7 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
         bind(channel);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gThp"] = mpTransparencyThp;
+    var["gReflectionMask"] = mpReflectionsMask;
 
     // Execute
     mpScene->raytrace(pRenderContext, mReflectionsPass.pProgram.get(), mReflectionsPass.pVars, uint3(targetDim, 1));

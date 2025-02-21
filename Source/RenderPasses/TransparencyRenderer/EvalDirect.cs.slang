@@ -14,11 +14,14 @@ RWTexture2D<float2> gMotionVector;     //Can be overwritten if scene was missed
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
+RWTexture2D<float> gRayReflectionMask;
 
 static const bool kAdjustShadingNormals = true;
 static const float kMinOpacity = 1e-7;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
 static const float kEnvMapStrength = ENV_MAP_STRENGTH;
+static const bool kWriteReflectionMask = RAY_REFLECTIONS_ENABLE;
+static const float kReflectionsRoughnessThreshold = REFLECTIONS_ROUGHNESS_THRESHOLD;
 static const bool kCalcEnvMapMotionVectors = true;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
@@ -52,7 +55,8 @@ float2 ViewSpaceToUV(float3 posV)
 void main(uint2 pixel: SV_DispatchThreadID)
 {
     // Load color from transparency pass
-    float3 colorOut = float3(0.0); 
+    float3 colorOut = float3(0.0);
+    bool useRayReflections = false;
     const HitInfo hit = HitInfo(gVBuffer[pixel]);
     float3 viewDir = -gViewW[pixel].xyz;
     float3 transparencyThp = gTransparencyThp[pixel].xyz;
@@ -100,7 +104,18 @@ void main(uint2 pixel: SV_DispatchThreadID)
         colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity);
 
         // Ambient
-        colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
+        float3 ambient = bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
+
+        //Check if a ray reflection should be executed on the current pixel
+        if (kWriteReflectionMask) {
+            // float3 specularPercentage = bsdfProperties.specularReflectionAlbedo / max(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo, 1e-7);
+            // useRayReflections |= luminance(specularPercentage) > kReflectionsRoughnessThreshold;
+            useRayReflections |= bsdfProperties.roughness < kReflectionsRoughnessThreshold;
+            if (!useRayReflections)
+                colorOut += ambient;
+        } else {
+            colorOut += ambient;
+        }
     }
     else //Enviroment map lookup
     {
@@ -112,6 +127,11 @@ void main(uint2 pixel: SV_DispatchThreadID)
             gMotionVector[pixel] = prevUV - (float2(pixel) + 0.5) / float2(gFrameDim);
         }
     }
-    float3 prevColor = gOutputColor[pixel].xyz;
-    gOutputColor[pixel] = float4(colorOut + prevColor, 1.0);
+
+    gOutputColor[pixel] += float4(colorOut, 1.0);
+
+    if (kWriteReflectionMask) {
+        float isReflection = useRayReflections ? 1.0 : 0.0;
+        gRayReflectionMask[pixel] = isReflection;
+    }
 }
