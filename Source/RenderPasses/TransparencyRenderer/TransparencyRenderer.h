@@ -61,7 +61,8 @@ public:
         LinkedList = 2,
         AccelShadowKBuffer = 3,
         AccelIrregularZ = 4,
-        LinkedListIrregularZ = 5
+        LinkedListIrregularZ = 5,
+        VirtualShadowMap = 6
     };
 
     FALCOR_ENUM_INFO(ShadowRenderMethod,  {
@@ -71,6 +72,7 @@ public:
             {ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"},
             {ShadowRenderMethod::LinkedList, "LinkedList"},
             {ShadowRenderMethod::LinkedListIrregularZ, "LinkedListIrregularZ"},
+            {ShadowRenderMethod::VirtualShadowMap, "VirtualShadowMap"},
         }
     );
 
