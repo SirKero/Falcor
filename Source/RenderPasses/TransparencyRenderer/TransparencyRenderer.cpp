@@ -187,6 +187,10 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
 
+    if (mIrregularUseShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ ||
+        mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+        mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get());
+
     //Render
     switch (mCameraRenderMode)
     {
@@ -260,8 +264,8 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
     dirty |= methodChanged;
 
-    mOpaqueShadowMapModeChanged |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);
-    widget.tooltip("Enables a extra opaque shadow map pass. Shadow Method should only evaluate non-opaque geometry in that case");
+    //mOpaqueShadowMapModeChanged |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);
+    //widget.tooltip("Enables a extra opaque shadow map pass. Shadow Method should only evaluate non-opaque geometry in that case");
 
     widget.checkbox("Enable Fallback Shadows", mEnableFallbackRayTracedShadows);
     widget.tooltip("Some techniques allow for ray traced shadows as a fallback. They can be toggled on/off manually here");
@@ -274,6 +278,16 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 
     widget.var("Global Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
     widget.tooltip("Global Near/Far values for all lights");
+
+    if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+    {
+        widget.checkbox("Enable Shadow Backproject Mask", mIrregularUseShadowMask);
+        widget.tooltip(
+            "Enables a backprojection mask (non-opaque objects rasterized), that is used to reject samples for only opaque on fully-lit "
+            "samples in the backprojection process"
+        );
+    }
+        
 
     if (auto group = widget.group("Soft Shadow Options"))
     {
@@ -333,6 +347,8 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
             if (lightCount == 1)
                 mLightSampleMode = LightSampleMode::Uniform; // Cheapest light sample mode
         }
+
+        mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
     }
 }
 
@@ -345,6 +361,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
         defines.add(mpShadowMap->getDefines());
     defines.add("EVAL_OPAQUE_SHADOW_MAP", mEnableOpaqueShadowMaps ? "1" : "0");
     RayFlags evalQueryRayFlags = mEnableOpaqueShadowMaps ? RayFlags::CullOpaque : RayFlags::ForceNonOpaque;
+    //evalQueryRayFlags = mIrregularUseShadowMask ? RayFlags::CullNonOpaque : evalQueryRayFlags; //TODO fix
     defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
@@ -430,6 +447,8 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
         "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
     );
     mpEvalDirectPass->getProgram()->addDefine("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
+    mpEvalDirectPass->getProgram()->addDefine("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
+
 
     //Dispatch Dims
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -442,6 +461,10 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     mpSampleGenerator->setShaderData(var);                    // Sample generator
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
+
+    if (mIrregularUseShadowMask &&
+        (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask());
 
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
@@ -533,6 +556,10 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
+
+    if (mIrregularUseShadowMask &&
+        (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask());
 
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());

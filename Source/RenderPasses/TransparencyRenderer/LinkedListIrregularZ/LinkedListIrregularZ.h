@@ -48,6 +48,10 @@ public:
      */
     virtual void setShaderData(const ShaderVar& var) override;
 
+    /** Additional mask to reject the backprojectio
+    */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex) override;
+
     /** Render UI for the method
      */
     virtual bool renderUI(Gui::Widgets& widget) override;

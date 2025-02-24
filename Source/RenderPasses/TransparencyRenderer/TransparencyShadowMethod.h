@@ -38,6 +38,21 @@ class TransparencyShadowMethod
 public:
     virtual ~TransparencyShadowMethod() = default;
 
+    // Light MVP
+    struct LightMVP
+    {
+        float3 pos = float3(0);
+        float spreadAngle = 0;
+        float4x4 view = float4x4();
+        float4x4 projectionNoJitter = float4x4();
+        float4x4 projection = float4x4();
+        float4x4 viewProjection = float4x4();
+        float4x4 viewProjectionNoJitter = float4x4();
+        float4x4 invViewProjection = float4x4();
+        float4x4 invProjection = float4x4();
+        float4x4 invView = float4x4();
+    };
+
     /** Generate resources needed to evaluate the Shadow Method (e.g. Shadow Map)
     * Should be called every frame and needs to be called before using any resources from that pass
     */
@@ -50,6 +65,10 @@ public:
     /** Set the needed shader data for the method (textures,buffer, etc)
     */
     virtual void setShaderData(const ShaderVar& var) {}
+
+    /** Some methods can use an additional mask, this is set here
+    */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex) {}
 
     /** Render UI for the method
     */
@@ -89,26 +108,20 @@ public:
         mRandomSoftShadowsDirSpread = directionalSpread;
     }
 
+    /** Gets current shadow map resolution
+    */
+    const uint2 getShadowMapResolution() const { return mResolution; }
+
+    /** Get the light mpvs for the scene
+    */
+    const std::vector<LightMVP>& getLightMVPs() const { return mShadowMapMVP; }
+
 protected:
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
     //Function to update the Shadow Map Matrices
     virtual void updateSMMatrices(bool rebuild = false);
 
-    //Light MVP
-    struct LightMVP
-    {
-        float3 pos = float3(0);
-        float spreadAngle = 0;
-        float4x4 view = float4x4();
-        float4x4 projectionNoJitter = float4x4();
-        float4x4 projection = float4x4();
-        float4x4 viewProjection = float4x4();
-        float4x4 viewProjectionNoJitter = float4x4();
-        float4x4 invViewProjection = float4x4();
-        float4x4 invProjection = float4x4();
-        float4x4 invView = float4x4();
-    };
     virtual void updateViewProjection(LightMVP& lightMVP, ref<Light> pLight);
 
     virtual void updateMVPAndJitter(LightMVP& lightMVP);
@@ -167,5 +180,4 @@ protected:
             pFBO.reset();
         }
     };
-
 };

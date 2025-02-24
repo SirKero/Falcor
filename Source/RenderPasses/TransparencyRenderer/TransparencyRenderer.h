@@ -32,6 +32,7 @@
 #include "Rendering/ShadowMaps/ShadowMap.h"
 #include "TransparencyShadowMethod.h"
 #include "Rendering/Materials/TexLODTypes.slang"
+#include "TransparentShadowMask/TransparentShadowMask.h"
 
 using namespace Falcor;
 
@@ -139,7 +140,6 @@ private:
 
     //Prepare additional textures and buffers
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
-
     //Evaluate direct light with an Compute Shader
     void evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluates the transparencies until the first opaque surface
@@ -153,6 +153,7 @@ private:
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
     std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
+    std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask for Irregular Shadow Maps
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
@@ -178,6 +179,9 @@ private:
 
     //Reflections
     float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
+
+    //Shadow Mask
+    bool mIrregularUseShadowMask = true;
 
     //Soft Shadows
     bool mEnableSoftShadows = false;

@@ -614,6 +614,13 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gLinkedListData"][i] = mLinkedListData[i];
     }
 
+    shadowVar["gSampler"] = mpPointSampler;
+}
+
+void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex) {
+    auto shadowVar = var["gLinkedListIrregularZ"];
+
+    shadowVar["gShadowMask"] = maskTex;
 }
 
 //TODO Some of the options should not be toggable for this pass as that will probably break the algorithm

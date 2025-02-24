@@ -75,6 +75,9 @@ struct AccelIrregularZShader
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
+    Texture2DArray<float> gShadowMask;
+
+    SamplerState gSampler;
 
     inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const SHADOW_DATA_FORMAT transparency) {
         rayData.visibility += transparency;
@@ -111,7 +114,7 @@ struct AccelIrregularZShader
      * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
      * \return visibility in [0,1]
      */
-    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0, bool useMask = false) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -129,7 +132,15 @@ struct AccelIrregularZShader
             }
             validShadow = false;
         }
-            
+
+        // Get mask value
+        bool validBackprojection = true;
+        if (useMask) {
+            float maskVal = gShadowMask.SampleLevel(gSampler, float3(shadowPos.xy, lightIdx), 0);
+            validBackprojection = maskVal > 0.0;
+            validShadow &= validBackprojection;
+        }
+
     #if SHADOW_ACCEL_PCF
         float2 gatherUV;
         float4 w = getGatherWeights(shadowPos.xy, gSMSize.x, gatherUV);
@@ -141,24 +152,25 @@ struct AccelIrregularZShader
 
         // Add access
         uint2 uShadowPixel;
-        bool validBackprojection = true;
-        if(isDirectional){
-            // For directional use the staggered MVP for access
-            float2 dirShadowPixel = mul(gStaggeredDirVP, float4(posW, 1)).xy;
-            dirShadowPixel.y *= -1;                            // Flip
-            dirShadowPixel.xy = dirShadowPixel.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
-            if (any(dirShadowPixel.xy < 0.0) || any(dirShadowPixel.xy > 1.0))
-                validBackprojection = false;
-            uShadowPixel = uint2(dirShadowPixel * gSMSize);
+        if (validBackprojection) {
+            if (isDirectional) {
+                // For directional use the staggered MVP for access
+                float2 dirShadowPixel = mul(gStaggeredDirVP, float4(posW, 1)).xy;
+                dirShadowPixel.y *= -1;                            // Flip
+                dirShadowPixel.xy = dirShadowPixel.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+                if (any(dirShadowPixel.xy < 0.0) || any(dirShadowPixel.xy > 1.0))
+                    validBackprojection = false;
+                uShadowPixel = uint2(dirShadowPixel * gSMSize);
+            }
+            else
+                uShadowPixel = uint2(shadowPixel);
         }
-        else
-            uShadowPixel = uint2(shadowPixel);
-
+        
         uint backprojectionWeight = clamp(uint(importance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         if(validBackprojection)
             InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
 
-        //Raytraced shadows as fallback
+        // Raytraced shadows as fallback
         if (!validShadow)
             return float3(-1.f);
 

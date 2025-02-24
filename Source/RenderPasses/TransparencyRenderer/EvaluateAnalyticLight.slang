@@ -54,6 +54,9 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #define IMPORTANCE_MODE IMPORTANCE_MODE_OPACITY_THP
 #endif
 
+#ifndef USE_IRRGEGULAR_SHADOW_MASK
+#define USE_IRRGEGULAR_SHADOW_MASK 0
+#endif
 
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
@@ -62,6 +65,7 @@ static const bool kTRUseColoredTransparency = TR_USE_COLORED_TRANSPARENCY;
 static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
 static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
+static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK; //Enables use of irregular shadow mask
 
 // For RIS light sampling
 struct RISReservoir {
@@ -383,9 +387,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
             visibility = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelIrregularZ
-            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance);
+            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, kUseIrregularShadowMask);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedListIrregularZ
-            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance);
+            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, kUseIrregularShadowMask);
         #endif
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)

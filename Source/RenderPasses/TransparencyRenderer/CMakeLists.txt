@@ -37,6 +37,10 @@ target_sources(TransparencyRenderer PRIVATE
 	LinkedListIrregularZ/GenLinkedListIrregularZ.rt.slang
 	LinkedListIrregularZ/LinkedListIrregularZData.slang
 
+    TransparentShadowMask/TransparentShadowMask.cpp
+    TransparentShadowMask/TransparentShadowMask.h
+    TransparentShadowMask/GenTransparentShadowMask.3d.slang
+
 	TransparencyShadowMethod.h
 	TransparencyShadowMethod.cpp
 

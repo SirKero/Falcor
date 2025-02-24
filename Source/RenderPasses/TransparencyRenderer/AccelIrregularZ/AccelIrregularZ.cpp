@@ -684,7 +684,16 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gShadowAABBs"][i] = mAccelShadowAABB[i];
     }
 
+    shadowVar["gSampler"] = mpPointSampler;
+
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
+}
+
+void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex)
+{
+    auto shadowVar = var["gAccelIrregularZ"];
+
+    shadowVar["gShadowMask"] = maskTex;
 }
 
 bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
