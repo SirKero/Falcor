@@ -152,10 +152,10 @@ void rayGen()
     // Prepare ray payload.
     PathData pd = PathData();
     pd.origin = gScene.camera.getPosition();
-    pd.direction = reflect(viewDir, sd.frame.N);//bsdfProperties.guideNormal);
+    pd.direction = reflect(viewDir, bsdfProperties.guideNormal);
     pd.sg = SampleGenerator(pixel, gFrameCount);
 
-    pd.thp = gThp[pixel].xyz * (mi.eval(sd, pd.direction, pd.sg) / mi.evalPdf(sd, pd.direction)); // Get Thp times reflection brdf
+    pd.thp = gThp[pixel].xyz * (mi.eval(sd, pd.direction, pd.sg)/  mi.evalPdf(sd, pd.direction)); // Get Thp times reflection brdf
     
     //Prepare Ray
     RayDesc ray;
