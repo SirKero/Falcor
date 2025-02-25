@@ -52,10 +52,10 @@ LinkedListIrregularZ::LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScen
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
     Sampler::Desc samplerDesc = {};
-    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-    mpPointSampler = Sampler::create(mpDevice, samplerDesc);
-    FALCOR_ASSERT(mpPointSampler);
+    mpTexSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpTexSampler);
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
 }
@@ -536,7 +536,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
         var["gCounter"] = mLinkedListCounter[frameInFlight];
         var["gData"] = mLinkedListData[i];
-        var["gPointSampler"] = mpPointSampler;
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
         var["gHaltonSamples"] = mpHaltonBuffer;
@@ -614,7 +613,7 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gLinkedListData"][i] = mLinkedListData[i];
     }
 
-    shadowVar["gSampler"] = mpPointSampler;
+    shadowVar["gSampler"] = mpTexSampler;
 }
 
 void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex) {

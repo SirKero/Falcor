@@ -136,7 +136,7 @@ private:
     LightMVP mStaggeredDirectionalLightMVP = {};
     int mDirectionalLightIndex = -1; //Used to set LightMVP
 
-    ref<Sampler> mpPointSampler;
+    ref<Sampler> mpTexSampler;
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
     ref<SampleGenerator> mpSampleGenerator;
 

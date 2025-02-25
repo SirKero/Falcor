@@ -182,6 +182,7 @@ private:
 
     //Shadow Mask
     bool mIrregularUseShadowMask = true;
+    bool mIrregularShadowMaskAlwaysUseOpaqueRayShadow = false;
 
     //Soft Shadows
     bool mEnableSoftShadows = false;

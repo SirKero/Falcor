@@ -286,6 +286,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             "Enables a backprojection mask (non-opaque objects rasterized), that is used to reject samples for only opaque on fully-lit "
             "samples in the backprojection process"
         );
+        widget.checkbox("Backproject always use opaque shadow ray", mIrregularShadowMaskAlwaysUseOpaqueRayShadow);
     }
         
 
@@ -361,7 +362,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
         defines.add(mpShadowMap->getDefines());
     defines.add("EVAL_OPAQUE_SHADOW_MAP", mEnableOpaqueShadowMaps ? "1" : "0");
     RayFlags evalQueryRayFlags = mEnableOpaqueShadowMaps ? RayFlags::CullOpaque : RayFlags::ForceNonOpaque;
-    //evalQueryRayFlags = mIrregularUseShadowMask ? RayFlags::CullNonOpaque : evalQueryRayFlags; //TODO fix
+    evalQueryRayFlags = mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing ? RayFlags::CullNonOpaque : evalQueryRayFlags; //TODO fix
     defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
@@ -448,6 +449,9 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     );
     mpEvalDirectPass->getProgram()->addDefine("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
     mpEvalDirectPass->getProgram()->addDefine("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
+    mpEvalDirectPass->getProgram()->addDefine(
+        "IRRGEGULAR_SHADOW_MASK_USE_RAY", mIrregularUseShadowMask && mIrregularShadowMaskAlwaysUseOpaqueRayShadow ? "1" : "0"
+    );
 
 
     //Dispatch Dims

@@ -66,8 +66,6 @@ Texture2D<float> gSampleDistribution;
 
 Buffer<float2> gHaltonSamples; 
 
-SamplerState gPointSampler;
-
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
 static const float kOpaqueHitRayDepthBias = OPAQUE_HIT_RAY_DEPTH_BIAS; //Depth bias applied to tmin to search for the next opaque hit (for midpoint sm)
 static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;

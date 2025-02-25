@@ -52,10 +52,10 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
     Sampler::Desc samplerDesc = {};
-    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-    mpPointSampler = Sampler::create(mpDevice, samplerDesc);
-    FALCOR_ASSERT(mpPointSampler);
+    mpTexSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpTexSampler);
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
 }
@@ -584,7 +584,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gAABB"] = mUseOneAABBForAllLights ? mAccelShadowAABB[0] : mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mUseOneAABBForAllLights ? mAccelShadowData[0] : mAccelShadowData[i];
-        var["gPointSampler"] = mpPointSampler;
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
         var["gHaltonSamples"] = mpHaltonBuffer;
@@ -684,7 +683,7 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gShadowAABBs"][i] = mAccelShadowAABB[i];
     }
 
-    shadowVar["gSampler"] = mpPointSampler;
+    shadowVar["gSampler"] = mpTexSampler;
 
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
 }

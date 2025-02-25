@@ -58,6 +58,10 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #define USE_IRRGEGULAR_SHADOW_MASK 0
 #endif
 
+#ifndef IRRGEGULAR_SHADOW_MASK_USE_RAY
+#define IRRGEGULAR_SHADOW_MASK_USE_RAY 0
+#endif
+
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
@@ -65,7 +69,8 @@ static const bool kTRUseColoredTransparency = TR_USE_COLORED_TRANSPARENCY;
 static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
 static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
-static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK; //Enables use of irregular shadow mask
+static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK; // Enables use of irregular shadow mask
+static const bool kIrregularShadowMaskUseRay = IRRGEGULAR_SHADOW_MASK_USE_RAY;
 
 // For RIS light sampling
 struct RISReservoir {
@@ -223,7 +228,9 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
         }
     }
 
-    //No need to check comitted status, as no hit is accepted
+    //In case of non opaque hit
+    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        visibility = 0.0;
 
     return visibility;
 }
@@ -300,6 +307,8 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     }
 
     // No need to check comitted status, as no hit is accepted
+    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        visibility = 0.0;
 
     return visibility;
 }
@@ -394,8 +403,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
 
-        // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (visibility.x < 0) && kEnableFallbackRay) {
+            // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
+            if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || kIrregularShadowMaskUseRay ||(visibility.x < 0) && kEnableFallbackRay) {
+            if (visibility.x < 0)
+                visibility = 1.0;
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
             if (kUseSoftShadows) {
                 if (isDirectional) {
@@ -407,10 +418,12 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
                     ls.dir /= ls.distance;
                 }
             }
-            if(kUseStochasticRayTracing)
-                visibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
+            float3 rayVisibility = 1.0;
+            if (kUseStochasticRayTracing)
+                rayVisibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
             else
-                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
+                rayVisibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
+            visibility = min(visibility, rayVisibility);
         }
 
         // Clamp shadow in [0,1]

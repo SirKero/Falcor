@@ -147,7 +147,7 @@ private:
         bool stopGeneration = false;
     } mAccelDebugShowAS;
 
-    ref<Sampler> mpPointSampler;
+    ref<Sampler> mpTexSampler;
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
     ref<SampleGenerator> mpSampleGenerator;
 
