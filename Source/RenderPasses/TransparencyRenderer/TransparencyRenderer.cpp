@@ -183,19 +183,19 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         method->setSoftShadowParameter(mEnableSoftShadows, mSoftShadowsPositionRadius, mSoftShadowsDirectionalSpread);
     }        
 
-    //Generate Shadow Structure
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
-        mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
-
-    if (mIrregularUseShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+    if (mIrregularUseShadowMask &&
+        (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
     {
         mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get());
         mShadowMethods[mSelectedShadowMethod]->enableOpaqueShadowMap(
             mIrregularUseShadowMask && mIrregularShadowMaskAlwaysUseOpaqueRayShadow
         );
     }
-        
 
+    //Generate Shadow Structure
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+        mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
+      
     //Render
     switch (mCameraRenderMode)
     {

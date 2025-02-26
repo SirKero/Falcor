@@ -50,7 +50,8 @@ TransparencyShadowMethod::TransparencyShadowMethod(ref<Device> pDevice, ref<Scen
             mHasDirectionalLight = true;
             count++;
         }
-    FALCOR_ASSERT(count <= 1); //More than 1 directional light? 
+    FALCOR_ASSERT(count <= 1); //More than 1 directional light?
+    updateSMMatrices(true);
 }
 
 DefineList TransparencyShadowMethod::getDefines()
