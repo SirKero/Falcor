@@ -126,8 +126,6 @@ private:
     uint mLinkedListDataFormatSize = 3; //TODO set automatically
     bool mRebuildDataBuffer = true;
     bool mAccelUsePCF = false;
-    RayFlags mAccelRayFlags = RayFlags::None;
-    float mMergeBoxDist = 0.f; //Distance the accel boxes are merged
     bool mTransparencyBufferUsesColor = false; // Checks if the transparency buffer data size matches the global setting
 
     uint mSkipFrameCount = 0;           // Counter for skipping frames

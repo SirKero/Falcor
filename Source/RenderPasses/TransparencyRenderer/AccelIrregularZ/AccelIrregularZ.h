@@ -126,7 +126,6 @@ private:
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
     bool mAccelUseFrustumCulling = false;
-    RayFlags mAccelRayFlags = RayFlags::None;
 
     uint mSkipFrameCount = 0; //Counter for skipping frames
     uint mSkipGenerationFrameCount = 1; //Number of generated frames is 1/X
