@@ -187,9 +187,14 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
 
-    if (mIrregularUseShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ ||
-        mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+    if (mIrregularUseShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+    {
         mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get());
+        mShadowMethods[mSelectedShadowMethod]->enableOpaqueShadowMap(
+            mIrregularUseShadowMask && mIrregularShadowMaskAlwaysUseOpaqueRayShadow
+        );
+    }
+        
 
     //Render
     switch (mCameraRenderMode)

@@ -39,7 +39,11 @@ struct RayData
         this.dist = -1.0;
         this.depth = 1.0;
         this.currentTransmittance = float3(1.0);
-        this.sampleTransmittance = float3(0.0);
+        this.sampleTransmittance = float3(1.0);
+    }
+
+    const bool isOpaque() {
+        return sampleTransmittance.x < 0;
     }
 };
 
@@ -72,15 +76,14 @@ static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIB
 static const float kMinOpacity = 1e-7;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
-static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
-static const float kMergeDistance = ACCEL_MERGE_BOX_DIST;
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
-static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; //For Directional lights
+static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
+static const bool kLimitedOpaqueStore = STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
 
 
 
@@ -100,6 +103,13 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
 
     return sd;
+}
+
+//Get next hightest float
+float ulp(float f)
+{
+    int i = asint(f);
+    return abs(asfloat(i + 1) - f);
 }
 
 //Shaders
@@ -162,9 +172,11 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
         transmittance = 1.0 - float3(gScene.materials.getMaterialOpacity(v, materialID, lod));
     }
 
+    //If hit is transparent (alpha < 1e-7)
     if (all(transmittance > kMaxTransmittance))
         IgnoreHit();
 
+    //Commit hit
     if (RayTCurrent() < rayData.dist) {
         rayData.sampleTransmittance = transmittance;
         rayData.dist = RayTCurrent();
@@ -191,13 +203,15 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     VertexData v = gScene.getVertexData(triangleHit);
 
     float3 transmittance = rayData.sampleTransmittance;
+    rayData.sampleTransmittance = float3(1.0);
     //Case opaque object that does not call the anyHit
     if (RayTCurrent() < rayData.dist) {
         transmittance = 0.0;
+        rayData.sampleTransmittance.x = -1.0;
     }
     
     rayData.currentTransmittance = rayData.currentTransmittance * transmittance;
-    float4 posH = mul(gViewProj, float4(v.posW, 1.f));
+    float4 posH = mul(gViewProj, float4(v.posW, 1.0));
     rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
     rayData.dist = RayTCurrent();
 }
@@ -420,7 +434,6 @@ void rayGen()
     boxPixelOffset *= mipMulFactor;
     pixelCenterOffest *= mipMulFactor;
 
-    const float pixelScale = mipMulFactor * subpixelSize;
     //
     // Dispatch Sample / Create Shadow Map
     //
@@ -477,75 +490,98 @@ void rayGen()
     }
     
     RayData rayData = RayData();
-    bool useRayTracing = true;
-    float2 boxZ = float2(0.0); //Last two middle depths
+    bool rayTracingLoop = true;
+    float aabbFrontZ = 0.0;
+    float aabbBackZ = 0.0;
     float lastHitDepth = 0.0;
     float3 currTranmittance = float3(1.0);  //Tranmission end of current sample
     float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
-    bool mergeLastBox = false;               // Merge the box from the prevoius frame
     const float far = ray.TMax;
     const uint instanceMask = getBestParticleShadowPlane(gLightDir);
+    bool currHitOpaque = false;
+    bool prevHitOpaque = false;
+
     // Loop to get all possible samples
-    for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
+    for (uint i = 0; (i < MAX_ELEMENTS) && rayTracingLoop; i++) {
         rayData.depth = -1;
         rayData.dist = ray.TMax;
         rayData.sampleTransmittance = 0.0;
 
         //Trace ray
 
-        TraceRay(gScene.rtAccel, kRayFlags, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        TraceRay(gScene.rtAccel, 0 /*Flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0)
             return;
 
-        //End ray tracing for the next frame
+        //End Loop for the next iteration if transmittance is smaller as minValue or the ray missed the scene
         if (all(prevTransmittance <= kMinOpacity) || rayData.dist < 0) {
-            useRayTracing = false;
+            rayTracingLoop = false;
         }
 
-        // Merge boxes for non-opaque hits if they are too close to another
+        //Get difference between last and current depth
         float distDiff = rayData.depth - lastHitDepth;
-        bool mergeBox = i > 1 && distDiff < kMergeDistance && any(rayData.currentTransmittance > kMinOpacity); 
-        // Update box dims
+        // Update aabb Z values if the ray hit something
         if (rayData.dist > 0) {
-            if (!mergeLastBox)
-                boxZ.y = boxZ.x;
-            boxZ.x = lastHitDepth + distDiff * kMidpointPercentage;           
+            aabbFrontZ = aabbBackZ;
+            aabbBackZ = lastHitDepth + distDiff * kMidpointPercentage;           
         }
 
-        // Write output data
-        if (rayData.dist > 0 && i > 1 && (!mergeBox)) {
-            if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, prevTransmittance, lastHitDepth))
+        //Write the sample stating on 3rd iteration(i=2). Both aabbZ values are filled at that point
+        if (rayData.dist > 0 && i > 1) {
+            if (!writeSample(pixelSample, boxPixelOffset, aabbFrontZ, aabbBackZ, prevTransmittance, lastHitDepth))
                  return;
         }
-        // Update for next iteration
+
+        // Update depth, transmittance and ray for next iteration
         if (rayData.dist > 0) {
-            // A bit of a dirty fix for particles that overlap with solid geometry
-            ray.TMin = all(rayData.currentTransmittance <= kMinOpacity) ? rayData.dist + kOpaqueHitRayDepthBias * pixelScale : rayData.dist + 1e-7; 
+            prevHitOpaque = currHitOpaque;
+            currHitOpaque = rayData.isOpaque();
+            float rayOffset = ulp(rayData.dist) * 4.0; // Next highest float x4 seems to work pretty well
+            // ray.TMin = currHitOpaque ? min(rayData.dist + kOpaqueHitRayDepthBias, rayData.dist + rayOffset) : rayData.dist + rayOffset; // This a bit of a dirty fix for particles that overlap with solid geometry
+            ray.TMin = rayData.dist + rayOffset;
             lastHitDepth = rayData.depth;
             prevTransmittance = currTranmittance;
-           
             currTranmittance = rayData.currentTransmittance;
-            mergeLastBox = mergeBox;            
         }
     }
 
-// Insert last two elements
-    if (rayData.dist < 0)
-        rayData.depth = far;
+    // Insert last two elements
+    bool lastHitMiss = rayData.dist < 0;
+    bool storePrev = true;
+    bool storeCurr = !lastHitMiss;
+
+    //When Limited Opaque store is enabled, only opaque hits that hit non opaque objects after are stored. A ray may be distributed to check (if ray: -> opaqueHit -> opaqueHit)
+    if(kLimitedOpaqueStore){
+        // Distribute ray to check if there is any non opaque geometry
+        storeCurr = !prevHitOpaque;
+        if (prevHitOpaque && currHitOpaque) {
+            rayData.depth = -1;
+            rayData.dist = ray.TMax;
+            rayData.sampleTransmittance = 0.0;
+            uint rayFlags = RAY_FLAG_CULL_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
+            TraceRay(gScene.rtAccel, rayFlags, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+
+            storePrev = rayData.dist >= 0;
+            lastHitMiss = true;
+        } else if (prevHitOpaque && !currHitOpaque) {
+            storePrev = !lastHitMiss;
+            lastHitMiss = true;
+        }
+    }
 
     // Update box
-    boxZ.y = boxZ.x;
-    boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) * kMidpointPercentage;
+    aabbFrontZ = aabbBackZ;
+    aabbBackZ = lastHitMiss ? far : lastHitDepth + (rayData.depth - lastHitDepth) * kMidpointPercentage;
 
-    if (any(prevTransmittance < 1.0)) {
-        if (!writeSample(pixelSample, boxPixelOffset, boxZ.y, boxZ.x, prevTransmittance, lastHitDepth))
+    if (any(prevTransmittance < 1.0) && storePrev) {
+        if (!writeSample(pixelSample, boxPixelOffset, aabbFrontZ, aabbBackZ, prevTransmittance, lastHitDepth))
             return;
     }
     // Store last box
-    if (any(currTranmittance < 1.0) && rayData.dist >= 0) {
-        if (!writeSample(pixelSample, boxPixelOffset, boxZ.x, far, currTranmittance, rayData.depth))
+    if (any(currTranmittance < 1.0) && storeCurr) {
+        if (!writeSample(pixelSample, boxPixelOffset, aabbBackZ, far, currTranmittance, rayData.depth))
             return;
     }
 }

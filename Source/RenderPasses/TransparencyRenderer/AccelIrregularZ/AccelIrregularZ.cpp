@@ -362,9 +362,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         mStaggeredDirectionalLightMVP = tmp;
     }
 
-    //Check if opaque shadow map is set and change ray flags accordingly
-    mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
-
     auto& lights = mpScene->getLights();
     uint frameInFlight = mStagingCount; // For sync if optimization is used
 
@@ -528,16 +525,15 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
     mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
     mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
+    mGenAccelShadowPip.pProgram->addDefine("STORE_LIMITED_OPAQUE_SURFACES", mOpaqueShadowMapEnabled ? "1" : "0");
     
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
@@ -798,10 +794,6 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         group.var("OpaqueHitRayDepthBias", mOpaqueHitRayDepthBias, 1e-7f, FLT_MAX, 0.000001f, false, "%.7f");
         group.tooltip("Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used");
 
-        group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");
-        group.tooltip(
-            "Merges Accel Boxes together and takes the transparency of the first box. Can add bias (brightening). \n Set to 0 to disable."
-        );
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         group.tooltip("Only uses the Visibility of the sample with the closest depth. If disabled, the average of all hit Boxes is used");
         if (auto group2 = group.group("Debug"))
