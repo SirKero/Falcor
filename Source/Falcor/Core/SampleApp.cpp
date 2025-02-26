@@ -49,7 +49,7 @@ namespace Falcor
 {
 SampleApp::SampleApp(const SampleAppConfig& config)
 {
-    logInfo("Falcor (ClausthalRendering) {}", getLongVersionString());
+    logInfo("Falcor {}", getLongVersionString());
 
     OSServices::start();
     Threading::start();
