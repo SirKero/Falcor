@@ -150,7 +150,7 @@ private:
     std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
-    ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
+    ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::VirtualShadowMap;
     TexLODMode mRayLodMode = TexLODMode::Mip0;
     bool mEnableTransparencyPassLODMode = true;
     TexLODMode mShadowLodMode = TexLODMode::Mip0;

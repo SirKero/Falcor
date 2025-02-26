@@ -22,6 +22,10 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_NEAREST_DEPTH 0
 #endif
 
+#ifndef ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS
+#define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 1
+#endif
+
 #if SHADOW_ACCEL_PCF
 struct AccelShadowRayData {
     float4 visibility;

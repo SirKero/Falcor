@@ -306,7 +306,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         mShadowMethods.push_back(std::make_shared<AccelShadowKBuffer>(mpDevice,mpScene)); //AccelShadow KBuffer (2)
         mShadowMethods.push_back(std::make_shared<AccelIrregularZ>(mpDevice, mpScene)); // Accel IrregularZ (3)
         mShadowMethods.push_back(std::make_shared<LinkedListIrregularZ>(mpDevice, mpScene)); // Linked List IrregularZ (4)
-        mShadowMethods.push_back(std::make_shared<VirtualShadowMap>(mpDevice, mpScene)); // Linked List IrregularZ (4)
+        mShadowMethods.push_back(std::make_shared<VirtualShadowMap>(mpDevice, mpScene)); // Virtual Shadow Map (5)
 
         if (mpScene->getLightCount() == 1)
             mLightSampleMode = LightSampleMode::Uniform; //Cheapest light sample mode
