@@ -1,6 +1,7 @@
 #include "EvaluateAnalyticLight.slang"
- 
+
 import Utils.Math.MathHelpers;
+import Rendering.Materials.Fresnel;
 
 cbuffer CB
 {
@@ -156,7 +157,8 @@ void rayGen()
     pd.direction = reflect(viewDir, bsdfProperties.guideNormal);
     pd.sg = SampleGenerator(pixel, gFrameCount);
 
-    pd.thp = gThp[pixel].xyz * (mi.eval(sd, pd.direction, pd.sg)/  mi.evalPdf(sd, pd.direction)); // Get Thp times reflection brdf
+    //pd.thp = gThp[pixel].xyz * (mi.eval(sd, pd.direction, pd.sg)/  mi.evalPdf(sd, pd.direction)); //Same result als below, but much more expensive
+    pd.thp = gThp[pixel].xyz * evalFresnelSchlick(bsdfProperties.specularReflectionAlbedo, 1.0f, max(0.00001f, dot(bsdfProperties.guideNormal, pd.direction))); 
     
     //Prepare Ray
     RayDesc ray;
