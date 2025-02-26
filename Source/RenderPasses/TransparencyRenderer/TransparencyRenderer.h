@@ -184,6 +184,8 @@ private:
     bool mIrregularUseShadowMask = true;
     bool mIrregularShadowMaskAlwaysUseOpaqueRayShadow = false;
 
+    float mSMCascadedSize = 50.f; //Global setting for cascaded size
+
     //Soft Shadows
     bool mEnableSoftShadows = false;
     float mSoftShadowsPositionRadius = 0.001f;

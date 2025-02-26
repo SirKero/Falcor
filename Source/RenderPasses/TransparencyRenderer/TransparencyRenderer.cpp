@@ -181,6 +181,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         method->setColoredTransparency(mUseColorTransparency);
         method->setNearFar(mNearFar);
         method->setSoftShadowParameter(mEnableSoftShadows, mSoftShadowsPositionRadius, mSoftShadowsDirectionalSpread);
+        method->setCascadedSize(mSMCascadedSize);
     }        
 
     if (mIrregularUseShadowMask &&
@@ -293,7 +294,11 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         );
         widget.checkbox("Backproject always use opaque shadow ray", mIrregularShadowMaskAlwaysUseOpaqueRayShadow);
     }
-        
+
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+    {
+        widget.var("Cascaded Size", mSMCascadedSize, 0.f, FLT_MAX, 0.1f);
+    }
 
     if (auto group = widget.group("Soft Shadow Options"))
     {
@@ -355,6 +360,9 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         }
 
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
+
+        auto& sceneAABB = mpScene->getSceneBounds();
+        mSMCascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y);
     }
 }
 

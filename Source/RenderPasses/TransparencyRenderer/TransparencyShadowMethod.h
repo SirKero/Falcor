@@ -108,6 +108,10 @@ public:
         mRandomSoftShadowsDirSpread = directionalSpread;
     }
 
+    /** Set cascaded size
+    */
+    void setCascadedSize(float cascadedSize) { mCascadedSize = cascadedSize; }
+
     /** Gets current shadow map resolution
     */
     const uint2 getShadowMapResolution() const { return mResolution; }

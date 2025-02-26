@@ -73,9 +73,6 @@ bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
     {
         widget.var("Directional Light Max Camera Dist", mDirectionalMaxCameraDist, 0.001f, FLT_MAX);
         widget.tooltip("The maximum camera distance that is used to create the perspective shadow map");
-    #if CASCADE_VERSION > 0
-        widget.var("Size Cascaded", mCascadedSize);
-    #endif
     }
 
     return mResolutionChanged || mUpdateSMMatrices;
