@@ -16,6 +16,10 @@ RWTexture2D<float2> gMotionVector;     //Can be overwritten if scene was missed
 RWTexture2D<float4> gOutputColor;
 RWTexture2D<float> gRayReflectionMask;
 
+#ifndef USE_IRRGEGULAR_SHADOW_MASK
+#define USE_IRRGEGULAR_SHADOW_MASK 0
+#endif
+
 static const bool kAdjustShadingNormals = true;
 static const float kMinOpacity = 1e-7;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
@@ -23,6 +27,7 @@ static const float kEnvMapStrength = ENV_MAP_STRENGTH;
 static const bool kWriteReflectionMask = RAY_REFLECTIONS_ENABLE;
 static const float kReflectionsRoughnessThreshold = REFLECTIONS_ROUGHNESS_THRESHOLD;
 static const bool kCalcEnvMapMotionVectors = true;
+static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -101,7 +106,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
-        colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity);
+        colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity, kUseIrregularShadowMask);
 
         // Ambient
         float3 ambient = bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;

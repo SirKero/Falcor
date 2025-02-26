@@ -22,6 +22,7 @@ static const uint kMaxElements = 256; // For now 256 max transparent elements on
 static const bool kAdjustShadingNormals = true;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
 static const float kEnvMapStrength = ENV_MAP_STRENGTH;
+static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK;
 
 
 /** Payload for alpha ray (20B + 16B if lod is enabled)
@@ -193,7 +194,8 @@ void rayGen()
         pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
         // Analytic
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity) * sd.opacity;
+        bool useMask = kUseIrregularShadowMask && sd.opacity <= kMinOpacity; //Use the mask for opaque hits
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, useMask) * sd.opacity;
 
         // Ambient
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;

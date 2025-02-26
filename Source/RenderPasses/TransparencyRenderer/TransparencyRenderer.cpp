@@ -635,6 +635,10 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
     // Update define that can change at runtime
     mReflectionsPass.pProgram->addDefines(getLightEvalDefines());
     mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
+    mReflectionsPass.pProgram->addDefine("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
+    mReflectionsPass.pProgram->addDefine(
+        "IRRGEGULAR_SHADOW_MASK_USE_RAY", mIrregularUseShadowMask && mIrregularShadowMaskAlwaysUseOpaqueRayShadow ? "1" : "0"
+    );
 
     // Init Vars
     if (!mReflectionsPass.pVars)
