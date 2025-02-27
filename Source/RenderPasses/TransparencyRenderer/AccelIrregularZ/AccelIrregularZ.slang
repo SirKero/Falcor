@@ -1,5 +1,6 @@
 #pragma once
 #include "AccelIrregularZData.slang"
+#include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
 import Rendering.ShadowMaps.ShadowMapHelpers;
@@ -54,8 +55,8 @@ struct AccelShadowAttribs {
 
 struct AccelIrregularZShader
 {
-    static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;  // TODO currently ignored and always assumed true
-    static const uint kMaxAtomicWeight = 64;                      // Max value to be added on the atomic counter
+    static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;       // TODO currently ignored and always assumed true
+    static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT;                      // Max value to be added on the atomic counter
     static const bool kUseOneAABBForAllLight = ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS;
 
     cbuffer SMCB

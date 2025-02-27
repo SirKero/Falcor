@@ -1,3 +1,5 @@
+#pragma once
+#include "../SharedShadowDefines.slang"
 
 #ifndef COUNT_LIGHTS
 #define COUNT_LIGHTS 1
@@ -15,7 +17,7 @@ Texture2D<float> gSmpMip[COUNT_LIGHTS];
 Buffer<uint> gElementCount; // Last frames aabb count
 RWBuffer<uint> gLastFrameSampleCount; //Max number of distributed samples
 
-static const uint kMaxAtomicWeight = 64; // Should be the same as in AccelIrregularZ.slang (where the atomic counter is increased)
+static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT; // Should be the same as in AccelIrregularZ.slang (where the atomic counter is increased)
 static const uint kMinSamples = 4096;    // Min 64x64 samples
 static const uint kMaxSamples = MAX_SAMPLES; //Cannot distribute more than this per shadow map
 static const bool kUseOneBufferForAllLights = USE_ONE_BUFFER_FOR_ALL_LIGHTS;

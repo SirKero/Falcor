@@ -53,6 +53,7 @@ target_sources(TransparencyRenderer PRIVATE
     RayReflections.rt.slang
 	PathTracer.rt.slang
 	RayLodHelper.slang
+    SharedShadowDefines.slang
 )
 
 target_copy_shaders(TransparencyRenderer RenderPasses/TransparencyRenderer)

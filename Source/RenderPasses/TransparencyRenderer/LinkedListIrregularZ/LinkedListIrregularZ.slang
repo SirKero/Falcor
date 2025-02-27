@@ -1,5 +1,6 @@
 #pragma once
 #include "LinkedListIrregularZData.slang"
+#include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
 import Rendering.ShadowMaps.ShadowMapHelpers;
@@ -13,7 +14,7 @@ __exported import Scene.Intersection;
 
 struct LinkedListIrregularZShader
 {
-    static const uint kMaxAtomicWeight = 64;                      // Max value to be added on the atomic counter
+    static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT;    // Max value to be added on the atomic counter
 
     cbuffer SMCB
     {
