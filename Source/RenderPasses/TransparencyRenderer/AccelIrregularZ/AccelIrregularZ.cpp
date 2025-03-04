@@ -380,6 +380,18 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             mGenAccessMips = ComputePass::create(mpDevice, desc, defines, true);
         }
 
+        //One pass to cap the lowest mip at a max value
+        {
+            auto var = mGenAccessMips->getRootVar();
+            for (uint i = 0; i < lights.size(); i++)
+                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(0));
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
+            var["CB"]["gDstSize"] = dispatchDim.xy();
+            var["CB"]["gCapLowestLevel"] = true;
+
+            mGenAccessMips->execute(pRenderContext, dispatchDim);
+        }
+
         for (uint m = 0; m < mAccessTextures[0]->getMipCount() - 1; m++)
         {
             auto var = mGenAccessMips->getRootVar();
@@ -391,6 +403,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
                
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m + 1), mAccessTextures[0]->getHeight(m + 1), lights.size());
             var["CB"]["gDstSize"] = dispatchDim.xy();
+            var["CB"]["gCapLowestLevel"] = false;
 
             mGenAccessMips->execute(pRenderContext, dispatchDim);
         }

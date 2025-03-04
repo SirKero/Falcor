@@ -84,7 +84,7 @@ static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
-static const bool kLimitedOpaqueStore = STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
+static const bool kLimitedOpaqueStore = false;// STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
 
 
 
@@ -575,7 +575,7 @@ void rayGen()
 
     // Update box
     aabbFrontZ = aabbBackZ;
-    aabbBackZ = lastHitMiss ? far : lastHitDepth + (rayData.depth - lastHitDepth) * kMidpointPercentage;
+    aabbBackZ = lastHitMiss || !storeCurr ? far : lastHitDepth + (rayData.depth - lastHitDepth) * kMidpointPercentage;
 
     if (any(prevTransmittance < 1.0) && storePrev) {
         if (!writeSample(pixelSample, boxPixelOffset, aabbFrontZ, aabbBackZ, prevTransmittance, lastHitDepth))

@@ -129,7 +129,7 @@ struct AccelIrregularZShader
         // Check if inside the SM
         if (any(shadowPos.xy < 0.0) || any(shadowPos.xy > 1.0)) {
             if (!isDirectional) {
-                return float3(0.f);
+                return float3(-1.f);
             }
             validShadow = false;
         }
