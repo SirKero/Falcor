@@ -30,7 +30,8 @@
 
 namespace
 {
-const std::string kShaderFile = "RenderPasses/TransparencyRenderer/TransparentShadowMask/GenTransparentShadowMask.3d.slang";
+const std::string kShaderGenRaster = "RenderPasses/TransparencyRenderer/TransparentShadowMask/GenTransparentShadowMask.3d.slang";
+const std::string kShaderAccumulate = "RenderPasses/TransparencyRenderer/TransparentShadowMask/AccumulateMask.cs.slang";
 }
 
 TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene)
@@ -46,32 +47,32 @@ void TransparentShadowMask::generate(RenderContext* pRenderContext, const Render
     auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
 
     //Prepare Resources
-    //Mask
-    if (!mpTransparentShadowMask || mpTransparentShadowMask->getWidth() != smRes.x || mpTransparentShadowMask->getHeight() != smRes.y ||
-        mpTransparentShadowMask->getArraySize() != lights.size())
+    //Mask Render target
+    if (!mpTransparentShadowMaskRaster || mpTransparentShadowMaskRaster->getWidth() != smRes.x || mpTransparentShadowMaskRaster->getHeight() != smRes.y ||
+        mpTransparentShadowMaskRaster->getArraySize() != lights.size())
     {
-        mpTransparentShadowMask = Texture::create2D(
+        mpTransparentShadowMaskRaster = Texture::create2D(
             mpDevice, smRes.x, smRes.y, ResourceFormat::R8Unorm, lights.size(), 1u, nullptr,
             ResourceBindFlags::RenderTarget | ResourceBindFlags::ShaderResource
         );
+        mpTransparentShadowMaskRaster->setName("TransparentShadowMaskRenderTarget");
+    }
+    //Mask temporal accumulate
+    if (!mpTransparentShadowMask || mpTransparentShadowMask->getWidth() != smRes.x || mpTransparentShadowMask->getHeight() != smRes.y)
+    {
+        mpTransparentShadowMask = Texture::create2D(
+            mpDevice, smRes.x, smRes.y, ResourceFormat::R8Unorm, lights.size(), 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
         mpTransparentShadowMask->setName("TransparentShadowMask");
     }
-    //Depth
-    if (!mpRasterDepth || mpRasterDepth->getWidth() != smRes.x || mpRasterDepth->getHeight() != smRes.y)
-    {
-        mpRasterDepth = Texture::create2D(
-            mpDevice, smRes.x, smRes.y, ResourceFormat::D32Float, 1u, 1u, nullptr,
-            ResourceBindFlags::DepthStencil
-        );
-        mpRasterDepth->setName("TransparentShadowMask_RasterDepth");
-    }
-
+    
      // Init Program
     if (!mGenerateMaskPip.pProgram)
     {
         // Init program
         Program::Desc desc;
-        desc.addShaderLibrary(kShaderFile).vsEntry("vsMain").psEntry("psMain");
+        desc.addShaderLibrary(kShaderGenRaster).vsEntry("vsMain").psEntry("psMain");
         desc.setShaderModel("6_6");
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addTypeConformances(mpScene->getTypeConformances());
@@ -83,6 +84,10 @@ void TransparentShadowMask::generate(RenderContext* pRenderContext, const Render
         mGenerateMaskPip.pState = GraphicsState::create(mpDevice);
 
         // Set state
+        DepthStencilState::Desc dsDesc;
+        dsDesc.setDepthEnabled(false);
+        mGenerateMaskPip.pState->setDepthStencilState(DepthStencilState::create(dsDesc));
+        mGenerateMaskPip.pState->setDepthStencilState(DepthStencilState::create(dsDesc));
         mGenerateMaskPip.pState->setProgram(mGenerateMaskPip.pProgram);
 
         mGenerateMaskPip.pFBO = Fbo::create(mpDevice);
@@ -97,7 +102,6 @@ void TransparentShadowMask::generate(RenderContext* pRenderContext, const Render
 
     auto var = mGenerateMaskPip.pVars->getRootVar();
 
-    mGenerateMaskPip.pFBO->attachDepthStencilTarget(mpRasterDepth, 0u, 0u, 1u);
     auto meshRenderMode = RasterizerState::MeshRenderMode::SkipOpaque | RasterizerState::MeshRenderMode::SkipParticleCamera;
 
     //Raster pass over every light
@@ -139,7 +143,7 @@ void TransparentShadowMask::generate(RenderContext* pRenderContext, const Render
         }
 
         //Set and clear FBO
-        mGenerateMaskPip.pFBO->attachColorTarget(mpTransparentShadowMask, 0u, 0u, i, 1u);
+        mGenerateMaskPip.pFBO->attachColorTarget(mpTransparentShadowMaskRaster, 0u, 0u, i, 1u);
         mGenerateMaskPip.pState->setFbo(mGenerateMaskPip.pFBO);
 
         pRenderContext->clearFbo(mGenerateMaskPip.pFBO.get(), float4(0.f), 1.f, 0);
@@ -149,4 +153,35 @@ void TransparentShadowMask::generate(RenderContext* pRenderContext, const Render
 
         mpScene->rasterize(pRenderContext, mGenerateMaskPip.pState.get(), mGenerateMaskPip.pVars.get(), RasterizerState::CullMode::None,meshRenderMode);
     }
+
+    //Compute pass for temporal accumulate
+    if (!mpTemporalAccumulateMaskPass)
+    {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderAccumulate).csEntry("main").setShaderModel("6_6");
+
+        DefineList defines;
+        defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+
+        mpTemporalAccumulateMaskPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+
+    FALCOR_ASSERT(mpTemporalAccumulateMaskPass);
+
+    //Dispatch compute
+    {
+        FALCOR_PROFILE(pRenderContext, "TemporalAccumulateMask");
+        var = mpTemporalAccumulateMaskPass->getRootVar();
+        uint3 dispatchDimensions = uint3(mpTransparentShadowMask->getWidth(), mpTransparentShadowMask->getHeight(), lights.size());
+
+        var["CB"]["gDispatchDims"] = dispatchDimensions;
+        var["CB"]["gCurrentBit"] = mTemporalCounter % kMaxTemporal;
+
+        var["gCurrentMask"] = mpTransparentShadowMaskRaster;
+        var["gTemporalMask"] = mpTransparentShadowMask;
+
+        mpTemporalAccumulateMaskPass->execute(pRenderContext, dispatchDimensions);
+    }
+
+    mTemporalCounter++;
 }

@@ -49,11 +49,15 @@ public:
 
 private:
 
+    const uint kMaxTemporal = 8;    //Max temporal accumulation (8bit)
+
+    uint mTemporalCounter = 0;  //< Current frame counter for the temporal mask 
+
     ref<Device> mpDevice;
     ref<Scene> mpScene;
 
-    ref<Texture> mpTransparentShadowMask; //2D Array containing the masks for all shadow maps
-    ref<Texture> mpRasterDepth;             //Raster depth texture
+    ref<Texture> mpTransparentShadowMaskRaster; //2D Array containing the masks for all shadow maps
+    ref<Texture> mpTransparentShadowMask; //Containing the temporally accumulated shadow masks
 
     struct RasterPipeline
     {
@@ -72,5 +76,5 @@ private:
     };
 
     RasterPipeline mGenerateMaskPip;
-
+    ref<ComputePass> mpTemporalAccumulateMaskPass; 
 };

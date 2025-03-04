@@ -138,7 +138,7 @@ struct AccelIrregularZShader
         bool validBackprojection = true;
         if (useMask) {
             float maskVal = gShadowMask.SampleLevel(gSampler, float3(shadowPos.xy, lightIdx), 0);
-            validBackprojection = maskVal > 0.0;
+            validBackprojection = maskVal > TRANSPARENCY_MASK_COMPAIRE_VALUE; // 1.0/255.0
             validShadow &= validBackprojection;
         }
 
