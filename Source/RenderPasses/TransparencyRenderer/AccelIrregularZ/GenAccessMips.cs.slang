@@ -22,7 +22,8 @@ void main(uint3 thdID: SV_DispatchThreadID)
     uint2 srcIdx = pixel * 2;
 
     if (gCapLowestLevel) {
-        gDst[thdID.z][uint2(srcIdx.x, srcIdx.y)] = min(gDst[thdID.z][uint2(srcIdx.x, srcIdx.y)], MAX_LOWEST_LEVEL_IMPORTANCE);
+        uint importance = gDst[thdID.z][uint2(pixel.x, pixel.y)];
+        gDst[thdID.z][uint2(pixel.x, pixel.y)] = min(importance , MAX_LOWEST_LEVEL_IMPORTANCE);
     } else {
         uint sum = 0;
         sum += gSrc[thdID.z][uint2(srcIdx.x, srcIdx.y)];
