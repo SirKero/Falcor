@@ -25,6 +25,10 @@ RWTexture2D<float4> gThpOut;
 #define ENABLE_TRANSPARENCY_LOD 0
 #endif
 
+#ifndef CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
+#define CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE 0
+#endif
+
 #define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = 1e-7;
 static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
@@ -198,11 +202,6 @@ void rayGen()
         }
     }
        
-    //Motion vector
-    float2 mVec = float2(0);
-    if (is_valid(gInMotion))
-        mVec = gInMotion[pixel];
-
     //Prepare Ray
     RayDesc ray;
     ray.Origin = pd.origin;
@@ -210,8 +209,16 @@ void rayGen()
     ray.TMin =  gScene.camera.data.nearZ;
     ray.TMax = tMax;
     TransparencyRayData rayData = TransparencyRayData(tMax);
+
+#if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
+    // Motion vector
+    float2 mVec = float2(0);
+    if (is_valid(gInMotion))
+        mVec = gInMotion[pixel];
+
     bool mVecUpdated = false;
     bool depthUpdated = false;
+#endif
 
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
@@ -261,6 +268,7 @@ void rayGen()
         rayData = TransparencyRayData(ray.TMax);
 
         // Update depth and motion vector if valid
+    #if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
         bool overThreshold = any(pd.thp > kDepthMVOpacityThreshold);
         if (is_valid(gOutDepth) && (!depthUpdated || overThreshold )) {
             float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
@@ -275,13 +283,16 @@ void rayGen()
             mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
             mVecUpdated = true;
         }
+    #endif // CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
     }
     //Write data
     gOutputColor[pixel] = float4(pd.radiance, 1.0);
     gThpOut[pixel] = float4(pd.thp, 1.0);
 
+#if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
     if (is_valid(gOutMotion))
         gOutMotion[pixel] = mVec;
     if (is_valid(gOutDepth))
         gOutDepth[pixel] = depth;
+#endif
 }

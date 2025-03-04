@@ -135,6 +135,18 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         return;
     }
 
+    //Copy depth and mvec
+    if (!mUseNonOpaqueDepthAndMV)
+    {
+        for (uint i=0; i<kInputGeometryInfoChannels.size(); i++)
+        {
+            Texture* pSrc = renderData.getTexture(kInputGeometryInfoChannels[i].name).get();
+            Texture* pDst = renderData.getTexture(kOutputGeometryInfoChannels[i].name).get();
+            if (pSrc && pDst)
+                pRenderContext->copyResource(pDst, pSrc);
+        }
+    }
+
     //Set render dimensions for LOD helper
     if (any(mRenderDims != renderData.getDefaultTextureDims()))
         mRenderDims = renderData.getDefaultTextureDims();
@@ -245,6 +257,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
             dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
             dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
+            dirty |= widget.checkbox("Calc MVec & Depth for non opaque", mUseNonOpaqueDepthAndMV);
             break;
         case CameraRenderMode::DirectRT_Reflections:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
@@ -254,6 +267,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
             dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
             dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
+            dirty |= widget.checkbox("Calc MVec & Depth for non opaque", mUseNonOpaqueDepthAndMV);
             break;
         case CameraRenderMode::PathTracer:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
@@ -553,6 +567,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData)); //For NRD
     mEvalTransparencyDirectRay.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
+    mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", mUseNonOpaqueDepthAndMV ? "1" : "0");
     
     // Init Vars
     if (!mEvalTransparencyDirectRay.pVars)

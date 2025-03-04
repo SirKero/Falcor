@@ -176,6 +176,7 @@ private:
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
     bool mUseColorTransparency = false; //Enables transparency with color
     ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
+    bool mUseNonOpaqueDepthAndMV = false;
 
     //Reflections
     float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
