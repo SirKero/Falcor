@@ -27,6 +27,10 @@ import Utils.Sampling.SampleGenerator;
 #define ACCEL_USE_FRUSTUM_CULLING 0
 #endif
 
+#ifndef TRACE_NON_OPAQUE_ONLY
+#define TRACE_NON_OPAQUE_ONLY 0
+#endif
+
 /** Payload for shadow ray. (32B)
 */
 struct RayData
@@ -84,8 +88,8 @@ static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
-static const bool kLimitedOpaqueStore = false;// STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
-
+static const bool kLimitedOpaqueStore = false; // STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
+static const bool kUseOptimizedMidpoint = true; //Uses min between midpoint and a high bias (0.08% of lights far)
 
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
@@ -111,6 +115,16 @@ float ulp(float f)
 {
     int i = asint(f);
     return abs(asfloat(i + 1) - f);
+}
+
+inline float getMidpointDepth(float lastHitDepth, float distanceDifference, float far) {
+    float midpointDepth = 0;
+    if (kUseOptimizedMidpoint)
+        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, 0.0008 * far);
+    else
+        midpointDepth = lastHitDepth + distanceDifference * kMidpointPercentage;
+
+    return midpointDepth;
 }
 
 //Shaders
@@ -182,16 +196,6 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
         rayData.sampleTransmittance = transmittance;
         rayData.dist = RayTCurrent();
     }
-}
-
-bool intersectPlane(const float3 N, const float3 p, const float3 ray, out float t) {
-    t = 0.0;
-    float denom = dot(N, ray);
-    if (abs(denom) > 1e-4) {
-        t = dot(p, N) / denom;
-        return t >= 0;
-    }
-    return false;
 }
 
 [shader("closesthit")]
@@ -502,16 +506,19 @@ void rayGen()
     const uint instanceMask = getBestParticleShadowPlane(gLightDir);
     bool currHitOpaque = false;
     bool prevHitOpaque = false;
-
+    uint i = 0;
     // Loop to get all possible samples
-    for (uint i = 0; (i < MAX_ELEMENTS) && rayTracingLoop; i++) {
+    for (i; (i < MAX_ELEMENTS) && rayTracingLoop; i++) {
         rayData.depth = -1;
         rayData.dist = ray.TMax;
         rayData.sampleTransmittance = 0.0;
 
-        //Trace ray
-
-        TraceRay(gScene.rtAccel, 0 /*Flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        // Trace ray
+        uint rayFlags = 0;
+    #if TRACE_NON_OPAQUE_ONLY
+        rayFlags = RAY_FLAG_CULL_OPAQUE;
+    #endif
+        TraceRay(gScene.rtAccel, rayFlags /*Flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0)
@@ -527,7 +534,7 @@ void rayGen()
         // Update aabb Z values if the ray hit something
         if (rayData.dist > 0) {
             aabbFrontZ = aabbBackZ;
-            aabbBackZ = lastHitDepth + distDiff * kMidpointPercentage;           
+            aabbBackZ = getMidpointDepth(lastHitDepth, distDiff, far); 
         }
 
         //Write the sample stating on 3rd iteration(i=2). Both aabbZ values are filled at that point
@@ -553,6 +560,9 @@ void rayGen()
     bool lastHitMiss = rayData.dist < 0;
     bool storePrev = true;
     bool storeCurr = !lastHitMiss;
+#if TRACE_NON_OPAQUE_ONLY
+    storeCurr = true;       //It now cannot be assumed that this is the last hit
+#endif
 
     //When Limited Opaque store is enabled, only opaque hits that hit non opaque objects after are stored. A ray may be distributed to check (if ray: -> opaqueHit -> opaqueHit)
     if(kLimitedOpaqueStore){
@@ -575,14 +585,18 @@ void rayGen()
 
     // Update box
     aabbFrontZ = aabbBackZ;
-    aabbBackZ = lastHitMiss || !storeCurr ? far : lastHitDepth + (rayData.depth - lastHitDepth) * kMidpointPercentage;
+#if TRACE_NON_OPAQUE_ONLY
+    aabbBackZ = getMidpointDepth(lastHitDepth, 1000000.f, far); // TODO  1000000.f trigger max bias, use a better one 
+#else
+    aabbBackZ = lastHitMiss || !storeCurr ? far : getMidpointDepth(lastHitDepth, (rayData.depth - lastHitDepth), far);
+#endif
 
     if (any(prevTransmittance < 1.0) && storePrev) {
         if (!writeSample(pixelSample, boxPixelOffset, aabbFrontZ, aabbBackZ, prevTransmittance, lastHitDepth))
             return;
     }
     // Store last box
-    if (any(currTranmittance < 1.0) && storeCurr) {
+    if (true) {
         if (!writeSample(pixelSample, boxPixelOffset, aabbBackZ, far, currTranmittance, rayData.depth))
             return;
     }
