@@ -548,8 +548,8 @@ void rayGen()
             prevHitOpaque = currHitOpaque;
             currHitOpaque = rayData.isOpaque();
             float rayOffset = ulp(rayData.dist) * 4.0; // Next highest float x4 seems to work pretty well
-            ray.TMin = currHitOpaque ? min(rayData.dist + kOpaqueHitRayDepthBias * pixelScale, rayData.dist + rayOffset) : rayData.dist + rayOffset; // This a bit of a dirty fix for particles that overlap with solid geometry
-            //ray.TMin = rayData.dist + rayOffset;
+            //ray.TMin = currHitOpaque ? min(rayData.dist + kOpaqueHitRayDepthBias * pixelScale, rayData.dist + rayOffset) : rayData.dist + rayOffset; // This a bit of a dirty fix for particles that overlap with solid geometry
+            ray.TMin = rayData.dist + rayOffset;
             lastHitDepth = rayData.depth;
             prevTransmittance = currTranmittance;
             currTranmittance = rayData.currentTransmittance;
