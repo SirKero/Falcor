@@ -438,7 +438,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             uint mip = mSampleDistribution[0]->getMipCount() - 1;
             var["CB"]["gCalcTotalDispatchCount"] = true;
             var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mDynRCGuardPercentage);
-            var["CB"]["gChangePercentage"] = mDynRCChangePercentage; // 50% for now
+            var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x; 
+            var["CB"]["gChangePercentageDecrease"] = mDynRCChangePercentage.y; 
             var["CB"]["gMaxSampleOverestimate"] = mSampleOverestimate * mSampleOverestimate; //Squared as this is applied to x and y of dispatch resolution
 
             var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
@@ -650,7 +651,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         {
             float diffPercentage = ((mAccelShadowMaxNumPoints - mAccelShadowNumPoints[i]) / mAccelShadowMaxNumPoints);
             uint maxPossibleCount = diffPercentage > 0.0 && mEnableDynamicRayCountCalc
-                                        ? uint(totalCount * diffPercentage * mDynRCChangePercentage)
+                                        ? uint(totalCount * diffPercentage * mDynRCChangePercentage.y)
                                         : 0.25f * mAccelShadowMaxNumPoints;
             numPoints = std::min(uint(mAccelShadowNumPoints[i] + maxPossibleCount), mAccelShadowMaxNumPoints);
         }
@@ -757,10 +758,13 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         mResetRayCount |= group.checkbox("Use GPU Sample Distribution opimization", mEnableDynamicRayCountCalc);
         if (mEnableDynamicRayCountCalc)
         {
-            group.var("GPU SD Total Mult", mDynRCGuardPercentage, 0.001f, 1.f);
-            group.tooltip("Multiplier for the total that is used to calculate the ray count for the current frame");
-            group.var("GPU SD Change Mult", mDynRCChangePercentage, 0.001f, 1.f);
-            group.tooltip("Multiplier for the change value in the Sample Distribution");
+            group.var("GPU SD Fill Guard", mDynRCGuardPercentage, 0.001f, 1.f);
+            group.tooltip("Buffer should be held around this fill percentage. ");
+            group.var("GPU SD Change Mult (Increase/Decrease)", mDynRCChangePercentage, 0.001f, 1.f);
+            group.tooltip(
+                "Multiplier for the change value in the Sample Distribution. There is a different value for increase and decrease. "
+                "Increase should be handled more conserveratively, while the decrease should be quiet aggressive"
+            );
         }
 
         group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);

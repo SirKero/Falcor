@@ -25,7 +25,8 @@ static const bool kUseOneBufferForAllLights = USE_ONE_BUFFER_FOR_ALL_LIGHTS;
 cbuffer CB {
     uint2 gDstSize;
     int gMaxNumAABBs;
-    float gChangePercentage;    //(0,1] how much can the ray dispatch change
+    float gChangePercentageIncrease;    //(0,1] how much can the ray dispatch can increase
+    float gChangePercentageDecrease;    //(0,1] how much can the ray dispatch can decrease
     bool gCalcTotalDispatchCount; // Should only be true on the max mip level
     float gMaxSampleOverestimate;
 }
@@ -63,8 +64,13 @@ void main(uint3 thdID: SV_DispatchThreadID)
         // adjust ray count based on the fullness of the buffer
         int countDiff = gMaxNumAABBs - elementCount;
         float diffPercentage = float(countDiff) / gMaxNumAABBs;
-        totalRayCount += totalRayCount * diffPercentage * gChangePercentage;
-        
+        float rayCountChange = 0.0;
+        if (diffPercentage > 0)
+            rayCountChange = totalRayCount * diffPercentage * gChangePercentageIncrease;
+        else
+            rayCountChange = totalRayCount * diffPercentage * gChangePercentageDecrease;
+
+        totalRayCount += rayCountChange;
         totalRayCount = max(totalRayCount, kMinSamples);
 
         // Write new ray counts to textures
