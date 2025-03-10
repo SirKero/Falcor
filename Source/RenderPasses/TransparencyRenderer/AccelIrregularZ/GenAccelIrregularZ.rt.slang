@@ -532,19 +532,19 @@ void rayGen()
         //Get difference between last and current depth
         float distDiff = rayData.depth - lastHitDepth;
         // Update aabb Z values if the ray hit something
-        if (rayData.dist > 0) {
+        if (rayData.dist >= 0) {
             aabbFrontZ = aabbBackZ;
             aabbBackZ = getMidpointDepth(lastHitDepth, distDiff, far); 
         }
 
         //Write the sample stating on 3rd iteration(i=2). Both aabbZ values are filled at that point
-        if (rayData.dist > 0 && i > 1) {
+        if (rayData.dist >= 0 && i > 1) {
             if (!writeSample(pixelSample, boxPixelOffset, aabbFrontZ, aabbBackZ, prevTransmittance, lastHitDepth))
                  return;
         }
 
         // Update depth, transmittance and ray for next iteration
-        if (rayData.dist > 0) {
+        if (rayData.dist >= 0) {
             prevHitOpaque = currHitOpaque;
             currHitOpaque = rayData.isOpaque();
             float rayOffset = ulp(rayData.dist) * 4.0; // Next highest float x4 seems to work pretty well
@@ -586,7 +586,7 @@ void rayGen()
     // Update box
     aabbFrontZ = aabbBackZ;
 #if TRACE_NON_OPAQUE_ONLY
-    aabbBackZ = getMidpointDepth(lastHitDepth, 1000000.f, far); // TODO  1000000.f trigger max bias, use a better one 
+    aabbBackZ = getMidpointDepth(lastHitDepth, 0.01, far); // TODO use better bias
 #else
     aabbBackZ = lastHitMiss || !storeCurr ? far : getMidpointDepth(lastHitDepth, (rayData.depth - lastHitDepth), far);
 #endif
@@ -596,7 +596,7 @@ void rayGen()
             return;
     }
     // Store last box
-    if (true) {
+    if (any(currTranmittance < 1.0) && storeCurr) {
         if (!writeSample(pixelSample, boxPixelOffset, aabbBackZ, far, currTranmittance, rayData.depth))
             return;
     }

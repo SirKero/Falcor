@@ -23,6 +23,10 @@ import Utils.Sampling.SampleGenerator;
 #define MAX_IDX 1
 #endif
 
+#ifndef TRACE_NON_OPAQUE_ONLY
+#define TRACE_NON_OPAQUE_ONLY 0
+#endif
+
 /** Payload for shadow ray. (32B)
 */
 struct RayData
@@ -78,7 +82,7 @@ static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
-
+static const bool kUseOptimizedMidpoint = true; // Uses min between midpoint and a high bias (0.08% of lights far)
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -103,6 +107,16 @@ float ulp(float f)
 {
     int i = asint(f);
     return abs(asfloat(i + 1) - f);
+}
+
+inline float getMidpointDepth(float lastHitDepth, float distanceDifference, float far) {
+    float midpointDepth = 0;
+    if (kUseOptimizedMidpoint)
+        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, 0.0008 * far);
+    else
+        midpointDepth = lastHitDepth + distanceDifference * kMidpointPercentage;
+
+    return midpointDepth;
 }
 
 //Shaders
@@ -484,8 +498,13 @@ void rayGen()
         rayData.dist = ray.TMax;
         rayData.sampleTransmittance = 1.0;
 
-        //Trace ray
-        TraceRay(gScene.rtAccel, 0 /*Ray flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        // Trace ray
+        //  Trace ray
+        uint rayFlags = 0;
+    #if TRACE_NON_OPAQUE_ONLY
+        rayFlags = RAY_FLAG_CULL_OPAQUE;
+    #endif
+        TraceRay(gScene.rtAccel, rayFlags /*Ray flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0) {
@@ -500,13 +519,13 @@ void rayGen()
         // Get difference between last and current depth
         float distDiff = rayData.depth - lastHitDepth;
         // Update midpoint depth values if the ray hit something
-        if (rayData.dist > 0) {
+        if (rayData.dist >= 0) {
             midpointLast = midpointCurrent;
             midpointCurrent = lastHitDepth + distDiff * kMidpointPercentage;
         }
 
         // Write the sample stating on 3rd iteration(i=2).
-        if (rayData.dist > 0 && i > 1) {
+        if (rayData.dist >= 0 && i > 1) {
             nodeIndex = getInsertIndex();
             if (nodeIndex > MAX_IDX)
                 rayTracingLoop = false;
@@ -516,7 +535,7 @@ void rayGen()
         }
 
         // Update depth, transmittance and ray for next iteration
-        if (rayData.dist > 0) {
+        if (rayData.dist >= 0) {
             prevHitOpaque = currHitOpaque;
             currHitOpaque = rayData.isOpaque();
             float rayOffset = ulp(rayData.dist) * 4.0; // Next highest float x4 seems to work pretty well
@@ -542,11 +561,20 @@ void rayGen()
 
     // Update box
     midpointLast = midpointCurrent;
-
-    bool storeLastBox = (any(currTranmittance < 1.0) && rayData.dist >= 0);
+    bool storeLastBox = true;
+#if TRACE_NON_OPAQUE_ONLY
+    storeLastBox &= any(currTranmittance < 1.0);
+#else
+    storeLastBox &= (any(currTranmittance < 1.0) && rayData.dist >= 0);
+#endif
     storeLastBox |= (prevNodeIndex == idx1D) && all(prevTransmittance >= 1.0); //Guarantees that the head buffer is set
 
-    if (any(prevTransmittance < 1.0)) {
+#if TRACE_NON_OPAQUE_ONLY
+    if (any(prevTransmittance < 1.0) || storeLastBox)
+#else
+    if (any(prevTransmittance < 1.0))
+#endif
+    {
         if (storeLastBox){
             nodeIndex = getInsertIndex();
             if(nodeIndex > MAX_IDX)
