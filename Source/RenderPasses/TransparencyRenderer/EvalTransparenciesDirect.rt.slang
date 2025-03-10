@@ -34,8 +34,8 @@ static const float kMinOpacity = 1e-7;
 static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
-static const float kDepthMVOpacityThreshold = 0.7;   //If thp is above this value, the mv and depth are updated if there are multiple hits
-
+static const float kDepthMVOpacityThreshold = 0.7; // If thp is above this value, the mv and depth are updated if there are multiple hits
+static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK;
 
 /** Payload for alpha ray (20B + 16B if lod is enabled)
 */
@@ -251,7 +251,8 @@ void rayGen()
         pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
         // Analytic
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity) * sd.opacity;
+        uint maskFlag = kUseIrregularShadowMask ? TRANSPARENCY_MASK_FLAG_USE_SM : TRANSPARENCY_MASK_FLAG_NONE;
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag) * sd.opacity;
 
         // Ambient
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;

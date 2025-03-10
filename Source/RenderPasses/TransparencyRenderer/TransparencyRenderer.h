@@ -183,7 +183,6 @@ private:
 
     //Shadow Mask
     bool mIrregularUseShadowMask = true;
-    bool mIrregularShadowMaskAlwaysUseOpaqueRayShadow = false;
 
     float mSMCascadedSize = 50.f; //Global setting for cascaded size
 

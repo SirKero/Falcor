@@ -200,9 +200,6 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
     {
         mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get());
-        mShadowMethods[mSelectedShadowMethod]->enableOpaqueShadowMap(
-            mIrregularUseShadowMask && mIrregularShadowMaskAlwaysUseOpaqueRayShadow
-        );
     }
 
     //Generate Shadow Structure
@@ -306,7 +303,6 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             "Enables a backprojection mask (non-opaque objects rasterized), that is used to reject samples for only opaque on fully-lit "
             "samples in the backprojection process"
         );
-        widget.checkbox("Backproject always use opaque shadow ray", mIrregularShadowMaskAlwaysUseOpaqueRayShadow);
     }
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -376,7 +372,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
 
         auto& sceneAABB = mpScene->getSceneBounds();
-        mSMCascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y);
+        mSMCascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.5f;
     }
 }
 
@@ -397,6 +393,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("USE_STOCHASTIC_RAY_TRACING", mShadowUseStochasticRayTracing ? "1" : "0");
     defines.add("TR_USE_COLORED_TRANSPARENCY", mUseColorTransparency ? "1" : "0");
     defines.add("IMPORTANCE_MODE", std::to_string((uint)mImportanceMode));
+
+    //Mask
+    defines.add("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
 
     //Soft Shadows
     defines.add("USE_SOFT_SHADOWS", mEnableSoftShadows ? "1" : "0");
@@ -475,11 +474,6 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
         "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
     );
     mpEvalDirectPass->getProgram()->addDefine("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
-    mpEvalDirectPass->getProgram()->addDefine("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
-    mpEvalDirectPass->getProgram()->addDefine(
-        "IRRGEGULAR_SHADOW_MASK_USE_RAY", mIrregularUseShadowMask && mIrregularShadowMaskAlwaysUseOpaqueRayShadow ? "1" : "0"
-    );
-
 
     //Dispatch Dims
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -493,9 +487,8 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
-    if (mIrregularUseShadowMask &&
-        (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
-        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask());
+    if (mIrregularUseShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask);
 
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
@@ -589,9 +582,8 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
-    if (mIrregularUseShadowMask &&
-        (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
-        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask());
+    if (mIrregularUseShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask);
 
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
@@ -658,10 +650,6 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
     // Update define that can change at runtime
     mReflectionsPass.pProgram->addDefines(getLightEvalDefines());
     mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
-    mReflectionsPass.pProgram->addDefine("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
-    mReflectionsPass.pProgram->addDefine(
-        "IRRGEGULAR_SHADOW_MASK_USE_RAY", mIrregularUseShadowMask && mIrregularShadowMaskAlwaysUseOpaqueRayShadow ? "1" : "0"
-    );
 
     // Init Vars
     if (!mReflectionsPass.pVars)
@@ -685,6 +673,9 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
 
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
+
+    if (mIrregularUseShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask);
 
     var["CB"]["gFrameCount"] = mFrameCount;
 

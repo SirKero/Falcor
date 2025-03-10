@@ -196,8 +196,11 @@ void rayGen()
         pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
         // Analytic
-        bool useMask = kUseIrregularShadowMask && sd.opacity <= kMinOpacity; //Use the mask for opaque hits
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, useMask) * sd.opacity;
+        uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE;
+        if (kUseIrregularShadowMask) {
+            maskFlags |= sd.opacity <= (1. - kMinOpacity) ? TRANSPARENCY_MASK_FLAG_USE_SM : TRANSPARENCY_MASK_FLAG_USE_MASK;
+        }
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlags) * sd.opacity;
 
         // Ambient
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;

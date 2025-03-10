@@ -1,3 +1,5 @@
+#pragma once
+#include "SharedShadowDefines.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 #include "RayLodHelper.slang"
@@ -54,10 +56,6 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #define IMPORTANCE_MODE IMPORTANCE_MODE_OPACITY_THP
 #endif
 
-#ifndef IRRGEGULAR_SHADOW_MASK_USE_RAY
-#define IRRGEGULAR_SHADOW_MASK_USE_RAY 0
-#endif
-
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
@@ -65,7 +63,7 @@ static const bool kTRUseColoredTransparency = TR_USE_COLORED_TRANSPARENCY;
 static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
 static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
-static const bool kIrregularShadowMaskUseRay = IRRGEGULAR_SHADOW_MASK_USE_RAY;
+static const bool kIrregularShadowMaskUseRay = USE_IRRGEGULAR_SHADOW_MASK;
 
 // For RIS light sampling
 struct RISReservoir {
@@ -315,7 +313,7 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     \param[in,out] sg SampleGenerator object.
     \return Outgoing radiance in view direction.
 */
-float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0), const float opacity = 1.0, bool useMask = false)
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0), const float opacity = 1.0, uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE)
 {
     const uint lightCount = gScene.getLightCount();
     if (lightCount == 0) return float3(0.0);
@@ -382,6 +380,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         // Test visibility by tracing a shadow ray.
         bool isDirectional = lightType == (uint)LightType::Directional; // Slight different calculations for ortho
         float3 visibility = float3(1.0);
+        
 
         // Shadow maps
         #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
@@ -391,15 +390,16 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
             visibility = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelIrregularZ
-            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, useMask);
+            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedListIrregularZ
-            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, useMask);
+            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, maskFlags);
         #endif
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
 
-            // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-            if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (kIrregularShadowMaskUseRay&& useMask) ||(visibility.x < 0) && kEnableFallbackRay) {
+        bool useMaskRay = kIrregularShadowMaskUseRay && (maskFlags & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0;
+        // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
+        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || useMaskRay ||(visibility.x < 0) && kEnableFallbackRay) {
             if (visibility.x < 0)
                 visibility = 1.0;
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);

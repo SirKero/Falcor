@@ -54,8 +54,11 @@ LinkedListIrregularZ::LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScen
     Sampler::Desc samplerDesc = {};
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-    mpTexSampler = Sampler::create(mpDevice, samplerDesc);
-    FALCOR_ASSERT(mpTexSampler);
+    mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpLinearSampler);
+    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    mpPointSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpPointSampler);
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
 }
@@ -499,6 +502,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
+    mGenLinkedListShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); // Trace non-opaque only if mask is used
     
 
     //LOD
@@ -622,13 +626,19 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gLinkedListData"][i] = mLinkedListData[i];
     }
 
-    shadowVar["gSampler"] = mpTexSampler;
+    shadowVar["gLinearSampler"] = mpLinearSampler;
+    shadowVar["gPointSampler"] = mpPointSampler;
 }
 
-void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex) {
-    auto shadowVar = var["gLinkedListIrregularZ"];
+void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable) {
+    mUseMask = enable;
+    if (mUseMask)
+    {
+        auto shadowVar = var["gLinkedListIrregularZ"];
 
-    shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gMaskShadowMap"] = maskSM;
+    }
 }
 
 //TODO Some of the options should not be toggable for this pass as that will probably break the algorithm

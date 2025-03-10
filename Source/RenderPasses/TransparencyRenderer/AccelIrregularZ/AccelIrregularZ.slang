@@ -77,8 +77,10 @@ struct AccelIrregularZShader
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
+    Texture2DArray<float> gMaskShadowMap;
 
-    SamplerState gSampler;
+    SamplerState gLinearSampler;
+    SamplerState gPointSampler;
 
     inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const SHADOW_DATA_FORMAT transparency) {
         rayData.visibility += transparency;
@@ -115,7 +117,7 @@ struct AccelIrregularZShader
      * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
      * \return visibility in [0,1]
      */
-    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0, bool useMask = false) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0, uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -136,8 +138,8 @@ struct AccelIrregularZShader
 
         // Get mask value
         bool validBackprojection = true;
-        if (useMask) {
-            float maskVal = gShadowMask.SampleLevel(gSampler, float3(shadowPos.xy, lightIdx), 0);
+        if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0) {
+            float maskVal = gShadowMask.SampleLevel(gLinearSampler, float3(shadowPos.xy, lightIdx), 0);
             validBackprojection = maskVal > TRANSPARENCY_MASK_COMPAIRE_VALUE; // 1.0/255.0
             validShadow &= validBackprojection;
         }
@@ -173,11 +175,18 @@ struct AccelIrregularZShader
 
         // Raytraced shadows as fallback
         if (!validShadow)
-            return float3(-1.f);
+            return float3(-1.0);
 
         // If only one AABB is used for all lights, offset the pixel pos
         if (kUseOneAABBForAllLight)
             shadowPixel.x += gSMSize.x * lightIdx;
+
+        // Use transparent shadow map
+        if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
+            float maskSMDepth = gMaskShadowMap.SampleLevel(gPointSampler, float3(shadowPos.xy, lightIdx), 0);
+            if (maskSMDepth <= dist)
+                return float3(0.0);
+        }
 
         AccelShadowRayData rayData = AccelShadowRayData();
         RayDesc ray;

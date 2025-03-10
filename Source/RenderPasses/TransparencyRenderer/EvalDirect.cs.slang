@@ -106,7 +106,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
-        colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity, kUseIrregularShadowMask);
+        uint maskFlag = kUseIrregularShadowMask ? TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_NONE;
+        colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity, maskFlag);
 
         // Ambient
         float3 ambient = bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;

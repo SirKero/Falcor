@@ -54,8 +54,12 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
     Sampler::Desc samplerDesc = {};
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-    mpTexSampler = Sampler::create(mpDevice, samplerDesc);
-    FALCOR_ASSERT(mpTexSampler);
+    mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpLinearSampler);
+    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    mpPointSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpPointSampler);
+
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
 }
@@ -548,6 +552,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
     mGenAccelShadowPip.pProgram->addDefine("STORE_LIMITED_OPAQUE_SURFACES", mOpaqueShadowMapEnabled ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); //Trace non-opaque only if mask is used
     
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
@@ -693,16 +698,22 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gShadowAABBs"][i] = mAccelShadowAABB[i];
     }
 
-    shadowVar["gSampler"] = mpTexSampler;
+    shadowVar["gPointSampler"] = mpPointSampler;
+    shadowVar["gLinearSampler"] = mpLinearSampler;
 
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
 }
 
-void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex)
+void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
 {
-    auto shadowVar = var["gAccelIrregularZ"];
+    mUseMask = enable;
+    if (mUseMask)
+    {
+        auto shadowVar = var["gAccelIrregularZ"];
 
-    shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gMaskShadowMap"] = maskSM;
+    }
 }
 
 bool AccelIrregularZ::renderUI(Gui::Widgets& widget)

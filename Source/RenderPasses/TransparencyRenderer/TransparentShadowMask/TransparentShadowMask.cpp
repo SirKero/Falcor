@@ -32,6 +32,7 @@ namespace
 {
 const std::string kShaderGenRaster = "RenderPasses/TransparencyRenderer/TransparentShadowMask/GenTransparentShadowMask.3d.slang";
 const std::string kShaderAccumulate = "RenderPasses/TransparencyRenderer/TransparentShadowMask/AccumulateMask.cs.slang";
+const std::string kShaderGenerateOpaqueSMRT = "RenderPasses/TransparencyRenderer/TransparentShadowMask/GenMaskShadowMap.rt.slang";
 }
 
 TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene)
@@ -39,7 +40,15 @@ TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pSc
 
 }
 
-void TransparentShadowMask::generate(RenderContext* pRenderContext, const RenderData& renderData,const TransparencyShadowMethod* pTransparencyShadowMethod) {
+void TransparentShadowMask::generate(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod)
+{
+    generateTransparencyMask(pRenderContext, renderData, pTransparencyShadowMethod);
+
+    if (mEnableOpaqueMaskShadowMaps)
+        generateOpaqueMaskShadowMap(pRenderContext, renderData, pTransparencyShadowMethod);
+}
+
+void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderContext, const RenderData& renderData,const TransparencyShadowMethod* pTransparencyShadowMethod) {
     FALCOR_PROFILE(pRenderContext,"GenerateTransparencyMasks");
 
     auto& lights = mpScene->getLights();
@@ -184,4 +193,87 @@ void TransparentShadowMask::generate(RenderContext* pRenderContext, const Render
     }
 
     mTemporalCounter++;
+}
+
+void TransparentShadowMask::generateOpaqueMaskShadowMap(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod)
+{
+    FALCOR_PROFILE(pRenderContext, "GenerateOpaqueMaskSM");
+
+    auto& lights = mpScene->getLights();
+    const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
+    auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
+
+    // Prepare Resources
+    if (!mpMaskOpaqueShadowMap || mpMaskOpaqueShadowMap->getWidth() != smRes.x || mpMaskOpaqueShadowMap->getHeight() != smRes.y)
+    {
+        mpMaskOpaqueShadowMap = Texture::create2D(
+            mpDevice, smRes.x, smRes.y, ResourceFormat::R32Float, lights.size(), 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpMaskOpaqueShadowMap->setName("TransparencyMaskOpaqueShadowMap");
+    }
+
+     // Create scene ray tracing program.
+    if (!mGenerateMaskShadowMapRayPass.pProgram)
+    {
+        // Shader setup
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderGenerateOpaqueSMRT);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxPayloadSize(4u);
+        desc.setMaxTraceRecursionDepth(1u);
+
+        mGenerateMaskShadowMapRayPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mGenerateMaskShadowMapRayPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen"));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        // Only Triangle meshes are supported
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        // Initial defines and program
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+
+        mGenerateMaskShadowMapRayPass.pProgram = RtProgram::create(mpDevice, desc, defines);
+    }
+
+    FALCOR_ASSERT(mGenerateMaskShadowMapRayPass.pProgram);
+
+     // Init Vars
+    if (!mGenerateMaskShadowMapRayPass.pVars)
+    {
+        mGenerateMaskShadowMapRayPass.pProgram->setTypeConformances(mpScene->getTypeConformances());
+        mGenerateMaskShadowMapRayPass.pVars =
+            RtProgramVars::create(mpDevice, mGenerateMaskShadowMapRayPass.pProgram, mGenerateMaskShadowMapRayPass.pBindingTable);
+    }
+
+    // Bind shader data
+    const uint2 targetDim = smRes;
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    auto var = mGenerateMaskShadowMapRayPass.pVars->getRootVar();
+
+    // Ray pass over every light
+    for (uint i = 0; i < lights.size(); i++)
+    {
+        bool isDirectional = lights[i]->getType() == LightType::Directional;
+        var["CB"]["gLightIdx"] = i;
+        var["CB"]["gLightPos"] = lights[i]->getData().posW;
+        var["CB"]["gIsDirectional"] = isDirectional;
+        var["CB"]["gInvViewProjection"] = lightMVPs[i].invViewProjection;
+        var["CB"]["gViewProjection"] = lightMVPs[i].viewProjection;
+
+        var["gMask"] = mpTransparentShadowMask;
+        var["gShadowMap"] = mpMaskOpaqueShadowMap;
+
+        // Execute
+        mpScene->raytrace(
+            pRenderContext, mGenerateMaskShadowMapRayPass.pProgram.get(), mGenerateMaskShadowMapRayPass.pVars, uint3(targetDim, 1)
+        );
+    }
 }

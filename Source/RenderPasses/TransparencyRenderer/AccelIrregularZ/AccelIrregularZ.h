@@ -51,7 +51,7 @@ public:
 
     /** Additional mask to reject the backprojectio
     */
-    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex) override;
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable = true) override;
 
     /** Render UI for the method
      */
@@ -91,6 +91,7 @@ private:
 
     //Runtime
     uint mFrameCount = 0;
+    bool mUseMask = false;
 
     //Sync Resources
     static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
@@ -145,7 +146,8 @@ private:
         bool stopGeneration = false;
     } mAccelDebugShowAS;
 
-    ref<Sampler> mpTexSampler;
+    ref<Sampler> mpPointSampler;
+    ref<Sampler> mpLinearSampler;
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
     ref<SampleGenerator> mpSampleGenerator;
 

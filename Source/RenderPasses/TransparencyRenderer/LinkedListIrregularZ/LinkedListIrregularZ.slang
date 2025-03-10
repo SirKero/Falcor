@@ -35,8 +35,10 @@ struct LinkedListIrregularZShader
     Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
+    Texture2DArray<float> gMaskShadowMap;
 
-    SamplerState gSampler;
+    SamplerState gLinearSampler;
+    SamplerState gPointSampler;
     
     /** Caculates the shadow value by evaluating the shadow acceleration structure
      * \param[in] index of the current light
@@ -45,7 +47,7 @@ struct LinkedListIrregularZShader
      * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
      * \return visibility in [0,1]
      */
-    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0, bool useMask = false) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0, uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -66,8 +68,8 @@ struct LinkedListIrregularZShader
 
         // Get mask value
         bool validBackprojection = true;
-        if (useMask) {
-            float maskVal = gShadowMask.SampleLevel(gSampler, float3(shadowPos.xy, lightIdx), 0);
+        if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0) {
+            float maskVal = gShadowMask.SampleLevel(gLinearSampler, float3(shadowPos.xy, lightIdx), 0);
             validBackprojection = maskVal > TRANSPARENCY_MASK_COMPAIRE_VALUE;
             validShadow &= validBackprojection;
         }
@@ -98,6 +100,13 @@ struct LinkedListIrregularZShader
         //Raytraced shadows as fallback
         if (!validShadow)
             return -1.f;
+
+        // Use transparent shadow map
+        if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
+            float maskSMDepth = gMaskShadowMap.SampleLevel(gPointSampler, float3(shadowPos.xy, lightIdx), 0);
+            if (maskSMDepth <= dist)
+                return float3(0.0);
+        }
 
         float3 visibility = 1.0;
 

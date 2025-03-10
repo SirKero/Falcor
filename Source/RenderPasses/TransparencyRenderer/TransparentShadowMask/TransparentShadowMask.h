@@ -47,18 +47,40 @@ public:
     //Get the layered mask texture
     ref<Texture> getMask() { return mpTransparentShadowMask; }
 
-private:
+    //Get layered mask shadow map
+    ref<Texture> getMaskShadowMap() { return mpMaskOpaqueShadowMap; }
 
+private:
+    void generateTransparencyMask(
+        RenderContext* pRenderContext,
+        const RenderData& renderData,
+        const TransparencyShadowMethod* pTransparencyShadowMethod
+    );
+
+    void generateOpaqueMaskShadowMap(
+        RenderContext* pRenderContext,
+        const RenderData& renderData,
+        const TransparencyShadowMethod* pTransparencyShadowMethod
+    );
+
+    //Constants
     const uint kMaxTemporal = 8;    //Max temporal accumulation (8bit)
 
-    uint mTemporalCounter = 0;  //< Current frame counter for the temporal mask 
-
+    //Runtime
     ref<Device> mpDevice;
     ref<Scene> mpScene;
 
+    uint mTemporalCounter = 0;  //< Current frame counter for the temporal mask 
+    
+    //Options
+    bool mEnableOpaqueMaskShadowMaps = true;    //< Enables the opaque mask shadow map pass
+
+    //Buffer and Textures
     ref<Texture> mpTransparentShadowMaskRaster; //2D Array containing the masks for all shadow maps
     ref<Texture> mpTransparentShadowMask; //Containing the temporally accumulated shadow masks
+    ref<Texture> mpMaskOpaqueShadowMap;         //Opaque shadow map for mask region 
 
+    // Pipelines / Programms
     struct RasterPipeline
     {
         ref<GraphicsState> pState;
@@ -76,5 +98,19 @@ private:
     };
 
     RasterPipeline mGenerateMaskPip;
-    ref<ComputePass> mpTemporalAccumulateMaskPass; 
+    ref<ComputePass> mpTemporalAccumulateMaskPass;
+         
+    struct RayTracingPipeline
+    {
+        ref<RtProgram> pProgram;
+        ref<RtBindingTable> pBindingTable;
+        ref<RtProgramVars> pVars;
+
+        void resetPip()
+        {
+            pProgram.reset();
+            pBindingTable.reset();
+            pVars.reset();
+        }
+    } mGenerateMaskShadowMapRayPass;
 };
