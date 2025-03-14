@@ -144,6 +144,21 @@ bool SMGaussianBlur::renderUI(Gui::Widgets& widget) {
     return changed;
 }
 
+bool SMGaussianBlur::setBlurKernel(uint width, float sigma)
+{
+    bool valid = false;
+    if (width % 2 == 1)
+    {
+        width = math::clamp(width, 1u, 15u);
+        sigma = math::clamp(sigma, 0.001f, width / 2.f);
+        mKernelWidth = width;
+        mSigma = sigma;
+        mKernelChanged = true;
+        valid = true;
+    }
+    return valid;
+}
+
 void SMGaussianBlur::prepareBlurTexture(ref<Texture> pTexture)
 {
     bool createTexture = !mpBlurWorkTexture;

@@ -63,6 +63,8 @@ public:
 
     bool renderUI(Gui::Widgets& widget);
 
+    bool setBlurKernel(uint width, float sigma);
+
 private:
     void prepareBlurTexture(ref<Texture> pTexture);
     void updateKernel();

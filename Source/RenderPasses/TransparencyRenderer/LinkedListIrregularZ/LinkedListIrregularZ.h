@@ -114,8 +114,8 @@ private:
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;
     bool mResetRayCount = false;
-    float mDynRCGuardPercentage = 0.9f;  // 10% buffer for possible changes
-    float2 mDynRCChangePercentage = float2(0.1f, 0.8f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
+    float mDynRCGuardPercentage = 0.85f;  // 15% buffer for possible changes
+    float2 mDynRCChangePercentage = float2(0.1f, 0.6f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
 
     //Shadow settings
     float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias

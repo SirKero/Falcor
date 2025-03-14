@@ -121,6 +121,9 @@ public:
     const std::vector<LightMVP>& getLightMVPs() const { return mShadowMapMVP; }
 
 protected:
+    static const uint kBlurKernelWidthInit = 5;
+    static const bool kBlurSigmaInit = 1.f;
+
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
     //Function to update the Shadow Map Matrices

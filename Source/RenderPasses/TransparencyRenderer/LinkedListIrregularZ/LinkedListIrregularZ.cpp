@@ -448,8 +448,11 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     if(mBlurSampleDistribution)
     {
         if (!mpGaussianBlur)
+        {
             mpGaussianBlur = std::make_unique<SMGaussianBlur>(mpDevice);
-
+            mpGaussianBlur->setBlurKernel(kBlurKernelWidthInit, kBlurSigmaInit);
+        }
+            
         //TODO Maybe optimize so that all shaders execute the same step in parallel (e.g. an array version)
         for (uint i = 0; i < lights.size(); i++)
             mpGaussianBlur->execute(pRenderContext, mSampleDistribution[i]); 
