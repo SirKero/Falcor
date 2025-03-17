@@ -29,7 +29,7 @@ struct RayData
     float depth;
 
     __init() {
-        this.depth = 1.0;
+        this.depth = FLT_MAX;
     }
 }
 
@@ -56,7 +56,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 [shader("miss")]
 void miss(inout RayData rayData)
 {
-    rayData.depth = 1.0; // indicate miss
+
 }
 
 [shader("anyhit")]

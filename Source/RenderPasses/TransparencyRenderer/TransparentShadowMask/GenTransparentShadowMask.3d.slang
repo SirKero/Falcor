@@ -11,7 +11,7 @@ import Utils.Math.MathHelpers;
 #define INTERPOLATION_MODE linear
 #endif
 
-#define USE_ALPHA_TEST 1
+#define USE_ALPHA_TEST 0
 
 cbuffer CB
 {
