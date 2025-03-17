@@ -196,16 +196,16 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         method->setCascadedSize(mSMCascadedSize);
     }        
 
+    //Generate Shadow Structure
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+        mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
+
     if (mIrregularUseShadowMask &&
         (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
     {
         mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get());
     }
 
-    //Generate Shadow Structure
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
-        mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
-      
     //Render
     switch (mCameraRenderMode)
     {

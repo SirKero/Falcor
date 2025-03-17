@@ -708,7 +708,7 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
 }
 
-void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
+void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Buffer> maskSM, bool enable)
 {
     mUseMask = enable;
     if (mUseMask)

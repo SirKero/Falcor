@@ -203,15 +203,30 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(RenderContext* pRenderCo
     const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
     auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
 
+    uint2 targetDim = pTransparencyShadowMethod->getShaderDispatchSize();
+    size_t targetDim1D = targetDim.x * targetDim.y;
     // Prepare Resources
-    if (!mpMaskOpaqueShadowMap || mpMaskOpaqueShadowMap->getWidth() != smRes.x || mpMaskOpaqueShadowMap->getHeight() != smRes.y)
+    if (!mpMaskOpaqueShadowMap || mpMaskOpaqueShadowMap->getSize() != targetDim1D * sizeof(float) * lights.size())
     {
+        mpMaskOpaqueShadowMap = Buffer::create(mpDevice, targetDim1D * sizeof(float) * lights.size());
+        /*
         mpMaskOpaqueShadowMap = Texture::create2D(
             mpDevice, smRes.x, smRes.y, ResourceFormat::R32Float, lights.size(), 1u, nullptr,
             ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
         );
+        */
         mpMaskOpaqueShadowMap->setName("TransparencyMaskOpaqueShadowMap");
     }
+
+    if (!mpMaskSampler)
+    {
+        Sampler::Desc samplerDesc = {};
+        samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
+        samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+        mpMaskSampler = Sampler::create(mpDevice, samplerDesc);
+       
+    }
+    FALCOR_ASSERT(mpMaskSampler);
 
      // Create scene ray tracing program.
     if (!mGenerateMaskShadowMapRayPass.pProgram)
@@ -253,8 +268,11 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(RenderContext* pRenderCo
     }
 
     // Bind shader data
-    const uint2 targetDim = smRes;
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    //Get Sample distribution
+    FALCOR_ASSERT(pTransparencyShadowMethod->getSamplesDistribution());
+    auto sampleDistribution = *(pTransparencyShadowMethod->getSamplesDistribution());
 
     auto var = mGenerateMaskShadowMapRayPass.pVars->getRootVar();
 
@@ -265,11 +283,15 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(RenderContext* pRenderCo
         var["CB"]["gLightIdx"] = i;
         var["CB"]["gLightPos"] = lights[i]->getData().posW;
         var["CB"]["gIsDirectional"] = isDirectional;
+        var["CB"]["gMipCount"] = sampleDistribution[0]->getMipCount();
+        var["CB"]["gSMRes"] = smRes;
         var["CB"]["gInvViewProjection"] = lightMVPs[i].invViewProjection;
         var["CB"]["gViewProjection"] = lightMVPs[i].viewProjection;
 
         var["gMask"] = mpTransparentShadowMask;
+        var["gSampleDistribution"] = sampleDistribution[i];
         var["gShadowMap"] = mpMaskOpaqueShadowMap;
+        var["gMaskSampler"] = mpMaskSampler;
 
         // Execute
         mpScene->raytrace(

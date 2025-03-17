@@ -35,7 +35,7 @@ struct LinkedListIrregularZShader
     Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
-    Texture2DArray<float> gMaskShadowMap;
+    Buffer<float> gMaskShadowMap;
 
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
@@ -102,11 +102,13 @@ struct LinkedListIrregularZShader
             return -1.f;
 
         // Use transparent shadow map
+        /*
         if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
             float maskSMDepth = gMaskShadowMap.SampleLevel(gPointSampler, float3(shadowPos.xy, lightIdx), 0);
             if (maskSMDepth <= dist)
                 return float3(0.0);
         }
+        */
 
         float3 visibility = 1.0;
 
@@ -178,6 +180,13 @@ struct LinkedListIrregularZShader
         //Check if index is bigger than max size. Can happen if sample count increases drastically compaired to previous frame
         if (selectedIndex >= gMaxBufferSize)
             return visibility;
+
+        if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
+            uint maskIndex = selectedIndex + gMaxBufferSize * lightIdx;
+            float maskSMDepth = gMaskShadowMap[selectedIndex];
+            if (maskSMDepth <= dist)
+                return float3(0.0);
+        }
 
         LinkedListNode n = gLinkedListData[lightIdx][selectedIndex];
         // traverse visibility until dist is reached

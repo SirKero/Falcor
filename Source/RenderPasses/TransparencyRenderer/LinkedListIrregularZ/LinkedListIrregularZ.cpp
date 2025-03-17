@@ -633,7 +633,7 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["gPointSampler"] = mpPointSampler;
 }
 
-void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable) {
+void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Buffer> maskSM, bool enable) {
     mUseMask = enable;
     if (mUseMask)
     {

@@ -77,7 +77,7 @@ struct AccelIrregularZShader
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
-    Texture2DArray<float> gMaskShadowMap;
+    Buffer<float> gMaskShadowMap;
 
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
@@ -182,11 +182,13 @@ struct AccelIrregularZShader
             shadowPixel.x += gSMSize.x * lightIdx;
 
         // Use transparent shadow map
+        /*
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
             float maskSMDepth = gMaskShadowMap.SampleLevel(gPointSampler, float3(shadowPos.xy, lightIdx), 0);
             if (maskSMDepth <= dist)
                 return float3(0.0);
         }
+        */
 
         AccelShadowRayData rayData = AccelShadowRayData();
         RayDesc ray;

@@ -48,7 +48,7 @@ public:
     ref<Texture> getMask() { return mpTransparentShadowMask; }
 
     //Get layered mask shadow map
-    ref<Texture> getMaskShadowMap() { return mpMaskOpaqueShadowMap; }
+    ref<Buffer> getMaskShadowMap() { return mpMaskOpaqueShadowMap; }
 
 private:
     void generateTransparencyMask(
@@ -78,8 +78,8 @@ private:
     //Buffer and Textures
     ref<Texture> mpTransparentShadowMaskRaster; //2D Array containing the masks for all shadow maps
     ref<Texture> mpTransparentShadowMask; //Containing the temporally accumulated shadow masks
-    ref<Texture> mpMaskOpaqueShadowMap;         //Opaque shadow map for mask region 
-
+    ref<Buffer> mpMaskOpaqueShadowMap;         //Importance shadow map with only opaque objects
+    ref<Sampler> mpMaskSampler;             //Mask sampler for the gen pass
     // Pipelines / Programms
     struct RasterPipeline
     {

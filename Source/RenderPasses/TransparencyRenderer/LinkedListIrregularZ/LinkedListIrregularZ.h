@@ -50,7 +50,7 @@ public:
 
     /** Additional mask to reject the backprojectio
     */
-    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable = true) override;
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Buffer> maskSM, bool enable = true) override;
 
     /** Render UI for the method
      */
@@ -59,6 +59,14 @@ public:
     /** Optional Debug pass
      */
     //virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
+
+    /*  Returns the sample distribution
+    */
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return &mSampleDistribution; };
+
+    /* Gets dispatch size for the gen shader
+     */
+    virtual const uint2 getShaderDispatchSize() const { return uint2(float2(mResolution) * mSampleOverestimate); }
 
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 

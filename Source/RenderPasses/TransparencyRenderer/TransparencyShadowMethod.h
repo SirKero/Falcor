@@ -68,7 +68,7 @@ public:
 
     /** Some methods can use an additional mask, this is set here
     */
-    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable = true) {}
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Buffer> maskSM, bool enable = true) {}
 
     /** Render UI for the method
     */
@@ -119,6 +119,14 @@ public:
     /** Get the light mpvs for the scene
     */
     const std::vector<LightMVP>& getLightMVPs() const { return mShadowMapMVP; }
+
+    /* For irregular methods only. Returns the sample distribution
+    */
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const { return nullptr; };
+
+    /* Gets dispatch size for the gen shader
+    */
+    virtual const uint2 getShaderDispatchSize() const { return mResolution; }
 
 protected:
     static const uint kBlurKernelWidthInit = 5;
