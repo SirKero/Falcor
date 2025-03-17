@@ -586,7 +586,7 @@ void rayGen()
     // Update box
     aabbFrontZ = aabbBackZ;
 #if TRACE_NON_OPAQUE_ONLY
-    aabbBackZ = getMidpointDepth(lastHitDepth, 0.01, far); // TODO use better bias
+    aabbBackZ = lastHitDepth + (0.005 * far * pixelScale * pixelScale); // This is a bit of a experimental bias
 #else
     aabbBackZ = lastHitMiss || !storeCurr ? far : getMidpointDepth(lastHitDepth, (rayData.depth - lastHitDepth), far);
 #endif

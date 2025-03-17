@@ -558,14 +558,13 @@ void rayGen()
     }
 
     // Insert last two elements
-
-    // Update box
-    midpointLast = midpointCurrent;
     bool storeLastBox = true;
 #if TRACE_NON_OPAQUE_ONLY
     storeLastBox &= any(currTranmittance < 1.0);
+    midpointLast = lastHitDepth + (0.005 * far * pixelScale * pixelScale); //This is a bit of a experimental bias
 #else
     storeLastBox &= (any(currTranmittance < 1.0) && rayData.dist >= 0);
+    midpointLast = midpointCurrent;
 #endif
     storeLastBox |= (prevNodeIndex == idx1D) && all(prevTransmittance >= 1.0); //Guarantees that the head buffer is set
 
