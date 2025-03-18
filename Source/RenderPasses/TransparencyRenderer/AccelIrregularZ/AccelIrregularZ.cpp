@@ -687,6 +687,9 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
+    shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
+    uint2 opaqueSMMaxDispatch = getShaderDispatchSize();
+    shadowVar["SMCB"]["gMaxBufferSize"] = opaqueSMMaxDispatch.x * opaqueSMMaxDispatch.y;
 
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
@@ -694,6 +697,7 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjectionNoJitter;
         shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjectionNoJitter;
         shadowVar["gAccessCounter"][i] = mAccessTextures[i];
+        shadowVar["gSampleDistribution"][i] = mSampleDistribution[i];
     }
     const auto accelDataSize = mUseOneAABBForAllLights ? 1 : lights.size();
     for (uint i = 0; i < accelDataSize; i++)

@@ -85,7 +85,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
     else {       
         uint2 pixelMip = pixel / 2;
         uint fullImportance = gImptMip[thdID.z][pixelMip];
-        uint sampleImportance = gImpt[thdID.z][pixel];
+        uint sampleImportance = gImpt[thdID.z][pixel];    //TODO Gather instead of fetching full importance mip
         float sampleCount = gSmpMip[thdID.z][pixelMip];
         //if (gDstSize.x == 2)
             //sampleCount = min(sampleCount, uint(ceil(float(fullImportance) / kMaxAtomicWeight)));

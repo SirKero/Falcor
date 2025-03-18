@@ -101,15 +101,6 @@ struct LinkedListIrregularZShader
         if (!validShadow)
             return -1.f;
 
-        // Use transparent shadow map
-        /*
-        if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
-            float maskSMDepth = gMaskShadowMap.SampleLevel(gPointSampler, float3(shadowPos.xy, lightIdx), 0);
-            if (maskSMDepth <= dist)
-                return float3(0.0);
-        }
-        */
-
         float3 visibility = 1.0;
 
         //Go through the mip chain to get the head buffer index of the sample

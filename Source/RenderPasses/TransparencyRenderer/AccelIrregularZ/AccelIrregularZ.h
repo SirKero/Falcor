@@ -67,7 +67,7 @@ public:
 
      /* Gets dispatch size for the gen shader
      */
-    virtual const uint2 getShaderDispatchSize() const { return uint2(float2(mResolution) * mSampleOverestimate); }
+    virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
 
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 
