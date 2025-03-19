@@ -243,6 +243,8 @@ void rayGen()
     valid = maskVal > TRANSPARENCY_MASK_COMPAIRE_VALUE; // 1.0/255.0
 
     if (valid) {
+        //TODO Soft shadows
+
         float4 posWPixelNear = mul(gInvViewProjection, float4(relFramePos, 0.0, 1.0));
         float4 posWPixelFar = mul(gInvViewProjection, float4(relFramePos, 1.0, 1.0));
 

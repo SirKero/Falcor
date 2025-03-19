@@ -110,17 +110,13 @@ void main(uint2 pixel: SV_DispatchThreadID)
         colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity, maskFlag);
 
         // Ambient
-        float3 ambient = bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
+        colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
 
         //Check if a ray reflection should be executed on the current pixel
         if (kWriteReflectionMask) {
             // float3 specularPercentage = bsdfProperties.specularReflectionAlbedo / max(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo, 1e-7);
             // useRayReflections |= luminance(specularPercentage) > kReflectionsRoughnessThreshold;
             useRayReflections |= bsdfProperties.roughness < kReflectionsRoughnessThreshold;
-            if (!useRayReflections)
-                colorOut += ambient;
-        } else {
-            colorOut += ambient;
         }
     }
     else //Enviroment map lookup

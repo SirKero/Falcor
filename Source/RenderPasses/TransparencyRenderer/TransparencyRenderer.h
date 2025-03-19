@@ -120,14 +120,18 @@ public:
     //Renderers
     enum class CameraRenderMode : uint
     {
-        DirectRT = 0,
-        DirectRT_Reflections = 1,
-        PathTracer = 2
+        VBuffer_DirectRT = 0,
+        VBuffer_DirectRT_Reflections = 1,
+        DirectRT= 2,
+        DirectRT_Reflections = 3,
+        PathTracer = 4
     };
 
     FALCOR_ENUM_INFO(
         CameraRenderMode,
         {
+            {CameraRenderMode::VBuffer_DirectRT, "VBuffer_DirectRT"},
+            {CameraRenderMode::VBuffer_DirectRT_Reflections, "VBuffer_DirectRT+RayReflections"},
             {CameraRenderMode::DirectRT, "DirectRT"},
             {CameraRenderMode::DirectRT_Reflections, "DirectRT+RayReflections"},
             {CameraRenderMode::PathTracer, "PathTracer"},
@@ -202,6 +206,7 @@ private:
     //Buffer/Textures
     ref<Texture> mpTransparencyThp; //Thp texture for transparency
     ref<Texture> mpReflectionsMask; //Mask where ray reflections should be used
+    ref<Texture> mpReflectionsHit; //Opaque hit for the reflection. Is needed when V-Buffer is not used
 
     //Passes
     // Pipelines / Programms

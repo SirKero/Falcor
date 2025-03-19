@@ -31,11 +31,13 @@ static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK;
 struct TransparencyRayData {
     PackedHitInfo hit; //< Packed Hit
     float dist;
+    bool isOpaque;
 
     __init(float tMax)
     {
-        hit = {}; // Init emtpy
-        dist = tMax;
+        this.hit = {}; // Init emtpy
+        this.dist = tMax;
+        this.isOpaque = false;
     }
 }
 
@@ -95,7 +97,7 @@ void miss(inout TransparencyRayData rayData)
 [shader("anyhit")]
 void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    // Alpha test for non-opaque geometry.
+     // Alpha test for non-opaque geometry.
     TriangleHit triangleHit;
     triangleHit.instanceID = getGeometryInstanceID();
     triangleHit.primitiveIndex = PrimitiveIndex();
@@ -105,20 +107,41 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
 
-    if (gScene.materials.alphaTest(v, materialID, lod, kMinOpacity)) //Only skip elements with opacity close to 0
+    if (!gScene.materials.alphaTest(v, materialID, lod, kMinOpacity)) {
+        //Update payload
+        if (RayTCurrent() < rayData.dist) {
+           
+            rayData.hit = HitInfo(triangleHit).getData();
+            rayData.dist = RayTCurrent();
+            rayData.isOpaque = false;
+            #if ENABLE_TRANSPARENCY_LOD
+                rayData.ddx = ddx;
+                rayData.ddy = ddy;
+            #endif
+        }
+    } else {
         IgnoreHit();
+    }
 }
 
 [shader("closesthit")]
 void closestHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    TriangleHit triangleHit;
-    triangleHit.instanceID = getGeometryInstanceID();
-    triangleHit.primitiveIndex = PrimitiveIndex();
-    triangleHit.barycentrics = attribs.barycentrics;
+    if (RayTCurrent() < rayData.dist) {
+        // Alpha test for non-opaque geometry.
+        TriangleHit triangleHit;
+        triangleHit.instanceID = getGeometryInstanceID();
+        triangleHit.primitiveIndex = PrimitiveIndex();
+        triangleHit.barycentrics = attribs.barycentrics;
 
-    rayData.hit = HitInfo(triangleHit).getData();
-    rayData.dist = RayTCurrent();
+        VertexData v = gScene.getVertexData(triangleHit);
+        uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+        ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+
+        rayData.hit = HitInfo(triangleHit).getData();
+        rayData.dist = RayTCurrent();
+        rayData.isOpaque = true;
+    }
 }
 
 [shader("raygeneration")]
@@ -135,10 +158,8 @@ void rayGen()
     const HitInfo hit = HitInfo(gVBuffer[pixel]);
     //Load View
     float3 viewDir;
-    if (is_valid(gViewW))
-        viewDir = -gViewW[pixel].xyz;
-    else
-        viewDir = gScene.camera.computeRayPinhole(pixel, frameDim).dir;
+    viewDir = gScene.camera.computeRayPinhole(pixel, frameDim).dir;
+
     // Load shading data.
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -197,9 +218,8 @@ void rayGen()
 
         // Analytic
         uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE;
-        if (kUseIrregularShadowMask) {
-            maskFlags |= sd.opacity <= (1. - kMinOpacity) ? TRANSPARENCY_MASK_FLAG_USE_SM : TRANSPARENCY_MASK_FLAG_USE_MASK;
-        }
+        if(kUseIrregularShadowMask)
+            maskFlags = rayData.isOpaque ?TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
         pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlags) * sd.opacity;
 
         // Ambient

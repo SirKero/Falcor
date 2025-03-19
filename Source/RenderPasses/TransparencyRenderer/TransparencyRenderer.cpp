@@ -209,18 +209,31 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     //Render
     switch (mCameraRenderMode)
     {
-    case CameraRenderMode::DirectRT:
+    case CameraRenderMode::VBuffer_DirectRT:
         {
             FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
             evalDirectTransparency(pRenderContext, renderData);
             evalDirectOpaque(pRenderContext, renderData);
         }
         break;
-    case CameraRenderMode::DirectRT_Reflections:
+    case CameraRenderMode::VBuffer_DirectRT_Reflections:
         {
             FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
             evalDirectTransparency(pRenderContext, renderData);
             evalDirectOpaque(pRenderContext, renderData);
+            evalRayReflections(pRenderContext, renderData);
+        }
+        break;
+    case CameraRenderMode::DirectRT:
+        {
+            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
+            evalDirectTransparency(pRenderContext, renderData);
+        }
+        break;
+    case CameraRenderMode::DirectRT_Reflections:
+        {
+            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
+            evalDirectTransparency(pRenderContext, renderData);
             evalRayReflections(pRenderContext, renderData);
         }
         break;
@@ -247,6 +260,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     {
         switch (mCameraRenderMode)
         {
+        case CameraRenderMode::VBuffer_DirectRT:
         case CameraRenderMode::DirectRT:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
@@ -256,6 +270,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
             dirty |= widget.checkbox("Calc MVec & Depth for non opaque", mUseNonOpaqueDepthAndMV);
             break;
+        case CameraRenderMode::VBuffer_DirectRT_Reflections:
         case CameraRenderMode::DirectRT_Reflections:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
@@ -433,13 +448,24 @@ void TransparencyRenderer::prepareResources(RenderContext* pRenderContext, const
         mpTransparencyThp->setName("TransparencyThp");
     }
 
-    if (mCameraRenderMode == CameraRenderMode::DirectRT_Reflections && needRebuild(mpReflectionsMask, screenSize))
+    if ((mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections ||
+         mCameraRenderMode == CameraRenderMode::DirectRT_Reflections) &&
+        needRebuild(mpReflectionsMask, screenSize))
     {
         mpReflectionsMask = Texture::create2D(
             mpDevice, screenSize.x, screenSize.y, ResourceFormat::R8Unorm, 1u, 1u, nullptr,
             ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
         );
         mpReflectionsMask->setName("ReflectionsMask");
+    }
+
+     if (mCameraRenderMode == CameraRenderMode::DirectRT_Reflections && needRebuild(mpReflectionsHit, screenSize))
+    {
+         mpReflectionsHit = Texture::create2D(
+            mpDevice, screenSize.x, screenSize.y, HitInfo::kDefaultFormat, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpReflectionsHit->setName("ReflectionHitBuffer");
     }
 }
 
@@ -458,7 +484,7 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add(getLightEvalDefines());
-        defines.add("RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0");
+        defines.add("RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections ? "1" : "0");
         defines.add("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
         
 
@@ -471,7 +497,7 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     mpEvalDirectPass->getProgram()->addDefines(getLightEvalDefines());
     // Reflections
     mpEvalDirectPass->getProgram()->addDefine(
-        "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
+        "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections ? "1" : "0"
     );
     mpEvalDirectPass->getProgram()->addDefine("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
 
@@ -561,6 +587,14 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData)); //For NRD
     mEvalTransparencyDirectRay.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
     mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", mUseNonOpaqueDepthAndMV ? "1" : "0");
+    mEvalTransparencyDirectRay.pProgram->addDefine(
+        "EVAL_OPAQUE_HIT",
+        (mCameraRenderMode == CameraRenderMode::DirectRT || mCameraRenderMode == CameraRenderMode::DirectRT_Reflections) ? "1" : "0"
+    );
+    mEvalTransparencyDirectRay.pProgram->addDefine(
+        "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
+    );
+    mEvalTransparencyDirectRay.pProgram->addDefine("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
     
     // Init Vars
     if (!mEvalTransparencyDirectRay.pVars)
@@ -606,6 +640,8 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
         bind(channel);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gThpOut"] = mpTransparencyThp;
+    var["gRayReflectionMask"] = mpReflectionsMask;
+    var["gRayReflectionVBuffer"] = mpReflectionsHit;
 
      // Execute
     mpScene->raytrace(pRenderContext, mEvalTransparencyDirectRay.pProgram.get(), mEvalTransparencyDirectRay.pVars, uint3(targetDim, 1));
@@ -679,16 +715,15 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
 
     var["CB"]["gFrameCount"] = mFrameCount;
 
-    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
-    auto bind = [&](const ChannelDesc& desc)
+    if (mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections)
     {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData.getTexture(desc.name);
-        }
-    };
-    for (auto& channel : kInputChannels)
-        bind(channel);
+        var["gVBuffer"] = renderData.getTexture(kInputVBuffer);
+    }
+    else
+    {
+        var["gVBuffer"] = mpReflectionsHit;
+    }
+    
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gThp"] = mpTransparencyThp;
     var["gReflectionMask"] = mpReflectionsMask;
