@@ -128,6 +128,10 @@ public:
     */
     virtual const uint2 getShaderDispatchSize() const { return mResolution; }
 
+    /* Get Sample distribution buffer
+    */
+    virtual const ref<Buffer> getJitterSampleBuffer() const{return nullptr;}
+
 protected:
     static const uint kBlurKernelWidthInit = 5;
     static const bool kBlurSigmaInit = 1.f;

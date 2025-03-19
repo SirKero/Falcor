@@ -69,6 +69,10 @@ public:
      */
     virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
 
+    /* Get Sample distribution buffer
+     */
+    virtual const ref<Buffer> getJitterSampleBuffer() const override { return mSamplePattern == SMSamplePattern::Halton ?  mpHaltonBuffer : nullptr;}
+
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 
     enum class SMSamplePattern : uint

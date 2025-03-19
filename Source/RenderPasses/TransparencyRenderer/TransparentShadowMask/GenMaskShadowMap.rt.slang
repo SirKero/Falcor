@@ -7,6 +7,7 @@ import Rendering.Materials.TexLODHelpers;
 import Rendering.Materials.TexLODTypes;
 import Scene.Raytracing;
 import Scene.Intersection;
+import Utils.Sampling.SampleGenerator;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 
@@ -17,6 +18,8 @@ cbuffer CB
     bool gIsDirectional; // is directional
     uint gMipCount;
     uint2 gSMRes;
+    uint gFrameCount;
+    uint _pad;
     float4x4 gInvViewProjection; // Inverse view projection
     float4x4 gViewProjection;    // View Projection for current light
 }
@@ -24,9 +27,13 @@ cbuffer CB
 // Textures
 Texture2DArray<float> gMask; // Non-Opaque object mask
 Texture2D<float> gSampleDistribution; //sample Distribution
-RWBuffer<float> gShadowMap; //Shadow map
+RWBuffer<float> gShadowMap;           // Shadow map
+Buffer<float2> gHaltonSamples;
 
 SamplerState gMaskSampler;
+
+static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
+static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 
 struct RayData
 {
@@ -192,10 +199,15 @@ void rayGen()
     float2 subpixelLoc = float2(subpixelIndex % samplesSq, subpixelIndex / samplesSq);
     float2 borderMin = subpixelLoc * subpixelSize;
 
-    /*
+    //SampleGenerator sg = SampleGenerator(pixel, gFrameCount + 34 * gLightIdx);
+
     if (kUseHaltonSamplePattern) {
         uint jitterIdx = (subpixelLoc.x + (subpixelLoc.y * samplesSq) + gFrameCount) % kNumHaltonSamples;
         pixelOffset = gHaltonSamples[jitterIdx]; // pixel offset in [0,1]
+    }
+    /*
+    else {
+        pixelOffset = sampleNext2D(sg);
     }
     */
 

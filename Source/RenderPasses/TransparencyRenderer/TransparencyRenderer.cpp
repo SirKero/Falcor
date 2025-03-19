@@ -203,7 +203,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     if (mIrregularUseShadowMask &&
         (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
     {
-        mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get());
+        mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get(), mpSampleGenerator);
     }
 
     //Render

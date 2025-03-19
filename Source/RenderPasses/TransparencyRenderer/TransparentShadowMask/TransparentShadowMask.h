@@ -42,7 +42,7 @@ public:
     /** Generate resources needed to evaluate the Shadow Method (e.g. Shadow Map)
     * Should be called every frame and needs to be called before using any resources from that pass
     */
-    void generate(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod);
+    void generate(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod, ref<SampleGenerator> pSampleGenerator);
 
     //Get the layered mask texture
     ref<Texture> getMask() { return mpTransparentShadowMask; }
@@ -60,7 +60,8 @@ private:
     void generateOpaqueMaskShadowMap(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const TransparencyShadowMethod* pTransparencyShadowMethod
+        const TransparencyShadowMethod* pTransparencyShadowMethod,
+        ref<SampleGenerator> pSampleGenerator
     );
 
     //Constants
@@ -71,7 +72,8 @@ private:
     ref<Scene> mpScene;
 
     uint mTemporalCounter = 0;  //< Current frame counter for the temporal mask 
-    
+    uint mFrameCount = 0;
+
     //Options
     bool mEnableOpaqueMaskShadowMaps = true;    //< Enables the opaque mask shadow map pass
 
