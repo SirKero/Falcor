@@ -50,6 +50,9 @@ public:
     //Get layered mask shadow map
     ref<Buffer> getMaskShadowMap() { return mpMaskOpaqueShadowMap; }
 
+    //Set blacklist status
+    void enableBlacklist(bool enable) { mEnableBlacklistWithMaterialFlag = enable; }
+
 private:
     void generateTransparencyMask(
         RenderContext* pRenderContext,
@@ -76,6 +79,7 @@ private:
 
     //Options
     bool mEnableOpaqueMaskShadowMaps = true;    //< Enables the opaque mask shadow map pass
+    bool mEnableBlacklistWithMaterialFlag = false;  //< Enables blacklist with material flag (castShadows)
 
     //Buffer and Textures
     ref<Texture> mpTransparentShadowMaskRaster; //2D Array containing the masks for all shadow maps

@@ -116,6 +116,10 @@ public:
     */
     const uint2 getShadowMapResolution() const { return mResolution; }
 
+    /** Sets the blacklist flag
+    */
+    void enableBlacklist(bool enable) { mEnableBlacklistWithShadowMaterialFlag = enable; }
+
     /** Get the light mpvs for the scene
     */
     const std::vector<LightMVP>& getLightMVPs() const { return mShadowMapMVP; }
@@ -163,6 +167,9 @@ protected:
     float mCascadedSize = 50.f;
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
+
+    //Blacklist
+    bool mEnableBlacklistWithShadowMaterialFlag = false;
 
     // Random Soft Shadows
     bool mEnableRandomSoftShadows = false;          // Enables Random offset of start position for shadow maps

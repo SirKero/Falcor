@@ -160,7 +160,7 @@ void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderConte
         //Set shader data
         var["CB"]["gViewProjection"] = lightMVPs[i].viewProjectionNoJitter;
 
-        mpScene->rasterize(pRenderContext, mGenerateMaskPip.pState.get(), mGenerateMaskPip.pVars.get(), RasterizerState::CullMode::None,meshRenderMode);
+        mpScene->rasterize(pRenderContext, mGenerateMaskPip.pState.get(), mGenerateMaskPip.pVars.get(), RasterizerState::CullMode::None,meshRenderMode, !mEnableBlacklistWithMaterialFlag);
     }
 
     //Compute pass for temporal accumulate
@@ -265,6 +265,8 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(RenderContext* pRenderCo
 
     mGenerateMaskShadowMapRayPass.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", pHaltonBuffer ? "1" : "0");
     mGenerateMaskShadowMapRayPass.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(numHaltonSampls));
+    mGenerateMaskShadowMapRayPass.pProgram->addDefine("USE_BLACKLIST", mEnableBlacklistWithMaterialFlag ? "1" : "0");
+
 
      // Init Vars
     if (!mGenerateMaskShadowMapRayPass.pVars)

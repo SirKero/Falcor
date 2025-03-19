@@ -194,7 +194,10 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         method->setNearFar(mNearFar);
         method->setSoftShadowParameter(mEnableSoftShadows, mSoftShadowsPositionRadius, mSoftShadowsDirectionalSpread);
         method->setCascadedSize(mSMCascadedSize);
+        method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
     }        
+    if (mpShadowMask)
+        mpShadowMask->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
 
     //Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -318,6 +321,8 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             "Enables a backprojection mask (non-opaque objects rasterized), that is used to reject samples for only opaque on fully-lit "
             "samples in the backprojection process"
         );
+        widget.checkbox("Enable shadow material flag as blacklist", mUseShadowMaterialFlagAsBlacklist);
+        widget.tooltip("Uses the \"non-shadow throwable\" material flag as a blacklist.");
     }
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -400,7 +405,10 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
         defines.add(mpShadowMap->getDefines());
     defines.add("EVAL_OPAQUE_SHADOW_MAP", mEnableOpaqueShadowMaps ? "1" : "0");
     RayFlags evalQueryRayFlags = mEnableOpaqueShadowMaps ? RayFlags::CullOpaque : RayFlags::ForceNonOpaque;
-    evalQueryRayFlags = mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing ? RayFlags::CullNonOpaque : evalQueryRayFlags; //TODO fix
+    evalQueryRayFlags = mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing ? RayFlags::CullNonOpaque : evalQueryRayFlags; 
+    evalQueryRayFlags =
+        mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing
+        ? RayFlags::None : evalQueryRayFlags;
     defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
@@ -411,6 +419,8 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
 
     //Mask
     defines.add("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
+    defines
+        .add("SHADOW_MATERIAL_FLAG_AS_BLACKLIST", mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask ? "1" : "0");
 
     //Soft Shadows
     defines.add("USE_SOFT_SHADOWS", mEnableSoftShadows ? "1" : "0");
@@ -579,6 +589,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     FALCOR_ASSERT(mEvalTransparencyDirectRay.pProgram);
 
     bool useLodMode = mEnableTransparencyPassLODMode && ((mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs));
+    bool evalOpaque = (mCameraRenderMode == CameraRenderMode::DirectRT || mCameraRenderMode == CameraRenderMode::DirectRT_Reflections);
     // Update define that can change at runtime
     mEvalTransparencyDirectRay.pProgram->addDefines(getLightEvalDefines());
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
@@ -586,11 +597,8 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData)); //For NRD
     mEvalTransparencyDirectRay.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
-    mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", mUseNonOpaqueDepthAndMV ? "1" : "0");
-    mEvalTransparencyDirectRay.pProgram->addDefine(
-        "EVAL_OPAQUE_HIT",
-        (mCameraRenderMode == CameraRenderMode::DirectRT || mCameraRenderMode == CameraRenderMode::DirectRT_Reflections) ? "1" : "0"
-    );
+    mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", mUseNonOpaqueDepthAndMV || evalOpaque ? "1" : "0");
+    mEvalTransparencyDirectRay.pProgram->addDefine("EVAL_OPAQUE_HIT", evalOpaque ? "1" : "0");
     mEvalTransparencyDirectRay.pProgram->addDefine(
         "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
     );

@@ -120,6 +120,15 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
+// posV: view space position (negative z)
+// return: texture uv [0, 1]
+float2 ViewSpaceToUV(float3 posV)
+{
+    const float2 imageScale = 0.5 * float2(gScene.camera.data.frameWidth / gScene.camera.data.focalLength, gScene.camera.data.frameHeight / gScene.camera.data.focalLength);
+    float2 ndc = posV.xy / (imageScale * posV.z);
+    return ndc * float2(-0.5, 0.5) + 0.5; // since posV.z is negative, the sign order is inversed
+}
+
 [shader("miss")]
 void miss(inout TransparencyRayData rayData)
 {
@@ -160,7 +169,7 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
            
             rayData.hit = HitInfo(triangleHit).getData();
             rayData.dist = RayTCurrent();
-            rayData.isOpaque = false;
+            rayData.isOpaque = kShadowMaterialFlagAsBlacklist ? !gScene.materials.isCastShadow(materialID) : false;
             #if ENABLE_TRANSPARENCY_LOD
                 rayData.ddx = ddx;
                 rayData.ddy = ddy;
@@ -290,7 +299,7 @@ void rayGen()
         // Analytic
         uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE;
         if(kUseIrregularShadowMask)
-            maskFlag = rayData.isOpaque ?TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
+            maskFlag = rayData.isOpaque ? TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
         pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag) * sd.opacity;
 
         // Ambient
@@ -339,10 +348,10 @@ void rayGen()
         pd.radiance += gScene.envMap.eval(viewDir) * kEnvMapStrength * pd.thp;
         #if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
             if (kCalcEnvMapMotionVectors && all( pd.thp >= 1.0)) {
-                float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, gFrameDim, /*no jitter*/ false).dir;
+                float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, frameDim, /*no jitter*/ false).dir;
                 float3 prevEnvMapDir = mul(gScene.camera.data.prevViewMat, float4(rayDirNoJitter, 0.0)).xyz;
                 float2 prevUV = ViewSpaceToUV(prevEnvMapDir);
-                mVec = prevUV - (float2(pixel) + 0.5) / float2(gFrameDim);
+                mVec = prevUV - (float2(pixel) + 0.5) / float2(frameDim);
             }
         #endif
     }

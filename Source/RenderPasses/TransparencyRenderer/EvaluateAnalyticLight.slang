@@ -64,6 +64,8 @@ static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
 static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
 static const bool kIrregularShadowMaskUseRay = USE_IRRGEGULAR_SHADOW_MASK;
+static const bool kShadowMaterialFlagAsBlacklist = SHADOW_MATERIAL_FLAG_AS_BLACKLIST; //Enables the shadow material flag as blacklist when mask is enabled
+
 
 // For RIS light sampling
 struct RISReservoir {
@@ -165,7 +167,7 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
     float3 visibility = 1.0;
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = getBestParticleShadowPlane(lightDir);
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir,true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
@@ -179,22 +181,6 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
             VertexData v = gScene.getVertexData(triangleHit);
             uint materialID = gScene.getMaterialID(triangleHit.instanceID);
             ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-
-            //LOD mode handling TODO this is incorrect as it assumes the pixel is the camera
-            /*
-            if (kShadowLODMode == TexLODMode::RayCones)
-            {
-                float2 ddx, ddy;
-                computeAnisotropicAxesRayCones(triangleHit, v, ray.Direction, rayQuery.CandidateTriangleRayT(), kScreenSpacePixelSpreadAngle, ddx, ddy);
-                lod = ExplicitGradientTextureSampler(ddx, ddy);
-            }
-            else if (kShadowLODMode == TexLODMode::RayDiffs)
-            {
-                float2 ddx, ddy;
-                computeRayDifferentials(triangleHit, ray.Direction, rayQuery.CandidateTriangleRayT(), gScene.camera, kInvFrameDim, ddx, ddy);
-                lod = ExplicitGradientTextureSampler(ddx, ddy);
-            }
-            */
 
             if(kTRUseColoredTransparency){
                 ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -ray.Direction, lod);
@@ -246,7 +232,7 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     float3 visibility = 1.0; //Visible
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = getBestParticleShadowPlane(lightDir);
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir, true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {

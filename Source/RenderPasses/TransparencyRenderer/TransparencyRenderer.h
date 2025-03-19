@@ -186,7 +186,8 @@ private:
     float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
 
     //Shadow Mask
-    bool mIrregularUseShadowMask = false; //TODO creates strange bugs do not use until fixed
+    bool mIrregularUseShadowMask = false;               //Enables a shadow mask for opaque objects
+    bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable as blacklist for non-opaque objects
 
     float mSMCascadedSize = 50.f; //Global setting for cascaded size
 

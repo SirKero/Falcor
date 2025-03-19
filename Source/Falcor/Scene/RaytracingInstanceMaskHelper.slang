@@ -10,6 +10,7 @@ static const uint kInstanceMaskBitParticleXZ = 32;    // Instance Mask Bit with 
 
 static const uint kShadowRayInstanceMask = 0xFD; // Instance Mask without castShadow geometry (legacy)
 
+static const uint kInstanceNoParticle = 0x3;        //Normal and Cast shadow
 static const uint kInstanceCameraParticle = 0x07;   //Camera Particle
 static const uint kInstanceShadowParticleXY = 0x09; // Particle Shadow Ray XY Plane
 static const uint kInstanceShadowParticleYZ = 0x11; // Particle Shadow Ray YZ Plane
@@ -19,9 +20,10 @@ static const uint kInstanceShadowParticleXZ = 0x21; // Particle Shadow Ray XZ Pl
 * \param[in] normalized direction
 * \return instance mask escluding non shadowable geometry and all particles except the selcted plane
 */
-uint getBestParticleShadowPlane(float3 direction) {
+uint getBestParticleShadowPlane(float3 direction, bool addShadowBit = false) {
     uint instanceMask = kInstanceMaskBitNormalGeometry;
-
+    if(addShadowBit)
+        instanceMask |= kInstanceMaskBitCastShadow;
     uint particleMask = kInstanceMaskBitParticleXY;
 
     float xy = abs(dot(direction, float3(0, 0, 1)));

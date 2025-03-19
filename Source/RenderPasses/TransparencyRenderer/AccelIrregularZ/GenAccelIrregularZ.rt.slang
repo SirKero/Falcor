@@ -90,7 +90,7 @@ static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS;
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
 static const bool kLimitedOpaqueStore = false; // STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
 static const bool kUseOptimizedMidpoint = true; //Uses min between midpoint and a high bias (0.08% of lights far)
-
+static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -503,7 +503,7 @@ void rayGen()
     float3 currTranmittance = float3(1.0);  //Tranmission end of current sample
     float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
     const float far = ray.TMax;
-    const uint instanceMask = getBestParticleShadowPlane(gLightDir);
+    const uint instanceMask = getBestParticleShadowPlane(gLightDir, kIncludeCastShadowInstanceMaskBit);
     bool currHitOpaque = false;
     bool prevHitOpaque = false;
     uint i = 0;

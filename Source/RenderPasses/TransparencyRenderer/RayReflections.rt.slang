@@ -113,7 +113,7 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
            
             rayData.hit = HitInfo(triangleHit).getData();
             rayData.dist = RayTCurrent();
-            rayData.isOpaque = false;
+            rayData.isOpaque = kShadowMaterialFlagAsBlacklist ? !gScene.materials.isCastShadow(materialID) : false;
             #if ENABLE_TRANSPARENCY_LOD
                 rayData.ddx = ddx;
                 rayData.ddy = ddy;

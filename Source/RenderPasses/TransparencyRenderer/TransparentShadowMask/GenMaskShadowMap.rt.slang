@@ -11,6 +11,10 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 
+#ifndef USE_BLACKLIST
+#define USE_BLACKLIST 0
+#endif
+
 cbuffer CB
 {
     uint gLightIdx; // Current light index
@@ -73,15 +77,19 @@ void miss(inout RayData rayData)
 [shader("anyhit")]
 void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    // Alpha test for non-opaque geometry.
-    /*
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
-    let lod = ExplicitLodTextureSampler(0.f);
-    if (gScene.materials.alphaTest(v, materialID, lod, MIN_OPACITY)) 
-        IgnoreHit();
-    */
+    //Alpha text is only used when the blacklist is used (else all non-opaque geometry is culled)
+    #if USE_BLACKLIST
+        GeometryInstanceID instanceID = getGeometryInstanceID();
+        VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
+        const uint materialID = gScene.getMaterialID(instanceID);
+        let lod = ExplicitLodTextureSampler(0.f);
+
+        if(gScene.materials.isCastShadow(materialID))
+            IgnoreHit();
+
+        if (gScene.materials.alphaTest(v, materialID, lod, MIN_OPACITY)) 
+            IgnoreHit();
+    #endif
 }
 
 [shader("closesthit")]
@@ -271,8 +279,8 @@ void rayGen()
         }
 
         // Trace ray
-        uint rayFlags = RAY_FLAG_CULL_NON_OPAQUE;
-        TraceRay(gScene.rtAccel, rayFlags, kShadowRayInstanceMask /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        uint rayFlags = USE_BLACKLIST ? RAY_FLAG_NONE : RAY_FLAG_CULL_NON_OPAQUE;
+        TraceRay(gScene.rtAccel, rayFlags, kInstanceNoParticle /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
     }
 
     uint insertIndex = idx1D + frameDim.x * frameDim.y * gLightIdx;

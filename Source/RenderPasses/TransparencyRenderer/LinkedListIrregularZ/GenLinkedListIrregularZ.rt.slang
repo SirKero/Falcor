@@ -83,6 +83,7 @@ static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
 static const bool kUseOptimizedMidpoint = true; // Uses min between midpoint and a high bias (0.08% of lights far)
+static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -488,7 +489,7 @@ void rayGen()
     prevNode.next = 0;
     uint prevNodeIndex = idx1D;
     uint nodeIndex = prevNodeIndex;
-    const uint instanceMask = getBestParticleShadowPlane(gLightDir);
+    const uint instanceMask = getBestParticleShadowPlane(gLightDir,kIncludeCastShadowInstanceMaskBit);
     bool currHitOpaque = false;
     bool prevHitOpaque = false;
 
