@@ -500,7 +500,6 @@ void rayGen()
         rayData.sampleTransmittance = 1.0;
 
         // Trace ray
-        //  Trace ray
         uint rayFlags = 0;
     #if TRACE_NON_OPAQUE_ONLY
         rayFlags = RAY_FLAG_CULL_OPAQUE;
@@ -522,7 +521,7 @@ void rayGen()
         // Update midpoint depth values if the ray hit something
         if (rayData.dist >= 0) {
             midpointLast = midpointCurrent;
-            midpointCurrent = lastHitDepth + distDiff * kMidpointPercentage;
+            midpointCurrent = getMidpointDepth(lastHitDepth, distDiff, far);
         }
 
         // Write the sample stating on 3rd iteration(i=2).
@@ -547,7 +546,7 @@ void rayGen()
             currTranmittance = rayData.currentTransmittance;
 
             // Update node
-            prevNode.depth = min(rayData.depth + 1e-1, midpointCurrent);
+            prevNode.depth = midpointCurrent;
             #if USE_COLOR_TRANSPARENCY
                 prevNode.visibility = prevTransmittance;
             #else
