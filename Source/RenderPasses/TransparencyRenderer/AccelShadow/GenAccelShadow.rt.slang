@@ -1,6 +1,8 @@
-#include "AccelShadowData.slang"
+#include "../SharedShadowDefines.slang"
+//#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
+
 
 import Scene.Raytracing;
 import Scene.Intersection;
@@ -20,56 +22,60 @@ import Utils.Geometry.GeometryHelpers;
 #define MAX_IDX 1
 #endif
 
-#ifndef ACCEL_USE_FRUSTUM_CULLING
-#define ACCEL_USE_FRUSTUM_CULLING 0
+#ifndef TRACE_NON_OPAQUE_ONLY
+#define TRACE_NON_OPAQUE_ONLY 0
 #endif
 
-/** Payload for shadow ray.
-*/
+#define USE_COLOR_TRANSPARENCY 0
+
+/** Payload for shadow ray. (32B)
+ */
 struct RayData
 {
+    float3 currentTransmittance;
     float dist;
+    float3 sampleTransmittance;
     float depth;
-    float currentTransmittance;
-    float depthRange;
 
     __init() {
         this.dist = -1.0;
         this.depth = 1.0;
-        this.currentTransmittance = 1.0;
-        this.depthRange = 0.0;
+        this.currentTransmittance = float3(1.0);
+        this.sampleTransmittance = float3(1.0);
+    }
+
+    const bool isOpaque() {
+        return sampleTransmittance.x < 0;
     }
 };
 
 cbuffer CB
 {
-    uint gFrameCount; // Current frame count
-    float3 gLightPos; // Current Light Position
-    float gNear;
+    uint gFrameCount;    // Current frame count
+    float3 gLightPos;    // Current Light Position
+    bool gIsDirectional; // Is light a directional light (posW invalid)
+    float3 gLightDir;    // LightDirection
     float gFar;
-    uint gLightIdx;     //LightIndex
+    uint gLightIdx; // LightIndex
+    uint2 gSMRes;   // ShadowMap resolution
+    float gSpreadAngle;
     uint _pad;
-    float4x4 gViewProj;    // View Projection for current light
+    float4x4 gViewProj;
     float4x4 gInvViewProj; // Inverse view projection
-    float4x4 gInvProj;
-    float4x4 gInvView;
-    float4x4 gView;
-    float4 gFrustumPlanes[4]; //Top, Bottom, Left, Right Planes of frustum
 }
 
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
-RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
+RWStructuredBuffer<float> gData;
 
-static const float kMinOpacity = 1e-7;
+static const float kMidpointPercentage = 0.5; // Percentage of distance the midpoint is set
+static const float kMinOpacity = MIN_OPACITY;
+static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
+static const bool kUseOptimizedMidpoint = true; // Uses min between midpoint and a high bias (0.08% of lights far)
+static const bool kIncludeCastShadowInstanceMaskBit = false; //INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
-static const float2 kMSAAPattern[16] = { float2(0.0625, 0.0625), float2(-0.0625, -0.1875), float2(-0.1875, 0.125), float2(0.25, -0.0625),
-                                         float2(-0.3125, -0.125),  float2(0.125, 0.3125), float2(0.3125, 0.1875), float2(0.1875, -0.3125),
-                                         float2(-0.125, 0.375), float2(0.0, -0.4375),   float2(-0.25, 0.375),     float2(-0.375, 0.25),
-                                         float2(-0.5, 0.0),      float2(0.4375, -0.25),    float2(0.375, 0.4375), float2(-0.4375, -0.5)
-                                       };
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -89,6 +95,23 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
+// Get next hightest float
+float ulp(float f)
+{
+    int i = asint(f);
+    return abs(asfloat(i + 1) - f);
+}
+
+inline float getMidpointDepth(float lastHitDepth, float distanceDifference, float far) {
+    float midpointDepth = 0;
+    if (kUseOptimizedMidpoint)
+        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, 0.0008 * far);
+    else
+        midpointDepth = lastHitDepth + distanceDifference * kMidpointPercentage;
+
+    return midpointDepth;
+}
+
 //Shaders
 [shader("miss")]
 void miss(inout RayData rayData)
@@ -100,24 +123,52 @@ void miss(inout RayData rayData)
 // Shader entry points for TriangleMesh hit groups.
 //
 
+//
+// Shader entry points for TriangleMesh hit groups.
+//
+
 [shader("anyhit")]
 void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    // Alpha test for non-opaque geometry.
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
-    if (gScene.materials.alphaTest(v, materialID, 0.f, kMinOpacity)) IgnoreHit();
-}
+    //  Alpha test for non-opaque geometry.
+    TriangleHit triangleHit;
+    triangleHit.instanceID = getGeometryInstanceID();
+    triangleHit.primitiveIndex = PrimitiveIndex();
+    triangleHit.barycentrics = attribs.barycentrics;
 
-bool intersectPlane(const float3 N, const float3 p, const float3 ray, out float t) {
-    t = 0.0;
-    float denom = dot(N, ray);
-    if (abs(denom) > 1e-4) {
-        t = dot(p, N) / denom;
-        return t >= 0;
+    VertexData v = gScene.getVertexData(triangleHit);
+    const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+
+    float3 transmittance = float3(0.0);
+
+    if (false) { //Colored transmittance
+        ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
+        // uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        // Emissive lights
+        BSDFProperties bsdfProperties = mi.getProperties(sd);
+        float3 color = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo;
+        // Normalize color
+        float maxColor = max(max(color.x, color.y), color.z);
+        color /= maxColor;
+        if (sd.opacity < kMinOpacity)
+            transmittance = 1.0;
+        else
+            transmittance = color * (1.0 - sd.opacity);
+    } else {
+        transmittance = 1.0 - float3(gScene.materials.getMaterialOpacity(v, materialID, lod));
     }
-    return false;
+
+    // If hit is transparent (alpha < 1e-7)
+    if (all(transmittance > kMaxTransmittance))
+        IgnoreHit();
+
+    // Commit hit
+    if (RayTCurrent() < rayData.dist) {
+        rayData.sampleTransmittance = transmittance;
+        rayData.dist = RayTCurrent();
+    }
 }
 
 [shader("closesthit")]
@@ -127,116 +178,46 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     triangleHit.instanceID = getGeometryInstanceID();
     triangleHit.primitiveIndex = PrimitiveIndex();
     triangleHit.barycentrics = attribs.barycentrics;
-
     VertexData v = gScene.getVertexData(triangleHit);
-    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
 
-    rayData.currentTransmittance = rayData.currentTransmittance * (1.0 - sd.opacity);
-    float4 posH = mul(gViewProj, float4(sd.posW, 1.f));
-    //rayData.depth = posH.w; // Linear depth
-    float3 posView = mul(gView, float4(sd.posW, 1.f)).xyz;
-    rayData.depth = -1.0 * posView.z; //same as above
-
-    //Get the for corners of the pixel to approximate the size of the 3D pixel
-    float2 pixel = float2(DispatchRaysIndex().xy) + 0.5;
-    const uint2 frameDim = DispatchRaysDimensions().xy;
-
-    //Estimate the size of the currently hit plane for the pixel
-    float2 ndcCorners[4];
-    ndcCorners[0] = (pixel + float2(-kPixelOffset, -kPixelOffset)) / frameDim;
-    ndcCorners[1] = (pixel + float2(kPixelOffset, -kPixelOffset)) / frameDim;
-    ndcCorners[2] = (pixel + float2(-kPixelOffset, kPixelOffset)) / frameDim;
-    ndcCorners[3] = (pixel + float2(kPixelOffset, kPixelOffset)) / frameDim;
-    //From [0,1] to [-1,1]
-    [unroll]
-    for (uint i = 0; i < 4; i++) {
-        ndcCorners[i] = ndcCorners[i] * 2.0 - 1.0;
-        ndcCorners[i].y *= -1.f;
+    float3 transmittance = rayData.sampleTransmittance;
+    rayData.sampleTransmittance = float3(1.0);
+    // Case opaque object that does not call the anyHit
+    if (RayTCurrent() < rayData.dist) {
+        transmittance = 0.0;
+        rayData.sampleTransmittance.x = -1.0;
     }
-    float3 rayDir[4];
-    //To view space
-    for (uint i = 0; i < 4; i++) {
-        rayDir[i] = mul(gInvProj, float4(ndcCorners[i], 1.0, 1.0)).xyz;
-        // rayDir[i].xyz /= rayDir[i].z; // Normalize z
-        rayDir[i] = normalize(rayDir[i]);
-    }
-    // View normal
-    float3 faceN = sd.frontFacing ? sd.faceN : -sd.faceN;
-    float3 normalView = normalize(mul(gView, float4(faceN, 0)).xyz);
 
-    float maxDepth = rayData.depth;
-    float minDepth = rayData.depth;
-    for (uint i = 0; i < 4; i++) {
-        float t = 0;
-        if (intersectPlane(normalView, posView, rayDir[i], t)) {
-            float3 hitView = rayDir[i] * t;
-            maxDepth = max(maxDepth, -hitView.z);
-            minDepth = min(minDepth, -hitView.z);
-        }
-    }
-    rayData.depthRange = max(max(maxDepth - rayData.depth , rayData.depth - minDepth),1e-4);
-
+    rayData.currentTransmittance = rayData.currentTransmittance * transmittance;
+    float4 posH = mul(gViewProj, float4(v.posW, 1.0));
+    rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
     rayData.dist = RayTCurrent();
 }
 
-void writeData(const uint index, const AccelShadowData shadowData) {
-    #if SHADOW_DATA_FORMAT_SIZE == 1
-        gData[index] = shadowData.packAsUint();
-    #elif SHADOW_DATA_FORMAT_SIZE == 2
-        gData[index] = shadowData.packAsUint2(); // Transmittance last sample
-    #elif SHADOW_DATA_FORMAT_SIZE == 4
-        gData[index] = shadowData.packAsUint4(); // Transmittance last sample
-    #endif
+inline uint getInsertIndex() {
+    uint insertIdx = 0;
+    const uint lightIdx = gLightIdx;//kUseOneAABBForAllLights ? 0 : gLightIdx;
+    InterlockedAdd(gCounter[lightIdx], 1u, insertIdx);
+    return insertIdx;
 }
 
-//Checks if any part of the AABB is in front of the plane
-//Assumes everything is in World space
-bool isInFrontOfPlane(const float3 planeN, const float planeDist, const AABB aabb) {
-    float3 c = aabb.center();
-    float3 e = aabb.maxPoint - c; // Positive extends
-    // Compute the projection interval radius of b onto L(t) = b.c + t * p.n
-    float r = dot(e, abs(planeN));
+// Writes the shadow map sample. Returns a bool if the insert was sucessfull
+inline bool writeSample(float2 pixelSample, float4 boxPixelOffset, float boxMinDepth, float boxMaxDepth, float3 transmittance, float hitDepth) {
+    float3 minPoint = float3(pixelSample.x + boxPixelOffset.x, pixelSample.y + boxPixelOffset.z, boxMinDepth);
+    float3 maxPoint = float3(pixelSample.x + boxPixelOffset.y, pixelSample.y + boxPixelOffset.w, boxMaxDepth);
 
-    //A intersection would be if the signed distance is between [-r, r], but we only want to check if
-    //any part of the box is in front of the plane, hence we test if the distance is [-inf, -r]
-    return -r <= (dot(planeN, c) - planeDist);
-}
+    AABB aabb = AABB(minPoint, maxPoint);
+    uint insertIdx = getInsertIndex();
+    if (insertIdx > MAX_IDX)
+        return false; // Cannot append box
 
-//Checks if the AABB is inside of the cameras frustum
-bool aabbIsVisible(AABB aabb, uint2 smSize){
-    // Convert to World space AABB
-    float3 points[8] = {
-        aabb.minPoint,
-        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.minPoint.z),
-        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
-        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
-        float3(aabb.minPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
-        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
-        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
-        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
-    };
-    AABB aabbWorld = AABB(float3(FLT_MAX), float3(-FLT_MAX));
-    [unroll]
-    for (uint i = 0; i < 8; i++) {
-        float2 ndc = (2.0 * points[i].xy / smSize) - 1.0;
-        ndc.y *= -1.0;
-        float4 rayDir = mul(gInvProj, float4(ndc, 1.0, 1.0));
-        rayDir.xyz /= rayDir.z;                       // Normalize z
-        float3 posView = rayDir.xyz * (-points[i].z); // view is negative Z
-        float4 worldPos = mul(gInvView, float4(posView, 1.0));
-        aabbWorld.minPoint = min(aabbWorld.minPoint, worldPos.xyz);
-        aabbWorld.maxPoint = max(aabbWorld.maxPoint, worldPos.xyz);
-    }
-
-    bool visible = true;
-    [unroll]
-    for (uint i = 0; i < 4; i++) {
-        visible &= isInFrontOfPlane(gFrustumPlanes[i].xyz, gFrustumPlanes[i].w, aabbWorld);
-    }
-
-    return visible;
+    gAABB[insertIdx] = aabb;
+#if USE_COLOR_TRANSPARENCY
+    gData[insertIdx] = transmittance;
+#else
+    gData[insertIdx] = transmittance.x;
+#endif
+    return true;
 }
 
 //
@@ -247,93 +228,120 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
-
+    float4 boxPixelOffset = float4(-kPixelOffset,kPixelOffset, -kPixelOffset, kPixelOffset); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
     float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
 
     float2 relFramePos = pixelSample / frameDim;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
     relFramePos.y *= -1.f;
 
-    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos, 0.f, 1.f));
-    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.f, 1.f));
-
+    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos, 0.0, 1.0));
+    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.0, 1.0));
     posWPixelNear.xyz /= posWPixelNear.w;
-    float3 toNear = posWPixelNear.xyz - gLightPos;
+    posWPixelFar.xyz /= posWPixelFar.w;
+    float3 rayDirection;
+    if (gIsDirectional) {
+        rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
+    } else {
+        rayDirection = posWPixelNear.xyz - gLightPos;
+    }
 
     RayDesc ray;
-    ray.TMin = length(toNear); ;                                                                  // Always start at depth 0
-    ray.TMax = distance(gLightPos, posWPixelFar.xyz / posWPixelFar.w); // Real far for the pixel
-    ray.Origin = gLightPos;
-    ray.Direction = normalize(toNear); // World direction
+    if (gIsDirectional) {
+        ray.TMin = 0;
+        ray.TMax = length(rayDirection);
+        ray.Origin = posWPixelNear.xyz;
+        ray.Direction = rayDirection / ray.TMax;
+    } else {
+        ray.TMin = length(rayDirection);                 // Always start at depth 0
+        ray.TMax = distance(gLightPos, posWPixelFar.xyz); // Real far for the pixel
+        ray.Origin = gLightPos;
+        ray.Direction = rayDirection / ray.TMin; // World direction
+    }
 
     RayData rayData = RayData();
-    bool useRayTracing = true;
-    float lastMinDepth = 0.0;
-    float lastDepthRange = 0.0;
-    float2 lastTransmittances = float2(1.0);
+    bool rayTracingLoop = true;
+    float aabbFrontZ = 0.0;
+    float aabbBackZ = 0.0;
+    float lastHitDepth = 0.0;
+    float3 currTranmittance = float3(1.0);  // Tranmission end of current sample
+    float3 prevTransmittance = float3(1.0); // Tranmission end of previous sample
+    const float far = ray.TMax;
+    const uint instanceMask = getBestParticleShadowPlane(gLightDir, kIncludeCastShadowInstanceMaskBit);
+    bool currHitOpaque = false;
+    bool prevHitOpaque = false;
     // Loop to get all possible samples
-    for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing ; i++) {
+    for (uint i = 0; (i < MAX_ELEMENTS) && rayTracingLoop; i++) {
         rayData.depth = -1;
-        rayData.dist = -1;
+        rayData.dist = ray.TMax;
+        rayData.sampleTransmittance = 0.0;
 
-        //Trace ray
-        TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        // Trace ray
+        uint rayFlags = 0;
+        #if TRACE_NON_OPAQUE_ONLY
+            rayFlags = RAY_FLAG_CULL_OPAQUE;
+        #endif
+        TraceRay(gScene.rtAccel, rayFlags /*Flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
-        // A miss or opaque object ends the ray
+        // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0)
             return;
 
-        //End ray tracing for the next frame
-        if (rayData.currentTransmittance <= kMinOpacity || rayData.dist < 0) {
-            useRayTracing = false;
+        // End Loop for the next iteration if transmittance is smaller as minValue or the ray missed the scene
+        if (all(prevTransmittance <= kMinOpacity) || rayData.dist < 0) {
+            rayTracingLoop = false;
         }
 
-        if (rayData.dist > 0 && i>0) {
-            // Write output
-            float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
-            float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, rayData.depth - rayData.depthRange));
-
-            AABB aabb = AABB(minPoint, maxPoint);
-            #if ACCEL_USE_FRUSTUM_CULLING
-                if (aabbIsVisible(aabb, frameDim))
-            #endif
-                {
-                    uint insertIdx = 0;
-                    InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
-                    if (insertIdx > MAX_IDX)
-                        return;
-            
-                    gAABB[insertIdx] = aabb;
-                    writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
-                }
+        // Get difference between last and current depth
+        float distDiff = rayData.depth - lastHitDepth;
+        // Update aabb Z values if the ray hit something
+        if (rayData.dist >= 0) {
+            aabbFrontZ = aabbBackZ;
+            aabbBackZ = getMidpointDepth(lastHitDepth, distDiff, far);
         }
-        // Update for next iteration
-        if (rayData.dist > 0) {
-            ray.TMin = rayData.dist;
-            lastMinDepth = rayData.depth;
-            lastDepthRange = rayData.depthRange;
-            lastTransmittances.y = lastTransmittances.x;
-            lastTransmittances.x = rayData.currentTransmittance;
+
+        // Write the sample stating on 3rd iteration(i=2). Both aabbZ values are filled at that point
+        if (rayData.dist >= 0 && i > 1) {
+            if (!writeSample(pixelSample, boxPixelOffset, aabbFrontZ, aabbBackZ, prevTransmittance, lastHitDepth))
+                return;
+        }
+
+        // Update depth, transmittance and ray for next iteration
+        if (rayData.dist >= 0) {
+            prevHitOpaque = currHitOpaque;
+            currHitOpaque = rayData.isOpaque();
+            float rayOffset = ulp(rayData.dist) * 4.0; // Next highest float x4 seems to work pretty well
+            // ray.TMin = currHitOpaque ? min(rayData.dist + kOpaqueHitRayDepthBias * pixelScale, rayData.dist + rayOffset) : rayData.dist + rayOffset; // This a bit of a dirty fix for particles that overlap with solid geometry
+            ray.TMin = rayData.dist + rayOffset;
+            lastHitDepth = rayData.depth;
+            prevTransmittance = currTranmittance;
+            currTranmittance = rayData.currentTransmittance;
         }
     }
 
-// Insert last element
-    if (lastMinDepth < gFar && (lastTransmittances.x < 1.0)) {
-        float3 minPoint = float3(pixelSample.x - kPixelOffset, pixelSample.y - kPixelOffset, lastMinDepth - lastDepthRange);
-        float3 maxPoint = float3(pixelSample.x + kPixelOffset, pixelSample.y + kPixelOffset, max(lastMinDepth + lastDepthRange, gFar));
+    // Insert last two elements
+    bool lastHitMiss = rayData.dist < 0;
+    bool storePrev = true;
+    bool storeCurr = !lastHitMiss;
+    #if TRACE_NON_OPAQUE_ONLY
+        storeCurr = true; // It now cannot be assumed that this is the last hit
+    #endif
 
-        AABB aabb = AABB(minPoint, maxPoint);
-        #if ACCEL_USE_FRUSTUM_CULLING
-            if (aabbIsVisible(aabb, frameDim))
-        #endif
-            {
-                uint insertIdx = 0;
-                InterlockedAdd(gCounter[gLightIdx], 1u, insertIdx);
-                if (insertIdx > MAX_IDX)
-                    return;
+    // Update box
+    aabbFrontZ = aabbBackZ;
+    #if TRACE_NON_OPAQUE_ONLY
+        aabbBackZ = lastHitDepth + (0.005 * far * pixelScale * pixelScale); // This is a bit of a experimental bias
+    #else
+        aabbBackZ = lastHitMiss || !storeCurr ? far : getMidpointDepth(lastHitDepth, (rayData.depth - lastHitDepth), far);
+    #endif
 
-                gAABB[insertIdx] = aabb;
-                writeData(insertIdx, AccelShadowData(lastTransmittances.y, lastTransmittances.x, lastDepthRange * 2));
-            }
+    if (any(prevTransmittance < 1.0) && storePrev) {
+        if (!writeSample(pixelSample, boxPixelOffset, aabbFrontZ, aabbBackZ, prevTransmittance, lastHitDepth))
+            return;
+    }
+    // Store last box
+    if (any(currTranmittance < 1.0) && storeCurr) {
+        if (!writeSample(pixelSample, boxPixelOffset, aabbBackZ, far, currTranmittance, rayData.depth))
+            return;
     }
 }

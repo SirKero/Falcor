@@ -68,8 +68,7 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kGenShader);
-        desc.setMaxPayloadSize(20u); //
-                                     //(4) + align(4)
+        desc.setMaxPayloadSize(32u);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1u);
 
@@ -144,7 +143,7 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint) * mAccelDataFormatSize, mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
+                    mpDevice, sizeof(float), mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));
@@ -240,21 +239,19 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
         if (!lights[i]->isActive())
             break;
         FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        bool isDirectional = lights[i]->getType() == LightType::Directional;
         // Bind Utility
         auto var = mGenAccelShadowPip.pVars->getRootVar();
         var["CB"]["gFrameCount"] = mFrameCount;
         var["CB"]["gLightPos"] = mShadowMapMVP[i].pos;
-        var["CB"]["gNear"] = mNearFar.x;
+        var["CB"]["gIsDirectional"] = isDirectional;
+        var["CB"]["gLightDir"] = lights[i]->getData().dirW;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
+        var["CB"]["gSMRes"] = mResolution;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
-        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
-        var["CB"]["gInvView"] = mShadowMapMVP[i].invView;
-        var["CB"]["gView"] = mShadowMapMVP[i].view;
-        std::array<float4, 4> planes = getCameraFrustumPlanes(); // Get Top,Bottom,Left,Right Camera frustum plane
-        for (uint j = 0; j < 4; j++)
-            var["CB"]["gFrustumPlanes"][j] = planes[j];
+        var["CB"]["gSpreadAngle"] = mShadowMapMVP[i].spreadAngle;
 
         var["gAABB"] = mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
@@ -267,6 +264,9 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
         // Spawn the rays.
         mpScene->raytrace(pRenderContext, mGenAccelShadowPip.pProgram.get(), mGenAccelShadowPip.pVars, uint3(targetDim, 1));
     }
+
+     // Clear unused AABBs
+    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
 
     // Sync Photon copy data
     if (mAccelShadowUseCPUCounterOptimization)
