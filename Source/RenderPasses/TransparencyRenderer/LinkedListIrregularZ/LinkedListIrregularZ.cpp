@@ -228,37 +228,6 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
 }
 
-std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes()
-{
-    // TODO add motion prediction
-    const CameraData& data = mpScene->getCamera()->getData();
-    const float fovY = focalLengthToFovY(data.focalLength, data.frameHeight);
-    const float3 camU = normalize(data.cameraU);
-    const float3 camV = normalize(data.cameraV);
-    const float3 camW = normalize(data.cameraW);
-
-    const float halfVSide = data.farZ * math::tan(fovY * 0.5f);
-    const float halfHSide = halfVSide * data.aspectRatio;
-    const float3 frontTimesFar = camW * data.farZ;
-
-    // Frustum Planes. Data struct xyz = N ; w = distance
-    std::array<float4, 4> frustumPlanes;
-    // Top
-    float3 N = math::normalize(math::cross(camU, frontTimesFar - camV * halfVSide));
-    frustumPlanes[0] = float4(N, math::dot(N, data.posW));
-    // Bottom
-    N = math::normalize(math::cross(frontTimesFar + camV * halfVSide, camU));
-    frustumPlanes[1] = float4(N, math::dot(N, data.posW));
-    // Left
-    N = math::normalize(math::cross(camV, frontTimesFar + camU * halfHSide));
-    frustumPlanes[2] = float4(N, math::dot(N, data.posW));
-    // Right
-    N = math::normalize(math::cross(frontTimesFar - camU * halfHSide, camV));
-    frustumPlanes[3] = float4(N, math::dot(N, data.posW));
-
-    return frustumPlanes;
-}
-
 void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
 {
     {
@@ -289,7 +258,7 @@ void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
 
 void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "GenerateShadowLinkedList");
+    FALCOR_PROFILE(pRenderContext, "GenerateIrregularLinkedList");
 
     prepareResources(pRenderContext);
 
