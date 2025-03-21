@@ -161,13 +161,13 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = dir;
-    ray.TMin = 0.f;
+    ray.TMin = 0;
     ray.TMax = distance;
 
     float3 visibility = 1.0;
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = kShadowMaterialFlagAsBlacklist ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir,true);
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist && (TR_RAY_QUERY_FLAG != RAY_FLAG_FORCE_NON_OPAQUE) ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir,true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
@@ -232,7 +232,7 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     float3 visibility = 1.0; //Visible
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = kShadowMaterialFlagAsBlacklist ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir, true);
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist && (TR_RAY_QUERY_FLAG != RAY_FLAG_FORCE_NON_OPAQUE) ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir, true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
@@ -409,7 +409,6 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         // Clamp shadow in [0,1]
         visibility = clamp(visibility, 0.0, 1.0);
-
         #if EVAL_OPAQUE_SHADOW_MAP
             LightData lightData = gScene.getLight(lightIndex);
             SMLightData smData = gShadowMap.getShadowMapLightData(lightData, lightIndex);
