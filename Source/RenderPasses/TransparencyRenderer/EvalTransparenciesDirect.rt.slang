@@ -109,13 +109,17 @@ struct PathData
     \param[in] lod Method for computing texture level-of-detail.
     \return ShadingData struct.
 */
-ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
+ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod, inout float minTriangleSide)
 {
+    StaticVertexData vertices[3];
     const TriangleHit triangleHit = hit.getTriangleHit();
-    VertexData v = gScene.getVertexData(triangleHit);
+    VertexData v = gScene.getVertexData(triangleHit, vertices);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
 
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+
+    // Calc min triangle side
+    minTriangleSide = min( min(distance(vertices[0].position, vertices[1].position), distance(vertices[1].position, vertices[2].position)), distance(vertices[0].position, vertices[2].position));
 
     return sd;
 }
@@ -284,9 +288,10 @@ void rayGen()
         ITextureSampler lod = ExplicitLodTextureSampler(0.f);
         #if ENABLE_TRANSPARENCY_LOD
             lod = ExplicitGradientTextureSampler(rayData.ddx, rayData.ddy);
-        #endif 
-        //Get shading data
-        ShadingData sd = loadShadingData(hit, pd.direction, lod);
+        #endif
+        // Get shading data
+        float minTriangleSide = 0.0;
+        ShadingData sd = loadShadingData(hit, pd.direction, lod, minTriangleSide);
         // Get material instance
         uint hints = 0;
         if (kAdjustShadingNormals)
@@ -300,7 +305,7 @@ void rayGen()
         uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE;
         if(kUseIrregularShadowMask)
             maskFlag = rayData.isOpaque ? TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag) * sd.opacity;
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag, minTriangleSide) * sd.opacity;
 
         // Ambient
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;

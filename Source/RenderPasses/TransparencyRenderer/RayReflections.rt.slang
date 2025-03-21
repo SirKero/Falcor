@@ -77,13 +77,17 @@ struct PathData
     \param[in] lod Method for computing texture level-of-detail.
     \return ShadingData struct.
 */
-ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
+ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod, inout float minTriangleSide)
 {
+    StaticVertexData vertices[3];
     const TriangleHit triangleHit = hit.getTriangleHit();
-    VertexData v = gScene.getVertexData(triangleHit);
+    VertexData v = gScene.getVertexData(triangleHit, vertices);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
 
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+
+    // Calc min triangle side
+    minTriangleSide = min( min(distance(vertices[0].position, vertices[1].position), distance(vertices[1].position, vertices[2].position)), distance(vertices[0].position, vertices[2].position));
 
     return sd;
 }
@@ -205,8 +209,9 @@ void rayGen()
         }
 
         ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-        //Get shading data
-        ShadingData sd = loadShadingData(hit, pd.direction, lod);
+        // Get shading data
+        float triMinSide = 0.0;
+        ShadingData sd = loadShadingData(hit, pd.direction, lod, triMinSide);
         // Get material instance
         uint hints = 0;
         if (kAdjustShadingNormals)
@@ -220,7 +225,7 @@ void rayGen()
         uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE;
         if(kUseIrregularShadowMask)
             maskFlags = rayData.isOpaque ?TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlags) * sd.opacity;
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlags, triMinSide) * sd.opacity;
 
         // Ambient
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;

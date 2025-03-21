@@ -66,7 +66,8 @@ static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
 static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
 static const bool kIrregularShadowMaskUseRay = USE_IRRGEGULAR_SHADOW_MASK;
-static const bool kShadowMaterialFlagAsBlacklist = SHADOW_MATERIAL_FLAG_AS_BLACKLIST; //Enables the shadow material flag as blacklist when mask is enabled
+static const bool kShadowMaterialFlagAsBlacklist = SHADOW_MATERIAL_FLAG_AS_BLACKLIST; // Enables the shadow material flag as blacklist when mask is enabled
+static const bool kUseParticleRayOffset = true;
 
 
 // For RIS light sampling
@@ -166,7 +167,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance)
+float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance, float tMin = 0.0)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -202,16 +203,16 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
                 //Normalize color
                 float maxColor = max(max(color.x, color.y), color.z);
                 color /= maxColor;
-                if(sd.opacity < kMinOpacity)
+                if (sd.opacity < kMinOpacity || ((rayQuery.CandidateTriangleRayT() < tMin) && (sd.opacity < 1.0)))
                     visibility *= 1.0;
                 else
                     visibility *= color * (1.0 - sd.opacity);
             }else{
                 float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
-                visibility *= saturate(1.0 - opacity);
+                if (rayQuery.CandidateTriangleRayT() >= tMin || opacity >= 1.0)
+                    visibility *= saturate(1.0 - opacity);
             }
             
-
             if (all(visibility <= kMinOpacity))
                 rayQuery.Abort();
         }
@@ -231,12 +232,12 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
     \param[inout] Sample Generator
     \return Visbility that is either 0 or 1
 */
-float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg)
+float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg, float TMin = 0.0)
 {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = dir;
-    ray.TMin = 0.f;
+    ray.TMin = TMin;
     ray.TMax = distance;
 
     float3 visibility = 1.0; //Visible
@@ -309,7 +310,7 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     \param[in,out] sg SampleGenerator object.
     \return Outgoing radiance in view direction.
 */
-float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0), const float opacity = 1.0, uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE)
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0), const float opacity = 1.0, uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE, float minTriSide = 0.0)
 {
     const uint lightCount = gScene.getLightCount();
     if (lightCount == 0) return float3(0.0);
@@ -346,6 +347,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         bool isParticle = isHitObjectAParticle(sd.materialID);
         if (isParticle)
             lightDirection = sd.frame.N;
+
+        if (!isParticle || !kUseParticleRayOffset)
+            minTriSide = 0.0;
 
         // Eval BSDF
         float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
@@ -415,9 +419,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
             }
             float3 rayVisibility = 1.0;
             if (kUseStochasticRayTracing)
-                rayVisibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
+                rayVisibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg, minTriSide / 2.0);
             else
-                rayVisibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
+                rayVisibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance, minTriSide / 2.0);
             visibility = min(visibility, rayVisibility);
         }
 
