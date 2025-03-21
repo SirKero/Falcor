@@ -68,12 +68,13 @@ RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<float> gData;
 
-static const float kMidpointPercentage = 0.5; // Percentage of distance the midpoint is set
+static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
+static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias for midpoint
 static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
-static const bool kUseOptimizedMidpoint = true; // Uses min between midpoint and a high bias (0.08% of lights far)
+static const bool kUseMidpointBias = true; // Uses min between midpoint and a high bias (0.08% of lights far)
 static const bool kIncludeCastShadowInstanceMaskBit = false; //INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
 
@@ -102,10 +103,10 @@ float ulp(float f)
     return abs(asfloat(i + 1) - f);
 }
 
-inline float getMidpointDepth(float lastHitDepth, float distanceDifference, float far) {
+inline float getMidpointDepth(float lastHitDepth, float distanceDifference) {
     float midpointDepth = 0;
-    if (kUseOptimizedMidpoint)
-        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, 0.0008 * far);
+    if (kUseMidpointBias)
+        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, kMidpointDepthBias);
     else
         midpointDepth = lastHitDepth + distanceDifference * kMidpointPercentage;
 
@@ -297,7 +298,7 @@ void rayGen()
         // Update aabb Z values if the ray hit something
         if (rayData.dist >= 0) {
             aabbFrontZ = aabbBackZ;
-            aabbBackZ = getMidpointDepth(lastHitDepth, distDiff, far);
+            aabbBackZ = getMidpointDepth(lastHitDepth, distDiff);
         }
 
         // Write the sample stating on 3rd iteration(i=2). Both aabbZ values are filled at that point
@@ -329,10 +330,10 @@ void rayGen()
 
     // Update box
     aabbFrontZ = aabbBackZ;
-    #if TRACE_NON_OPAQUE_ONLY
-        aabbBackZ = lastHitDepth + (0.005 * far * pixelScale * pixelScale); // This is a bit of a experimental bias
+    #if TRACE_NON_OPAQUE_ONLY 
+        aabbBackZ = lastHitDepth + kMidpointBias; //No midpoint for this hit
     #else
-        aabbBackZ = lastHitMiss || !storeCurr ? far : getMidpointDepth(lastHitDepth, (rayData.depth - lastHitDepth), far);
+        aabbBackZ = lastHitMiss || !storeCurr ? far : getMidpointDepth(lastHitDepth, (rayData.depth - lastHitDepth));
     #endif
 
     if (any(prevTransmittance < 1.0) && storePrev) {

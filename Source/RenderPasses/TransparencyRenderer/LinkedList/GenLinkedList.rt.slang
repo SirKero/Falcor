@@ -66,13 +66,13 @@ RWBuffer<uint> gCounter;
 RWStructuredBuffer<LinkedListNode> gData;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
-static const float kOpaqueHitRayDepthBias = OPAQUE_HIT_RAY_DEPTH_BIAS; // Depth bias applied to tmin to search for the next opaque hit (for midpoint sm)
+static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias applied to tmin to search for the next opaque hit (for midpoint sm)
 static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
-static const bool kUseOptimizedMidpoint = true; // Uses min between midpoint and a high bias (0.08% of lights far)
+static const bool kUseMidpointBias = true; // Uses min between midpoint and a high bias (0.08% of lights far)
 static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
@@ -100,10 +100,10 @@ float ulp(float f)
     return abs(asfloat(i + 1) - f);
 }
 
-inline float getMidpointDepth(float lastHitDepth, float distanceDifference, float far) {
+inline float getMidpointDepth(float lastHitDepth, float distanceDifference) {
     float midpointDepth = 0;
-    if (kUseOptimizedMidpoint)
-        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, 0.0008 * far);
+    if (kUseMidpointBias)
+        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, kMidpointDepthBias);
     else
         midpointDepth = lastHitDepth + distanceDifference * kMidpointPercentage;
 
@@ -285,7 +285,7 @@ void rayGen()
         // Update midpoint depth values if the ray hit something
         if (rayData.dist > 0) {
             midpointLast = midpointCurrent;
-            midpointCurrent = getMidpointDepth(lastHitDepth, distDiff, far);
+            midpointCurrent = getMidpointDepth(lastHitDepth, distDiff);
         }
 
         // Write the sample stating on 3rd iteration(i=2).
@@ -325,7 +325,7 @@ void rayGen()
     bool storeLastBox = true;
     #if TRACE_NON_OPAQUE_ONLY
         storeLastBox &= any(currTranmittance < 1.0);
-        midpointLast = lastHitDepth + (0.005 * far); // This is a bit of a experimental bias
+        midpointLast = lastHitDepth + kMidpointBias; //No midpoint for this hit
     #else
         storeLastBox &= (any(currTranmittance < 1.0) && rayData.dist >= 0);
         midpointLast = midpointCurrent;

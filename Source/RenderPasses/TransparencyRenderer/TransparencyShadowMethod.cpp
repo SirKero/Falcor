@@ -316,7 +316,7 @@ void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& set
     mUseColoredTransparency = settings.enableColoredTransparency;
 
     mMidpointPercentage = settings.midpointPercentage;
-    mOpaqueHitRayDepthBias = settings.depthBias;
+    mMidpointDepthBias = settings.depthBias;
 
     mEnableRandomSoftShadows = settings.enableSoftShadows;
     mRandomSoftShadowsPositionRadius = settings.softShadowsPositionRadius;
@@ -334,7 +334,7 @@ bool TransparencyShadowMethod::GlobalShadowSettings::renderUI(Gui::Widgets& widg
 
     widget.var("Midpoint Percentage", midpointPercentage, 0.f, 1.f, 0.001f);
     widget.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
-    widget.var("Depth Bias", depthBias, 1e-2f, FLT_MAX, 0.00001f, false, "%.7f");
+    widget.var("Depth Bias", depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
     widget.tooltip("Depth bias for midpoint shadow maps. Min(depth + depthBias, midpoint) is used.");
 
     return false;

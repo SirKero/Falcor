@@ -142,7 +142,7 @@ public:
         float2 nearFar = float2(0.1f, 60.f);
         float cascadedSize = 20.f;
         float midpointPercentage = 0.5f;
-        float depthBias = 1e-6f;
+        float depthBias = 1e-2f;
         bool enableColoredTransparency = false;
         bool enableSoftShadows = false;
         float softShadowsPositionRadius = 0.001f;
@@ -174,7 +174,7 @@ protected:
     bool mHasDirectionalLight = false;      
 
     float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
-    float mOpaqueHitRayDepthBias = 1e-7f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
+    float mMidpointDepthBias = 1e-2f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
     uint2 mResolution = uint2(512);
     bool mUpdateSMMatrices = false;         //True if VP Matrices of the shadow maps should be recalculated
     bool mUpdateDirectional = true;         //To disable update of directional lights (for debug purposes)
