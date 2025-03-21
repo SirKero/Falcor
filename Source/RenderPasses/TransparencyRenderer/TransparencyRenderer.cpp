@@ -80,6 +80,8 @@ namespace
         {kOutputMV, "gOutMotion", "Motion Vector including transparencies", true, ResourceFormat::RG32Float},
     };
 
+    const std::string kParticleMaterialBufferName = "gParticleMaterials";
+
 }; // namespace
 
 TransparencyRenderer::TransparencyRenderer(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
@@ -363,6 +365,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
     mpShadowMap.reset();
     mpEvalDirectPass.reset();
     mEvalTransparencyDirectRay.resetPip();
+    mpParticleMaterials.reset();
 
     if (mpScene)
     {
@@ -387,6 +390,28 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
 
         auto& sceneAABB = mpScene->getSceneBounds();
         mShadowSettings.cascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.5f;
+
+        //Create and fill the particle material buffer
+        
+        uint materialCount = mpScene->getMaterialCount();
+        materialCount = materialCount + (32u - (materialCount % 32u)); //Round up to next byte size
+        std::vector<uint> particleMaterialsData(materialCount / 32u);
+        auto& particleSystems = mpScene->getParticleSystem();
+        for (auto& ps : particleSystems)
+        {
+            auto& mesh = mpScene->getMesh(ps.meshIDs[0]); //Get first mesh
+            const uint materialID = mesh.materialID;
+            //Mark Material ID
+            uint bufferIdx = materialID / 32u;
+            uint bitIdx = materialID % 32u;
+
+            particleMaterialsData[bufferIdx] |= 1u << bitIdx;
+        }
+
+        mpParticleMaterials =
+            Buffer::create(mpDevice, materialCount / 4u, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, particleMaterialsData.data());
+        mpParticleMaterials->setName("ParticleMaterialsBuffer");
+        
     }
 }
 
@@ -514,6 +539,7 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
 
     mpScene->setRaytracingShaderData(pRenderContext, var, 1); // Set scene data
     mpSampleGenerator->setShaderData(var);                    // Sample generator
+    var[kParticleMaterialBufferName] = mpParticleMaterials;
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
@@ -605,6 +631,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
         mEvalTransparencyDirectRay.pVars = RtProgramVars::create(mpDevice, mEvalTransparencyDirectRay.pProgram, mEvalTransparencyDirectRay.pBindingTable);
         auto var = mEvalTransparencyDirectRay.pVars->getRootVar();
         mpSampleGenerator->setShaderData(var);
+        var[kParticleMaterialBufferName] = mpParticleMaterials;
     }
 
     FALCOR_ASSERT(mEvalTransparencyDirectRay.pVars);
@@ -696,6 +723,7 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
         mReflectionsPass.pVars = RtProgramVars::create(mpDevice, mReflectionsPass.pProgram, mReflectionsPass.pBindingTable);
         auto var = mReflectionsPass.pVars->getRootVar();
         mpSampleGenerator->setShaderData(var);
+        var[kParticleMaterialBufferName] = mpParticleMaterials;
     }
 
     FALCOR_ASSERT(mReflectionsPass.pVars);
@@ -785,6 +813,7 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
             RtProgramVars::create(mpDevice, mTransparencyPathTracer.pProgram, mTransparencyPathTracer.pBindingTable);
         auto var = mTransparencyPathTracer.pVars->getRootVar();
         mpSampleGenerator->setShaderData(var);
+        var[kParticleMaterialBufferName] = mpParticleMaterials;
     }
 
     FALCOR_ASSERT(mTransparencyPathTracer.pVars);

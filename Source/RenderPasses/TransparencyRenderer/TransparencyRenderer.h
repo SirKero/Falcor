@@ -201,6 +201,7 @@ private:
     ref<Texture> mpTransparencyThp; //Thp texture for transparency
     ref<Texture> mpReflectionsMask; //Mask where ray reflections should be used
     ref<Texture> mpReflectionsHit; //Opaque hit for the reflection. Is needed when V-Buffer is not used
+    ref<Buffer> mpParticleMaterials; //Buffer that stores if the material with index x is a particle
 
     //Passes
     // Pipelines / Programms

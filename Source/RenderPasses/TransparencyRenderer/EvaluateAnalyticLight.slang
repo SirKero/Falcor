@@ -56,6 +56,8 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #define IMPORTANCE_MODE IMPORTANCE_MODE_OPACITY_THP
 #endif
 
+Buffer<uint> gParticleMaterials; //Buffer with the bitsize of all materials. Particle materials bits are set
+
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
@@ -104,6 +106,14 @@ struct RISReservoir {
         }
     }
 };
+
+/** Checks if the material is a particle
+ */
+bool isHitObjectAParticle(uint materialID) {
+    uint bufferIdx = materialID / 32;
+    uint bitIdx = materialID % 32;
+    return (gParticleMaterials[bufferIdx] & (1 << bitIdx)) > 0;
+}
 
 /** Samples a light index either uniform or with RIS (Good if a couple lights are used that dont overlap each other)
  */
@@ -332,6 +342,10 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
         if (flipLightDir)
             ls.Li *= (1.0 - sd.opacity); // consider the opacity of the hit if light shined through
+
+        bool isParticle = isHitObjectAParticle(sd.materialID);
+        if (isParticle)
+            lightDirection = sd.frame.N;
 
         // Eval BSDF
         float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
