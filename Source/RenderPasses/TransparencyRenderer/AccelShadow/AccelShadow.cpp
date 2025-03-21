@@ -60,6 +60,8 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
         mRebuildAccelDataBuffer = false;
     }
 
+    mResolutionChanged = false;
+
     updateSMMatrices();
 
     // Create AVSM trace program

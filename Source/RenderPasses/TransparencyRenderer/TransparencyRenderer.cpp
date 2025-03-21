@@ -190,10 +190,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     for (auto& method : mShadowMethods)
     {
         method->setShadowLODMode(mShadowLodMode);
-        method->setColoredTransparency(mUseColorTransparency);
-        method->setNearFar(mNearFar);
-        method->setSoftShadowParameter(mEnableSoftShadows, mSoftShadowsPositionRadius, mSoftShadowsDirectionalSpread);
-        method->setCascadedSize(mSMCascadedSize);
+        method->setGlobalShadowSettings(mShadowSettings);
         method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
     }        
     if (mpShadowMask)
@@ -308,12 +305,6 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     widget.checkbox("Enable Stochastic Shadow Ray", mShadowUseStochasticRayTracing);
     widget.tooltip("Toggle Stochastic Ray Tracing for the Visibility ray. Applies to all techniques that use stochastic ray tracing");
 
-    widget.checkbox("Enable Colored Transparency", mUseColorTransparency);
-    widget.tooltip("Enabled Colored transparency for all methods that support it");
-
-    widget.var("Global Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
-    widget.tooltip("Global Near/Far values for all lights");
-
     if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
     {
         widget.checkbox("Enable Shadow Backproject Mask", mIrregularUseShadowMask);
@@ -325,20 +316,15 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         widget.tooltip("Uses the \"non-shadow throwable\" material flag as a blacklist.");
     }
 
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
-    {
-        widget.var("Cascaded Size", mSMCascadedSize, 0.f, FLT_MAX, 0.1f);
-    }
-
     if (auto group = widget.group("Soft Shadow Options"))
     {
         group.text("Info");
         group.tooltip("Creates fake soft shadows by randomly offset the starting position or direction");
-        group.checkbox("Enable", mEnableSoftShadows);
-        if (mEnableSoftShadows)
+        group.checkbox("Enable", mShadowSettings.enableSoftShadows);
+        if (mShadowSettings.enableSoftShadows)
         {
-            group.var("Position offset radius (Spot/Point)", mSoftShadowsPositionRadius, 0.f, FLT_MAX, 0.001f, false, "%.6f");
-            group.var("Directional Spread (Dir)", mSoftShadowsDirectionalSpread, 0.f, FLT_MAX, 0.001f, false, "%.6f");
+            group.var("Position offset radius (Spot/Point)", mShadowSettings.softShadowsPositionRadius, 0.f, FLT_MAX, 0.001f, false, "%.6f");
+            group.var("Directional Spread (Dir)", mShadowSettings.softShadowsDirectionsSpread, 0.f, FLT_MAX, 0.001f, false, "%.6f");
         }
     } 
 
@@ -351,6 +337,14 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
     {
         widget.dropdown("Importance Mode", mImportanceMode);
+    }
+
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+    {
+        if (auto group = widget.group("Global Shadow Map Settings"))
+        {
+            mShadowSettings.renderUI(group);
+        }
     }
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing && !mShadowMethods.empty() && mShadowMethods[mSelectedShadowMethod])
@@ -392,7 +386,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
 
         auto& sceneAABB = mpScene->getSceneBounds();
-        mSMCascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.5f;
+        mShadowSettings.cascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.5f;
     }
 }
 
@@ -414,7 +408,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
     defines.add("USE_STOCHASTIC_RAY_TRACING", mShadowUseStochasticRayTracing ? "1" : "0");
-    defines.add("TR_USE_COLORED_TRANSPARENCY", mUseColorTransparency ? "1" : "0");
+    defines.add("TR_USE_COLORED_TRANSPARENCY", mShadowSettings.enableColoredTransparency ? "1" : "0");
     defines.add("IMPORTANCE_MODE", std::to_string((uint)mImportanceMode));
 
     //Mask
@@ -423,9 +417,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
         .add("SHADOW_MATERIAL_FLAG_AS_BLACKLIST", mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask ? "1" : "0");
 
     //Soft Shadows
-    defines.add("USE_SOFT_SHADOWS", mEnableSoftShadows ? "1" : "0");
-    defines.add("SOFT_SHADOWS_POS_RADIUS", std::to_string(mSoftShadowsPositionRadius));
-    defines.add("SOFT_SHADOWS_DIR_SPREAD", std::to_string(mSoftShadowsDirectionalSpread * 0.0001)); //TODO proper conversion
+    defines.add("USE_SOFT_SHADOWS", mShadowSettings.enableSoftShadows ? "1" : "0");
+    defines.add("SOFT_SHADOWS_POS_RADIUS", std::to_string(mShadowSettings.softShadowsPositionRadius));
+    defines.add("SOFT_SHADOWS_DIR_SPREAD", std::to_string(mShadowSettings.softShadowsDirectionsSpread * 0.0001)); //TODO proper conversion
 
     //LOD
     defines.add("RAY_LOD_MODE", std::to_string((uint)mRayLodMode));

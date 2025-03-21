@@ -136,6 +136,24 @@ public:
     */
     virtual const ref<Buffer> getJitterSampleBuffer() const{return nullptr;}
 
+    struct GlobalShadowSettings
+    {
+        uint resolution = 512u;
+        float2 nearFar = float2(0.1f, 60.f);
+        float cascadedSize = 20.f;
+        float midpointPercentage = 0.5f;
+        float depthBias = 1e-6f;
+        bool enableColoredTransparency = false;
+        bool enableSoftShadows = false;
+        float softShadowsPositionRadius = 0.001f;
+        float softShadowsDirectionsSpread = 1.f;
+        
+
+        bool renderUI(Gui::Widgets& widget);
+    };
+
+    void setGlobalShadowSettings(GlobalShadowSettings& settings);
+
 protected:
     static const uint kBlurKernelWidthInit = 5;
     static const bool kBlurSigmaInit = 1.f;
@@ -155,10 +173,11 @@ protected:
     bool mOpaqueShadowMapEnabled = false;
     bool mHasDirectionalLight = false;      
 
+    float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
+    float mOpaqueHitRayDepthBias = 1e-7f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
     uint2 mResolution = uint2(512);
     bool mUpdateSMMatrices = false;         //True if VP Matrices of the shadow maps should be recalculated
     bool mUpdateDirectional = true;         //To disable update of directional lights (for debug purposes)
-    float mDirectionalMaxCameraDist = 20.f; //Max camera dist taken for directional lights
     float2 mNearFar = float2(1.f, 60.f);    //Near and far for spot
     bool mResolutionChanged = false;         //True if the resolution changed
     bool mUseColoredTransparency = false;   //Enable colored transparency

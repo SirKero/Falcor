@@ -38,7 +38,7 @@
 namespace
 {
     const Gui::DropdownList kSMResolutionDropdown = {
-        {256, "256x256"}, {512, "512x512"}, {768, "768x768"}, {1024, "1024x1024"}, {2048, "2048x2048"}, {4096, "4096x4096"},
+        {256, "256x256"}, {512, "512x512"}, {1024, "1024x1024"}, {2048, "2048x2048"}, {4096, "4096x4096"},
     };
 }
 
@@ -62,20 +62,8 @@ DefineList TransparencyShadowMethod::getDefines()
 }
 
 bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
-    mResolutionChanged = false;
-    //For now only support quadratic shadow maps
-    mResolutionChanged |= widget.dropdown("ShadowResolution", kSMResolutionDropdown, mResolution.x);
-    if (mResolutionChanged)
-        mResolution.y = mResolution.x;
-
-    //mUpdateSMMatrices |= widget.var("Near/Far", mNearFar, 0.0f, FLT_MAX, 0.001f);
-    if (mHasDirectionalLight)
-    {
-        widget.var("Directional Light Max Camera Dist", mDirectionalMaxCameraDist, 0.001f, FLT_MAX);
-        widget.tooltip("The maximum camera distance that is used to create the perspective shadow map");
-    }
-
-    return mResolutionChanged || mUpdateSMMatrices;
+    //Legacy
+    return false;
 }
 
 void TransparencyShadowMethod::updateSMMatrices(bool rebuild)
@@ -126,7 +114,7 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
 
         auto& cameraData = mpScene->getCamera()->getData();
         float camNear = cameraData.nearZ;
-        float camFar = math::min(cameraData.farZ, mDirectionalMaxCameraDist); // TODO better limiter
+        float camFar = cameraData.farZ;
         float camFovY = focalLengthToFovY(cameraData.focalLength - 2.f, cameraData.frameHeight);
 
         // Get the 8 corners of the frustum Part
@@ -314,4 +302,40 @@ void TransparencyShadowMethod::setNearFar(const float2 nearFar) {
         mNearFar = nearFar;
         mUpdateSMMatrices = true;
     }
+}
+
+void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& settings) {
+   
+    if (mResolution.x != settings.resolution){
+        mResolutionChanged = true;
+        mResolution = uint2(settings.resolution);
+    }
+
+    mNearFar = settings.nearFar;
+    mCascadedSize = settings.cascadedSize;
+    mUseColoredTransparency = settings.enableColoredTransparency;
+
+    mMidpointPercentage = settings.midpointPercentage;
+    mOpaqueHitRayDepthBias = settings.depthBias;
+
+    mEnableRandomSoftShadows = settings.enableSoftShadows;
+    mRandomSoftShadowsPositionRadius = settings.softShadowsPositionRadius;
+    mRandomSoftShadowsDirSpread = settings.softShadowsDirectionsSpread;
+}
+
+bool TransparencyShadowMethod::GlobalShadowSettings::renderUI(Gui::Widgets& widget) {
+    widget.dropdown("ShadowResolution", kSMResolutionDropdown, resolution);
+    widget.var("Near/Far", nearFar, 0.0f, FLT_MAX, 0.001f);
+    widget.tooltip("Global Near/Far values for all lights spotlights");
+    widget.var("Cascaded Size", cascadedSize, 0.f, FLT_MAX, 0.1f);
+    widget.tooltip("Radius for the cascade");
+    widget.checkbox("Enable Colored Transparency", enableColoredTransparency);
+    widget.tooltip("Enabled Colored transparency for all methods that support it");
+
+    widget.var("Midpoint Percentage", midpointPercentage, 0.f, 1.f, 0.001f);
+    widget.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
+    widget.var("Depth Bias", depthBias, 1e-2f, FLT_MAX, 0.00001f, false, "%.7f");
+    widget.tooltip("Depth bias for midpoint shadow maps. Min(depth + depthBias, midpoint) is used.");
+
+    return false;
 }

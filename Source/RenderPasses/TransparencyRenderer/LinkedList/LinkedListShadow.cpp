@@ -64,6 +64,8 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
         mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
 
+    mResolutionChanged = false;
+
     updateSMMatrices();
 
     // Create AVSM trace program
@@ -317,11 +319,6 @@ bool LinkedListShadow::renderUI(Gui::Widgets& widget)
 
         mResolutionChanged |= group.var("Node Buffer size (Res x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
         group.tooltip("Multiplier for the Node Data buffer.");
-
-        group.var("Midpoint Percentage", mMidpointPercentage, 0.f, 1.f, 0.001f);
-        group.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
-        group.var("OpaqueHitRayDepthBias", mOpaqueHitRayDepthBias, 1e-7f, FLT_MAX, 0.000001f, false, "%.7f");
-        group.tooltip("Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used");
 
         /*
         dirty |= widget.checkbox("Use PCF", mUseLinkedListPcf);

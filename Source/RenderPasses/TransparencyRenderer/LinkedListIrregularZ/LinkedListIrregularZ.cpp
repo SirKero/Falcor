@@ -84,6 +84,8 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
 
+    mResolutionChanged = false;
+
     // Set Jitter and update Matricies
     if (mpCPUSampleGenerator)
     {
@@ -703,10 +705,6 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
         if (patternChanged)
             updateSamplePattern();
 
-        group.var("Midpoint Percentage", mMidpointPercentage, 0.f, 1.f, 0.001f);
-        group.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
-        group.var("OpaqueHitRayDepthBias", mOpaqueHitRayDepthBias, 1e-7f, FLT_MAX, 0.000001f, false, "%.7f");
-        group.tooltip("Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used");
     }
 
     return dirty;

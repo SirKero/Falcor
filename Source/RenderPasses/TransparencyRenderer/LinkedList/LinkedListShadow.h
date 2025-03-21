@@ -67,8 +67,6 @@ private:
     uint mStagingCount = 0;
 
     // Shadow settings
-    float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
-    float mOpaqueHitRayDepthBias = 1e-7f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
     uint mApproxNumElementsPerPixel = 16u;
     std::vector<uint> mUIElementCounter;
     std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync

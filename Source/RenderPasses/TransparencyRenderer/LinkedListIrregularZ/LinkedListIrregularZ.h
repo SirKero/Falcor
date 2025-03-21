@@ -128,8 +128,6 @@ private:
     float2 mDynRCChangePercentage = float2(0.1f, 0.6f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
 
     //Shadow settings
-    float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
-    float mOpaqueHitRayDepthBias = 1e-7f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
     uint mApproxNumElementsPerPixel = 4u;
     std::vector<uint> mUIElementCounter;
     std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync

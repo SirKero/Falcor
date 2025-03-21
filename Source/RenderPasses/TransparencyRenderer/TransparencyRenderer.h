@@ -171,14 +171,12 @@ private:
     // Runtime data Tracer
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     uint2 mRenderDims = uint2(512);
-    float2 mNearFar = float2(1.0f, 60.f);
     LightSampleMode mLightSampleMode = LightSampleMode::RIS;
     bool mOptionsChanged = false;
     bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass
     bool mOpaqueShadowMapModeChanged = false;
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
-    bool mUseColorTransparency = false; //Enables transparency with color
     ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
     bool mUseNonOpaqueDepthAndMV = false;
 
@@ -189,12 +187,7 @@ private:
     bool mIrregularUseShadowMask = false;               //Enables a shadow mask for opaque objects
     bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable as blacklist for non-opaque objects
 
-    float mSMCascadedSize = 50.f; //Global setting for cascaded size
-
-    //Soft Shadows
-    bool mEnableSoftShadows = false;
-    float mSoftShadowsPositionRadius = 0.001f;
-    float mSoftShadowsDirectionalSpread = 1.f;
+    TransparencyShadowMethod::GlobalShadowSettings mShadowSettings = {};
 
     //Path Tracer specific settings
     uint mPTMaxBounces = 256;
