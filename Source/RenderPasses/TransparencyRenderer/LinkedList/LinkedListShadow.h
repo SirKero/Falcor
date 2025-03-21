@@ -58,25 +58,41 @@ public:
 private:
     void prepareResources(RenderContext* pRenderContext);
 
-    //Runtime
+    // Runtime
     uint mFrameCount = 0;
 
-    float mDepthBias = 1e-6f;
-    float mNormalDepthBias = 1e-3f;
-    RayFlags mLLRayFlags = RayFlags::None;
+    // Sync Resources
+    static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
+    ref<GpuFence> mpFence;                                  ///< Fence for CPU/GPU syncs
+    uint mStagingCount = 0;
+
+    // Shadow settings
+    float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
+    float mOpaqueHitRayDepthBias = 1e-7f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
+    uint mApproxNumElementsPerPixel = 16u;
+    std::vector<uint> mUIElementCounter;
+    std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync
+    uint mLinkedListNodeBufferSize = 0;
+    uint mLinkedListDataFormatSize = 3; // TODO set automatically
+    bool mRebuildDataBuffer = true;
+    bool mAccelUsePCF = false;
+    bool mTransparencyBufferUsesColor = false; // Checks if the transparency buffer data size matches the global setting
+
+    //TODO
+    bool mUseLinkedListPcf = false;
+    bool mUseLinkedListArray = false;
 
     //Linked List
-    std::vector<ref<Buffer>> mpLinkedList;
+    std::vector<ref<Buffer>> mLinkedListCounter;    // Counter for inserting points
+    std::vector<ref<Buffer>> mLinkedListCounterCPU; // Counter for inserting points
+
+    std::vector<ref<Buffer>> mLinkedListData;       // Transparency Data
+
+    //TODO
     std::vector<ref<Buffer>> mpLinkedListNeighbors;
     std::vector<ref<Buffer>> mpLinkedListArray;
     std::vector<ref<Texture>> mpLinkedListArrayOffsets;
-    bool mUseLinkedListPcf = false;
-    bool mUseLinkedListArray = false;
-    uint mLinkedListElementPerPixel = 16;
-    uint32_t mLinkedElementCount = mResolution.x * mResolution.y * mLinkedListElementPerPixel; // (~70mb with 16 byte data => 4 floats)
-    RayTracingPipeline mGenLinkedListPip;
-    ref<Buffer> mpLinkedListCounter;
-    ref<Buffer> mpLinkedListCounter2;
+ 
+    RayTracingPipeline mGenLinkedListShadowPip;
     ref<ComputePass> mpLinkedListNeighborsPass;
-
 };
