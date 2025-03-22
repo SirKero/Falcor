@@ -1549,10 +1549,15 @@ namespace Falcor
 
         // Check if one particle system is active
         bool oneActive = false;
+        bool paused = true;
         for (const auto& ps : mParticleSystems)
+        {
             oneActive |= ps.active;
+            paused &= ps.paused;
+        }
+            
 
-        if (!oneActive)
+        if (!oneActive || paused)
             return flags;
 
         // Update the particle systems

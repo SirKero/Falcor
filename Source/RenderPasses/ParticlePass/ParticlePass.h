@@ -87,6 +87,7 @@ private:
     uint mFrameCounter = 0;             //Frame Counter for the sample generator
     bool mReinitializeBuffer = false;   //Resets the buffer data
     bool mReset = false;                //Resets all Particle simimulations
+    bool mPaused = false;                 //Pause simulation
 
     bool mEnableSimulateOnStartup = true;     //Simumlates the max lifetime on startup
     bool mUseSimulation = true;         //Simulate the max lifetime

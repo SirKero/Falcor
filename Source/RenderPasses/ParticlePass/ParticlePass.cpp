@@ -225,9 +225,23 @@ void ParticlePass::execute(RenderContext* pRenderContext, const RenderData& rend
     auto& renderDict = renderData.getDictionary();
     auto pGlobalClock = static_cast<Clock*>(renderDict[kRenderGlobalClock]);
     double currentTime = pGlobalClock->getTime();
+
     float deltaT = static_cast<float>(math::min(currentTime - lastFrameTime, 0.3)); //Cap deltaT at 300ms
     lastFrameTime = currentTime;
 
+    //Handle Pause
+    const auto& camera = mpScene->getCamera();
+    auto cameraChanges = camera->getChanges();
+    auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
+    bool cameraMoved = (cameraChanges & ~excluded) != Camera::Changes::None;
+
+    bool isPaused = pGlobalClock->isPaused() || mPaused;
+    for (auto& ps : particleSystems)
+        ps.paused = isPaused && !cameraMoved;
+
+    if (isPaused)
+        return;
+        
     //Get Simulated deltaT instead
     if (mUseSimulation)
     {
@@ -384,6 +398,8 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
     bool storeConfig = widget.button("Store Current Configuration");
     if (storeConfig)
         storeCurrentConfiguration();
+
+    widget.checkbox("Pause Simulation", mPaused);
 }
 
 void ParticlePass::storeCurrentConfiguration() {

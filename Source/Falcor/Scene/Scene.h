@@ -329,8 +329,9 @@ namespace Falcor
             float3 spawnPosition = float3(0, -10, 0);
             float intitialRadius = 1.f;
             std::array<MeshID, 4> meshIDs;
-            bool active = false;
             uint particleBufferOffset = 0;
+            bool active = false;
+            bool paused = false;
         };
 
         /** Full set of required data to create a scene object.
