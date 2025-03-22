@@ -17,9 +17,13 @@ Texture2D<float> gReflectionMask;
 // Outputs
 RWTexture2D<float4> gOutputColor;
 
+#ifndef ENABLE_TRANSPARENCY_LOD
+#define ENABLE_TRANSPARENCY_LOD 0
+#endif
+
 #define is_valid(name) (is_valid_##name != 0)
-static const float kMinOpacity = 1e-7;
-static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
+static const float kMinOpacity = MIN_OPACITY;
+static const uint kMaxElements = MAX_ELEMENTS; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
 static const float kEnvMapStrength = ENV_MAP_STRENGTH;

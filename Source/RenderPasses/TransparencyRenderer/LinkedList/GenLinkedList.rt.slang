@@ -9,10 +9,6 @@ import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 //import Utils.Sampling.SampleGenerator;
 
-#ifndef MAX_ELEMENTS
-#define MAX_ELEMENTS 256
-#endif
-
 #ifndef NUM_LIGHTS
 #define NUM_LIGHTS 1
 #endif

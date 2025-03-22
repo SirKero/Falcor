@@ -38,7 +38,7 @@ RWTexture2D<float4> gThpOut;
 
 #define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = MIN_OPACITY;
-static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
+static const uint kMaxElements = MAX_ELEMENTS; //Max transparent hits
 static const bool kAdjustShadingNormals = true;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
 static const float kEnvMapStrength = ENV_MAP_STRENGTH;

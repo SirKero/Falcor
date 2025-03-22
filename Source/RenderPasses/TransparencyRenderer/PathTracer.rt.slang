@@ -21,8 +21,8 @@ RWTexture2D<float2> gOutMotion;
 RWTexture2D<float4> gOutputColor;
 
 #define is_valid(name) (is_valid_##name != 0)
-static const float kMinOpacity = 1e-7;
-static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
+static const float kMinOpacity = MIN_OPACITY
+static const uint kMaxElements = MAX_ELEMENTS; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
 
 // TODO set as CPU defines
