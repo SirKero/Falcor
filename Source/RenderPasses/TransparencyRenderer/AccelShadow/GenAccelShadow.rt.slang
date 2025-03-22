@@ -331,7 +331,7 @@ void rayGen()
     // Update box
     aabbFrontZ = aabbBackZ;
     #if TRACE_NON_OPAQUE_ONLY 
-        aabbBackZ = lastHitDepth + kMidpointBias; //No midpoint for this hit
+        aabbBackZ = lastHitDepth + kMidpointDepthBias; //No midpoint for this hit
     #else
         aabbBackZ = lastHitMiss || !storeCurr ? far : getMidpointDepth(lastHitDepth, (rayData.depth - lastHitDepth));
     #endif

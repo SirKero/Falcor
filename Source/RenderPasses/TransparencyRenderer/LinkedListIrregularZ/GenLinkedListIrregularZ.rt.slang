@@ -561,7 +561,7 @@ void rayGen()
     bool storeLastBox = true;
 #if TRACE_NON_OPAQUE_ONLY
     storeLastBox &= any(currTranmittance < 1.0);
-    midpointLast = lastHitDepth + kMidpointBias; //No midpoint for this hit
+    midpointLast = lastHitDepth + kMidpointDepthBias; //No midpoint for this hit
 #else
     storeLastBox &= (any(currTranmittance < 1.0) && rayData.dist >= 0);
     midpointLast = midpointCurrent;
