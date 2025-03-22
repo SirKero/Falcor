@@ -180,7 +180,7 @@ void rayGen()
     PathData pd = PathData();
     pd.origin = gScene.camera.getPosition();
     pd.direction = reflect(viewDir, bsdfProperties.guideNormal);
-    pd.sg = SampleGenerator(pixel, gFrameCount);
+    pd.sg = SampleGenerator(pixel, gFrameCount + 32);
 
     //pd.thp = gThp[pixel].xyz * (mi.eval(sd, pd.direction, pd.sg)/  mi.evalPdf(sd, pd.direction)); //Same result als below, but much more expensive
     pd.thp = gThp[pixel].xyz * evalFresnelSchlick(bsdfProperties.specularReflectionAlbedo, 1.0f, max(0.00001f, dot(bsdfProperties.guideNormal, pd.direction))); 
@@ -192,8 +192,8 @@ void rayGen()
     ray.TMin = 0;
     ray.TMax = gScene.camera.data.farZ; ;
     TransparencyRayData rayData = TransparencyRayData(ray.TMax);
-    const uint instanceMask = getBestParticleShadowPlane(ray.Direction);
-
+    //const uint instanceMask = getBestParticleShadowPlane(ray.Direction,true);
+    const uint instanceMask = 3 | kInstanceMaskBitParticleYZ;
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = 0;
@@ -210,8 +210,8 @@ void rayGen()
 
         ITextureSampler lod = ExplicitLodTextureSampler(0.f);
         // Get shading data
-        float triMinSide = 0.0;
-        ShadingData sd = loadShadingData(hit, pd.direction, lod, triMinSide);
+        float minTriangleSide = 0.0;
+        ShadingData sd = loadShadingData(hit,pd.direction, lod, minTriangleSide);
         // Get material instance
         uint hints = 0;
         if (kAdjustShadingNormals)
@@ -222,23 +222,25 @@ void rayGen()
         pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
         // Analytic
-        uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE;
+        uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE;
         if(kUseIrregularShadowMask)
-            maskFlags = rayData.isOpaque ?TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlags, triMinSide) * sd.opacity;
+            maskFlag = rayData.isOpaque ? TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag, minTriangleSide) * sd.opacity;
 
         // Ambient
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;
 
         //Update thp
         float transparency = (1.0 - sd.opacity);
-        pd.thp *= transparency; // TODO weight with color?
-
-        if (all(pd.thp <= kMinOpacity))
+        float3 thp = pd.thp * transparency;
+        if (all(thp <= kMinOpacity))
             pd.terminated = true;
 
+        if(!rayData.isOpaque)
+            pd.thp = thp;
+
         //Update ray
-        ray.TMin = rayData.dist + 1e-10;
+        ray.TMin = rayData.dist + 1e-7;
         rayData = TransparencyRayData(ray.TMax);
 
     }

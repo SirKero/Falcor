@@ -67,7 +67,7 @@ static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point
 static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
 static const bool kIrregularShadowMaskUseRay = USE_IRRGEGULAR_SHADOW_MASK;
 static const bool kShadowMaterialFlagAsBlacklist = SHADOW_MATERIAL_FLAG_AS_BLACKLIST; // Enables the shadow material flag as blacklist when mask is enabled
-static const bool kUseParticleRayOffset = true;
+static const bool kUseParticleRayOffset = false;
 
 
 // For RIS light sampling
@@ -346,14 +346,13 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         bool isParticle = isHitObjectAParticle(sd.materialID);
         if (isParticle)
-            lightDirection = sd.frame.N;
+            lightDirection = sd.frontFacing ?  sd.frame.N : -sd.frame.N;
 
         if (!isParticle || !kUseParticleRayOffset)
             minTriSide = 0.0;
 
         // Eval BSDF
         float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
-
         if (all(brdf <= 0)) {
             #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
                 continue;

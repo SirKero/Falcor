@@ -89,7 +89,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     verts[1].position = prt.position + float3(prt.radius, prt.radius,0);
     verts[2].position = prt.position + float3(prt.radius, -prt.radius,0);
     verts[3].position = prt.position + float3(-prt.radius, -prt.radius,0 );
-    normal = normalize(cross(verts[1].position - verts[0].position, verts[2].position - verts[0].position));
+    normal = normalize(cross(verts[2].position - verts[0].position, verts[1].position - verts[0].position));
     tangent = float4(normalize(verts[1].position - verts[0].position), 1);
     [unroll]
     for(uint i=0; i<4; i++){
@@ -108,7 +108,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     verts[1].position = prt.position + float3(0, prt.radius,prt.radius);
     verts[2].position = prt.position + float3(0, -prt.radius,prt.radius);
     verts[3].position = prt.position + float3(0, -prt.radius,-prt.radius);
-    normal = normalize(cross(verts[1].position - verts[0].position, verts[2].position - verts[0].position));
+    normal = normalize(cross(verts[2].position - verts[0].position, verts[1].position - verts[0].position));
     tangent = float4(normalize(verts[1].position - verts[0].position), 1);
     [unroll]
     for(uint i=0; i<4; i++){
@@ -127,7 +127,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     verts[1].position = prt.position + float3(prt.radius, 0,prt.radius);
     verts[2].position = prt.position + float3(prt.radius,0, -prt.radius);
     verts[3].position = prt.position + float3(-prt.radius,0, -prt.radius);
-    normal = normalize(cross(verts[1].position - verts[0].position, verts[2].position - verts[0].position));
+    normal = normalize(cross(verts[2].position - verts[0].position, verts[1].position - verts[0].position));
     tangent = float4(normalize(verts[1].position - verts[0].position), 1);
     [unroll]
     for(uint i=0; i<4; i++){
