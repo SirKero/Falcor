@@ -1,5 +1,6 @@
 #pragma once
 #include "AccelShadowData.slang"
+#include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
 import Rendering.ShadowMaps.ShadowMapHelpers;
@@ -64,6 +65,7 @@ struct AccelShadowShader
     RaytracingAccelerationStructure gShadowAS;
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
     StructuredBuffer<float> gAccelShadowData[COUNT_LIGHTS];
+    Texture2D<float> gMaskShadowMap;
 
     inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const float transparency) {
         rayData.visibility += transparency;
@@ -93,7 +95,7 @@ struct AccelShadowShader
         }
     }
 
-    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -124,6 +126,14 @@ struct AccelShadowShader
          // Raytraced shadows as fallback
         if (!validShadow)
             return float3(-1.0);
+
+        //Use Opaque SM
+        if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
+            uint2 shadowPixelU = uint2(shadowPixel);
+            float shadowZ = gMaskShadowMap[shadowPixelU];
+            if(dist > shadowZ)
+                return float3(0);
+        }
 
         AccelShadowRayData rayData = AccelShadowRayData();
         RayDesc ray;

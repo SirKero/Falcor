@@ -7,7 +7,7 @@ import Rendering.Materials.TexLODHelpers;
 import Rendering.Materials.TexLODTypes;
 import Scene.Raytracing;
 import Scene.Intersection;
-//import Utils.Sampling.SampleGenerator;
+import Utils.Sampling.SampleGenerator;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 
@@ -20,6 +20,7 @@ cbuffer CB
     uint gLightIdx; // Current light index
     float3 gLightPos;
     bool gIsDirectional; // is directional
+    uint gMipCount;
     uint2 gSMRes;
     uint gFrameCount;
     uint _pad;
@@ -30,14 +31,14 @@ cbuffer CB
 // Textures
 Texture2DArray<float> gMask; // Non-Opaque object mask
 Texture2D<float> gSampleDistribution; //sample Distribution
-RWTexture2D<float> gShadowMap;           // Shadow map
-//Buffer<float2> gHaltonSamples;
+RWBuffer<float> gShadowMap;           // Shadow map
+Buffer<float2> gHaltonSamples;
 
 SamplerState gMaskSampler;
 
-//static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
-//static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
-static const bool kUseMask = USE_MASK; //use Mask to reject
+static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
+static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
+static const bool kUseMask = USE_MASK; //USe mask to reject
 
 struct RayData
 {
@@ -111,14 +112,104 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
 [shader("raygeneration")]
 void rayGen()
 {
-    uint2 pixel = DispatchRaysIndex().xy;
+     uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
     float2 pixelOffset = float2(0.5);
+    float4 boxPixelOffset = float4(-0.5, 0.5, -0.5, 0.5); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
 
     const uint2 smRes = gSMRes;
+    
+    //
+    //Sample Distribution
+    //
+
+    // Go through the mip chain
+    float pixelCenterOffest = 0.5;
+
+    float totalSamples = float(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
+    totalSamples = min(totalSamples, frameDim.x * frameDim.y);
+    const uint idx1D = pixel.x + pixel.y * frameDim.x; // Create an 1D weight from 2D
+    
+    if (idx1D > totalSamples)
+        return;
+    
+    int mipMulFactor = 1; // Default Mip 0
+    uint index = idx1D;
+    uint sampleCount = 1;
+    int subpixelIndex = 0;
+
+    // IDSM Travers algorithm
+    {
+         // For this version we always traverse the whole mip chain, as every sample is at least 1
+        uint2 mipIdx = uint2(0); // Top left
+        uint2 selectedMipIdx = mipIdx;
+        uint weightIdx = idx1D; // Uint weight for traversal
+        uint choosenSampleCount = 0;
+        int pixelIndex = 0; //Start index for the selected pixel
+        uint prevMipRes = 1; // Mip res for previous iteration
+        const uint highestMip = gMipCount - 2;
+        uint selectedMipLevel = highestMip;
+        for (int m = highestMip; m >= 0; m--) {
+            uint4 mipSamples;
+            mipSamples[0] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m))));
+            mipSamples[1] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
+            mipSamples[2] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
+            mipSamples[3] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+            uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+            uint currSamples = 0; //Total for select in loop
+            uint selectedSubpixel = 0;  //Selected subpixel id
+            uint numSamples = 0;        // Number of samples for that subpixel index
+            for (uint x = 0; x < 4 && totalSamples > 0; x++) {
+                numSamples = mipSamples[x];
+                currSamples += numSamples;
+                selectedSubpixel = x;
+                if (weightIdx < currSamples)
+                    break;
+            }
+            // If total is reduced, abort and use the higher level
+            if (totalSamples < choosenSampleCount)
+                break;
+
+            // Update weight idx
+            uint prevSampleIdx = currSamples - numSamples;
+            weightIdx -= prevSampleIdx;
+            choosenSampleCount = numSamples;
+
+            // Get start pixel index
+            for (uint i = 0; i < selectedSubpixel; i++)
+                pixelIndex += mipSamples[i];
+
+            // Update idx for next it
+            if (selectedSubpixel == 1 || selectedSubpixel == 3)
+                mipIdx.x += 1;
+            if (selectedSubpixel > 1) // 2 or 3
+                mipIdx.y += 1;
+
+            selectedMipLevel = m;
+            selectedMipIdx = mipIdx;
+            mipIdx *= 2; // Update for new resolution
+            prevMipRes *= 2;
+        }
+        // Get pixel on default resolution
+        float2 relPixel = float2(selectedMipIdx) / prevMipRes;
+        pixel = uint2((relPixel * smRes) + 0.5);
+        subpixelIndex = max(idx1D - pixelIndex,0);
+
+        sampleCount = choosenSampleCount;
+        index = idx1D % choosenSampleCount;
+        mipMulFactor = 1 << selectedMipLevel; // Multiplier for Mip level
+    }
+    // Fetch a sample with the IDSM algorithm
+    if (sampleCount <= 0)
+        return;
+
+     uint samplesSq = uint(sqrt(sampleCount)); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
+    const float subpixelSize = 1.0 / samplesSq;
+    float2 subpixelLoc = float2(subpixelIndex % samplesSq, subpixelIndex / samplesSq);
+    float2 borderMin = subpixelLoc * subpixelSize;
+
     //SampleGenerator sg = SampleGenerator(pixel, gFrameCount + 34 * gLightIdx);
 
-    /*
     if (kUseHaltonSamplePattern) {
         uint jitterIdx = (subpixelLoc.x + (subpixelLoc.y * samplesSq) + gFrameCount) % kNumHaltonSamples;
         pixelOffset = gHaltonSamples[jitterIdx]; // pixel offset in [0,1]
@@ -129,11 +220,24 @@ void rayGen()
     }
     */
 
+    // X
+    float2 border = float2(borderMin.x, borderMin.x + subpixelSize) - 0.5; // From [0, 1] to [-0.5,0.5]
+    pixelOffset.x = border.x + pixelOffset.x * subpixelSize; // Offset from [0,1] in pixel to [0,1] in subpixel
+    boxPixelOffset.xy = float2(border.x - pixelOffset.x, border.y - pixelOffset.x);
+    // Y
+    border = float2(borderMin.y, borderMin.y + subpixelSize) - 0.5; // From [0, 1] to [-0.5,0.5]
+    pixelOffset.y = border.x + pixelOffset.y * subpixelSize;
+    boxPixelOffset.zw = float2(border.x - pixelOffset.y, border.y - pixelOffset.y);
+
+    pixelOffset *= mipMulFactor;
+    boxPixelOffset *= mipMulFactor;
+    pixelCenterOffest *= mipMulFactor;
+
     //
     // Dispatch Sample / Create Shadow Map
     //
 
-    float2 pixelSample = pixel + pixelOffset;
+    float2 pixelSample = pixel + pixelCenterOffest + pixelOffset;
 
     float2 relFramePos = pixelSample / smRes;
     float maskVal = 1.0;
@@ -182,5 +286,6 @@ void rayGen()
         TraceRay(gScene.rtAccel, rayFlags, kInstanceNoParticle /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
     }
 
-    gShadowMap[pixel] = rayData.depth;
+    uint insertIndex = idx1D + frameDim.x * frameDim.y * gLightIdx;
+    gShadowMap[insertIndex] = rayData.depth;
 }

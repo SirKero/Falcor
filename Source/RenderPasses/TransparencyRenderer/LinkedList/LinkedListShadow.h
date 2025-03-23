@@ -43,6 +43,10 @@ public:
      */
     virtual DefineList getDefines() override;
 
+    /** Additional mask to reject the backprojectio
+     */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable = true) override;
+
     /** Set the needed shader data for the method (textures,buffer, etc)
      */
     virtual void setShaderData(const ShaderVar& var) override;
@@ -60,6 +64,7 @@ private:
 
     // Runtime
     uint mFrameCount = 0;
+    bool mUseOpaqueSM = false; // Use opaque shadow map
 
     // Sync Resources
     static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync

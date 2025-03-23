@@ -69,7 +69,7 @@ public:
             {ShadowRenderMethod::RayTracing, "RayTracing"},
             {ShadowRenderMethod::AccelIrregularZ, "AccelIrregularZ"},
             {ShadowRenderMethod::AccelShadow, "AccelShadow"},
-            {ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"},
+            //{ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"}, //TODO remove
             {ShadowRenderMethod::LinkedList, "LinkedList"},
             {ShadowRenderMethod::LinkedListIrregularZ, "LinkedListIrregularZ"},
         }

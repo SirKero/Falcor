@@ -165,7 +165,7 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
     mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
-    //mGenLinkedListShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); // Trace non-opaque only if mask is used
+    mGenLinkedListShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseOpaqueSM ? "1" : "0"); // Trace non-opaque only if mask is used
     mGenLinkedListShadowPip.pProgram->addDefine(
         "INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"
     ); // Determines if the castShadow instance mask bit is used
@@ -282,6 +282,18 @@ void LinkedListShadow::setShaderData(const ShaderVar& var)
     for (uint i = 0; i < accelDataSize; i++)
     {
         shadowVar["gLinkedListData"][i] = mLinkedListData[i];
+    }
+}
+
+void LinkedListShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable)
+{
+    mUseOpaqueSM = enable;
+    if (mUseOpaqueSM)
+    {
+        auto shadowVar = var["gLinkedListShadow"];
+
+        //shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gMaskShadowMap"] = maskSM->asTexture();
     }
 }
 

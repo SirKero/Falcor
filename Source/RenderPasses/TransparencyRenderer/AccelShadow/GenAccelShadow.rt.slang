@@ -71,7 +71,7 @@ static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const bool kUseMidpointBias = true; // Uses min between midpoint and a high bias (0.08% of lights far)
-static const bool kIncludeCastShadowInstanceMaskBit = false; //INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
+static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.

@@ -42,6 +42,7 @@ target_sources(TransparencyRenderer PRIVATE
     TransparentShadowMask/GenTransparentShadowMask.3d.slang
     TransparentShadowMask/AccumulateMask.cs.slang
     TransparentShadowMask/GenMaskShadowMap.rt.slang
+    TransparentShadowMask/GenMaskImportanceShadowMap.rt.slang
 
 	TransparencyShadowMethod.h
 	TransparencyShadowMethod.cpp

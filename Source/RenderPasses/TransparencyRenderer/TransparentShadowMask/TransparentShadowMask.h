@@ -39,16 +39,26 @@ public:
     virtual ~TransparentShadowMask() = default;
     TransparentShadowMask(ref<Device> pDevice, ref<Scene> pScene);
 
+    enum class MaskGenerateMode : uint
+    {
+        Mask_ISM = 0,
+        Mask_SM = 1,
+        NoMask_SM = 2,
+    };
+
     /** Generate resources needed to evaluate the Shadow Method (e.g. Shadow Map)
     * Should be called every frame and needs to be called before using any resources from that pass
     */
-    void generate(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod, ref<SampleGenerator> pSampleGenerator);
+    void generate(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod, ref<SampleGenerator> pSampleGenerator, MaskGenerateMode genMode = MaskGenerateMode::Mask_ISM);
 
     //Get the layered mask texture
-    ref<Texture> getMask() { return mpTransparentShadowMask; }
+    ref<Texture> getMask() const { return mpTransparentShadowMask; }
 
     //Get layered mask shadow map
-    ref<Buffer> getMaskShadowMap() { return mpMaskOpaqueShadowMap; }
+    ref<Buffer> getMaskImportanceShadowMap() const { return mpMaskOpaqueImportanceShadowMap; }
+
+    //Regular shadow map
+    ref<Texture> getMaskShadowMap() const { return mpMaskOpaqueShadowMap; }
 
     //Set blacklist status
     void enableBlacklist(bool enable) { mEnableBlacklistWithMaterialFlag = enable; }
@@ -60,11 +70,17 @@ private:
         const TransparencyShadowMethod* pTransparencyShadowMethod
     );
 
-    void generateOpaqueMaskShadowMap(
+    void generateOpaqueMaskImportanceShadowMap(
         RenderContext* pRenderContext,
         const RenderData& renderData,
         const TransparencyShadowMethod* pTransparencyShadowMethod,
         ref<SampleGenerator> pSampleGenerator
+    );
+
+    void generateOpaqueMaskShadowMap(
+        RenderContext* pRenderContext,
+        const RenderData& renderData,
+        const TransparencyShadowMethod* pTransparencyShadowMethod
     );
 
     //Constants
@@ -80,11 +96,13 @@ private:
     //Options
     bool mEnableOpaqueMaskShadowMaps = true;    //< Enables the opaque mask shadow map pass
     bool mEnableBlacklistWithMaterialFlag = false;  //< Enables blacklist with material flag (castShadows)
+    bool mGenUseMaskToReject = true;            //< Enables / Disables mask to reject samples
 
     //Buffer and Textures
     ref<Texture> mpTransparentShadowMaskRaster; //2D Array containing the masks for all shadow maps
     ref<Texture> mpTransparentShadowMask; //Containing the temporally accumulated shadow masks
-    ref<Buffer> mpMaskOpaqueShadowMap;         //Importance shadow map with only opaque objects
+    ref<Buffer> mpMaskOpaqueImportanceShadowMap;         //Importance shadow map with only opaque objects
+    ref<Texture> mpMaskOpaqueShadowMap;          // Importance shadow map with only opaque objects
     ref<Sampler> mpMaskSampler;             //Mask sampler for the gen pass
     // Pipelines / Programms
     struct RasterPipeline
@@ -118,5 +136,7 @@ private:
             pBindingTable.reset();
             pVars.reset();
         }
-    } mGenerateMaskShadowMapRayPass;
+    };
+    RayTracingPipeline mGenerateMaskImportanceShadowMapRayPass;
+    RayTracingPipeline mGenerateMaskShadowMapRayPass;
 };

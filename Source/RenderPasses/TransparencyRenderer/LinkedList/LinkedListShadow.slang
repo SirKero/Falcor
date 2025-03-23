@@ -35,6 +35,7 @@ struct LinkedListShadow
     }
 
     StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
+    Texture2D<float> gMaskShadowMap;
 
     /** Caculates the shadow value by evaluating the shadow acceleration structure
     * \param[in] index of the current light
@@ -43,7 +44,7 @@ struct LinkedListShadow
     * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
     * \return visibility in [0,1]
     */
-    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -69,6 +70,14 @@ struct LinkedListShadow
         // Raytraced shadows as fallback
         if (!validShadow)
             return -1.f;
+
+         //Use Opaque SM
+        if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
+            uint2 shadowPixelU = uint2(shadowPixel);
+            float shadowZ = gMaskShadowMap[shadowPixelU];
+            if(dist > shadowZ)
+                return float3(0);
+        }
 
         float3 visibility = 1.0;
         uint index = uShadowPixel.y * gSMSize.x + uShadowPixel.x;

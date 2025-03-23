@@ -202,10 +202,13 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
 
-    if (mIrregularUseShadowMask &&
-        (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+    if (mIrregularUseShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
-        mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get(), mpSampleGenerator);
+        TransparentShadowMask::MaskGenerateMode genMode = TransparentShadowMask::MaskGenerateMode::Mask_ISM;
+        if (mShadowRenderMethod == ShadowRenderMethod::AccelShadow || mShadowRenderMethod == ShadowRenderMethod::LinkedList)
+            genMode = TransparentShadowMask::MaskGenerateMode::Mask_SM;
+
+        mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get(), mpSampleGenerator, genMode);
     }
 
     //Render
@@ -307,7 +310,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     widget.checkbox("Enable Stochastic Shadow Ray", mShadowUseStochasticRayTracing);
     widget.tooltip("Toggle Stochastic Ray Tracing for the Visibility ray. Applies to all techniques that use stochastic ray tracing");
 
-    if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
     {
         widget.checkbox("Enable Shadow Backproject Mask", mIrregularUseShadowMask);
         widget.tooltip(
@@ -543,9 +546,20 @@ void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
-    if (mpShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
-        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask);
-
+    //Set shadow mask and opaque shadow map
+    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing)) {
+        if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
+            );
+        else //Non irregular modes
+        {
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
+            );
+        }
+    }
+        
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
@@ -645,8 +659,20 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
-    if (mpShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
-        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask);
+    // Set shadow mask and opaque shadow map
+    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
+    {
+        if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
+            );
+        else // Non irregular modes
+        {
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
+            );
+        }
+    }
 
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
@@ -740,8 +766,20 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
-    if (mpShadowMask && (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
-        mShadowMethods[mSelectedShadowMethod]->setShadowMask(var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask);
+    // Set shadow mask and opaque shadow map
+    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
+    {
+        if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
+            );
+        else // Non irregular modes
+        {
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
+            );
+        }
+    }
 
     var["CB"]["gFrameCount"] = mFrameCount;
 

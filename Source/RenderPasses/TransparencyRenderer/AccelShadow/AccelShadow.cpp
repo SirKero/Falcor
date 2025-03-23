@@ -226,6 +226,10 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
+    mGenAccelShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseOpaqueSM ? "1" : "0"); // Trace non-opaque only if mask is used
+    mGenAccelShadowPip.pProgram->addDefine(
+        "INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"
+    ); // Determines if the castShadow instance mask bit is used
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -335,6 +339,18 @@ void AccelShadow::setShaderData(const ShaderVar& var) {
     }
 
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
+}
+
+void AccelShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable)
+{
+    mUseOpaqueSM = enable;
+    if (mUseOpaqueSM)
+    {
+        auto shadowVar = var["gAccelShadow"];
+
+        //shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gMaskShadowMap"] = maskSM->asTexture();
+    }
 }
 
 bool AccelShadow::renderUI(Gui::Widgets& widget) {
