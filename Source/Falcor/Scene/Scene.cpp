@@ -1616,6 +1616,9 @@ namespace Falcor
 
             mpUpdateParticlesPass->execute(pRenderContext, float3(ps.numberParticles, 1, 1));
             indexOffset += ps.numberParticles;
+            pRenderContext->uavBarrier(mpMeshVao->getVertexBuffer(kStaticDataBufferIndex).get());
+            if (validAnimationData)
+                pRenderContext->uavBarrier(mpAnimationController->getPrevVertexData().get());
         }
 
         return flags;

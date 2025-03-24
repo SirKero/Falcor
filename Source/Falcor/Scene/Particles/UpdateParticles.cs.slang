@@ -24,7 +24,7 @@ RWStructuredBuffer<PrevVertexData> gPrevVertexBuffer;
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     //Return if thread id is bigger than the number of particles
-    if(dispatchThreadId.x > gNumParticles)
+    if(dispatchThreadId.x >= gNumParticles)
         return;
 
     const uint particleIdx = dispatchThreadId.x;
