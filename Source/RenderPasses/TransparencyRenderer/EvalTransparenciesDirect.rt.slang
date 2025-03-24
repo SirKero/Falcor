@@ -216,16 +216,19 @@ void rayGen()
     PackedHitInfo rayReflectionsHitInfo = {};
 #endif
 
-    float3 viewDir;
-    if (is_valid(gViewW) && !kEvalOpaque)
-        viewDir = -gViewW[pixel].xyz;
-    else
-        viewDir = gScene.camera.computeRayPinhole(pixel, frameDim).dir;
-
-    // Prepare ray payload.
+    // Prepare path data
     PathData pd = PathData();
-    pd.origin = gScene.camera.getPosition();
-    pd.direction = viewDir;
+    if (is_valid(gViewW) && !kEvalOpaque) {
+        pd.origin = gScene.camera.getPosition();
+        pd.direction = -gViewW[pixel].xyz;
+    }
+    else {
+        Ray ray = gScene.camera.computeRayPinhole(pixel, frameDim);
+        pd.origin = ray.origin;
+        pd.direction = ray.dir;
+    }
+
+    //Set sampleGenerator
     pd.sg = SampleGenerator(pixel, gFrameCount);
 
     float tMax = gScene.camera.data.farZ;
@@ -349,8 +352,8 @@ void rayGen()
     }
 
     //Env Map
-    if(kEvalOpaque && rayData.dist < 0){
-        pd.radiance += gScene.envMap.eval(viewDir) * kEnvMapStrength * pd.thp;
+    if (kEvalOpaque && rayData.dist < 0) {
+        pd.radiance += gScene.envMap.eval(pd.direction) * kEnvMapStrength * pd.thp;
         #if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
             if (kCalcEnvMapMotionVectors && all( pd.thp >= 1.0)) {
                 float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, frameDim, /*no jitter*/ false).dir;
