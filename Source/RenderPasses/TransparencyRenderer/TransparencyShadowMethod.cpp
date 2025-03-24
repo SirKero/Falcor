@@ -156,7 +156,8 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
         // Set the Z values to min and max for the scene so that all geometry in the way is rendered
     #if CASCADE_VERSION == 2
         //Fixed Z
-        maxZ = math::ceil(smViewAABB.maxPoint.z);
+        float distDifference = smViewAABB.maxPoint.z - smViewAABB.minPoint.z;
+        maxZ = math::ceil(smViewAABB.maxPoint.z + distDifference * 0.2f);
         minZ = math::floor(smViewAABB.minPoint.z);
 
         //Get Camera Position on a grid

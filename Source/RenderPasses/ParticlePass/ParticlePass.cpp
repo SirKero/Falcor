@@ -305,12 +305,12 @@ void ParticlePass::dispatchParticlePass(RenderContext* pRenderContext, float del
         var["CB"]["gWind"] = pSett.windDirection * pSett.windStrength;
 
         mpUpdateParticlePointsPass->execute(pRenderContext, uint3(ps.numberParticles, 1, 1));
+        mFrameCounter++;
     }
 
     pRenderContext->uavBarrier(pParticlePointsBuffer.get());
     pRenderContext->uavBarrier(mpParticleAnimateDataBuffer.get());
     mReset = false;
-    mFrameCounter++;
 }
 
 void ParticlePass::renderUI(Gui::Widgets& widget)

@@ -78,7 +78,7 @@ float getRandomValue(inout SampleGenerator sg, float value) {
 void main(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
     const uint prtIdx = dispatchThreadId.x;
-    if (prtIdx > gNumParticles)
+    if (prtIdx >= gNumParticles)
         return;
 
     SampleGenerator sg = SampleGenerator(uint2(prtIdx, 0), gFrameCount); // TODO add seed in pixel.y ?
