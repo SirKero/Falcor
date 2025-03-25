@@ -746,17 +746,21 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                     uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
                     group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
                     group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
-                    std::string accelMem = std::to_string((mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f);
-                    std::string dataMem = std::to_string((mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f);
-                    std::string totalMem = std::to_string((mAccelShadowMaxNumPoints * dataBufferSize * sizeof(AABB)) / 1e6f);
-                    group2.text("AABB Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
-                    group2.text("Data Memory:     " + dataMem.substr(0, dataMem.find(".") + 3) + " MB");
-                    group2.text("Total Memory:    " + totalMem.substr(0, totalMem.find(".") + 3) + " MB");
+                    float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
+                    float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
+                    std::string accelMemStr = std::to_string(accelMem);
+                    std::string dataMemStr = std::to_string(dataMem);
+                    std::string totalMemStr = std::to_string((accelMem + dataMem));
+                    group2.text("AABB Memory:     " + accelMemStr.substr(0, accelMemStr.find(".") + 3) + " MB");
+                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+                    group2.text("Total Memory:    " + totalMemStr.substr(0, totalMemStr.find(".") + 3) + " MB");
 
                     group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
-                    std::string neededAABBMem = std::to_string((mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f);
-                    std::string neededDataMem = std::to_string((mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f);
-                    std::string neededTotalMem = std::to_string((mAccelShadowNumPoints[i] * dataBufferSize * sizeof(AABB)) / 1e6f);
+                    accelMem = (mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f;
+                    dataMem = (mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f;
+                    std::string neededAABBMem = std::to_string(accelMem);
+                    std::string neededDataMem = std::to_string(dataMem);
+                    std::string neededTotalMem = std::to_string(accelMem + dataMem);
                     std::string fillRate =
                         std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
                     group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB" );
