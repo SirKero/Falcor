@@ -187,7 +187,8 @@ void rayGen()
         TraceRay(gScene.rtAccel, rayFlags, instanceMask, 0, rayTypeCount, 0, ray, rayData);
 
         //Miss
-        if(rayData.dist < 0){
+        if (rayData.dist < 0) {
+            pd.radiance += gScene.envMap.eval(pd.direction) * pd.thp;
             pd.terminated = true;
             break;
         }
