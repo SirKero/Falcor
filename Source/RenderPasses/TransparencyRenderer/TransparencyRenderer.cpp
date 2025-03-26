@@ -835,9 +835,6 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
     FALCOR_ASSERT(mTransparencyPathTracer.pProgram);
 
     mTransparencyPathTracer.pProgram->addDefines(getLightEvalDefines());
-    mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
-    mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
-    mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); // For updating depth and motion
     mTransparencyPathTracer.pProgram->addDefine("MAX_BOUNCES", std::to_string(mPTMaxBounces));
     mTransparencyPathTracer.pProgram->addDefine("USE_RUSSIAN_ROULETTE", mPTUseRussianRoulette ? "1" : "0");
 
@@ -868,6 +865,21 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
     if (mEnableOpaqueShadowMaps)
         mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
+    // Set shadow mask and opaque shadow map
+    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
+    {
+        if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
+            );
+        else // Non irregular modes
+        {
+            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
+            );
+        }
+    }
+
     var["CB"]["gFrameCount"] = mFrameCount;
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
@@ -878,12 +890,7 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
             var[desc.texname] = renderData.getTexture(desc.name);
         }
     };
-    for (auto& channel : kInputChannels)
-        bind(channel);
-    for (auto& channel : kInputGeometryInfoChannels)
-        bind(channel);
-    for (auto& channel : kOutputGeometryInfoChannels)
-        bind(channel);
+
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
 
     // Execute

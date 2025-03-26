@@ -190,7 +190,7 @@ private:
     TransparencyShadowMethod::GlobalShadowSettings mShadowSettings = {};
 
     //Path Tracer specific settings
-    uint mPTMaxBounces = 256;
+    uint mPTMaxBounces = 1024;
     bool mPTUseRussianRoulette = true;
 
     //Shading Settings
