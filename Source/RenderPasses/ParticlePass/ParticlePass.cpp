@@ -73,6 +73,7 @@ namespace
     const std::string kJSONKeySpawnRadius = "spawnRadius";
     const std::string kJSONKeySpreadAngle = "spreadAngle";
     const std::string kJSONKeyWind = "wind";
+    const std::string kJSONKeyShrinkAtEnd = "shrinkAtEnd";
 }
 
 //Json defines for settings type
@@ -100,6 +101,7 @@ void from_json(const json& j, ParticlePass::ParticleSettings& settings) {
         settings.windDirection =
             settings.windStrength > 0.f ? settings.windDirection / settings.windStrength : float3(0, 1, 0);
     }
+    if (j.contains(kJSONKeyShrinkAtEnd))j[kJSONKeyShrinkAtEnd].get_to(settings.shirnkAtEnd);
  }
 
  void to_json(json& j, const ParticlePass::ParticleSettings& settings)
@@ -116,6 +118,7 @@ void from_json(const json& j, ParticlePass::ParticleSettings& settings) {
     j[kJSONKeySpawnRadius] = settings.spawnRadius;
     j[kJSONKeySpreadAngle] = settings.spreadAngle;
     j[kJSONKeyWind] = settings.windDirection * settings.windStrength;
+    j[kJSONKeyShrinkAtEnd] = settings.shirnkAtEnd;
  }
 
 ParticlePass::ParticlePass(ref<Device> pDevice, const Properties& props)
@@ -303,6 +306,7 @@ void ParticlePass::dispatchParticlePass(RenderContext* pRenderContext, float del
         var["CB"]["gSpawnRadius"] = pSett.spawnRadius;
         var["CB"]["gSpreadAngle"] = pSett.spreadAngle;
         var["CB"]["gWind"] = pSett.windDirection * pSett.windStrength;
+        var["CB"]["gShrinkAtEnd"] = pSett.shirnkAtEnd;
 
         mpUpdateParticlePointsPass->execute(pRenderContext, uint3(ps.numberParticles, 1, 1));
         mFrameCounter++;
@@ -370,6 +374,8 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
             if (group.var(labelText("Wind Direction", i).c_str(), pSett.windDirection))
                 pSett.windDirection = math::normalize(pSett.windDirection);
             group.var(labelText("Wind Stength", i).c_str(), pSett.windStrength, 0.f, FLT_MAX, 0.001f);
+            group.var(labelText("ShrinkAtEnd", i).c_str(), pSett.shirnkAtEnd, -1.f, pSett.lifetime, 0.001f);
+            group.tooltip("Shrinks the particle radius lineary at the end if lifetime of the particle is smaller than this value.");
         }
     }
     widget.separator();

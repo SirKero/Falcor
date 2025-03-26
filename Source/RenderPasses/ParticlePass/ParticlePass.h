@@ -53,6 +53,7 @@ public:
         float spreadAngle = 1.2f;
         float3 windDirection = float3(0,1,0);
         float windStrength = 0.f;
+        float shirnkAtEnd = -1.f;
     };
 
     static ref<ParticlePass> create(ref<Device> pDevice, const Properties& props) { return make_ref<ParticlePass>(pDevice, props); }
