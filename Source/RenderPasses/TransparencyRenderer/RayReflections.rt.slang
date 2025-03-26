@@ -196,8 +196,8 @@ void rayGen()
     ray.TMin = 0;
     ray.TMax = gScene.camera.data.farZ; ;
     TransparencyRayData rayData = TransparencyRayData(ray.TMax);
-    //const uint instanceMask = getBestParticleShadowPlane(ray.Direction,true);
-    const uint instanceMask = 3 | kInstanceMaskBitParticleYZ;
+    const uint instanceMask = getBestParticleShadowPlane(ray.Direction,true);
+    //const uint instanceMask = 3 | kInstanceMaskBitParticleYZ;
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = 0;
