@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "LinkedListShadow.h"
 #include "Utils/Math/FalcorMath.h"
+#include "Utils/SampleGenerators/HaltonSamplePattern.h"
 
 namespace
 {
@@ -145,6 +146,21 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
             }
         }
     }
+
+    if (!mpHaltonBuffer || mpHaltonBuffer->getElementCount() != mNumHaltonSamples)
+    {
+        // Generate Halton Samples on CPU
+        auto haltonSampler = HaltonSamplePattern::create(mNumHaltonSamples);
+        std::vector<float2> haltonInitData(mNumHaltonSamples);
+        for (uint i = 0; i < mNumHaltonSamples; i++)
+            haltonInitData[i] = haltonSampler->next() + 0.5f; // Halton samples are in [-0.5, 0.5) but we want the samples in [0,1)
+
+        // Create and upload GPU buffer
+        mpHaltonBuffer = Buffer::createTyped<float2>(
+            mpDevice, mNumHaltonSamples, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, haltonInitData.data()
+        );
+        mpHaltonBuffer->setName("HaltonDataBuffer");
+    }
 }
 
 void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData& renderData)
@@ -162,6 +178,8 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
     mGenLinkedListShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
+    mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mEnableHalton ? "1" : "0");
+    mGenLinkedListShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
@@ -207,6 +225,7 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
 
         var["gCounter"] = mLinkedListCounter[frameInFlight];
         var["gData"] = mLinkedListData[i];
+        var["gHaltonSamples"] = mpHaltonBuffer;
 
         // Get dimensions of ray dispatch.
         uint2 targetDim = mResolution;
@@ -331,6 +350,14 @@ bool LinkedListShadow::renderUI(Gui::Widgets& widget)
 
         mResolutionChanged |= group.var("Node Buffer size (Res x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
         group.tooltip("Multiplier for the Node Data buffer.");
+
+        group.checkbox("Enable Jitter", mEnableHalton);
+        if (mEnableHalton)
+        {
+            if (group.var("HaltonSamples", mNumHaltonSamples, 1u, 1024u, 1u))
+                mGenLinkedListShadowPip.pVars.reset();
+            group.tooltip("Number of Halton Samples");
+        }
 
         /*
         dirty |= widget.checkbox("Use PCF", mUseLinkedListPcf);

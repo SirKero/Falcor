@@ -63,11 +63,14 @@ cbuffer CB
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<float> gData;
+Buffer<float2> gHaltonSamples;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
 static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias for midpoint
 static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
+static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
+static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const bool kUseMidpointBias = true; // Uses min between midpoint and a high bias (0.08% of lights far)
@@ -225,8 +228,13 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 frameDim = DispatchRaysDimensions().xy;
-    float4 boxPixelOffset = float4(-kPixelOffset,kPixelOffset, -kPixelOffset, kPixelOffset); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
-    float2 pixelSample = pixel + 0.5; //+ kMSAAPattern[gFrameCount % 16];
+    float4 boxPixelOffset = float4(-kPixelOffset, kPixelOffset, -kPixelOffset, kPixelOffset); // Pixel offset to create AABB (xMin, xMax, yMin, yMax)
+    float2 pixelOffset = float2(0.5);
+    if (kUseHaltonSamplePattern) {
+        uint jitterIdx = (pixel.x + (pixel.y * frameDim.x) + gFrameCount) % kNumHaltonSamples;
+        pixelOffset = gHaltonSamples[jitterIdx]; // pixel offset in [0,1]
+    }
+    float2 pixelSample = pixel + pixelOffset;
 
     float2 relFramePos = pixelSample / frameDim;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]

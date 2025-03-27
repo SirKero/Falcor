@@ -27,7 +27,7 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 1
 #endif
 
-#if SHADOW_ACCEL_PCF
+#if 0
 struct AccelShadowRayData {
     float4 visibility;
     float4 hitDepth;

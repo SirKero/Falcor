@@ -19,7 +19,7 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_RAY_INLINE 1
 #endif
 
-#if SHADOW_ACCEL_PCF
+#if 0
 struct AccelShadowRayData {
     float4 visibility;
     float4 hitDepth;

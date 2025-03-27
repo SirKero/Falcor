@@ -60,11 +60,14 @@ cbuffer CB
 
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<LinkedListNode> gData;
+Buffer<float2> gHaltonSamples;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
 static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias applied to tmin to search for the next opaque hit (for midpoint sm)
 static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
+static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
+static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
@@ -200,8 +203,12 @@ void rayGen()
     uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
     uint idx1D = pixel.x + pixel.y * frameDim.x;
-
-    float2 pixelSample = pixel + 0.5;
+    float2 pixelOffset = float2(0.5);
+    if (kUseHaltonSamplePattern) {
+        uint jitterIdx = (pixel.x + (pixel.y * frameDim.x) + gFrameCount) % kNumHaltonSamples;
+        pixelOffset = gHaltonSamples[jitterIdx]; // pixel offset in [0,1]
+    }
+    float2 pixelSample = pixel + pixelOffset;
 
     float2 relFramePos = pixelSample / gSMRes;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]

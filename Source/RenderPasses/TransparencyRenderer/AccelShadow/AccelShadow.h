@@ -87,6 +87,11 @@ private:
     bool mAccelUseFrustumCulling = true;
     RayFlags mAccelRayFlags = RayFlags::None;
 
+    // Jitter
+    bool mEnableHalton = true;
+    uint mNumHaltonSamples = 64; // Number of halton samples
+    ref<Buffer> mpHaltonBuffer;  // Buffer with precalculated Halton numbers
+
     struct
     {
         bool enable = false;
