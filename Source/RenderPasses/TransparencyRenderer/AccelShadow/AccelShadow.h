@@ -88,7 +88,7 @@ private:
     RayFlags mAccelRayFlags = RayFlags::None;
 
     // Jitter
-    bool mEnableHalton = true;
+    bool mEnableHalton = false;
     uint mNumHaltonSamples = 64; // Number of halton samples
     ref<Buffer> mpHaltonBuffer;  // Buffer with precalculated Halton numbers
 
