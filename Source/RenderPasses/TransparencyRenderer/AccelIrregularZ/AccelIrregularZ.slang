@@ -19,10 +19,6 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_RAY_INLINE 1
 #endif
 
-#ifndef ACCEL_USE_NEAREST_DEPTH
-#define ACCEL_USE_NEAREST_DEPTH 0
-#endif
-
 #ifndef ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS
 #define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 1
 #endif
@@ -58,6 +54,7 @@ struct AccelIrregularZShader
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;       // TODO currently ignored and always assumed true
     static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT;                      // Max value to be added on the atomic counter
     static const bool kUseOneAABBForAllLight = ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS;
+    static const uint kMaskISMMultFactor = MASK_ISM_MULT_FACTOR;        //Multiplication factor for the ISM used by the mask
 
     cbuffer SMCB
     {
@@ -200,6 +197,7 @@ struct AccelIrregularZShader
                 mipSamples[1] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
                 mipSamples[2] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
                 mipSamples[3] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+                mipSamples *= kMaskISMMultFactor;
                 uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
                 uint pixelLoc = 0;
                 if (smUV.x > 0.5)

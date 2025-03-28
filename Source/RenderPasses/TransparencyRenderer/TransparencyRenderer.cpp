@@ -82,6 +82,8 @@ namespace
 
     const std::string kParticleMaterialBufferName = "gParticleMaterials";
 
+    const Gui::DropdownList kMaskISMMultFactorDropdown{{1u, "1"}, {4u, "4"}, {9u, "9"}, {16u, "16"}};
+
 }; // namespace
 
 TransparencyRenderer::TransparencyRenderer(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
@@ -196,7 +198,10 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
     }        
     if (mpShadowMask)
+    {
+        mpShadowMask->setIDMMultFactor(mMaskISMMultFactor);
         mpShadowMask->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
+    }
 
     //Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -317,6 +322,12 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             "Enables a backprojection mask (non-opaque objects rasterized), that is used to reject samples for only opaque on fully-lit "
             "samples in the backprojection process"
         );
+        if (mIrregularUseShadowMask &&
+            (mShadowRenderMethod != ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod != ShadowRenderMethod::LinkedListIrregularZ))
+        {
+            widget.dropdown("Mask ISM Multiplication Factor", kMaskISMMultFactorDropdown, mMaskISMMultFactor);
+            widget.tooltip("Multiplication factor for the ISM used when the mask is active. The dispatch size and all samples in the Sample Distribution will be multiplied with this number.");
+        }
         widget.checkbox("Enable shadow material flag as blacklist", mUseShadowMaterialFlagAsBlacklist);
         widget.tooltip("Uses the \"non-shadow throwable\" material flag as a blacklist.");
     }
@@ -443,6 +454,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
     defines
         .add("SHADOW_MATERIAL_FLAG_AS_BLACKLIST", mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask ? "1" : "0");
+    defines.add("MASK_ISM_MULT_FACTOR", std::to_string(mMaskISMMultFactor));
 
     //Soft Shadows
     defines.add("USE_SOFT_SHADOWS", mShadowSettings.enableSoftShadows ? "1" : "0");

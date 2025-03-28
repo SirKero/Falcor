@@ -11,10 +11,10 @@ __exported import Scene.Intersection;
 #define COUNT_LIGHTS 1
 #endif
 
-
 struct LinkedListIrregularZShader
 {
-    static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT;    // Max value to be added on the atomic counter
+    static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT; // Max value to be added on the atomic counter
+    static const uint kMaskISMMultFactor = MASK_ISM_MULT_FACTOR; // Multiplication factor for the ISM used by the mask
 
     cbuffer SMCB
     {
@@ -108,7 +108,7 @@ struct LinkedListIrregularZShader
         float2 smUV = shadowPos.xy;
         uint2 mipIdx = uint2(0); // Top left
         uint2 selectedMipIdx = mipIdx;
-        uint selectedIndex = 0;  // Start index at zero
+        uint selectedIndex = 0; // Start index at zero
         uint choosenSampleCount = 0;
         const uint highestMip = gMipCount - 2;
         uint selectedMipLevel = highestMip;
@@ -158,6 +158,7 @@ struct LinkedListIrregularZShader
         if (choosenSampleCount == 0)
             return visibility; //Unshadowed (1.0)
 
+        uint selectedMaskISMIndex = selectedIndex * kMaskISMMultFactor; //Only used when ISM is active
         //Get final offset (subpixels) for the index
         if (choosenSampleCount > 1) {
             uint samplesSq = uint(round(sqrt(choosenSampleCount))); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
@@ -173,8 +174,19 @@ struct LinkedListIrregularZShader
             return visibility;
 
         if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
-            uint maskIndex = selectedIndex + gMaxBufferSize * lightIdx;
-            float maskSMDepth = gMaskShadowMap[selectedIndex];
+            // Get Mask index
+            choosenSampleCount *= kMaskISMMultFactor;
+            if (choosenSampleCount > 1) {
+                uint samplesSq = uint(round(sqrt(choosenSampleCount))); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
+                const float subpixelSize = 1.0 / samplesSq;
+                uint2 subpixelOffset = uint2(smUV / subpixelSize);
+                subpixelOffset.y *= samplesSq;
+
+                selectedMaskISMIndex += subpixelOffset.x + subpixelOffset.y;
+            }
+
+            uint maskIndex = selectedMaskISMIndex + gMaxBufferSize * lightIdx;
+            float maskSMDepth = gMaskShadowMap[selectedMaskISMIndex];
             if (maskSMDepth <= dist)
                 return float3(0.0);
         }

@@ -217,7 +217,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
     auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
 
     uint2 targetDim = pTransparencyShadowMethod->getShaderDispatchSize();
-    size_t targetDim1D = targetDim.x * targetDim.y;
+    size_t targetDim1D = targetDim.x * targetDim.y * mOpaqueImportanceSMMultFactor;
 
     auto pHaltonBuffer = pTransparencyShadowMethod->getJitterSampleBuffer();
     // Prepare Resources
@@ -280,6 +280,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(numHaltonSampls));
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("USE_BLACKLIST", mEnableBlacklistWithMaterialFlag ? "1" : "0");
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("USE_MASK", mGenUseMaskToReject ? "1" : "0");
+    mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("MASK_ISM_MULT_FACTOR", std::to_string(mOpaqueImportanceSMMultFactor));
 
 
      // Init Vars

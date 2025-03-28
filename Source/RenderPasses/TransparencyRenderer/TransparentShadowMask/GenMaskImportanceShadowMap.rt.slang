@@ -38,7 +38,8 @@ SamplerState gMaskSampler;
 
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
-static const bool kUseMask = USE_MASK; //USe mask to reject
+static const bool kUseMask = USE_MASK; // USe mask to reject
+static const uint kMultFactor = MASK_ISM_MULT_FACTOR;
 
 struct RayData
 {
@@ -127,7 +128,7 @@ void rayGen()
     float pixelCenterOffest = 0.5;
 
     float totalSamples = float(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
-    totalSamples = min(totalSamples, frameDim.x * frameDim.y);
+    totalSamples *= kMultFactor;
     const uint idx1D = pixel.x + pixel.y * frameDim.x; // Create an 1D weight from 2D
     
     if (idx1D > totalSamples)
@@ -155,6 +156,7 @@ void rayGen()
             mipSamples[1] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
             mipSamples[2] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
             mipSamples[3] = uint(round(gSampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+            mipSamples *= kMultFactor;
             uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
             uint currSamples = 0; //Total for select in loop
             uint selectedSubpixel = 0;  //Selected subpixel id

@@ -62,6 +62,8 @@ public:
 
     //Set blacklist status
     void enableBlacklist(bool enable) { mEnableBlacklistWithMaterialFlag = enable; }
+    //Set mult factor
+    void setIDMMultFactor(uint multFactor) { mOpaqueImportanceSMMultFactor = multFactor; }
 
 private:
     void generateTransparencyMask(
@@ -92,6 +94,7 @@ private:
 
     uint mTemporalCounter = 0;  //< Current frame counter for the temporal mask 
     uint mFrameCount = 0;
+    uint mOpaqueImportanceSMMultFactor = 4;     //1, 4 or 9 to work without any issues
 
     //Options
     bool mEnableOpaqueMaskShadowMaps = true;    //< Enables the opaque mask shadow map pass
