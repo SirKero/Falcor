@@ -633,18 +633,16 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
                 {
                     if (i > 0)
                         group2.separator();
+                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
                     group2.text(mpScene->getLight(i)->getName());
-                    group2.text("Element Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
-                    std::string accelMem = std::to_string((mLinkedListNodeBufferSize * sizeof(float) * mLinkedListDataFormatSize) / 1e6f);
-                    group2.text("Element Buffer Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
-                    group2.text(
-                        "Used Elements: " + std::to_string(uint(mUIElementCounter[i]))
-                    );
-                    std::string neededMem = std::to_string(
-                        (mUIElementCounter[i] * sizeof(float) * mLinkedListDataFormatSize) / 1e6f
-                    );
-                    std::string fillRate =
-                        std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
+                    group2.text("Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
+                    float dataMem = (mLinkedListNodeBufferSize * (sizeof(float) + dataBufferSize)) / 1e6f;
+                    std::string dataMemStr = std::to_string(dataMem);
+                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+
+                    group2.text("Used Elements:    " + std::to_string(uint(mUIElementCounter[i])));
+                    std::string neededMem = std::to_string((mUIElementCounter[i] * (sizeof(float) + mLinkedListDataFormatSize)) / 1e6f);
+                    std::string fillRate = std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
                     group2.text(
                         "Used Element Buffer Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
                         fillRate.substr(0, fillRate.find(".") + 2) + "%)"

@@ -386,23 +386,31 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
                 {
                     if (i > 0)
                         group2.separator();
+                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
                     group2.text(mpScene->getLight(i)->getName());
-                    group2.text("Elements:        " + std::to_string(mAccelShadowMaxNumPoints));
-                    std::string accelMem = std::to_string((mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f);
-                    group2.text("AABB Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
-                    group2.text("Data Memory:      TBD"); // TODO
+                    group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
+                    float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
+                    float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
+                    std::string accelMemStr = std::to_string(accelMem);
+                    std::string dataMemStr = std::to_string(dataMem);
+                    std::string totalMemStr = std::to_string((accelMem + dataMem));
+                    group2.text("AABB Memory:     " + accelMemStr.substr(0, accelMemStr.find(".") + 3) + " MB");
+                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+                    group2.text("Total Memory:    " + totalMemStr.substr(0, totalMemStr.find(".") + 3) + " MB");
+
+                    group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
+                    accelMem = (mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f;
+                    dataMem = (mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f;
+                    std::string neededAABBMem = std::to_string(accelMem);
+                    std::string neededDataMem = std::to_string(dataMem);
+                    std::string neededTotalMem = std::to_string(accelMem + dataMem);
+                    std::string fillRate = std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
+                    group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB");
+                    group2.text("Used Data Memory:   " + neededDataMem.substr(0, neededDataMem.find(".") + 3) + " MB");
                     group2.text(
-                        "Needed Elements: " + std::to_string(uint(mAccelShadowNumPoints[i] * mAccelShadowOverestimation)) + " (" +
-                        std::to_string(mAccelShadowNumPoints[i]) + ")"
-                    );
-                    std::string neededMem = std::to_string((mAccelShadowNumPoints[i] * mAccelShadowOverestimation * sizeof(AABB)) / 1e6f);
-                    std::string fillRate =
-                        std::to_string(((mAccelShadowNumPoints[i] * mAccelShadowOverestimation) / float(mAccelShadowMaxNumPoints)) * 100.f);
-                    group2.text(
-                        "Needed AABB Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
+                        "Used Total Memory:   " + neededTotalMem.substr(0, neededTotalMem.find(".") + 3) + " MB (" +
                         fillRate.substr(0, fillRate.find(".") + 2) + "%)"
                     );
-                    group2.text("Needed Data Memory:    TBD");
                 }
                 group2.separator();
             }
