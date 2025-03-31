@@ -23,6 +23,7 @@ struct LinkedListIrregularZShader
         float gFar;          //Shadow far
         uint gMipCount;      //Count of mip in the sample distribution texture
         uint gMaxBufferSize; //Max size of the buffer
+        uint gISMMaxSize;   //ISM max size
     }
 
     cbuffer ShadowVPs
@@ -185,10 +186,12 @@ struct LinkedListIrregularZShader
                 selectedMaskISMIndex += subpixelOffset.x + subpixelOffset.y;
             }
 
-            uint maskIndex = selectedMaskISMIndex + gMaxBufferSize * lightIdx;
-            float maskSMDepth = gMaskShadowMap[selectedMaskISMIndex];
-            if (maskSMDepth <= dist)
-                return float3(0.0);
+            if(selectedMaskISMIndex < gISMMaxSize * kMaskISMMultFactor){
+                uint maskIndex = selectedMaskISMIndex + gMaxBufferSize * kMaskISMMultFactor * lightIdx;
+                float maskSMDepth = gMaskShadowMap[selectedMaskISMIndex];
+                if (maskSMDepth <= dist)
+                    return float3(0.0);
+            }
         }
 
         LinkedListNode n = gLinkedListData[lightIdx][selectedIndex];

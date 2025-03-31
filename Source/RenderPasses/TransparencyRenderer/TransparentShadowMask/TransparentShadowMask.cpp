@@ -216,8 +216,8 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
     const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
     auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
 
-    uint2 targetDim = pTransparencyShadowMethod->getShaderDispatchSize();
-    size_t targetDim1D = targetDim.x * targetDim.y * mOpaqueImportanceSMMultFactor;
+    uint2 targetDim = pTransparencyShadowMethod->getShaderDispatchSize() * mOpaqueImportanceSMMultFactor;
+    size_t targetDim1D = targetDim.x * targetDim.y;
 
     auto pHaltonBuffer = pTransparencyShadowMethod->getJitterSampleBuffer();
     // Prepare Resources

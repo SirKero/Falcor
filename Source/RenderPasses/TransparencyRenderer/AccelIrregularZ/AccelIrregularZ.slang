@@ -183,7 +183,6 @@ struct AccelIrregularZShader
 
         // Use transparent shadow map
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
-            uint index = uShadowPixel.y * gSMSize.x + uShadowPixel.x;
             float2 smUV = shadowPos.xy;
             uint2 mipIdx = uint2(0); // Top left
             uint2 selectedMipIdx = mipIdx;
@@ -245,9 +244,9 @@ struct AccelIrregularZShader
             }
 
             // Check if index is bigger than max size. Can happen if sample count increases drastically compaired to previous frame
-            if (selectedIndex < gMaxBufferSize){
-                uint maskIndex = selectedIndex + gMaxBufferSize * lightIdx;
-                float maskSMDepth = gMaskShadowMap[selectedIndex];
+            if (choosenSampleCount > 0 && (selectedIndex < gMaxBufferSize * kMaskISMMultFactor)) {
+                uint maskIndex = selectedIndex + gMaxBufferSize * kMaskISMMultFactor * lightIdx;
+                float maskSMDepth = gMaskShadowMap[maskIndex];
                 if (maskSMDepth <= dist)
                     return float3(0.0);
             }

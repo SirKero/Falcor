@@ -585,6 +585,8 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
     shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
     shadowVar["SMCB"]["gMaxBufferSize"] = mLinkedListNodeBufferSize;
+    uint2 opaqueSMMaxDispatch = getShaderDispatchSize();
+    shadowVar["SMCB"]["gISMMaxSize"] = opaqueSMMaxDispatch.x * opaqueSMMaxDispatch.y;
     
 
     auto& lights = mpScene->getLights();

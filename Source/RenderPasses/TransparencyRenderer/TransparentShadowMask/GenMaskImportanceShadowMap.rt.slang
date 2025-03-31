@@ -288,6 +288,6 @@ void rayGen()
         TraceRay(gScene.rtAccel, rayFlags, kInstanceNoParticle /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
     }
 
-    uint insertIndex = idx1D + frameDim.x * frameDim.y * gLightIdx;
+    uint insertIndex = idx1D + frameDim.x * frameDim.y * kMultFactor * gLightIdx;
     gShadowMap[insertIndex] = rayData.depth;
 }
