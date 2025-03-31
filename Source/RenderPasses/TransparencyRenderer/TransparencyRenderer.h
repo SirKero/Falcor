@@ -139,6 +139,7 @@ public:
     );
 
 private:
+    void parseProperties(const Properties& props); //Properties for render graph
     //Defines for the light evaluation. Can update every frame
     DefineList getLightEvalDefines();
 

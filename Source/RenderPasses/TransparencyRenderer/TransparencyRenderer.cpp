@@ -84,17 +84,48 @@ namespace
 
     const Gui::DropdownList kMaskISMMultFactorDropdown{{1u, "1"}, {4u, "4"}, {9u, "9"}, {16u, "16"}};
 
+    //Properties for render graph
+    const std::string kPropsEnableRenderMode = "RenderMode";
+    const std::string kPropsShadowMethod = "ShadowMethod";
+    const std::string kPropsEnableMask = "EnableMask";
+    const std::string kPropsShadowResolution = "ShadowResolution";
+
 }; // namespace
 
 TransparencyRenderer::TransparencyRenderer(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
+    parseProperties(props);
+}
+
+void TransparencyRenderer::parseProperties(const Properties& props)
+{
+    for (const auto& [key, value] : props)
+    {
+        if (key == kPropsEnableRenderMode)
+            mCameraRenderMode = value;
+        else if (key == kPropsShadowMethod)
+            mShadowRenderMethod = value;
+        else if (key == kPropsEnableMask)
+            mIrregularUseShadowMask = value;
+        else if (key == kPropsShadowResolution)
+            mShadowSettings.resolution = value;
+        else
+            logWarning("Unknown property '{}' in TransparencyRenderers properties.", key);
+    }
 }
 
 Properties TransparencyRenderer::getProperties() const
 {
-    return {};
+    Properties props = Properties();
+
+    props[kPropsEnableRenderMode] = mCameraRenderMode;
+    props[kPropsShadowMethod] = mShadowRenderMethod;
+    props[kPropsEnableMask] = mIrregularUseShadowMask;
+    props[kPropsShadowResolution] = mShadowSettings.resolution;
+
+    return props;
 }
 
 RenderPassReflection TransparencyRenderer::reflect(const CompileData& compileData)
@@ -403,7 +434,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
 
         auto& sceneAABB = mpScene->getSceneBounds();
-        mShadowSettings.cascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.5f;
+        mShadowSettings.cascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.4f;
 
         //Create and fill the particle material buffer
         
