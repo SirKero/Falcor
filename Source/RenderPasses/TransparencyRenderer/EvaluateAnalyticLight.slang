@@ -328,16 +328,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         // Sample local light source.
         AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf, lightType);
         float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
-
-        // Reject sample if invalid or has an too steep incident angle
-        if (all(ls.Li <= 0.0) || (abs(NdotL) < kMinIncidentAngle)) {
-            #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
-                    continue;
-            #else
-                    return float3(0.0);
-            #endif
-        }
-
+        
         // Flip light dir for non-opaque surfaces, so light shines through
         bool flipLightDir = (NdotL < 0) && (sd.opacity < 1);
         float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
@@ -346,10 +337,19 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         bool isParticle = isHitObjectAParticle(sd.materialID);
         if (isParticle)
-            lightDirection = sd.frontFacing ?  sd.frame.N : -sd.frame.N;
+            lightDirection = sd.frontFacing ? sd.faceN : -sd.faceN;
 
         if (!isParticle || !kUseParticleRayOffset)
             minTriSide = 0.0;
+
+        // Reject sample if invalid or has an too steep incident angle
+        if (all(ls.Li <= 0.0) || (abs(NdotL) < kMinIncidentAngle) && !isParticle) {
+            #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
+                    continue;
+            #else
+                    return float3(0.0);
+            #endif
+        }
 
         // Eval BSDF
         float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
