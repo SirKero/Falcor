@@ -40,7 +40,7 @@ namespace
     const std::string kAccessMipsShader = kShaderFolderOther + "GenAccessMips.cs.slang";
     const std::string kCalcSampleDistributionShader = kShaderFolderOther + "CalcSampleDistribution.cs.slang";
     const std::string kOptimizeSamplesShader = kShaderFolderOther + "OptimizeSamples.cs.slang";
-    //const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
+    const std::string kShaderShowImportanceMap = kShaderFolder + "DebugShowImportance.cs.slang";
 
     //UI
     const Gui::DropdownList kAccelDataFormat = {{1, "Uint"}, {2, "Uint2"}, {4, "Uint4"}};
@@ -705,6 +705,29 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
         if (patternChanged)
             updateSamplePattern();
 
+        group.checkbox("Debug Show Importance", mDebugEnableShowImportance);
+        if (mDebugEnableShowImportance)
+        {
+            if (mpScene)
+            {
+                uint lightCount = mpScene->getLightCount();
+                if (lightCount > 1)
+                    group.slider("Selected Light", mDebugSelectedLight, 0u, lightCount-1u);
+                else
+                    mDebugSelectedLight = 0;
+            }
+            if (!mAccessTextures.empty())
+            {
+                uint mipCount = mAccessTextures[0]->getMipCount();
+                if (mipCount > 1)
+                    group.slider("Selected Mipmap", mDebugSelectedMipLevel, 0u, mipCount - 1u);
+                else
+                    mDebugSelectedMipLevel = 0;
+            }
+            group.var("Scale Factor IM", mDebugScaleFactorIM, 0.f, FLT_MAX, 1.f);
+            group.var("Scale Factor SD", mDebugScaleFactorSD, 0.f, FLT_MAX, 1.f);
+        }
+
     }
 
     return dirty;
@@ -736,4 +759,51 @@ void LinkedListIrregularZ::updateSamplePattern()
         mNumCPUSampleGenSamples = mpCPUSampleGenerator->getSampleCount();
     else
         setJitter(float2(0)); // reset jitter
+}
+
+
+void LinkedListIrregularZ::debugPass(
+    RenderContext* pRenderContext,
+    const RenderData& renderData,
+    ref<Texture> debugOut,
+    ref<Texture> colorOut
+)
+{
+    // Early out
+    if (!mDebugEnableShowImportance || mAccessTextures.empty() || mSampleDistribution.empty())
+        return;
+
+    FALCOR_PROFILE(pRenderContext, "ShowSampleDistribution");
+
+    if (!mpDebugShowImportancePass)
+    {
+        Program::Desc desc;
+        //desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderShowImportanceMap).csEntry("main").setShaderModel("6_6");
+        //desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+
+        mpDebugShowImportancePass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpDebugShowImportancePass);
+
+    // Dispatch Dims
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    auto var = mpDebugShowImportancePass->getRootVar();
+    auto& pImportanceMap = mAccessTextures[mDebugSelectedLight];
+    auto& pSampleDistribution = mSampleDistribution[mDebugSelectedLight];
+
+    var["CB"]["gDispatchSize"] = targetDim;
+    var["CB"]["gSMRes"] = uint2(pImportanceMap->getWidth(), pImportanceMap->getHeight()) / (1u << mDebugSelectedMipLevel);
+    var["CB"]["gScaleFactorIM"] = mDebugScaleFactorIM;
+    var["CB"]["gScaleFactorSD"] = mDebugScaleFactorSD;
+
+    var["gDebug"] = debugOut;
+    var["gSampleDistribution"].setSrv(pSampleDistribution->getSRV(mDebugSelectedMipLevel, 1));
+    var["gImportanceMap"].setSrv(pImportanceMap->getSRV(mDebugSelectedMipLevel, 1));
+
+    mpDebugShowImportancePass->execute(pRenderContext, uint3(targetDim, 1));
 }

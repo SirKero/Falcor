@@ -57,8 +57,8 @@ public:
     virtual bool renderUI(Gui::Widgets& widget) override;
 
     /** Optional Debug pass
-     */
-    //virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
+    */
+    virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
 
     /*  Returns the sample distribution
     */
@@ -143,6 +143,13 @@ private:
     LightMVP mStaggeredDirectionalLightMVP = {};
     int mDirectionalLightIndex = -1; //Used to set LightMVP
 
+    //Debug
+    bool mDebugEnableShowImportance = false;
+    uint mDebugSelectedLight = 0;
+    float mDebugScaleFactorIM = 3000.f;   //Impoartance map
+    float mDebugScaleFactorSD = 120.f;   //sample distribution
+    uint mDebugSelectedMipLevel = 0;
+    
     ref<Sampler> mpLinearSampler;
     ref<Sampler> mpPointSampler;
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
@@ -159,6 +166,7 @@ private:
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
     ref<ComputePass> mpOptimizeSamples;             //Optimize Sample distribution
+    ref<ComputePass> mpDebugShowImportancePass;     //Debug show importance map or sample distribution
     RayTracingPipeline mGenLinkedListShadowPip; //RayTracingPipeline
 };
 FALCOR_ENUM_REGISTER(LinkedListIrregularZ::SMSamplePattern);
