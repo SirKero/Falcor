@@ -389,7 +389,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
             visibility = gAccelShadow.eval(lightIndex, sd.posW, isDirectional,maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedList
-            visibility = gLinkedListShadow.eval(lightIndex, sd.posW, isDirectional);
+            visibility = gLinkedListShadow.eval(lightIndex, sd.posW, isDirectional, maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
             visibility = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelIrregularZ
