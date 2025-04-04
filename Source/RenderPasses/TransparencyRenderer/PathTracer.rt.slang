@@ -7,23 +7,14 @@ cbuffer CB
     uint gFrameCount; // Current it for sample gen
 }
 
-// Inputs
-Texture2D<PackedHitInfo> gVBuffer;
-Texture2D<float4> gViewW; // Optional
-
-// Depths/MV for TAA or DLSS
-Texture2D<float> gInDepth;
-Texture2D<float2> gInMotion;
-RWTexture2D<float> gOutDepth;
-RWTexture2D<float2> gOutMotion;
-
 // Outputs
 RWTexture2D<float4> gOutputColor;
 
 #define is_valid(name) (is_valid_##name != 0)
-static const float kMinOpacity = 1e-7;
-static const uint kMaxElements = 256; // For now 256 max transparent elements on a ray
+static const float kMinOpacity = MIN_OPACITY;
+static const uint kMaxElements = MAX_ELEMENTS; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
+static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK;
 
 // TODO set as CPU defines
 static const uint kMaxBounces = MAX_BOUNCES;           //Max Bounces
@@ -34,11 +25,13 @@ static const bool kUseRussianRoulette = USE_RUSSIAN_ROULETTE; //Russian Roulette
 struct TransparencyRayData {
     PackedHitInfo hit; //< Packed Hit
     float dist;
+    bool isOpaque;
 
     __init(float tMax)
     {
         hit = {}; // Init emtpy
         dist = tMax;
+        isOpaque = false;
     }
 }
 
@@ -120,21 +113,38 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
     VertexData v = gScene.getVertexData(triangleHit);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-   
-    if (gScene.materials.alphaTest(v, materialID, lod, kMinOpacity))
+
+    if (!gScene.materials.alphaTest(v, materialID, lod, kMinOpacity)) {
+        // Update payload
+        if (RayTCurrent() < rayData.dist) {
+
+            rayData.hit = HitInfo(triangleHit).getData();
+            rayData.dist = RayTCurrent();
+            rayData.isOpaque = kShadowMaterialFlagAsBlacklist ? !gScene.materials.isCastShadow(materialID) : false;
+        }
+    } else {
         IgnoreHit();
+    }
 }
 
 [shader("closesthit")]
 void closestHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    TriangleHit triangleHit;
-    triangleHit.instanceID = getGeometryInstanceID();
-    triangleHit.primitiveIndex = PrimitiveIndex();
-    triangleHit.barycentrics = attribs.barycentrics;
+    if (RayTCurrent() < rayData.dist) {
+        // Alpha test for non-opaque geometry.
+        TriangleHit triangleHit;
+        triangleHit.instanceID = getGeometryInstanceID();
+        triangleHit.primitiveIndex = PrimitiveIndex();
+        triangleHit.barycentrics = attribs.barycentrics;
 
-    rayData.hit = HitInfo(triangleHit).getData();
-    rayData.dist = RayTCurrent();
+        VertexData v = gScene.getVertexData(triangleHit);
+        uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+        ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+
+        rayData.hit = HitInfo(triangleHit).getData();
+        rayData.dist = RayTCurrent();
+        rayData.isOpaque = true;
+    }
 }
 
 [shader("raygeneration")]
@@ -142,47 +152,19 @@ void rayGen()
 {
     const uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
-    
-    float3 viewDir;
-    if (is_valid(gViewW))
-        viewDir = -gViewW[pixel].xyz;
-    else
-        viewDir = gScene.camera.computeRayPinhole(pixel, frameDim).dir;
 
-    // Prepare ray payload.
+    // Prepare path data
     PathData pd = PathData();
-    pd.origin = gScene.camera.getPosition();
-    pd.direction = viewDir;
+    Ray cameraRayInfo = gScene.camera.computeRayPinhole(pixel, frameDim);
+    pd.origin = cameraRayInfo.origin;
+    pd.direction = cameraRayInfo.dir;
+
+    // Set sampleGenerator
     pd.sg = SampleGenerator(pixel, gFrameCount);
 
     float tMax = gScene.camera.data.farZ;
-    float depth = 1;
-    
-    //Get tMax for the first bounce either with depth texture or vBuffer
-    if (is_valid(gInDepth)) {
-        depth = gInDepth[pixel];
-        // Get recreated 3D position
-        float2 ndc = (float2(pixel) + 0.5) / frameDim; // in [0,1]
-        ndc = 2.0 * ndc - 1.0;                         // in [-1,1]
-        float4 recreatedPos = mul(gScene.camera.data.invViewProj, float4(ndc, depth, 1.0));
-        recreatedPos.xyz /= recreatedPos.w; //Perspective division
-
-        tMax = min(tMax, distance(recreatedPos.xyz, pd.origin));
-    } else { //Use VBuffer for hit
-        HitInfo hit = HitInfo(gVBuffer[pixel]);
-        if (hit.isValid()) {
-            const TriangleHit triangleHit = hit.getTriangleHit();
-            VertexData v = gScene.getVertexData(triangleHit);
-            tMax = min(tMax, length(v.posW - pd.origin)); // Linear depth
-        }
-    }
 
     tMax = 100000.0;
-
-    //Motion vector
-    float2 mVec = float2(0);
-    if (is_valid(gInMotion))
-        mVec = gInMotion[pixel];
 
     //Prepare Ray
     RayDesc ray;
@@ -191,14 +173,22 @@ void rayGen()
     ray.TMin =  gScene.camera.data.nearZ;
     ray.TMax = tMax;
     TransparencyRayData rayData = TransparencyRayData(tMax);
+    bool isPrimaryCameraRay = true;
 
     for(uint i=0; i<=kMaxBounces && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = 0;
-        TraceRay(gScene.rtAccel, rayFlags, 0xFF, 0, rayTypeCount, 0, ray, rayData);
+        uint instanceMask = 0;
+        if (isPrimaryCameraRay) {
+            instanceMask = kInstanceCameraParticle;
+        } else {
+            instanceMask = getBestParticleShadowPlane(ray.Direction, true);
+        }
+        TraceRay(gScene.rtAccel, rayFlags, instanceMask, 0, rayTypeCount, 0, ray, rayData);
 
         //Miss
-        if(rayData.dist < 0){
+        if (rayData.dist < 0) {
+            pd.radiance += gScene.envMap.eval(pd.direction) * pd.thp;
             pd.terminated = true;
             break;
         }
@@ -220,14 +210,18 @@ void rayGen()
         pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
         // Analytic
-        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp * sd.opacity);
+        uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE;
+        if (kUseIrregularShadowMask)
+            maskFlag = rayData.isOpaque ? TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
+        pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag) * sd.opacity;
 
         //Determine THP and new ray
         if(i==0)
             ray.TMax = 100000.0;
 
         float pReflect = sampleNext1D(pd.sg);
-        if(pReflect < sd.opacity){
+        if(pReflect < sd.opacity)
+        {
             // Sample material.
             BSDFSample bsdfSample;
             pd.terminated |= !mi.sample(sd, pd.sg, bsdfSample);
@@ -240,6 +234,7 @@ void rayGen()
             */
             ray.TMin = 0.0;
             rayData = TransparencyRayData(ray.TMax);
+            isPrimaryCameraRay = false;
         }
         else {
             /* Cancels out
@@ -265,24 +260,7 @@ void rayGen()
         ray.Origin = pd.origin;
         ray.Direction = pd.direction;
 
-        // Update depth and motion vector if valid
-        if (i == 0 && is_valid(gOutDepth)) {
-            float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
-            depth = curPosH.z / curPosH.w;
-        }
-        if (i == 0 && is_valid(gOutMotion)) {
-            // Compute motion vector.
-            float3 prevPosW = gScene.getPrevPosW(hit.getTriangleHit());
-            float2 pixelPos = pixel + float2(0.5f, 0.5f);
-            float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
-            mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
-        }
     }
     //Write data
     gOutputColor[pixel] = float4(pd.radiance, 1.0);
-
-    if (is_valid(gOutMotion))
-        gOutMotion[pixel] = mVec;
-    if (is_valid(gOutDepth))
-        gOutDepth[pixel] = depth;
 }

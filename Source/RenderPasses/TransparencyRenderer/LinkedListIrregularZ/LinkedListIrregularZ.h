@@ -48,45 +48,72 @@ public:
      */
     virtual void setShaderData(const ShaderVar& var) override;
 
+    /** Additional mask to reject the backprojectio
+    */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable = true) override;
+
     /** Render UI for the method
      */
     virtual bool renderUI(Gui::Widgets& widget) override;
 
     /** Optional Debug pass
+    */
+    virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> mask = nullptr) override;
+
+    /*  Returns the sample distribution
+    */
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return &mSampleDistribution; };
+
+    /* Gets dispatch size for the gen shader
      */
-    //virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
+    virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
+
+    /* Get Sample distribution buffer
+     */
+    virtual const ref<Buffer> getJitterSampleBuffer() const override {return mSamplePattern == SMSamplePattern::Halton ? mpHaltonBuffer : nullptr;}
 
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 
-     enum class SMSamplePattern : uint
+    enum class SMSamplePattern : uint
     {
         Center = 0,
         Halton = 1,
+        MatrixDirectX = 2,
+        MatrixHalton = 3,
+        MatrixStratified = 4,
     };
 
-    FALCOR_ENUM_INFO(SMSamplePattern,{
+    FALCOR_ENUM_INFO(
+        SMSamplePattern,
+        {
             {SMSamplePattern::Center, "Center"},
             {SMSamplePattern::Halton, "Halton"},
+            {SMSamplePattern::MatrixDirectX, "MatrixDirectX"},
+            {SMSamplePattern::MatrixHalton, "MatrixHalton"},
+            {SMSamplePattern::MatrixStratified, "MatrixStratified"},
         }
     );
 
 private:
     void prepareResources(RenderContext* pRenderContext);
-    std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes();
 
     // Funktion that generates the profiler passes in case they are not executed this frame
     void dummyProfileGeneration(RenderContext* pRenderContext);
 
+    void updateSamplePattern();
+
     //Runtime
     uint mFrameCount = 0;
+    bool mUseMask = false;
 
     //Sync Resources
     static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
-    static const uint kMinAABBUpdateCount = 128; //Shadow map should not be updated if there is less than this amount of AABBs
     ref<GpuFence> mpFence;                 ///< Fence for CPU/GPU syncs
     uint mStagingCount = 0;
 
     //Sample Gen (+Jitter)
+    ref<CPUSampleGenerator> mpCPUSampleGenerator; ///< Sample generator for uniform camera jitter.
+    uint mNumCPUSampleGenSamples = 16;            // For CPU sample gen
     std::vector<uint> mHaltonSampleCount;
     uint mNumHaltonSamples = 64; //Number of halton samples
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
@@ -97,10 +124,10 @@ private:
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;
     bool mResetRayCount = false;
-    float mDynRCGuardPercentage = 0.9f;  // 10% buffer for possible changes
-    float mDynRCChangePercentage = 0.6f; //How much of the optimal value should be taken
+    float mDynRCGuardPercentage = 0.85f;  // 15% buffer for possible changes
+    float2 mDynRCChangePercentage = float2(0.1f, 0.6f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
 
-    // Accel shadow settings
+    //Shadow settings
     uint mApproxNumElementsPerPixel = 4u;
     std::vector<uint> mUIElementCounter;
     std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync
@@ -108,8 +135,6 @@ private:
     uint mLinkedListDataFormatSize = 3; //TODO set automatically
     bool mRebuildDataBuffer = true;
     bool mAccelUsePCF = false;
-    RayFlags mAccelRayFlags = RayFlags::None;
-    float mMergeBoxDist = 0.f; //Distance the accel boxes are merged
     bool mTransparencyBufferUsesColor = false; // Checks if the transparency buffer data size matches the global setting
 
     uint mSkipFrameCount = 0;           // Counter for skipping frames
@@ -118,8 +143,17 @@ private:
     LightMVP mStaggeredDirectionalLightMVP = {};
     int mDirectionalLightIndex = -1; //Used to set LightMVP
 
+    //Debug
+    bool mDebugEnableShowImportance = false;
+    uint mDebugSelectedLight = 0;
+    float mDebugScaleFactorIM = 3000.f;   //Impoartance map
+    float mDebugScaleFactorSD = 120.f;   //sample distribution
+    uint mDebugSelectedMipLevel = 0;
+    
+    ref<Sampler> mpLinearSampler;
     ref<Sampler> mpPointSampler;
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
+    ref<SampleGenerator> mpSampleGenerator;
 
     std::vector<ref<Buffer>> mLinkedListCounter;                              // Counter for inserting points
     std::vector<ref<Buffer>> mLinkedListCounterCPU;                           // Counter for inserting points
@@ -132,6 +166,7 @@ private:
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
     ref<ComputePass> mpOptimizeSamples;             //Optimize Sample distribution
+    ref<ComputePass> mpDebugShowImportancePass;     //Debug show importance map or sample distribution
     RayTracingPipeline mGenLinkedListShadowPip; //RayTracingPipeline
 };
 FALCOR_ENUM_REGISTER(LinkedListIrregularZ::SMSamplePattern);

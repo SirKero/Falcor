@@ -162,6 +162,7 @@ void DLSSPass::renderUI(Gui::Widgets& widget)
             "PresetE (Perf/Balanced/Quality): The default preset for Perf/Balanced/Quality modes. Generally recommended preset for most performance and image stability.\n"
             "PresetF (Ultra Perf/DLAA): The default preset for Ultra Perf and DLAA modes.\n"
             "PresetJ (Perf/Balanced/Quality/DLAA): Transformer based. Best image quality preset in terms of aliasing quality and image stability but at a higher performance cost.\n "
+            "PresetK (Perf/Balanced/Quality/DLAA): Transformer based (newer). Best image quality preset in terms of aliasing quality and image stability but at a higher performance cost.\n "
         );
 
         widget.dropdown("Motion vector scale", mMotionVectorScale);
@@ -245,6 +246,9 @@ void DLSSPass::initializeDLSS(RenderContext* pRenderContext)
         break;
     case DLSSPass::Preset::PresetJ:
         renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_J;
+        break;
+    case DLSSPass::Preset::PresetK:
+        renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_K;
         break;
     default:
         break;

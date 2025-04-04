@@ -80,6 +80,10 @@ public:
         SkipNonDoubleSided = 0x4, ///< Rasterizes only double Sided Meshes
         SkipNonOpaque = 0x8, ///< Rasterizes only opaque meshes
         SkipOpaque = 0x10,   ///< Rasterizes only non-opaque meshes
+        SkipParticleCamera = 0x20, ///< Skip Camera facing particles
+        SkipParticleXY = 0x40, ///< Skip XY plane facing particles
+        SkipParticleYZ = 0x80, ///< Skip YZ facing particles
+        SkipParticleXZ = 0x100, ///< Skip XZ facing particles
     };
 
     /**

@@ -32,6 +32,7 @@
 #include "Rendering/ShadowMaps/ShadowMap.h"
 #include "TransparencyShadowMethod.h"
 #include "Rendering/Materials/TexLODTypes.slang"
+#include "TransparentShadowMask/TransparentShadowMask.h"
 
 using namespace Falcor;
 
@@ -53,6 +54,7 @@ public:
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
+    //Possible shadow render methods
     enum class ShadowRenderMethod : uint
     {
         RayTracing = 0,
@@ -67,12 +69,13 @@ public:
             {ShadowRenderMethod::RayTracing, "RayTracing"},
             {ShadowRenderMethod::AccelIrregularZ, "AccelIrregularZ"},
             {ShadowRenderMethod::AccelShadow, "AccelShadow"},
-            {ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"},
+            //{ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"}, //TODO remove
             {ShadowRenderMethod::LinkedList, "LinkedList"},
             {ShadowRenderMethod::LinkedListIrregularZ, "LinkedListIrregularZ"},
         }
     );
 
+    //Light sample mode for analytic lights (see EvaluateAnalyticLight.slang)
     enum class LightSampleMode : uint
     {
         Uniform = 0,
@@ -89,28 +92,65 @@ public:
         }
     );
 
+    //Importance mode for the per pixel adaptive shadow maps (see EvaluateAnalyticLight.slang)
+    enum class ImportanceMode : uint
+    {
+        Opacity = 0,
+        Opacity_Thp = 1,
+        Thp = 2,
+        Thp_Thp = 3,
+        Brdf_Thp = 4,
+        Brdf_Opacity_Thp = 5,
+        Uniform = 6,
+    };
+
+    FALCOR_ENUM_INFO(
+        ImportanceMode,
+        {
+            {ImportanceMode::Opacity, "Opacity"},
+            {ImportanceMode::Opacity_Thp, "Opacity*Throughput"},
+            {ImportanceMode::Thp, "Throughput"},
+            {ImportanceMode::Thp_Thp, "ThroughputSquare"},
+            {ImportanceMode::Brdf_Thp, "BRDF*Throughput"},
+            {ImportanceMode::Brdf_Opacity_Thp, "BRDF*Opacity*Throughput"},
+            {ImportanceMode::Uniform, "Unweighted(Uniform)"},
+        }
+    );
+
+    //Renderers
     enum class CameraRenderMode : uint
     {
-        DirectRT = 0,
-        PathTracer = 1
+        VBuffer_DirectRT = 0,
+        VBuffer_DirectRT_Reflections = 1,
+        DirectRT= 2,
+        DirectRT_Reflections = 3,
+        PathTracer = 4
     };
 
     FALCOR_ENUM_INFO(
         CameraRenderMode,
         {
+            {CameraRenderMode::VBuffer_DirectRT, "VBuffer_DirectRT"},
+            {CameraRenderMode::VBuffer_DirectRT_Reflections, "VBuffer_DirectRT+RayReflections"},
             {CameraRenderMode::DirectRT, "DirectRT"},
+            {CameraRenderMode::DirectRT_Reflections, "DirectRT+RayReflections"},
             {CameraRenderMode::PathTracer, "PathTracer"},
         }
     );
 
 private:
+    void parseProperties(const Properties& props); //Properties for render graph
     //Defines for the light evaluation. Can update every frame
     DefineList getLightEvalDefines();
 
+    //Prepare additional textures and buffers
+    void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluate direct light with an Compute Shader
     void evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluates the transparencies until the first opaque surface
     void evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData);
+    //Ray Traced Reflections
+    void evalRayReflections(RenderContext* pRenderContext, const RenderData& renderData);
     //Path tracing pass
     void evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -118,6 +158,7 @@ private:
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
     std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
+    std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask for Irregular Shadow Maps
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
@@ -131,17 +172,27 @@ private:
     // Runtime data Tracer
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     uint2 mRenderDims = uint2(512);
-    float2 mNearFar = float2(1.0f, 60.f);
     LightSampleMode mLightSampleMode = LightSampleMode::RIS;
     bool mOptionsChanged = false;
     bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass
     bool mOpaqueShadowMapModeChanged = false;
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
-    bool mUseColorTransparency = false; //Enables transparency with color
+    ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
+    bool mUseNonOpaqueDepthAndMV = false;
+
+    //Reflections
+    float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
+
+    //Shadow Mask
+    bool mIrregularUseShadowMask = false;               //Enables a shadow mask for opaque objects
+    uint mMaskISMMultFactor = 4u;                  // Mult factor for ISM 
+    bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable as blacklist for non-opaque objects
+
+    TransparencyShadowMethod::GlobalShadowSettings mShadowSettings = {};
 
     //Path Tracer specific settings
-    uint mPTMaxBounces = 256;
+    uint mPTMaxBounces = 1024;
     bool mPTUseRussianRoulette = true;
 
     //Shading Settings
@@ -150,6 +201,9 @@ private:
 
     //Buffer/Textures
     ref<Texture> mpTransparencyThp; //Thp texture for transparency
+    ref<Texture> mpReflectionsMask; //Mask where ray reflections should be used
+    ref<Texture> mpReflectionsHit; //Opaque hit for the reflection. Is needed when V-Buffer is not used
+    ref<Buffer> mpParticleMaterials; //Buffer that stores if the material with index x is a particle
 
     //Passes
     // Pipelines / Programms
@@ -170,9 +224,10 @@ private:
     RayTracingPipeline mEvalTransparencyDirectRay; // Ray Tracing pass for evaluating the Transparencies along the primary ray
     ref<ComputePass> mpEvalDirectPass; //Compute Pass for direct light
     RayTracingPipeline mTransparencyPathTracer; //Pipeline for the path tracer
-    
+    RayTracingPipeline mReflectionsPass;
 };
 
 FALCOR_ENUM_REGISTER(TransparencyRenderer::ShadowRenderMethod);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::LightSampleMode);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::CameraRenderMode);
+FALCOR_ENUM_REGISTER(TransparencyRenderer::ImportanceMode);

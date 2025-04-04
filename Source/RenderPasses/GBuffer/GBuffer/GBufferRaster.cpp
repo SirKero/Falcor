@@ -183,6 +183,8 @@ void GBufferRaster::execute(RenderContext* pRenderContext, const RenderData& ren
 
     RasterizerState::CullMode cullMode = mForceCullMode ? mCullMode : kDefaultCullMode;
     RasterizerState::MeshRenderMode renderMode = mCullNonOpaque ? RasterizerState::MeshRenderMode::SkipNonOpaque : RasterizerState::MeshRenderMode::All;
+    renderMode |= RasterizerState::MeshRenderMode::SkipParticleXY | RasterizerState::MeshRenderMode::SkipParticleYZ |
+                  RasterizerState::MeshRenderMode::SkipParticleXZ;
 
     // Depth pass.
     {

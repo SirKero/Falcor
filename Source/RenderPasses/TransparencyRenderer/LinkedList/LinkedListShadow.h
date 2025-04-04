@@ -43,6 +43,10 @@ public:
      */
     virtual DefineList getDefines() override;
 
+    /** Additional mask to reject the backprojectio
+     */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable = true) override;
+
     /** Set the needed shader data for the method (textures,buffer, etc)
      */
     virtual void setShaderData(const ShaderVar& var) override;
@@ -58,25 +62,45 @@ public:
 private:
     void prepareResources(RenderContext* pRenderContext);
 
-    //Runtime
+    // Runtime
     uint mFrameCount = 0;
+    bool mUseOpaqueSM = false; // Use opaque shadow map
 
-    float mDepthBias = 1e-6f;
-    float mNormalDepthBias = 1e-3f;
-    RayFlags mLLRayFlags = RayFlags::None;
+    // Sync Resources
+    static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
+    ref<GpuFence> mpFence;                                  ///< Fence for CPU/GPU syncs
+    uint mStagingCount = 0;
+
+    // Shadow settings
+    uint mApproxNumElementsPerPixel = 16u;
+    std::vector<uint> mUIElementCounter;
+    std::vector<uint64_t> mCounterFenceWaitValues; // Fence values forCounter sync
+    uint mLinkedListNodeBufferSize = 0;
+    uint mLinkedListDataFormatSize = 3; // TODO set automatically
+    bool mRebuildDataBuffer = true;
+    bool mAccelUsePCF = false;
+    bool mTransparencyBufferUsesColor = false; // Checks if the transparency buffer data size matches the global setting
+
+    //Jitter
+    bool mEnableHalton = false;
+    uint mNumHaltonSamples = 64; // Number of halton samples
+    ref<Buffer> mpHaltonBuffer;  // Buffer with precalculated Halton numbers
+
+    //TODO
+    bool mUseLinkedListPcf = false;
+    bool mUseLinkedListArray = false;
 
     //Linked List
-    std::vector<ref<Buffer>> mpLinkedList;
+    std::vector<ref<Buffer>> mLinkedListCounter;    // Counter for inserting points
+    std::vector<ref<Buffer>> mLinkedListCounterCPU; // Counter for inserting points
+
+    std::vector<ref<Buffer>> mLinkedListData;       // Transparency Data
+
+    //TODO
     std::vector<ref<Buffer>> mpLinkedListNeighbors;
     std::vector<ref<Buffer>> mpLinkedListArray;
     std::vector<ref<Texture>> mpLinkedListArrayOffsets;
-    bool mUseLinkedListPcf = false;
-    bool mUseLinkedListArray = false;
-    uint mLinkedListElementPerPixel = 16;
-    uint32_t mLinkedElementCount = mResolution.x * mResolution.y * mLinkedListElementPerPixel; // (~70mb with 16 byte data => 4 floats)
-    RayTracingPipeline mGenLinkedListPip;
-    ref<Buffer> mpLinkedListCounter;
-    ref<Buffer> mpLinkedListCounter2;
+ 
+    RayTracingPipeline mGenLinkedListShadowPip;
     ref<ComputePass> mpLinkedListNeighborsPass;
-
 };

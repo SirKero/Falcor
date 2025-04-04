@@ -1,5 +1,6 @@
 #pragma once
 #include "LinkedListIrregularZData.slang"
+#include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
 import Rendering.ShadowMaps.ShadowMapHelpers;
@@ -10,10 +11,10 @@ __exported import Scene.Intersection;
 #define COUNT_LIGHTS 1
 #endif
 
-
 struct LinkedListIrregularZShader
 {
-    static const uint kMaxAtomicWeight = 64;                      // Max value to be added on the atomic counter
+    static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT; // Max value to be added on the atomic counter
+    static const uint kMaskISMMultFactor = MASK_ISM_MULT_FACTOR; // Multiplication factor for the ISM used by the mask
 
     cbuffer SMCB
     {
@@ -22,6 +23,7 @@ struct LinkedListIrregularZShader
         float gFar;          //Shadow far
         uint gMipCount;      //Count of mip in the sample distribution texture
         uint gMaxBufferSize; //Max size of the buffer
+        uint gISMMaxSize;   //ISM max size
     }
 
     cbuffer ShadowVPs
@@ -33,6 +35,11 @@ struct LinkedListIrregularZShader
     StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
     Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
+    Texture2DArray<float> gShadowMask;
+    Buffer<float> gMaskShadowMap;
+
+    SamplerState gLinearSampler;
+    SamplerState gPointSampler;
     
     /** Caculates the shadow value by evaluating the shadow acceleration structure
      * \param[in] index of the current light
@@ -41,7 +48,7 @@ struct LinkedListIrregularZShader
      * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
      * \return visibility in [0,1]
      */
-    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0) {
+    float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0, uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE) {
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
 
         if (!isDirectional) {
@@ -60,24 +67,33 @@ struct LinkedListIrregularZShader
             validShadow = false;
         }
 
+        // Get mask value
+        bool validBackprojection = true;
+        if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0) {
+            float maskVal = gShadowMask.SampleLevel(gLinearSampler, float3(shadowPos.xy, lightIdx), 0);
+            validBackprojection = maskVal > TRANSPARENCY_MASK_COMPAIRE_VALUE;
+            validShadow &= validBackprojection;
+        }
+
         const float2 shadowPixel = shadowPos.xy * gSMSize; // floor((shadowPos.xy * gSMSize) - 0.5) ; //  //TODO strange fix for normal
         float dist = isDirectional ? shadowPos.z : shadowPos.w;
 
         // Add access
         uint2 uShadowPixel;
-        bool validBackprojection = true;
-        if(isDirectional){
-            // For directional use the staggered MVP for access
-            float2 dirShadowPixel = mul(gStaggeredDirVP, float4(posW, 1)).xy;
-            dirShadowPixel.y *= -1;                            // Flip
-            dirShadowPixel.xy = dirShadowPixel.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
-            if (any(dirShadowPixel.xy < 0.0) || any(dirShadowPixel.xy > 1.0))
-                validBackprojection = false;
-            uShadowPixel = uint2(dirShadowPixel * gSMSize);
+        if (validBackprojection) {
+            if (isDirectional) {
+                // For directional use the staggered MVP for access
+                float2 dirShadowPixel = mul(gStaggeredDirVP, float4(posW, 1)).xy;
+                dirShadowPixel.y *= -1;                            // Flip
+                dirShadowPixel.xy = dirShadowPixel.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+                if (any(dirShadowPixel.xy < 0.0) || any(dirShadowPixel.xy > 1.0))
+                    validBackprojection = false;
+                uShadowPixel = uint2(dirShadowPixel * gSMSize);
+            }
+            else
+                uShadowPixel = uint2(shadowPixel);
         }
-        else
-            uShadowPixel = uint2(shadowPixel);
-
+        
         uint backprojectionWeight = clamp(uint(importance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         if(validBackprojection)
             InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
@@ -93,7 +109,7 @@ struct LinkedListIrregularZShader
         float2 smUV = shadowPos.xy;
         uint2 mipIdx = uint2(0); // Top left
         uint2 selectedMipIdx = mipIdx;
-        uint selectedIndex = 0;  // Start index at zero
+        uint selectedIndex = 0; // Start index at zero
         uint choosenSampleCount = 0;
         const uint highestMip = gMipCount - 2;
         uint selectedMipLevel = highestMip;
@@ -143,6 +159,7 @@ struct LinkedListIrregularZShader
         if (choosenSampleCount == 0)
             return visibility; //Unshadowed (1.0)
 
+        uint selectedMaskISMIndex = selectedIndex * kMaskISMMultFactor; //Only used when ISM is active
         //Get final offset (subpixels) for the index
         if (choosenSampleCount > 1) {
             uint samplesSq = uint(round(sqrt(choosenSampleCount))); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
@@ -156,6 +173,26 @@ struct LinkedListIrregularZShader
         //Check if index is bigger than max size. Can happen if sample count increases drastically compaired to previous frame
         if (selectedIndex >= gMaxBufferSize)
             return visibility;
+
+        if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
+            // Get Mask index
+            choosenSampleCount *= kMaskISMMultFactor;
+            if (choosenSampleCount > 1) {
+                uint samplesSq = uint(round(sqrt(choosenSampleCount))); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
+                const float subpixelSize = 1.0 / samplesSq;
+                uint2 subpixelOffset = uint2(smUV / subpixelSize);
+                subpixelOffset.y *= samplesSq;
+
+                selectedMaskISMIndex += subpixelOffset.x + subpixelOffset.y;
+            }
+
+            if(selectedMaskISMIndex < gISMMaxSize * kMaskISMMultFactor){
+                uint maskIndex = selectedMaskISMIndex + gMaxBufferSize * kMaskISMMultFactor * lightIdx;
+                float maskSMDepth = gMaskShadowMap[selectedMaskISMIndex];
+                if (maskSMDepth <= dist)
+                    return float3(0.0);
+            }
+        }
 
         LinkedListNode n = gLinkedListData[lightIdx][selectedIndex];
         // traverse visibility until dist is reached

@@ -371,6 +371,27 @@ namespace Falcor
 
         auto pCurrentRS = pState->getRasterizerState();
         bool isIndexed = hasIndexBuffer();
+        // Lamda for checking particles
+        auto checkSkipParticle = [&](const DrawArgs& draw) {
+            bool skip = false;
+            if (draw.particleOrientationMode != ParticleOrientationMode::None)
+            {
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleCamera) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::Camera);
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleXY) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::XY_Plane);
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleYZ) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::YZ_Plane);
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleXZ) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::XZ_Plane);
+            }
+
+            return skip;
+        };
 
         for (const auto& draw : mDrawArgs)
         {
@@ -378,6 +399,10 @@ namespace Falcor
 
             // Skip meshes that should not cast a shadow
             if (!draw.isCastShadow && !drawShadowCastable)
+                continue;
+
+            //Skip particles
+            if (checkSkipParticle(draw))
                 continue;
 
             //Skip opaque meshes
@@ -523,6 +548,29 @@ namespace Falcor
         if (needUpdate || (updateDynamicGeomFrustum && pFrustumCulling->hasDynamic()))
             pFrustumCulling->startUpdate(mFenceSyncLastFrame);
 
+        //Lamda for checking particles
+        auto checkSkipParticle = [&](const DrawArgs& draw)
+        {
+            bool skip = false;
+            if (draw.particleOrientationMode != ParticleOrientationMode::None)
+            {
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleCamera) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::Camera);
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleXY) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::XY_Plane);
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleYZ) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::YZ_Plane);
+                skip |=
+                    (is_set(meshRenderMode, RasterizerState::MeshRenderMode::SkipParticleXZ) &&
+                     draw.particleOrientationMode == ParticleOrientationMode::XZ_Plane);
+            }
+
+            return skip;
+        };
+
         for (uint i=0; i<mDrawArgs.size(); i++)
         {
             const auto& draw = mDrawArgs[i];
@@ -530,6 +578,10 @@ namespace Falcor
 
             //Skip meshes that should not cast a shadow
             if (!draw.isCastShadow && !drawShadowCastable)
+                continue;
+
+            // Skip particles
+            if (checkSkipParticle(draw))
                 continue;
 
             // Skip opaque meshes
@@ -553,8 +605,15 @@ namespace Falcor
                 continue;
 
             bool bufferValid = pFrustumCulling->isBufferValid(i);
+            bool isParticle = draw.particleOrientationMode != ParticleOrientationMode::None;
 
-            if (isIndexed && (!bufferValid || draw.isDynamic))
+            //Skip Frustum culling for all particles
+            if (isParticle)
+            {
+                pDrawBufferCounts[i] = draw.count;
+                pDrawBuffers[i] = draw.pBuffer;
+            }
+            else if (isIndexed && (!bufferValid || draw.isDynamic))
             {
                 std::vector<DrawIndexedArguments> drawArguments;
                 std::vector<uint> passedDrawInstances;        //Draw instances used for dynamic geometry
@@ -569,7 +628,6 @@ namespace Falcor
                     // TODO: Add a better/functioning precalculated BB for skinned meshes
                     if (pFrustumCulling->isInFrustum(meshBB.transform(worldMat)) || mesh.isSkinned())
                     {
-                        
                         DrawIndexedArguments drawArg;
                         drawArg.IndexCountPerInstance = mesh.indexCount;
                         drawArg.InstanceCount = 1;
@@ -1491,10 +1549,15 @@ namespace Falcor
 
         // Check if one particle system is active
         bool oneActive = false;
+        bool paused = true;
         for (const auto& ps : mParticleSystems)
+        {
             oneActive |= ps.active;
+            paused &= ps.paused;
+        }
+            
 
-        if (!oneActive)
+        if (!oneActive || paused)
             return flags;
 
         // Update the particle systems
@@ -1553,6 +1616,9 @@ namespace Falcor
 
             mpUpdateParticlesPass->execute(pRenderContext, float3(ps.numberParticles, 1, 1));
             indexOffset += ps.numberParticles;
+            pRenderContext->uavBarrier(mpMeshVao->getVertexBuffer(kStaticDataBufferIndex).get());
+            if (validAnimationData)
+                pRenderContext->uavBarrier(mpAnimationController->getPrevVertexData().get());
         }
 
         return flags;
@@ -3087,7 +3153,7 @@ namespace Falcor
 
         // Helper to create the draw-indirect buffer for double sided meshes. Non Shadow throwable, as well as non opaque are always flagged as double sided
         auto createDoubleSidedDrawBuffer = [this](const auto& drawMeshes, bool isDynamic, bool isCastShadow, bool isOpaque,
-                                    const std::vector<uint>& instanceIDs, ResourceFormat ibFormat = ResourceFormat::Unknown)
+                                    const std::vector<uint>& instanceIDs, ResourceFormat ibFormat = ResourceFormat::Unknown, ParticleOrientationMode particleOrientationMode = ParticleOrientationMode::None)
         {
             if (drawMeshes.size() > 0)
             {
@@ -3105,6 +3171,7 @@ namespace Falcor
                 draw.isCastShadow = isCastShadow;
                 draw.isOpaque = isOpaque;
                 draw.ibFormat = ibFormat;
+                draw.particleOrientationMode = particleOrientationMode;
 
                 mDrawArgs.push_back(draw);
                 mDrawArgsInstanceIDs.push_back(instanceIDs);
@@ -3118,8 +3185,29 @@ namespace Falcor
             std::vector<DrawIndexedArguments> drawClockwiseMeshes16B[2], drawCounterClockwiseMeshes16B[4], drawDoubleSidedMeshes16B[8]; //16Bit indices; 0 static ; 1 dynamic; 2,3 +non shadow casting , 4-7 +non-opaque
             std::vector<uint> drawClockwiseMeshesIDs[2], drawCounterClockwiseMeshesIDs[2], drawDoubleSidedMeshesIDs[8];       //32Bit indices; 0 static ; 1 dynamic; 2,3 +non shadow casting , 4-7 +non-opaque
             std::vector<uint> drawClockwiseMeshesIDs16B[2], drawCounterClockwiseMeshesIDs16B[2], drawDoubleSidedMeshesIDs16B[8];       //16Bit indices; 0 static ; 1 dynamic; 2,3 +non shadow casting , 4-7 +non-opaque
+            std::vector<DrawIndexedArguments> drawParticles[4]; //Mesh groups for particles. They only exists in a specific configuration
+            std::vector<uint> drawParticlesMeshIDs[4];
 
             uint32_t instanceID = 0;
+            //Create a map to identify particles
+            std::map<uint32_t, uint32_t> particleMap;
+            
+            for (uint i = 0; i < mParticleSystems.size(); i++)
+            {
+                auto& ps = mParticleSystems[i];
+                /*
+                particleMap.insert((uint32_t)ps.meshIDs[0].get(), (uint32_t)ParticleOrientationMode::Camera);
+                particleMap.insert((uint32_t)ps.meshIDs[1].get(), (uint32_t)ParticleOrientationMode::XY_Plane);
+                particleMap.insert((uint32_t)ps.meshIDs[2].get(), (uint32_t)ParticleOrientationMode::YZ_Plane);
+                particleMap.insert((uint32_t)ps.meshIDs[3].get(), (uint32_t)ParticleOrientationMode::XZ_Plane);
+                */
+                particleMap[(uint32_t)ps.meshIDs[0].get()] = (uint32_t)ParticleOrientationMode::Camera;
+                particleMap[(uint32_t)ps.meshIDs[1].get()] = (uint32_t)ParticleOrientationMode::XY_Plane;
+                particleMap[(uint32_t)ps.meshIDs[2].get()] = (uint32_t)ParticleOrientationMode::YZ_Plane;
+                particleMap[(uint32_t)ps.meshIDs[3].get()] = (uint32_t)ParticleOrientationMode::XZ_Plane;
+            }
+            
+                
             for (const auto& instance : mGeometryInstanceData)
             {
                 if (instance.getType() != GeometryType::TriangleMesh) continue;
@@ -3129,6 +3217,7 @@ namespace Falcor
                 bool isDynamic = mesh.isAnimated() || mesh.isDynamic(); 
                 const auto mat = getMaterial(MaterialID::fromSlang(mesh.materialID));
                 bool isCastShadow = mat->isCastShadow();
+                bool isParticle = particleMap.count(instance.geometryID) > 0;
 
                 DrawIndexedArguments draw;
                 draw.IndexCountPerInstance = mesh.indexCount;
@@ -3138,7 +3227,14 @@ namespace Falcor
                 draw.StartInstanceLocation = instanceID;
 
                 int i = isDynamic ? 1 : 0;
-                if (mat->isDoubleSided() || !mat->isOpaque() || !isCastShadow)
+                if (isParticle)
+                {
+                    uint orientationID = particleMap[instance.geometryID] - 1u; //Orientation enum starts at 1 if the particle is set
+                    
+                    drawParticles[orientationID].push_back(draw);
+                    drawParticlesMeshIDs[orientationID].push_back(instance.geometryID);
+                }
+                else if (mat->isDoubleSided() || !mat->isOpaque() || !isCastShadow)
                 {
                     //Offset the non shadowed materials
                     if (!isCastShadow)
@@ -3213,6 +3309,12 @@ namespace Falcor
             createDoubleSidedDrawBuffer(drawDoubleSidedMeshes[5], true, true, false, drawDoubleSidedMeshesIDs[5], ResourceFormat::R32Uint);
             createDoubleSidedDrawBuffer(drawDoubleSidedMeshes[6], false, false, false, drawDoubleSidedMeshesIDs[6], ResourceFormat::R32Uint);
             createDoubleSidedDrawBuffer(drawDoubleSidedMeshes[7], true, false, false, drawDoubleSidedMeshesIDs[7], ResourceFormat::R32Uint);
+
+            //Particles
+            createDoubleSidedDrawBuffer(drawParticles[0], true, true, false, drawParticlesMeshIDs[0], ResourceFormat::R32Uint, ParticleOrientationMode::Camera);
+            createDoubleSidedDrawBuffer(drawParticles[1], true, true, false, drawParticlesMeshIDs[1], ResourceFormat::R32Uint, ParticleOrientationMode::XY_Plane);
+            createDoubleSidedDrawBuffer(drawParticles[2], true, true, false, drawParticlesMeshIDs[2], ResourceFormat::R32Uint, ParticleOrientationMode::YZ_Plane);
+            createDoubleSidedDrawBuffer(drawParticles[3], true, true, false, drawParticlesMeshIDs[3], ResourceFormat::R32Uint, ParticleOrientationMode::XZ_Plane);
         }
         else
         {

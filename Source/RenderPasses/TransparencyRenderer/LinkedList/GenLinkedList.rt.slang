@@ -1,87 +1,78 @@
+#include "../LinkedListIrregularZ/LinkedListIrregularZData.slang"
+#include "../SharedShadowDefines.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
-import Rendering.Materials.TexLODHelpers;
-import Rendering.Materials.TexLODTypes;
 import Scene.Raytracing;
 import Scene.Intersection;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
+//import Utils.Sampling.SampleGenerator;
 
-
-#ifndef MAX_ELEMENTS
-#define MAX_ELEMENTS 256
+#ifndef NUM_LIGHTS
+#define NUM_LIGHTS 1
 #endif
 
-//#define USE_LOD
+// Maximum index
+#ifndef MAX_IDX
+#define MAX_IDX 1
+#endif
 
-/** Payload for shadow ray.
-*/
+#ifndef TRACE_NON_OPAQUE_ONLY
+#define TRACE_NON_OPAQUE_ONLY 0
+#endif
+
+/** Payload for shadow ray. (32B)
+ */
 struct RayData
 {
-    float visibility; // accumulated visibility
-    float depth; // depth of last intersection (for the linked list)
-    float rayT; // RayTCurrent of last intersection
-    __init()
-    {
-        this.visibility = 1.0;
-        this.depth = 0.0;
-        this.rayT = 0.0;
+    float3 currentTransmittance;
+    float dist;
+    float3 sampleTransmittance;
+    float depth;
+
+    __init() {
+        this.dist = -1.0;
+        this.depth = 1.0;
+        this.currentTransmittance = float3(1.0);
+        this.sampleTransmittance = float3(1.0);
+    }
+
+    const bool isOpaque() {
+        return sampleTransmittance.x < 0;
     }
 };
 
 cbuffer CB
 {
-    uint        gFrameCount;       //Current frame count
-    float3      gLightPos;     // Current Light Position
-    float       gNear;
-    float       gFar;
-    float       gRayConeAngle; // spread angle
-    uint        _pad;
-    float4x4    gViewProj;      // View Projection for current light
-    float4x4    gInvViewProj;   // Inverse view projection
-    float4x4    gView;
+    uint gFrameCount;    // Current frame count
+    float3 gLightPos;    // Current Light Position
+    bool gIsDirectional; // Is light a directional light (posW invalid)
+    float3 gLightDir;    // Light Direction
+    float gFar;
+    uint gLightIdx; // LightIndex
+    uint2 gSMRes;   // ShadowMap resolution
+    float gSpreadAngle;
+    uint _pad;
+    float4x4 gViewProj;
+    float4x4 gInvViewProj; // Inverse view projection
 }
 
-struct ListNode
-{
-    float depth;
-    float visibility;
-    uint next;
-};
+RWBuffer<uint> gCounter;
+RWStructuredBuffer<LinkedListNode> gData;
+Buffer<float2> gHaltonSamples;
 
-struct ArrayNode
-{
-    float depth;
-    float visibility;
-
-    __init(ListNode n)
-    {
-        this.depth = n.depth;
-        this.visibility = n.visibility;
-    }
-};
-
-RWStructuredBuffer<ListNode> gLinkedList;
-RWBuffer<uint> gCounter; // counter for the nodes
-
-// array members
-RWStructuredBuffer<ArrayNode> gArray;
-RWTexture2D<uint2> gArrayOffsets; // stores offsets for the array: (start, count) pairs.
-RWBuffer<uint> gCounter2; // counter for array storage
-
-static const float kDepthBias = LL_DEPTH_BIAS;
-static const float kNormalBias = LL_NORMAL_DEPTH_BIAS;
-static const float kMinOpacity = 1e-7;
-static const uint kRayFlags = LL_RAY_FLAGS;
-
-ExplicitRayConesLodTextureSampler computeLod(VertexData v, float3 rayDir)
-{
-    RayCone rc = RayCone(0.0, gRayConeAngle);
-    rc = rc.propagateDistance(RayTCurrent());
-    float lambda = rc.computeLOD(v.coneTexLODValue, rayDir, v.faceNormalW);
-    return ExplicitRayConesLodTextureSampler(lambda);
-}
+static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
+static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias applied to tmin to search for the next opaque hit (for midpoint sm)
+static const float kMinOpacity = MIN_OPACITY;
+static const float kMaxTransmittance = 1.0 - kMinOpacity;
+static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
+static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
+static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
+static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
+static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
+static const bool kUseMidpointBias = true; // Uses min between midpoint and a high bias (0.08% of lights far)
+static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -101,28 +92,76 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
+// Get next hightest float
+float ulp(float f)
+{
+    int i = asint(f);
+    return abs(asfloat(i + 1) - f);
+}
+
+inline float getMidpointDepth(float lastHitDepth, float distanceDifference) {
+    float midpointDepth = 0;
+    if (kUseMidpointBias)
+        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, kMidpointDepthBias);
+    else
+        midpointDepth = lastHitDepth + distanceDifference * kMidpointPercentage;
+
+    return midpointDepth;
+}
+
 //Shaders
 [shader("miss")]
 void miss(inout RayData rayData)
 {
-    rayData.depth = -1.0; // indicate miss
+    //rayData.depth = -1.0; // indicate miss
+    rayData.dist = -1.0;
 }
 
 [shader("anyhit")]
 void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs)
 {
-    // Alpha test for non-opaque geometry.
-    GeometryInstanceID instanceID = getGeometryInstanceID();
-    VertexData v = getVertexData(instanceID, PrimitiveIndex(), attribs);
-    const uint materialID = gScene.getMaterialID(instanceID);
-    // TODO lod
-    #ifndef USE_LOD
-    let lod = ExplicitLodTextureSampler(0.f);
-    #else
-    let lod = computeLod(v, WorldRayDirection());
-    #endif
-    if (gScene.materials.alphaTest(v, materialID, lod, kMinOpacity)) 
+    //  Alpha test for non-opaque geometry.
+    TriangleHit triangleHit;
+    triangleHit.instanceID = getGeometryInstanceID();
+    triangleHit.primitiveIndex = PrimitiveIndex();
+    triangleHit.barycentrics = attribs.barycentrics;
+
+    VertexData v = gScene.getVertexData(triangleHit);
+    const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+
+    if (!gScene.materials.isAlphaTestSupported(materialID))
+        return;
+
+    ITextureSampler lod = ExplicitLodTextureSampler(0.f);
+    float3 transmittance = float3(0.0);
+
+    if (kUseColorTransparency) {
+        ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
+        // uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod);
+        // Emissive lights
+        BSDFProperties bsdfProperties = mi.getProperties(sd);
+        float3 color = bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo;
+        // Normalize color
+        float maxColor = max(max(color.x, color.y), color.z);
+        color /= maxColor;
+        if (sd.opacity < kMinOpacity)
+            transmittance = 1.0;
+        else
+            transmittance = color * (1.0 - sd.opacity);
+    } else {
+        transmittance = 1.0 - float3(gScene.materials.getMaterialOpacity(v, materialID, lod));
+    }
+
+    // If hit is transparent (alpha < 1e-7)
+    if (all(transmittance > kMaxTransmittance))
         IgnoreHit();
+
+    // Commit hit
+    if (RayTCurrent() < rayData.dist) {
+        rayData.sampleTransmittance = transmittance;
+        rayData.dist = RayTCurrent();
+    }
 }
 
 [shader("closesthit")]
@@ -132,21 +171,27 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     triangleHit.instanceID = getGeometryInstanceID();
     triangleHit.primitiveIndex = PrimitiveIndex();
     triangleHit.barycentrics = attribs.barycentrics;
-
     VertexData v = gScene.getVertexData(triangleHit);
-    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    #ifndef USE_LOD
-    let lod = ExplicitLodTextureSampler(0.f);
-    #else
-    let lod = computeLod(v, WorldRayDirection());
-    #endif
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -WorldRayDirection(), lod);
 
-    rayData.visibility = rayData.visibility * (1.0 - sd.opacity);
-    rayData.depth = -1.0 * mul(gView, float4(sd.posW, 1.f)).z;
-    float normalBias = (1.0 - abs(dot(WorldRayDirection(), sd.faceN))) * kNormalBias;
-    rayData.depth += (kDepthBias + normalBias) * gFar;
-    rayData.rayT = RayTCurrent();
+    float3 transmittance = rayData.sampleTransmittance;
+    rayData.sampleTransmittance = float3(1.0);
+    // Case opaque object that does not call the anyHit
+    if (RayTCurrent() < rayData.dist) {
+        transmittance = 0.0;
+        rayData.sampleTransmittance.x = -1.0;
+    }
+
+    rayData.currentTransmittance = rayData.currentTransmittance * transmittance;
+    float4 posH = mul(gViewProj, float4(v.posW, 1.0));
+    rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
+    rayData.dist = RayTCurrent();
+}
+
+inline uint getInsertIndex() {
+    uint insertIdx = 0;
+    const uint lightIdx = gLightIdx;
+    InterlockedAdd(gCounter[lightIdx], 1u, insertIdx);
+    return insertIdx;
 }
 
 //
@@ -156,91 +201,204 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
 void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
-    uint2 frameDim = DispatchRaysDimensions().xy;
-    uint numElements = 0;
+    const uint2 frameDim = DispatchRaysDimensions().xy;
+    uint idx1D = pixel.x + pixel.y * frameDim.x;
+    float2 pixelOffset = float2(0.5);
+    if (kUseHaltonSamplePattern) {
+        uint jitterIdx = (pixel.x + (pixel.y * frameDim.x) + gFrameCount) % kNumHaltonSamples;
+        pixelOffset = gHaltonSamples[jitterIdx]; // pixel offset in [0,1]
+    }
+    float2 pixelSample = pixel + pixelOffset;
 
-    float2 pixelSample = pixel + 0.5;
-
-    float2 relFramePos = pixelSample / frameDim;
+    float2 relFramePos = pixelSample / gSMRes;
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
     relFramePos.y *= -1.f;
 
-        
-    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos, 0.f, 1.f));
-    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.f, 1.f));
+    float3 lightPos = gLightPos;
+
+    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos, 0.0, 1.0));
+    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.0, 1.0));
 
     posWPixelNear.xyz /= posWPixelNear.w;
-    float3 toNear = posWPixelNear.xyz - gLightPos;
+    posWPixelFar.xyz /= posWPixelFar.w;
+    float3 rayDirection;
+    if (gIsDirectional) {
+        rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
+    } else {
+        rayDirection = posWPixelNear.xyz - gLightPos;
+    }
 
     RayDesc ray;
-    ray.TMin = length(toNear);;                                             // Always start at depth 0
-    ray.TMax = distance(gLightPos, posWPixelFar.xyz / posWPixelFar.w); // Real far for the pixel
-    ray.Origin = gLightPos;
-    ray.Direction = normalize(toNear); // World direction
+    if (gIsDirectional) {
+        ray.TMin = 0;
+        ray.TMax = length(rayDirection);
+        ray.Origin = posWPixelNear.xyz;
+        ray.Direction = rayDirection / ray.TMax;
+    } else {
+        ray.TMin = length(rayDirection);                 // Always start at depth 0
+        ray.TMax = distance(lightPos, posWPixelFar.xyz); // Real far for the pixel
+        ray.Origin = lightPos;
+        ray.Direction = rayDirection / ray.TMin; // World direction
+    }
 
     RayData rayData = RayData();
+    bool rayTracingLoop = true;
+    float midpointLast = 0.0;
+    float midpointCurrent = 0.0;
+    float lastHitDepth = 0.0;
+    float3 currTranmittance = float3(1.0);  // Tranmission end of current sample
+    float3 prevTransmittance = float3(1.0); // Tranmission end of previous sample
+    const float far = ray.TMax;
 
-    ListNode prevNode;
+    LinkedListNode prevNode;
     prevNode.depth = FLT_MAX;
     prevNode.visibility = 1.0;
     prevNode.next = 0;
-    uint prevNodeIndex = pixel.y * frameDim.x + pixel.x;
+    uint prevNodeIndex = idx1D;
     uint nodeIndex = prevNodeIndex;
+    const uint instanceMask = getBestParticleShadowPlane(gLightDir, kIncludeCastShadowInstanceMaskBit);
+    bool currHitOpaque = false;
+    bool prevHitOpaque = false;
 
     // Loop to get all possible samples
-    for (uint i = 0; i < MAX_ELEMENTS; i++) {
+    for (uint i = 0; (i < MAX_ELEMENTS) && rayTracingLoop; i++) {
+        rayData.depth = -1;
+        rayData.dist = ray.TMax;
+        rayData.sampleTransmittance = 1.0;
 
-        //Trace ray
-        TraceRay(gScene.rtAccel, kRayFlags, kShadowRayInstanceMask /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        // Trace ray
+        uint rayFlags = 0;
+        #if TRACE_NON_OPAQUE_ONLY
+            rayFlags = RAY_FLAG_CULL_OPAQUE;
+        #endif
+        TraceRay(gScene.rtAccel, rayFlags /*Ray flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
-        if(rayData.depth < 0) break; // miss shader
-
-        // get storage for new point
-        nodeIndex = prevNodeIndex;
-        if(i > 0) // for first iteration, just overwrite the initial node
-        {
-            InterlockedAdd(gCounter[0], 1u, nodeIndex);
-
-            if(nodeIndex >= MAX_INDEX) break; // cannot store further nodes, abort
-
-            // complete and write last node
-            prevNode.next = nodeIndex;
-            gLinkedList[prevNodeIndex] = prevNode;
-            numElements += 1;
+        // A miss on the first hit ends the ray
+        if (i == 0 && rayData.dist < 0) {
+            break;
         }
 
-        // create new node storage
-        ListNode node;
-        node.depth = rayData.depth;
-        node.visibility = rayData.visibility;
-        node.next = 0;
-        
-        // update for next iteration
-        prevNode = node;
-        prevNodeIndex = nodeIndex;
-        ray.TMin = rayData.rayT;  
-        
-        if(rayData.visibility <= kMinOpacity) break; // stop if visibility is too low)
+        // End Loop for the next iteration if transmittance is smaller as minValue or the ray missed the scene
+        if (all(prevTransmittance <= kMinOpacity) || rayData.dist < 0) {
+            rayTracingLoop = false;
+        }
+
+        // Get difference between last and current depth
+        float distDiff = rayData.depth - lastHitDepth;
+        // Update midpoint depth values if the ray hit something
+        if (rayData.dist > 0) {
+            midpointLast = midpointCurrent;
+            midpointCurrent = getMidpointDepth(lastHitDepth, distDiff);
+        }
+
+        // Write the sample stating on 3rd iteration(i=2).
+        if (rayData.dist > 0 && i > 1) {
+            nodeIndex = getInsertIndex();
+            if (nodeIndex >= MAX_IDX)
+                rayTracingLoop = false;
+
+            prevNode.next = nodeIndex;
+            gData[prevNodeIndex] = prevNode;
+        }
+
+        // Update depth, transmittance and ray for next iteration
+        if (rayData.dist > 0) {
+            prevHitOpaque = currHitOpaque;
+            currHitOpaque = rayData.isOpaque();
+            float rayOffset = ulp(rayData.dist) * 4.0; // Next highest float x4 seems to work pretty well
+            // ray.TMin = currHitOpaque ? min(rayData.dist + kOpaqueHitRayDepthBias * pixelScale, rayData.dist + rayOffset) : rayData.dist + rayOffset; // This a bit of a dirty fix for particles that overlap with solid geometry
+            ray.TMin = rayData.dist + rayOffset;
+            lastHitDepth = rayData.depth;
+            prevTransmittance = currTranmittance;
+            currTranmittance = rayData.currentTransmittance;
+
+            // Update node
+            prevNode.depth = midpointCurrent;
+            #if USE_COLOR_TRANSPARENCY
+                prevNode.visibility = prevTransmittance;
+            #else
+                prevNode.visibility = prevTransmittance.x;
+            #endif
+            prevNode.next = 0;
+            prevNodeIndex = nodeIndex;
+        }
     }
 
-    // write last node
-    gLinkedList[prevNodeIndex] = prevNode;
-    numElements += 1;
+    // Insert last two elements
+    bool storeLastBox = true;
+    #if TRACE_NON_OPAQUE_ONLY
+        storeLastBox &= any(currTranmittance < 1.0);
+        midpointLast = lastHitDepth + kMidpointDepthBias; //No midpoint for this hit
+    #else
+        storeLastBox &= (any(currTranmittance < 1.0) && rayData.dist >= 0);
+        midpointLast = midpointCurrent;
+    #endif
+    storeLastBox |= (prevNodeIndex == idx1D) && all(prevTransmittance >= 1.0); // Guarantees that the head buffer is set
+
+#if TRACE_NON_OPAQUE_ONLY
+    if (any(prevTransmittance < 1.0) || storeLastBox)
+#else
+    if (any(prevTransmittance < 1.0))
+#endif
+    {
+        if (storeLastBox) {
+            nodeIndex = getInsertIndex();
+            if (nodeIndex >= MAX_IDX)
+                return;
+        }
+
+        prevNode.next = storeLastBox ? nodeIndex : 0;
+        gData[prevNodeIndex] = prevNode;
+        prevNode.depth = midpointLast;
+        #if USE_COLOR_TRANSPARENCY
+            prevNode.visibility = currTranmittance;
+        #else
+            prevNode.visibility = currTranmittance.x;
+        #endif
+        prevNode.next = 0;
+        prevNodeIndex = nodeIndex;
+    }
+
+    // Store last box
+    if (storeLastBox) {
+        gData[prevNodeIndex] = prevNode;
+    }
+}
+
+/*
+
+ struct ArrayNode
+{
+    float depth;
+    float visibility;
+
+    __init(ListNode n)
+    {
+        this.depth = n.depth;
+        this.visibility = n.visibility;
+    }
+};
+
+// array members
+RWStructuredBuffer<ArrayNode> gArray;
+RWTexture2D<uint2> gArrayOffsets; // stores offsets for the array: (start, count) pairs.
+RWBuffer<uint> gCounter2; // counter for array storage
+
 
 #ifdef USE_LINKED_LIST_ARRAY
-    uint arrayStartIndex = 0;
-    InterlockedAdd(gCounter2[0], numElements, arrayStartIndex);
-    // store start index and number of elements
-    gArrayOffsets[pixel] = uint2(arrayStartIndex, numElements);
+uint arrayStartIndex = 0;
+InterlockedAdd(gCounter2[0], numElements, arrayStartIndex);
+// store start index and number of elements
+gArrayOffsets[pixel] = uint2(arrayStartIndex, numElements);
 
-    // write linked list to array
-    uint index = arrayStartIndex;
-    nodeIndex = pixel.y * frameDim.x + pixel.x;
-    for (uint index = arrayStartIndex; index < arrayStartIndex + numElements; index++)
-    {
-        ListNode node = gLinkedList[nodeIndex];
-        gArray[index] = ArrayNode(node);
-        nodeIndex = node.next;
-    }
-#endif
+// write linked list to array
+uint index = arrayStartIndex;
+nodeIndex = pixel.y * frameDim.x + pixel.x;
+for (uint index = arrayStartIndex; index < arrayStartIndex + numElements; index++)
+{
+    ListNode node = gLinkedList[nodeIndex];
+    gArray[index] = ArrayNode(node);
+    nodeIndex = node.next;
 }
+#endif
+*/

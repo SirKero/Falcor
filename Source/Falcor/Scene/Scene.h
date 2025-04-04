@@ -329,8 +329,9 @@ namespace Falcor
             float3 spawnPosition = float3(0, -10, 0);
             float intitialRadius = 1.f;
             std::array<MeshID, 4> meshIDs;
-            bool active = false;
             uint particleBufferOffset = 0;
+            bool active = false;
+            bool paused = false;
         };
 
         /** Full set of required data to create a scene object.
@@ -1354,6 +1355,7 @@ namespace Falcor
             bool isCastShadow = true;      ///< True if the mesh should cast a shadow
             bool isOpaque = true;           ///< True if the mesh is opaque
             ResourceFormat ibFormat = ResourceFormat::Unknown;  ///< Index buffer format.
+            ParticleOrientationMode particleOrientationMode = ParticleOrientationMode::None;    ///< For particles
         };
 
         GeometryTypeFlags mGeometryTypes;                           ///< Set of geometry types that exist in the scene.

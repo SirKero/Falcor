@@ -27,6 +27,7 @@
  **************************************************************************/
 #include "AccelShadow.h"
 #include "Utils/Math/FalcorMath.h"
+#include "Utils/SampleGenerators/HaltonSamplePattern.h"
 
 namespace
 {
@@ -60,7 +61,9 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
         mRebuildAccelDataBuffer = false;
     }
 
-    updateSMMatrices(pRenderContext);
+    mResolutionChanged = false;
+
+    updateSMMatrices();
 
     // Create AVSM trace program
     if (!mGenAccelShadowPip.pProgram)
@@ -68,8 +71,7 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
         desc.addShaderLibrary(kGenShader);
-        desc.setMaxPayloadSize(20u); //
-                                     //(4) + align(4)
+        desc.setMaxPayloadSize(32u);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1u);
 
@@ -144,7 +146,7 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
             for (uint i = 0; i < numBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint) * mAccelDataFormatSize, mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
+                    mpDevice, sizeof(float), mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));
@@ -165,6 +167,21 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
                 CustomAccelerationStructure::UpdateMode::TLASOnly
             );
         }
+    }
+
+    if (!mpHaltonBuffer || mpHaltonBuffer->getElementCount() != mNumHaltonSamples)
+    {
+        // Generate Halton Samples on CPU
+        auto haltonSampler = HaltonSamplePattern::create(mNumHaltonSamples);
+        std::vector<float2> haltonInitData(mNumHaltonSamples);
+        for (uint i = 0; i < mNumHaltonSamples; i++)
+            haltonInitData[i] = haltonSampler->next() + 0.5f; // Halton samples are in [-0.5, 0.5) but we want the samples in [0,1)
+
+        // Create and upload GPU buffer
+        mpHaltonBuffer = Buffer::createTyped<float2>(
+            mpDevice, mNumHaltonSamples, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, haltonInitData.data()
+        );
+        mpHaltonBuffer->setName("HaltonDataBuffer");
     }
 }
 
@@ -219,10 +236,18 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
 
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
+    mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
+    mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
+    mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mEnableHalton ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
+    mGenAccelShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseOpaqueSM ? "1" : "0"); // Trace non-opaque only if mask is used
+    mGenAccelShadowPip.pProgram->addDefine(
+        "INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"
+    ); // Determines if the castShadow instance mask bit is used
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -240,25 +265,24 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
         if (!lights[i]->isActive())
             break;
         FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        bool isDirectional = lights[i]->getType() == LightType::Directional;
         // Bind Utility
         auto var = mGenAccelShadowPip.pVars->getRootVar();
         var["CB"]["gFrameCount"] = mFrameCount;
         var["CB"]["gLightPos"] = mShadowMapMVP[i].pos;
-        var["CB"]["gNear"] = mNearFar.x;
+        var["CB"]["gIsDirectional"] = isDirectional;
+        var["CB"]["gLightDir"] = lights[i]->getData().dirW;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
+        var["CB"]["gSMRes"] = mResolution;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
-        var["CB"]["gInvProj"] = mShadowMapMVP[i].invProjection;
-        var["CB"]["gInvView"] = mShadowMapMVP[i].invView;
-        var["CB"]["gView"] = mShadowMapMVP[i].view;
-        std::array<float4, 4> planes = getCameraFrustumPlanes(); // Get Top,Bottom,Left,Right Camera frustum plane
-        for (uint j = 0; j < 4; j++)
-            var["CB"]["gFrustumPlanes"][j] = planes[j];
+        var["CB"]["gSpreadAngle"] = mShadowMapMVP[i].spreadAngle;
 
         var["gAABB"] = mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mAccelShadowData[i];
+        var["gHaltonSamples"] = mpHaltonBuffer;
 
         // Get dimensions of ray dispatch.
         const uint2 targetDim = mResolution;
@@ -267,6 +291,9 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
         // Spawn the rays.
         mpScene->raytrace(pRenderContext, mGenAccelShadowPip.pProgram.get(), mGenAccelShadowPip.pVars, uint3(targetDim, 1));
     }
+
+     // Clear unused AABBs
+    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
 
     // Sync Photon copy data
     if (mAccelShadowUseCPUCounterOptimization)
@@ -333,6 +360,18 @@ void AccelShadow::setShaderData(const ShaderVar& var) {
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
 }
 
+void AccelShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable)
+{
+    mUseOpaqueSM = enable;
+    if (mUseOpaqueSM)
+    {
+        auto shadowVar = var["gAccelShadow"];
+
+        //shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gMaskShadowMap"] = maskSM->asTexture();
+    }
+}
+
 bool AccelShadow::renderUI(Gui::Widgets& widget) {
     bool dirty = false;
     if (auto group = widget.group("Accel Shadow Settings"))
@@ -347,23 +386,31 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
                 {
                     if (i > 0)
                         group2.separator();
+                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
                     group2.text(mpScene->getLight(i)->getName());
-                    group2.text("Elements:        " + std::to_string(mAccelShadowMaxNumPoints));
-                    std::string accelMem = std::to_string((mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f);
-                    group2.text("AABB Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
-                    group2.text("Data Memory:      TBD"); // TODO
+                    group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
+                    float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
+                    float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
+                    std::string accelMemStr = std::to_string(accelMem);
+                    std::string dataMemStr = std::to_string(dataMem);
+                    std::string totalMemStr = std::to_string((accelMem + dataMem));
+                    group2.text("AABB Memory:     " + accelMemStr.substr(0, accelMemStr.find(".") + 3) + " MB");
+                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+                    group2.text("Total Memory:    " + totalMemStr.substr(0, totalMemStr.find(".") + 3) + " MB");
+
+                    group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
+                    accelMem = (mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f;
+                    dataMem = (mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f;
+                    std::string neededAABBMem = std::to_string(accelMem);
+                    std::string neededDataMem = std::to_string(dataMem);
+                    std::string neededTotalMem = std::to_string(accelMem + dataMem);
+                    std::string fillRate = std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
+                    group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB");
+                    group2.text("Used Data Memory:   " + neededDataMem.substr(0, neededDataMem.find(".") + 3) + " MB");
                     group2.text(
-                        "Needed Elements: " + std::to_string(uint(mAccelShadowNumPoints[i] * mAccelShadowOverestimation)) + " (" +
-                        std::to_string(mAccelShadowNumPoints[i]) + ")"
-                    );
-                    std::string neededMem = std::to_string((mAccelShadowNumPoints[i] * mAccelShadowOverestimation * sizeof(AABB)) / 1e6f);
-                    std::string fillRate =
-                        std::to_string(((mAccelShadowNumPoints[i] * mAccelShadowOverestimation) / float(mAccelShadowMaxNumPoints)) * 100.f);
-                    group2.text(
-                        "Needed AABB Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
+                        "Used Total Memory:   " + neededTotalMem.substr(0, neededTotalMem.find(".") + 3) + " MB (" +
                         fillRate.substr(0, fillRate.find(".") + 2) + "%)"
                     );
-                    group2.text("Needed Data Memory:    TBD");
                 }
                 group2.separator();
             }
@@ -379,6 +426,15 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
         group.tooltip("Data formats; For more info see AccelShadowData.slang");
         group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
+
+        group.checkbox("Enable Jitter", mEnableHalton);
+        if (mEnableHalton)
+        {
+            if (group.var("HaltonSamples", mNumHaltonSamples, 1u, 1024u, 1u))
+                mGenAccelShadowPip.pVars.reset();
+            group.tooltip("Number of Halton Samples");
+        }
+
         group.checkbox("Use PCF", mAccelUsePCF);
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         if (auto group2 = group.group("Debug"))

@@ -197,9 +197,7 @@ void PreviewSurfaceConverter::cacheMaterial(const UsdShadeShader& shader, ref<St
         std::unique_lock lock(mCacheMutex);
         if (mPrimMaterialCache.find(shader.GetPrim()) == mPrimMaterialCache.end())
         {
-            throw RuntimeError(
-                "Expected PreviewSurfaceConverter cache entry for '{}' not found.", shader.GetPath().GetString()
-            );
+            throw RuntimeError("Expected PreviewSurfaceConverter cache entry for '{}' not found.", shader.GetPath().GetString());
         }
         mPrimMaterialCache[shader.GetPrim()] = pMaterial;
     }
@@ -212,7 +210,8 @@ void PreviewSurfaceConverter::cacheMaterial(const StandardMaterialSpec& spec, re
         std::unique_lock lock(mCacheMutex);
         if (mSpecMaterialCache.find(spec) == mSpecMaterialCache.end())
         {
-            throw RuntimeError("Expected PreviewSurfaceConverter spec cache entry for '{}' not found.", spec.name);
+            //throw RuntimeError("Expected PreviewSurfaceConverter spec cache entry for '{}' not found.", spec.name);
+            logWarning("Expected PreviewSurfaceConverter spec cache entry for '{}' not found.", spec.name);
         }
         mSpecMaterialCache[spec] = pMaterial;
     }

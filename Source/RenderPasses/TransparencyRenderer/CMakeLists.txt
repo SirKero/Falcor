@@ -36,6 +36,14 @@ target_sources(TransparencyRenderer PRIVATE
 	LinkedListIrregularZ/LinkedListIrregularZ.slang
 	LinkedListIrregularZ/GenLinkedListIrregularZ.rt.slang
 	LinkedListIrregularZ/LinkedListIrregularZData.slang
+	LinkedListIrregularZ/DebugShowImportance.cs.slang
+
+    TransparentShadowMask/TransparentShadowMask.cpp
+    TransparentShadowMask/TransparentShadowMask.h
+    TransparentShadowMask/GenTransparentShadowMask.3d.slang
+    TransparentShadowMask/AccumulateMask.cs.slang
+    TransparentShadowMask/GenMaskShadowMap.rt.slang
+    TransparentShadowMask/GenMaskImportanceShadowMap.rt.slang
 
 	TransparencyShadowMethod.h
 	TransparencyShadowMethod.cpp
@@ -46,8 +54,10 @@ target_sources(TransparencyRenderer PRIVATE
 	EvaluateAnalyticLight.slang
 	EvalDirect.cs.slang
 	EvalTransparenciesDirect.rt.slang
+    RayReflections.rt.slang
 	PathTracer.rt.slang
 	RayLodHelper.slang
+    SharedShadowDefines.slang
 )
 
 target_copy_shaders(TransparencyRenderer RenderPasses/TransparencyRenderer)

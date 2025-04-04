@@ -1,16 +1,14 @@
+#include "../RayLodHelper.slang"
 #include "LinkedListIrregularZData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
-#include "../RayLodHelper.slang"
+#include "../SharedShadowDefines.slang"
 
 import Scene.Raytracing;
 import Scene.Intersection;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
-
-#ifndef MAX_ELEMENTS
-#define MAX_ELEMENTS 256
-#endif
+import Utils.Sampling.SampleGenerator;
 
 #ifndef NUM_LIGHTS
 #define NUM_LIGHTS 1
@@ -19,6 +17,10 @@ import Utils.Geometry.GeometryHelpers;
 //Maximum index 
 #ifndef MAX_IDX
 #define MAX_IDX 1
+#endif
+
+#ifndef TRACE_NON_OPAQUE_ONLY
+#define TRACE_NON_OPAQUE_ONLY 0
 #endif
 
 /** Payload for shadow ray. (32B)
@@ -34,7 +36,11 @@ struct RayData
         this.dist = -1.0;
         this.depth = 1.0;
         this.currentTransmittance = float3(1.0);
-        this.sampleTransmittance = float3(0.0);
+        this.sampleTransmittance = float3(1.0);
+    }
+
+    const bool isOpaque() {
+        return sampleTransmittance.x < 0;
     }
 };
 
@@ -60,18 +66,20 @@ RWTexture2D<uint> gAccessCounter;
 Texture2D<float> gSampleDistribution;
 Buffer<float2> gHaltonSamples;
 
-SamplerState gPointSampler;
-
+static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
+static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias for midpoint
 static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;
-static const float kMinOpacity = 1e-7;
+static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
-static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
-static const float kMergeDistance = ACCEL_MERGE_BOX_DIST;
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
-
+static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
+static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
+static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
+static const bool kUseMidpointBias = true; // Uses min between midpoint and a high bias (0.08% of lights far)
+static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -89,6 +97,23 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
 
     return sd;
+}
+
+// Get next hightest float
+float ulp(float f)
+{
+    int i = asint(f);
+    return abs(asfloat(i + 1) - f);
+}
+
+inline float getMidpointDepth(float lastHitDepth, float distanceDifference) {
+    float midpointDepth = 0;
+    if (kUseMidpointBias)
+        midpointDepth = lastHitDepth + min(distanceDifference * kMidpointPercentage, kMidpointDepthBias);
+    else
+        midpointDepth = lastHitDepth + distanceDifference * kMidpointPercentage;
+
+    return midpointDepth;
 }
 
 //Shaders
@@ -153,9 +178,11 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
         transmittance = 1.0 - float3(gScene.materials.getMaterialOpacity(v, materialID, lod));
     }
 
+    // If hit is transparent (alpha < 1e-7)
     if (all(transmittance > kMaxTransmittance))
         IgnoreHit();
 
+    // Commit hit
     if (RayTCurrent() < rayData.dist) {
         rayData.sampleTransmittance = transmittance;
         rayData.dist = RayTCurrent();
@@ -172,13 +199,15 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
     VertexData v = gScene.getVertexData(triangleHit);
 
     float3 transmittance = rayData.sampleTransmittance;
+    rayData.sampleTransmittance = float3(1.0);
     //Case opaque object that does not call the anyHit
     if (RayTCurrent() < rayData.dist) {
         transmittance = 0.0;
+        rayData.sampleTransmittance.x = -1.0;
     }
             
     rayData.currentTransmittance = rayData.currentTransmittance * transmittance;
-    float4 posH = mul(gViewProj, float4(v.posW, 1.f));
+    float4 posH = mul(gViewProj, float4(v.posW, 1.0));
     rayData.depth = gIsDirectional ? posH.z : posH.w; // Linear depth
     rayData.dist = RayTCurrent();
 }
@@ -364,7 +393,10 @@ void rayGen()
         index = idx1D % choosenSampleCount;
         mipMulFactor = 1 << selectedMipLevel; // Multiplier for Mip level
     }
-    
+
+    if (sampleCount <= 0)
+        return;
+
     uint samplesSq = uint(sqrt(sampleCount)); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
     const float subpixelSize = 1.0 / samplesSq;
     float2 subpixelLoc = float2(subpixelIndex % samplesSq, subpixelIndex / samplesSq);
@@ -387,7 +419,8 @@ void rayGen()
     pixelOffset *= mipMulFactor;
     boxPixelOffset *= mipMulFactor;
     pixelCenterOffest *= mipMulFactor;
-    
+
+    const float pixelScale = mipMulFactor * subpixelSize;
     //
     // Dispatch Sample / Create Shadow Map
     //
@@ -398,40 +431,52 @@ void rayGen()
     relFramePos = relFramePos * 2.0 - 1.0; // From [0,1] to [-1,1]
     relFramePos.y *= -1.f;
 
-    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos, 0.f, 1.f));
-    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.f, 1.f));
+    float3 lightPos = gLightPos;
+    float2 rndOffset = float2(0);
+    // Random offset for position
+    if (kUseRandomSoftShadows) {
+        SampleGenerator sg = SampleGenerator(DispatchRaysIndex().xy, gFrameCount);
+        if (gIsDirectional) {
+            rndOffset = sample_disk_concentric(sampleNext2D(sg));
+            rndOffset *= 1.0 / gSMRes * kRandomSoftShadowsDirSpread;
+        } else {
+            float3 rndPosOffset = sample_sphere(sampleNext2D(sg));
+            lightPos += rndPosOffset * kRandomSoftShadowsPosRadius;
+        }
+    }
+
+    float4 posWPixelNear = mul(gInvViewProj, float4(relFramePos + rndOffset, 0.0, 1.0));
+    float4 posWPixelFar = mul(gInvViewProj, float4(relFramePos, 1.0, 1.0));
 
     posWPixelNear.xyz /= posWPixelNear.w;
     posWPixelFar.xyz /= posWPixelFar.w;
-    float3 toNear;
+    float3 rayDirection;
     if (gIsDirectional) {
-        toNear = posWPixelFar.xyz - posWPixelNear.xyz;
+        rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
     } else {
-        toNear = posWPixelNear.xyz - gLightPos;
+        rayDirection = posWPixelNear.xyz - gLightPos;
     }
-   
-    //Prepare ray
+
     RayDesc ray;
     if (gIsDirectional) {
         ray.TMin = 0;
-        ray.TMax = length(toNear);
+        ray.TMax = length(rayDirection);
         ray.Origin = posWPixelNear.xyz;
-        ray.Direction = gLightDir;
+        ray.Direction = rayDirection / ray.TMax;
     } else {
-        ray.TMin = length(toNear); // Always start at depth 0
-        ray.TMax = distance(gLightPos, posWPixelFar.xyz); // Real far for the pixel
-        ray.Origin = gLightPos;
-        ray.Direction = normalize(toNear); // World direction
+        ray.TMin = length(rayDirection);                 // Always start at depth 0
+        ray.TMax = distance(lightPos, posWPixelFar.xyz); // Real far for the pixel
+        ray.Origin = lightPos;
+        ray.Direction = rayDirection / ray.TMin; // World direction
     }
-    
 
     RayData rayData = RayData();
-    bool useRayTracing = true;
-    float2 boxZ = float2(0.0); //Last two middle depths
+    bool rayTracingLoop = true;
+    float midpointLast = 0.0;
+    float midpointCurrent = 0.0;
     float lastHitDepth = 0.0;
     float3 currTranmittance = float3(1.0);  //Tranmission end of current sample
     float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
-    bool mergeLastBox = false;               // Merge the box from the prevoius frame
     const float far = ray.TMax;
 
     LinkedListNode prevNode;
@@ -440,60 +485,64 @@ void rayGen()
     prevNode.next = 0;
     uint prevNodeIndex = idx1D;
     uint nodeIndex = prevNodeIndex;
-    const uint instanceMask = getBestParticleShadowPlane(gLightDir);
+    const uint instanceMask = getBestParticleShadowPlane(gLightDir,kIncludeCastShadowInstanceMaskBit);
+    bool currHitOpaque = false;
+    bool prevHitOpaque = false;
 
     // Loop to get all possible samples
-    for (uint i = 0; (i < MAX_ELEMENTS) && useRayTracing; i++) {
+    for (uint i = 0; (i < MAX_ELEMENTS) && rayTracingLoop; i++) {
         rayData.depth = -1;
         rayData.dist = ray.TMax;
-        rayData.sampleTransmittance = 0.0;
+        rayData.sampleTransmittance = 1.0;
 
-        //Trace ray
-        TraceRay(gScene.rtAccel, kRayFlags, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
+        // Trace ray
+        uint rayFlags = 0;
+    #if TRACE_NON_OPAQUE_ONLY
+        rayFlags = RAY_FLAG_CULL_OPAQUE;
+    #endif
+        TraceRay(gScene.rtAccel, rayFlags /*Ray flags*/, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
         // A miss on the first hit ends the ray
         if (i == 0 && rayData.dist < 0) {
             break;
         }
-            
-        //End ray tracing for the next frame
+
+        // End Loop for the next iteration if transmittance is smaller as minValue or the ray missed the scene
         if (all(prevTransmittance <= kMinOpacity) || rayData.dist < 0) {
-            useRayTracing = false;
+            rayTracingLoop = false;
         }
 
-        // Merge boxes for non-opaque hits if they are too close to another
+        // Get difference between last and current depth
         float distDiff = rayData.depth - lastHitDepth;
-        bool mergeBox = i > 1 && distDiff < kMergeDistance && any(rayData.currentTransmittance > kMinOpacity); 
-        // Update box dims
-        if (rayData.dist > 0) {
-            if (!mergeLastBox)
-                boxZ.y = boxZ.x;
-            boxZ.x = lastHitDepth + (distDiff) / 2;           
+        // Update midpoint depth values if the ray hit something
+        if (rayData.dist >= 0) {
+            midpointLast = midpointCurrent;
+            midpointCurrent = getMidpointDepth(lastHitDepth, distDiff);
         }
 
-        // Write output data
-        if (rayData.dist > 0 && i > 1 && (!mergeBox)) {
+        // Write the sample stating on 3rd iteration(i=2).
+        if (rayData.dist >= 0 && i > 1) {
             nodeIndex = getInsertIndex();
-            if(nodeIndex > MAX_IDX)
-                useRayTracing = false;
+            if (nodeIndex > MAX_IDX)
+                rayTracingLoop = false;
 
             prevNode.next = nodeIndex;
             gData[prevNodeIndex] = prevNode;
         }
 
-        // Update for next iteration
-        if (rayData.dist > 0) {
-            ray.TMin = rayData.dist + 1e-7;
+        // Update depth, transmittance and ray for next iteration
+        if (rayData.dist >= 0) {
+            prevHitOpaque = currHitOpaque;
+            currHitOpaque = rayData.isOpaque();
+            float rayOffset = ulp(rayData.dist) * 4.0; // Next highest float x4 seems to work pretty well
+            //ray.TMin = currHitOpaque ? min(rayData.dist + kOpaqueHitRayDepthBias * pixelScale, rayData.dist + rayOffset) : rayData.dist + rayOffset; // This a bit of a dirty fix for particles that overlap with solid geometry
+            ray.TMin = rayData.dist + rayOffset;
             lastHitDepth = rayData.depth;
-            if(!mergeBox)
-                prevTransmittance = currTranmittance;
-            else
-                prevTransmittance = lerp(prevTransmittance, currTranmittance, 0.05);
+            prevTransmittance = currTranmittance;
             currTranmittance = rayData.currentTransmittance;
-            mergeLastBox = mergeBox;
 
-            //Update node
-            prevNode.depth = min(rayData.depth + 1e-1, boxZ.x);
+            // Update node
+            prevNode.depth = midpointCurrent;
             #if USE_COLOR_TRANSPARENCY
                 prevNode.visibility = prevTransmittance;
             #else
@@ -504,27 +553,32 @@ void rayGen()
         }
     }
 
-// Insert last two elements
-    if (rayData.dist < 0)
-        rayData.depth = far;
-
-    // Update box
-    boxZ.y = boxZ.x;
-    boxZ.x = lastHitDepth + (rayData.depth - lastHitDepth) / 2;
-
-    bool storeLastBox = (any(currTranmittance < 1.0) && rayData.dist >= 0);
+    // Insert last two elements
+    bool storeLastBox = true;
+#if TRACE_NON_OPAQUE_ONLY
+    storeLastBox &= any(currTranmittance < 1.0);
+    midpointLast = lastHitDepth + kMidpointDepthBias; //No midpoint for this hit
+#else
+    storeLastBox &= (any(currTranmittance < 1.0) && rayData.dist >= 0);
+    midpointLast = midpointCurrent;
+#endif
     storeLastBox |= (prevNodeIndex == idx1D) && all(prevTransmittance >= 1.0); //Guarantees that the head buffer is set
 
-    if (any(prevTransmittance < 1.0)) {
-        if(storeLastBox){
+#if TRACE_NON_OPAQUE_ONLY
+    if (any(prevTransmittance < 1.0) || storeLastBox)
+#else
+    if (any(prevTransmittance < 1.0))
+#endif
+    {
+        if (storeLastBox){
             nodeIndex = getInsertIndex();
             if(nodeIndex > MAX_IDX)
                 return;
         }
-        
+
         prevNode.next = storeLastBox ? nodeIndex : 0;
         gData[prevNodeIndex] = prevNode;
-        prevNode.depth = boxZ.y;
+        prevNode.depth = midpointLast;
         #if USE_COLOR_TRANSPARENCY
             prevNode.visibility = currTranmittance;
         #else

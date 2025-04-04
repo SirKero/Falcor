@@ -1,0 +1,10 @@
+add_plugin(GBufferOutputsToRayReconstructionInputsPass)
+
+target_sources(GBufferOutputsToRayReconstructionInputsPass PRIVATE
+    GBufferOutputsToRayReconstructionInputsPass.cpp
+    GBufferOutputsToRayReconstructionInputsPass.h
+    CopyData.cs.slang
+)
+
+target_source_group(GBufferOutputsToRayReconstructionInputsPass "RenderPasses")
+target_copy_shaders(GBufferOutputsToRayReconstructionInputsPass RenderPasses/GBufferOutputsToRayReconstructionInputsPass)

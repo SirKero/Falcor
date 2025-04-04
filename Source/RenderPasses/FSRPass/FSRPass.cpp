@@ -52,7 +52,7 @@ static void ffxApiMessageFunc(uint32_t type, const wchar_t* message)
 {
     auto wstr = std::wstring(message);
     auto cstr = std::string(wstr.begin(), wstr.end());
-    std::cerr << "FFX API message: " << cstr << std::endl;
+    logWarningOnce("FFX API message: " + cstr);
 }
 
 FSRPass::FSRPass(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice), mContext(nullptr) {}

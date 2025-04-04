@@ -27,7 +27,9 @@
  **************************************************************************/
 #include "LinkedListIrregularZ.h"
 #include "Utils/Math/FalcorMath.h"
+#include "Utils/SampleGenerators/DxSamplePattern.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
+#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
 
 namespace
 {
@@ -38,7 +40,7 @@ namespace
     const std::string kAccessMipsShader = kShaderFolderOther + "GenAccessMips.cs.slang";
     const std::string kCalcSampleDistributionShader = kShaderFolderOther + "CalcSampleDistribution.cs.slang";
     const std::string kOptimizeSamplesShader = kShaderFolderOther + "OptimizeSamples.cs.slang";
-    //const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
+    const std::string kShaderShowImportanceMap = kShaderFolder + "DebugShowImportance.cs.slang";
 
     //UI
     const Gui::DropdownList kAccelDataFormat = {{1, "Uint"}, {2, "Uint2"}, {4, "Uint4"}};
@@ -50,10 +52,15 @@ LinkedListIrregularZ::LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScen
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
     Sampler::Desc samplerDesc = {};
-    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+    mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpLinearSampler);
+    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     mpPointSampler = Sampler::create(mpDevice, samplerDesc);
     FALCOR_ASSERT(mpPointSampler);
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
+    FALCOR_ASSERT(mpSampleGenerator);
 }
 
 void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -77,7 +84,17 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
 
-    updateSMMatrices(pRenderContext);
+    mResolutionChanged = false;
+
+    // Set Jitter and update Matricies
+    if (mpCPUSampleGenerator)
+    {
+        float2 jitter = mpCPUSampleGenerator->next();
+        jitter *= 1.0f / float2(mResolution);
+        setJitter(jitter);
+    }
+
+    updateSMMatrices();
 
     // Create AVSM trace program
     if (!mGenLinkedListShadowPip.pProgram)
@@ -213,37 +230,6 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
 }
 
-std::array<float4, 4> LinkedListIrregularZ::getCameraFrustumPlanes()
-{
-    // TODO add motion prediction
-    const CameraData& data = mpScene->getCamera()->getData();
-    const float fovY = focalLengthToFovY(data.focalLength, data.frameHeight);
-    const float3 camU = normalize(data.cameraU);
-    const float3 camV = normalize(data.cameraV);
-    const float3 camW = normalize(data.cameraW);
-
-    const float halfVSide = data.farZ * math::tan(fovY * 0.5f);
-    const float halfHSide = halfVSide * data.aspectRatio;
-    const float3 frontTimesFar = camW * data.farZ;
-
-    // Frustum Planes. Data struct xyz = N ; w = distance
-    std::array<float4, 4> frustumPlanes;
-    // Top
-    float3 N = math::normalize(math::cross(camU, frontTimesFar - camV * halfVSide));
-    frustumPlanes[0] = float4(N, math::dot(N, data.posW));
-    // Bottom
-    N = math::normalize(math::cross(frontTimesFar + camV * halfVSide, camU));
-    frustumPlanes[1] = float4(N, math::dot(N, data.posW));
-    // Left
-    N = math::normalize(math::cross(camV, frontTimesFar + camU * halfHSide));
-    frustumPlanes[2] = float4(N, math::dot(N, data.posW));
-    // Right
-    N = math::normalize(math::cross(frontTimesFar - camU * halfHSide, camV));
-    frustumPlanes[3] = float4(N, math::dot(N, data.posW));
-
-    return frustumPlanes;
-}
-
 void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
 {
     {
@@ -274,7 +260,7 @@ void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
 
 void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "GenerateShadowLinkedList");
+    FALCOR_PROFILE(pRenderContext, "GenerateIrregularLinkedList");
 
     prepareResources(pRenderContext);
 
@@ -307,9 +293,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         mStaggeredDirectionalLightMVP = tmp;
     }
 
-    //Check if opaque shadow map is set and change ray flags accordingly
-    mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
-
     auto& lights = mpScene->getLights();
     uint frameInFlight = mStagingCount; //Counter GPU CPU sync
 
@@ -328,6 +311,18 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             mGenAccessMips = ComputePass::create(mpDevice, desc, defines, true);
         }
 
+        // One pass to cap the lowest mip at a max value
+        {
+            auto var = mGenAccessMips->getRootVar();
+            for (uint i = 0; i < lights.size(); i++)
+                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(0));
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
+            var["CB"]["gDstSize"] = dispatchDim.xy();
+            var["CB"]["gCapLowestLevel"] = true;
+
+            mGenAccessMips->execute(pRenderContext, dispatchDim);
+        }
+
         for (uint m = 0; m < mAccessTextures[0]->getMipCount() - 1; m++)
         {
             auto var = mGenAccessMips->getRootVar();
@@ -336,9 +331,10 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
                 var["gSrc"][i].setSrv(mAccessTextures[i]->getSRV(m, 1u));
                 var["gDst"][i].setUav(mAccessTextures[i]->getUAV(m + 1));
             }
-               
+
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m + 1), mAccessTextures[0]->getHeight(m + 1), lights.size());
             var["CB"]["gDstSize"] = dispatchDim.xy();
+            var["CB"]["gCapLowestLevel"] = false;
 
             mGenAccessMips->execute(pRenderContext, dispatchDim);
         }
@@ -371,7 +367,8 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             uint mip = mSampleDistribution[0]->getMipCount() - 1;
             var["CB"]["gCalcTotalDispatchCount"] = true;
             var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mApproxNumElementsPerPixel * mDynRCGuardPercentage);
-            var["CB"]["gChangePercentage"] = mDynRCChangePercentage; // 50% for now
+            var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x;
+            var["CB"]["gChangePercentageDecrease"] = mDynRCChangePercentage.y; 
             var["CB"]["gMaxSampleOverestimate"] = mSampleOverestimate * mSampleOverestimate; // Squared as this is applied to x and y of dispatch resolution
 
             var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
@@ -422,8 +419,11 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     if(mBlurSampleDistribution)
     {
         if (!mpGaussianBlur)
+        {
             mpGaussianBlur = std::make_unique<SMGaussianBlur>(mpDevice);
-
+            mpGaussianBlur->setBlurKernel(kBlurKernelWidthInit, kBlurSigmaInit);
+        }
+            
         //TODO Maybe optimize so that all shaders execute the same step in parallel (e.g. an array version)
         for (uint i = 0; i < lights.size(); i++)
             mpGaussianBlur->execute(pRenderContext, mSampleDistribution[i]); 
@@ -465,14 +465,20 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
     // Defines
     mGenLinkedListShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel));
+    mGenLinkedListShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
+    mGenLinkedListShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
-    mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenLinkedListShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
     mGenLinkedListShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
-    mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
+    mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
+    mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
+    mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
+    mGenLinkedListShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); // Trace non-opaque only if mask is used
+    mGenLinkedListShadowPip.pProgram->addDefine("INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"); //Determines if the castShadow instance mask bit is used
+    
 
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
@@ -486,8 +492,10 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     // Create Program Vars
     if (!mGenLinkedListShadowPip.pVars)
     {
+        mGenLinkedListShadowPip.pProgram->addDefines(mpSampleGenerator->getDefines());
         mGenLinkedListShadowPip.pProgram->setTypeConformances(mpScene->getTypeConformances());
         mGenLinkedListShadowPip.pVars = RtProgramVars::create(mpDevice, mGenLinkedListShadowPip.pProgram, mGenLinkedListShadowPip.pBindingTable);
+        mpSampleGenerator->setShaderData(mGenLinkedListShadowPip.pVars->getRootVar());
     }
 
     FALCOR_ASSERT(mGenLinkedListShadowPip.pVars);
@@ -516,7 +524,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
         var["gCounter"] = mLinkedListCounter[frameInFlight];
         var["gData"] = mLinkedListData[i];
-        var["gPointSampler"] = mpPointSampler;
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
         var["gHaltonSamples"] = mpHaltonBuffer;
@@ -533,6 +540,8 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
         // Spawn the rays.
         mpScene->raytrace(pRenderContext, mGenLinkedListShadowPip.pProgram.get(), mGenLinkedListShadowPip.pVars, uint3(targetDim, 1));
+
+        mFrameCount++;
     }
 
     const uint numAABBs = lights.size();
@@ -556,8 +565,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         std::memcpy(mUIElementCounter.data(), data, sizeof(uint) * numAABBs);
         mLinkedListCounterCPU[mStagingCount]->unmap();
     }
-
-    mFrameCount++;
 }
 
 DefineList LinkedListIrregularZ::getDefines()
@@ -578,13 +585,15 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
     shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
     shadowVar["SMCB"]["gMaxBufferSize"] = mLinkedListNodeBufferSize;
+    uint2 opaqueSMMaxDispatch = getShaderDispatchSize();
+    shadowVar["SMCB"]["gISMMaxSize"] = opaqueSMMaxDispatch.x * opaqueSMMaxDispatch.y;
     
 
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
-        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
-        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
+        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjectionNoJitter;
+        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjectionNoJitter;
         shadowVar["gAccessCounter"][i] = mAccessTextures[i];
     }
     const auto accelDataSize = lights.size();
@@ -594,6 +603,19 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gLinkedListData"][i] = mLinkedListData[i];
     }
 
+    shadowVar["gLinearSampler"] = mpLinearSampler;
+    shadowVar["gPointSampler"] = mpPointSampler;
+}
+
+void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable) {
+    mUseMask = enable;
+    if (mUseMask)
+    {
+        auto shadowVar = var["gLinkedListIrregularZ"];
+
+        shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gMaskShadowMap"] = maskSM->asBuffer();
+    }
 }
 
 //TODO Some of the options should not be toggable for this pass as that will probably break the algorithm
@@ -613,18 +635,16 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
                 {
                     if (i > 0)
                         group2.separator();
+                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
                     group2.text(mpScene->getLight(i)->getName());
-                    group2.text("Element Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
-                    std::string accelMem = std::to_string((mLinkedListNodeBufferSize * sizeof(float) * mLinkedListDataFormatSize) / 1e6f);
-                    group2.text("Element Buffer Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
-                    group2.text(
-                        "Used Elements: " + std::to_string(uint(mUIElementCounter[i]))
-                    );
-                    std::string neededMem = std::to_string(
-                        (mUIElementCounter[i] * sizeof(float) * mLinkedListDataFormatSize) / 1e6f
-                    );
-                    std::string fillRate =
-                        std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
+                    group2.text("Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
+                    float dataMem = (mLinkedListNodeBufferSize * (sizeof(float) + dataBufferSize)) / 1e6f;
+                    std::string dataMemStr = std::to_string(dataMem);
+                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+
+                    group2.text("Used Elements:    " + std::to_string(uint(mUIElementCounter[i])));
+                    std::string neededMem = std::to_string((mUIElementCounter[i] * (sizeof(float) + mLinkedListDataFormatSize)) / 1e6f);
+                    std::string fillRate = std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
                     group2.text(
                         "Used Element Buffer Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
                         fillRate.substr(0, fillRate.find(".") + 2) + "%)"
@@ -640,10 +660,14 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
         mResetRayCount |= group.checkbox("Use GPU Sample Distribution opimization", mEnableDynamicRayCountCalc);
         if (mEnableDynamicRayCountCalc)
         {
-            group.var("GPU SD Total Mult", mDynRCGuardPercentage, 0.001f, 1.f);
-            group.tooltip("Multiplier for the total that is used to calculate the ray count for the current frame");
-            group.var("GPU SD Change Mult", mDynRCChangePercentage, 0.001f, 1.f);
-            group.tooltip("Multiplier for the change value in the Sample Distribution");
+            group.var("GPU SD Fill Guard", mDynRCGuardPercentage, 0.001f, 1.f);
+            group.tooltip("Buffer should be held around this fill percentage. ");
+            group.var("GPU SD Change Mult (Increase/Decrease)", mDynRCChangePercentage, 0.001f, 1.f);
+            group.tooltip(
+                "Multiplier for the change value in the Sample Distribution. There is a different value for increase and decrease. "
+                "Increase should be handled more conserveratively, while the decrease should be quiet aggressive"
+            );
+        
         }
 
         group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
@@ -666,7 +690,7 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
         }
 
 
-        group.dropdown("Subpixel Sample Pattern", mSamplePattern);
+        bool patternChanged = group.dropdown("Subpixel Sample Pattern", mSamplePattern);
         group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
         if (mSamplePattern == SMSamplePattern::Halton)
         {
@@ -674,13 +698,113 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
                 mGenLinkedListShadowPip.pVars.reset();
             group.tooltip("Number of Halton Samples");
         }
+        else if (mSamplePattern != SMSamplePattern::Center)
+        {
+            patternChanged |= group.var("MatrixSamples", mNumCPUSampleGenSamples, 1u, 1024u, 1u);
+        }
+        if (patternChanged)
+            updateSamplePattern();
 
-        //group.checkbox("Use PCF", mAccelUsePCF);
-        group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");
-        group.tooltip(
-            "Merges Accel Boxes together and takes the transparency of the first box. Can add bias (brightening). \n Set to 0 to disable."
-        );
+        group.checkbox("Debug Show Importance", mDebugEnableShowImportance);
+        if (mDebugEnableShowImportance)
+        {
+            if (mpScene)
+            {
+                uint lightCount = mpScene->getLightCount();
+                if (lightCount > 1)
+                    group.slider("Selected Light", mDebugSelectedLight, 0u, lightCount-1u);
+                else
+                    mDebugSelectedLight = 0;
+            }
+            if (!mAccessTextures.empty())
+            {
+                uint mipCount = mAccessTextures[0]->getMipCount();
+                if (mipCount > 1)
+                    group.slider("Selected Mipmap", mDebugSelectedMipLevel, 0u, mipCount - 1u);
+                else
+                    mDebugSelectedMipLevel = 0;
+            }
+            group.var("Scale Factor IM", mDebugScaleFactorIM, 0.f, FLT_MAX, 1.f);
+            group.var("Scale Factor SD", mDebugScaleFactorSD, 0.f, FLT_MAX, 1.f);
+        }
+
     }
 
     return dirty;
+}
+
+static ref<CPUSampleGenerator> createSamplePattern(LinkedListIrregularZ::SMSamplePattern type, uint32_t sampleCount)
+{
+    switch (type)
+    {
+    case LinkedListIrregularZ::SMSamplePattern::Center:
+    case LinkedListIrregularZ::SMSamplePattern::Halton:
+        return nullptr;
+    case LinkedListIrregularZ::SMSamplePattern::MatrixDirectX:
+        return DxSamplePattern::create(sampleCount);
+    case LinkedListIrregularZ::SMSamplePattern::MatrixHalton:
+        return HaltonSamplePattern::create(sampleCount);
+    case LinkedListIrregularZ::SMSamplePattern::MatrixStratified:
+        return StratifiedSamplePattern::create(sampleCount);
+    default:
+        FALCOR_UNREACHABLE();
+        return nullptr;
+    }
+}
+
+void LinkedListIrregularZ::updateSamplePattern()
+{
+    mpCPUSampleGenerator = createSamplePattern(mSamplePattern, mNumCPUSampleGenSamples);
+    if (mpCPUSampleGenerator)
+        mNumCPUSampleGenSamples = mpCPUSampleGenerator->getSampleCount();
+    else
+        setJitter(float2(0)); // reset jitter
+}
+
+
+void LinkedListIrregularZ::debugPass(
+    RenderContext* pRenderContext,
+    const RenderData& renderData,
+    ref<Texture> debugOut,
+    ref<Texture> mask
+)
+{
+    // Early out
+    if (!mDebugEnableShowImportance || mAccessTextures.empty() || mSampleDistribution.empty())
+        return;
+
+    FALCOR_PROFILE(pRenderContext, "ShowSampleDistribution");
+
+    if (!mpDebugShowImportancePass)
+    {
+        Program::Desc desc;
+        //desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderShowImportanceMap).csEntry("main").setShaderModel("6_6");
+        //desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+
+        mpDebugShowImportancePass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpDebugShowImportancePass);
+
+    // Dispatch Dims
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
+    auto var = mpDebugShowImportancePass->getRootVar();
+    auto& pImportanceMap = mAccessTextures[mDebugSelectedLight];
+    auto& pSampleDistribution = mSampleDistribution[mDebugSelectedLight];
+
+    var["CB"]["gDispatchSize"] = targetDim;
+    var["CB"]["gSMRes"] = uint2(pImportanceMap->getWidth(), pImportanceMap->getHeight()) / (1u << mDebugSelectedMipLevel);
+    var["CB"]["gScaleFactorIM"] = mDebugScaleFactorIM;
+    var["CB"]["gScaleFactorSD"] = mDebugScaleFactorSD;
+
+    var["gDebug"] = debugOut;
+    var["gSampleDistribution"].setSrv(pSampleDistribution->getSRV(mDebugSelectedMipLevel, 1));
+    var["gImportanceMap"].setSrv(pImportanceMap->getSRV(mDebugSelectedMipLevel, 1));
+    var["gMask"] = mask;
+
+    mpDebugShowImportancePass->execute(pRenderContext, uint3(targetDim, 1));
 }

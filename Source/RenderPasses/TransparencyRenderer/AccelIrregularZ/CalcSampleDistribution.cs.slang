@@ -1,3 +1,5 @@
+#pragma once
+#include "../SharedShadowDefines.slang"
 
 #ifndef COUNT_LIGHTS
 #define COUNT_LIGHTS 1
@@ -15,7 +17,7 @@ Texture2D<float> gSmpMip[COUNT_LIGHTS];
 Buffer<uint> gElementCount; // Last frames aabb count
 RWBuffer<uint> gLastFrameSampleCount; //Max number of distributed samples
 
-static const uint kMaxAtomicWeight = 64; // Should be the same as in AccelIrregularZ.slang (where the atomic counter is increased)
+static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT; // Should be the same as in AccelIrregularZ.slang (where the atomic counter is increased)
 static const uint kMinSamples = 4096;    // Min 64x64 samples
 static const uint kMaxSamples = MAX_SAMPLES; //Cannot distribute more than this per shadow map
 static const bool kUseOneBufferForAllLights = USE_ONE_BUFFER_FOR_ALL_LIGHTS;
@@ -23,7 +25,8 @@ static const bool kUseOneBufferForAllLights = USE_ONE_BUFFER_FOR_ALL_LIGHTS;
 cbuffer CB {
     uint2 gDstSize;
     int gMaxNumAABBs;
-    float gChangePercentage;    //(0,1] how much can the ray dispatch change
+    float gChangePercentageIncrease;    //(0,1] how much can the ray dispatch can increase
+    float gChangePercentageDecrease;    //(0,1] how much can the ray dispatch can decrease
     bool gCalcTotalDispatchCount; // Should only be true on the max mip level
     float gMaxSampleOverestimate;
 }
@@ -61,8 +64,13 @@ void main(uint3 thdID: SV_DispatchThreadID)
         // adjust ray count based on the fullness of the buffer
         int countDiff = gMaxNumAABBs - elementCount;
         float diffPercentage = float(countDiff) / gMaxNumAABBs;
-        totalRayCount += totalRayCount * diffPercentage * gChangePercentage;
-        
+        float rayCountChange = 0.0;
+        if (diffPercentage > 0)
+            rayCountChange = totalRayCount * diffPercentage * gChangePercentageIncrease;
+        else
+            rayCountChange = totalRayCount * diffPercentage * gChangePercentageDecrease;
+
+        totalRayCount += rayCountChange;
         totalRayCount = max(totalRayCount, kMinSamples);
 
         // Write new ray counts to textures
@@ -77,7 +85,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
     else {       
         uint2 pixelMip = pixel / 2;
         uint fullImportance = gImptMip[thdID.z][pixelMip];
-        uint sampleImportance = gImpt[thdID.z][pixel];
+        uint sampleImportance = gImpt[thdID.z][pixel];    //TODO Gather instead of fetching full importance mip
         float sampleCount = gSmpMip[thdID.z][pixelMip];
         //if (gDstSize.x == 2)
             //sampleCount = min(sampleCount, uint(ceil(float(fullImportance) / kMaxAtomicWeight)));

@@ -29,7 +29,9 @@ cbuffer CB
     float gSpreadAngle;
 
     float gRadiusOffset; // Random Radius offset
-    float gRandomLifetime;  //Random Lifetime offset
+    float gRandomLifetime; // Random Lifetime offset
+    float gShrinkAtEnd; //Particle reduces size. Is based on the max possible radius
+    uint _pad;
 }
 
 RWStructuredBuffer<ParticlePointDesc> gParticlePointDesc;
@@ -78,7 +80,7 @@ float getRandomValue(inout SampleGenerator sg, float value) {
 void main(uint3 dispatchThreadId: SV_DispatchThreadID)
 {
     const uint prtIdx = dispatchThreadId.x;
-    if (prtIdx > gNumParticles)
+    if (prtIdx >= gNumParticles)
         return;
 
     SampleGenerator sg = SampleGenerator(uint2(prtIdx, 0), gFrameCount); // TODO add seed in pixel.y ?
@@ -133,6 +135,12 @@ void main(uint3 dispatchThreadId: SV_DispatchThreadID)
         particlePoint.position += particleData.velocity * gDeltaT;
         particleData.velocity.y -= (gGravity + gravRnd) * gDeltaT;
         particleData.velocity += gWind * gDeltaT;
+        if (particleData.lifetime < gShrinkAtEnd) {
+            float maxRadius = max(gBaseRadius + gRadiusOffset, kMinRadius);
+            float normTimeDiff = (gShrinkAtEnd - particleData.lifetime) / gShrinkAtEnd;
+            float newRad = lerp(maxRadius, kMinRadius, normTimeDiff);
+            particlePoint.radius = min(particlePoint.radius, newRad);
+        }
     }
 
     gParticlePointDesc[gParticleBufferOffset + prtIdx] = particlePoint;

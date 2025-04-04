@@ -1,3 +1,5 @@
+#pragma once
+#include "SharedShadowDefines.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 #include "RayLodHelper.slang"
@@ -20,7 +22,7 @@ import AccelShadowKBuffer.AccelShadowKBuffer;
 import AccelIrregularZ.AccelIrregularZ;
 import LinkedListIrregularZ.LinkedListIrregularZ;
 
-// Shadow Eval Modes
+// Shadow Eval Modes (see TransparencyRenderer.h)
 #define SHADOW_EVAL_MODE_RAYTRACING 0
 #define SHADOW_EVAL_MODE_Accel 1
 #define SHADOW_EVAL_MODE_LinkedList 2
@@ -32,7 +34,7 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
 #endif
 
-//LightSampleModes
+// LightSampleModes (see TransparencyRenderer.h)
 #define LIGHT_SAMPLE_MODE_UNIFORM 0
 #define LIGHT_SAMPLE_MODE_RIS 1
 #define LIGHT_SAMPLE_MODE_ALL 2
@@ -41,10 +43,32 @@ import LinkedListIrregularZ.LinkedListIrregularZ;
 #define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
 #endif
 
+//Imporance modes (see TransparencyRenderer.h)
+#define IMPORTANCE_MODE_OPACITY 0
+#define IMPORTANCE_MODE_OPACITY_THP 1
+#define IMPORTANCE_MODE_THP 2
+#define IMPORTANCE_MODE_THP_SQ 3
+#define IMPORTANCE_MODE_BRDF_THP 4
+#define IMPORTANCE_MODE_BRDF_THP_OPACITY 5
+#define IMPORTANCE_MODE_UNIFORM 6
+
+#ifndef IMPORTANCE_MODE
+#define IMPORTANCE_MODE IMPORTANCE_MODE_OPACITY_THP
+#endif
+
+Buffer<uint> gParticleMaterials; //Buffer with the bitsize of all materials. Particle materials bits are set
+
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
 static const bool kTRUseColoredTransparency = TR_USE_COLORED_TRANSPARENCY;
+static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
+static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
+static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
+static const bool kIrregularShadowMaskUseRay = USE_IRRGEGULAR_SHADOW_MASK;
+static const bool kShadowMaterialFlagAsBlacklist = SHADOW_MATERIAL_FLAG_AS_BLACKLIST; // Enables the shadow material flag as blacklist when mask is enabled
+static const bool kUseParticleRayOffset = false;
+
 
 // For RIS light sampling
 struct RISReservoir {
@@ -83,6 +107,14 @@ struct RISReservoir {
         }
     }
 };
+
+/** Checks if the material is a particle
+ */
+bool isHitObjectAParticle(uint materialID) {
+    uint bufferIdx = materialID / 32;
+    uint bitIdx = materialID % 32;
+    return (gParticleMaterials[bufferIdx] & (1 << bitIdx)) > 0;
+}
 
 /** Samples a light index either uniform or with RIS (Good if a couple lights are used that dont overlap each other)
  */
@@ -135,18 +167,18 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance)
+float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance, float tMin = 0.0)
 {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = dir;
-    ray.TMin = 0.f;
+    ray.TMin = 0;
     ray.TMax = distance;
 
     float3 visibility = 1.0;
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = getBestParticleShadowPlane(lightDir);
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist && (TR_RAY_QUERY_FLAG != RAY_FLAG_FORCE_NON_OPAQUE) ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir,true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
@@ -161,22 +193,6 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
             uint materialID = gScene.getMaterialID(triangleHit.instanceID);
             ITextureSampler lod = ExplicitLodTextureSampler(0.f);
 
-            //LOD mode handling TODO this is incorrect as it assumes the pixel is the camera
-            /*
-            if (kShadowLODMode == TexLODMode::RayCones)
-            {
-                float2 ddx, ddy;
-                computeAnisotropicAxesRayCones(triangleHit, v, ray.Direction, rayQuery.CandidateTriangleRayT(), kScreenSpacePixelSpreadAngle, ddx, ddy);
-                lod = ExplicitGradientTextureSampler(ddx, ddy);
-            }
-            else if (kShadowLODMode == TexLODMode::RayDiffs)
-            {
-                float2 ddx, ddy;
-                computeRayDifferentials(triangleHit, ray.Direction, rayQuery.CandidateTriangleRayT(), gScene.camera, kInvFrameDim, ddx, ddy);
-                lod = ExplicitGradientTextureSampler(ddx, ddy);
-            }
-            */
-
             if(kTRUseColoredTransparency){
                 ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -ray.Direction, lod);
                 //uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -187,22 +203,24 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
                 //Normalize color
                 float maxColor = max(max(color.x, color.y), color.z);
                 color /= maxColor;
-                if(sd.opacity < kMinOpacity)
+                if (sd.opacity < kMinOpacity || ((rayQuery.CandidateTriangleRayT() < tMin) && (sd.opacity < 1.0)))
                     visibility *= 1.0;
                 else
                     visibility *= color * (1.0 - sd.opacity);
             }else{
                 float opacity = gScene.materials.getMaterialOpacity(v, materialID, lod);
-                visibility *= saturate(1.0 - opacity);
+                if (rayQuery.CandidateTriangleRayT() >= tMin || opacity >= 1.0)
+                    visibility *= saturate(1.0 - opacity);
             }
             
-
             if (all(visibility <= kMinOpacity))
                 rayQuery.Abort();
         }
     }
 
-    //No need to check comitted status, as no hit is accepted
+    //In case of non opaque hit
+    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        visibility = 0.0;
 
     return visibility;
 }
@@ -214,18 +232,18 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
     \param[inout] Sample Generator
     \return Visbility that is either 0 or 1
 */
-float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg)
+float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg, float TMin = 0.0)
 {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = dir;
-    ray.TMin = 0.f;
+    ray.TMin = TMin;
     ray.TMax = distance;
 
     float3 visibility = 1.0; //Visible
 
     RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = getBestParticleShadowPlane(lightDir);
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist && (TR_RAY_QUERY_FLAG != RAY_FLAG_FORCE_NON_OPAQUE) ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir, true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
@@ -279,6 +297,8 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     }
 
     // No need to check comitted status, as no hit is accepted
+    if (rayQuery.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+        visibility = 0.0;
 
     return visibility;
 }
@@ -290,7 +310,7 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
     \param[in,out] sg SampleGenerator object.
     \return Outgoing radiance in view direction.
 */
-float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0))
+float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg, const float3 thp = float3(1.0), const float opacity = 1.0, uint maskFlags = TRANSPARENCY_MASK_FLAG_NONE, float minTriSide = 0.0)
 {
     const uint lightCount = gScene.getLightCount();
     if (lightCount == 0) return float3(0.0);
@@ -308,9 +328,22 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         // Sample local light source.
         AnalyticLightSample ls = sampleLightIndex(sd.posW, lightCount, sg, lightIndex, invPdf, lightType);
         float NdotL = dot(sd.getOrientedFaceNormal(), ls.dir);
+        
+        // Flip light dir for non-opaque surfaces, so light shines through
+        bool flipLightDir = (NdotL < 0) && (sd.opacity < 1);
+        float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
+        if (flipLightDir)
+            ls.Li *= (1.0 - sd.opacity); // consider the opacity of the hit if light shined through
+
+        bool isParticle = isHitObjectAParticle(sd.materialID);
+        if (isParticle)
+            lightDirection = sd.frontFacing ? sd.faceN : -sd.faceN;
+
+        if (!isParticle || !kUseParticleRayOffset)
+            minTriSide = 0.0;
 
         // Reject sample if invalid or has an too steep incident angle
-        if (all(ls.Li <= 0.0) || (abs(NdotL) < kMinIncidentAngle)) {
+        if (all(ls.Li <= 0.0) || (abs(NdotL) < kMinIncidentAngle) && !isParticle) {
             #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
                     continue;
             #else
@@ -318,57 +351,81 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
             #endif
         }
 
-        // Flip light dir for non-opaque surfaces, so light shines through
-        bool flipLightDir = (NdotL < 0) && (sd.opacity < 1);
-        float3 lightDirection = flipLightDir ? -ls.dir : ls.dir;
-        if (flipLightDir)
-            ls.Li *= (1.0 - sd.opacity); // consider the opacity of the hit if light shined through
-
         // Eval BSDF
         float3 brdf = mi.eval(sd, lightDirection, sg) * thp;
-        float importance = luminance(thp);              //Works best
-        //float importance = luminance(thp * thp);
-        //float importance = luminance((1.0 / ls.pdf) * (thp * thp) * brdf);
-        //float importance = luminance(brdf);
         if (all(brdf <= 0)) {
             #if LIGHT_SAMPLE_MODE == LIGHT_SAMPLE_MODE_ALL // Loop over all lights
-                        continue;
+                continue;
             #else
-                        return float3(0.0);
+                return float3(0.0);
             #endif
         }
+
+        // Importance between 1 and 0
+        float importance = 0.0;
+        #if IMPORTANCE_MODE == IMPORTANCE_MODE_OPACITY
+            importance = opacity;
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_OPACITY_THP
+            importance = luminance(thp) * opacity;
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_THP
+            importance = luminance(thp);
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_THP_SQ
+            importance = luminance(thp * thp);
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_BRDF_THP
+            importance = luminance(thp * brdf);
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_BRDF_THP_OPACITY
+            importance = luminance(thp * brdf) * opacity;
+        #elif IMPORTANCE_MODE == IMPORTANCE_MODE_UNIFORM
+            importance = 0; //Gets capped to lowest value
+        #endif
+        importance = saturate(importance);
 
         // Test visibility by tracing a shadow ray.
         bool isDirectional = lightType == (uint)LightType::Directional; // Slight different calculations for ortho
         float3 visibility = float3(1.0);
+        
 
         // Shadow maps
         #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_Accel
-            visibility = gAccelShadow.eval(lightIndex, sd.posW, ls.posW);
+            visibility = gAccelShadow.eval(lightIndex, sd.posW, isDirectional,maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedList
-            visibility = gLinkedListShadow.eval(lightIndex, sd.posW);
+            visibility = gLinkedListShadow.eval(lightIndex, sd.posW, isDirectional, maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
             visibility = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelIrregularZ
-            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
+            visibility = gAccelIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_LinkedListIrregularZ
-            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, saturate(importance));
+            visibility = gLinkedListIrregularZ.eval(lightIndex, sd.posW, isDirectional, importance, maskFlags);
         #endif
 
         // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
 
+        bool useMaskRay = kIrregularShadowMaskUseRay && (maskFlags & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0;
         // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (visibility.x < 0) && kEnableFallbackRay) {
+        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || useMaskRay ||(visibility.x < 0) && kEnableFallbackRay) {
+            if (visibility.x < 0)
+                visibility = 1.0;
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
-            if(kUseStochasticRayTracing)
-                visibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg);
+            if (kUseSoftShadows) {
+                if (isDirectional) {
+                    ls.dir = random_spread_direction(ls.dir, kSoftShadowsDirSpread, sampleNext2D(sg));
+                } else {
+                    ls.posW += sample_sphere(sampleNext2D(sg)) * kSoftShadowsPosRadius;
+                    ls.dir = ls.posW - origin;
+                    ls.distance = length(ls.dir);
+                    ls.dir /= ls.distance;
+                }
+            }
+            float3 rayVisibility = 1.0;
+            if (kUseStochasticRayTracing)
+                rayVisibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg, minTriSide / 2.0);
             else
-                visibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance);
+                rayVisibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance, minTriSide / 2.0);
+            visibility = min(visibility, rayVisibility);
         }
 
         // Clamp shadow in [0,1]
         visibility = clamp(visibility, 0.0, 1.0);
-
         #if EVAL_OPAQUE_SHADOW_MAP
             LightData lightData = gScene.getLight(lightIndex);
             SMLightData smData = gShadowMap.getShadowMapLightData(lightData, lightIndex);

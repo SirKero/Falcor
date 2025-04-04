@@ -14,12 +14,20 @@ RWTexture2D<float2> gMotionVector;     //Can be overwritten if scene was missed
 
 // Outputs
 RWTexture2D<float4> gOutputColor;
+RWTexture2D<float> gRayReflectionMask;
+
+#ifndef USE_IRRGEGULAR_SHADOW_MASK
+#define USE_IRRGEGULAR_SHADOW_MASK 0
+#endif
 
 static const bool kAdjustShadingNormals = true;
 static const float kMinOpacity = 1e-7;
 static const float kAmbientStrength = AMBIENT_STRENGTH;
 static const float kEnvMapStrength = ENV_MAP_STRENGTH;
+static const bool kWriteReflectionMask = RAY_REFLECTIONS_ENABLE;
+static const float kReflectionsRoughnessThreshold = REFLECTIONS_ROUGHNESS_THRESHOLD;
 static const bool kCalcEnvMapMotionVectors = true;
+static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -52,7 +60,8 @@ float2 ViewSpaceToUV(float3 posV)
 void main(uint2 pixel: SV_DispatchThreadID)
 {
     // Load color from transparency pass
-    float3 colorOut = float3(0.0); 
+    float3 colorOut = float3(0.0);
+    bool useRayReflections = false;
     const HitInfo hit = HitInfo(gVBuffer[pixel]);
     float3 viewDir = -gViewW[pixel].xyz;
     float3 transparencyThp = gTransparencyThp[pixel].xyz;
@@ -93,25 +102,38 @@ void main(uint2 pixel: SV_DispatchThreadID)
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         BSDFProperties bsdfProperties = mi.getProperties(sd);
         // Always output directly emitted light, independent of whether emissive materials are treated as light sources or not.
-        colorOut += bsdfProperties.emission * sd.opacity;
+        colorOut += bsdfProperties.emission * sd.opacity * transparencyThp;
 
         // Add contribution of direct light from analytic lights.
         // Light probe and mesh lights are handled by the scatter ray hit/miss shaders.
-        colorOut += evalDirectAnalytic(sd, mi, sg);
+        uint maskFlag = kUseIrregularShadowMask ? TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_NONE;
+        colorOut += evalDirectAnalytic(sd, mi, sg, transparencyThp, sd.opacity, maskFlag);
 
         // Ambient
-        colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength;
+        colorOut += bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * transparencyThp;
+
+        //Check if a ray reflection should be executed on the current pixel
+        if (kWriteReflectionMask) {
+            // float3 specularPercentage = bsdfProperties.specularReflectionAlbedo / max(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.specularReflectionAlbedo, 1e-7);
+            // useRayReflections |= luminance(specularPercentage) > kReflectionsRoughnessThreshold;
+            useRayReflections |= bsdfProperties.roughness < kReflectionsRoughnessThreshold;
+        }
     }
     else //Enviroment map lookup
     {
         colorOut = gScene.envMap.eval(viewDir) * kEnvMapStrength;
-        if (kCalcEnvMapMotionVectors) {
+        if (kCalcEnvMapMotionVectors && all(transparencyThp >= 1.0)) {
             float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, gFrameDim, /*no jitter*/ false).dir;
             float3 prevEnvMapDir = mul(gScene.camera.data.prevViewMat, float4(rayDirNoJitter, 0.0)).xyz;
             float2 prevUV = ViewSpaceToUV(prevEnvMapDir);
             gMotionVector[pixel] = prevUV - (float2(pixel) + 0.5) / float2(gFrameDim);
         }
     }
-    float3 prevColor = gOutputColor[pixel].xyz;
-    gOutputColor[pixel] = float4(colorOut * transparencyThp + prevColor, 1.0);
+
+    gOutputColor[pixel] += float4(colorOut, 1.0);
+
+    if (kWriteReflectionMask) {
+        float isReflection = useRayReflections ? 1.0 : 0.0;
+        gRayReflectionMask[pixel] = isReflection;
+    }
 }

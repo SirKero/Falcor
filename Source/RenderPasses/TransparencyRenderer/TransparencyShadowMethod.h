@@ -38,6 +38,21 @@ class TransparencyShadowMethod
 public:
     virtual ~TransparencyShadowMethod() = default;
 
+    // Light MVP
+    struct LightMVP
+    {
+        float3 pos = float3(0);
+        float spreadAngle = 0;
+        float4x4 view = float4x4();
+        float4x4 projectionNoJitter = float4x4();
+        float4x4 projection = float4x4();
+        float4x4 viewProjection = float4x4();
+        float4x4 viewProjectionNoJitter = float4x4();
+        float4x4 invViewProjection = float4x4();
+        float4x4 invProjection = float4x4();
+        float4x4 invView = float4x4();
+    };
+
     /** Generate resources needed to evaluate the Shadow Method (e.g. Shadow Map)
     * Should be called every frame and needs to be called before using any resources from that pass
     */
@@ -50,6 +65,10 @@ public:
     /** Set the needed shader data for the method (textures,buffer, etc)
     */
     virtual void setShaderData(const ShaderVar& var) {}
+
+    /** Some methods can use an additional mask, this is set here
+    */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable = true) {}
 
     /** Render UI for the method
     */
@@ -76,25 +95,77 @@ public:
      */
     void setNearFar(const float2 nearFar);
 
+    /** Set Camera Jitter
+    */
+    void setJitter(float2 jitter) { mJitter = jitter; }
+
+    /** Set Soft shadow parameters
+    */
+    void setSoftShadowParameter(bool enabled, float positionRadius, float directionalSpread)
+    {
+        mEnableRandomSoftShadows = enabled;
+        mRandomSoftShadowsPositionRadius = positionRadius;
+        mRandomSoftShadowsDirSpread = directionalSpread;
+    }
+
+    /** Set cascaded size
+    */
+    void setCascadedSize(float cascadedSize) { mCascadedSize = cascadedSize; }
+
+    /** Gets current shadow map resolution
+    */
+    const uint2 getShadowMapResolution() const { return mResolution; }
+
+    /** Sets the blacklist flag
+    */
+    void enableBlacklist(bool enable) { mEnableBlacklistWithShadowMaterialFlag = enable; }
+
+    /** Get the light mpvs for the scene
+    */
+    const std::vector<LightMVP>& getLightMVPs() const { return mShadowMapMVP; }
+
+    /* For irregular methods only. Returns the sample distribution
+    */
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const { return nullptr; };
+
+    /* Gets dispatch size for the gen shader
+    */
+    virtual const uint2 getShaderDispatchSize() const { return mResolution; }
+
+    /* Get Sample distribution buffer
+    */
+    virtual const ref<Buffer> getJitterSampleBuffer() const{return nullptr;}
+
+    struct GlobalShadowSettings
+    {
+        uint resolution = 512u;
+        float2 nearFar = float2(0.1f, 60.f);
+        float cascadedSize = 20.f;
+        float midpointPercentage = 0.5f;
+        float depthBias = 1e-2f;
+        bool enableColoredTransparency = false;
+        bool enableSoftShadows = false;
+        float softShadowsPositionRadius = 0.001f;
+        float softShadowsDirectionsSpread = 1.f;
+        
+
+        bool renderUI(Gui::Widgets& widget);
+    };
+
+    void setGlobalShadowSettings(GlobalShadowSettings& settings);
+
 protected:
+    static const uint kBlurKernelWidthInit = 5;
+    static const bool kBlurSigmaInit = 1.f;
+
     TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
 
     //Function to update the Shadow Map Matrices
-    virtual void updateSMMatrices(RenderContext* pRenderContext, bool rebuild = false);
+    virtual void updateSMMatrices(bool rebuild = false);
 
-    //Light MVP
-    struct LightMVP
-    {
-        float3 pos = float3(0);
-        float spreadAngle = 0;
-        float4x4 view = float4x4();
-        float4x4 projection = float4x4();
-        float4x4 viewProjection = float4x4();
-        float4x4 invViewProjection = float4x4();
-        float4x4 invProjection = float4x4();
-        float4x4 invView = float4x4();
-    };
-    virtual void updateMVP(LightMVP& lightMVP, ref<Light> pLight);
+    virtual void updateViewProjection(LightMVP& lightMVP, ref<Light> pLight);
+
+    virtual void updateMVPAndJitter(LightMVP& lightMVP);
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
@@ -102,15 +173,27 @@ protected:
     bool mOpaqueShadowMapEnabled = false;
     bool mHasDirectionalLight = false;      
 
+    float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
+    float mMidpointDepthBias = 1e-2f; // Depth bias applied to tmin after a opaque hit. Scaled with pixel size. Normally 1e-7 is used
     uint2 mResolution = uint2(512);
     bool mUpdateSMMatrices = false;         //True if VP Matrices of the shadow maps should be recalculated
     bool mUpdateDirectional = true;         //To disable update of directional lights (for debug purposes)
-    float mDirectionalMaxCameraDist = 20.f; //Max camera dist taken for directional lights
     float2 mNearFar = float2(1.f, 60.f);    //Near and far for spot
     bool mResolutionChanged = false;         //True if the resolution changed
     bool mUseColoredTransparency = false;   //Enable colored transparency
+    float2 mJitter = float2(0, 0);          //Optional Light Camera Jitter
+
+    float mCascadedSize = 50.f;
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
+
+    //Blacklist
+    bool mEnableBlacklistWithShadowMaterialFlag = false;
+
+    // Random Soft Shadows
+    bool mEnableRandomSoftShadows = false;          // Enables Random offset of start position for shadow maps
+    float mRandomSoftShadowsPositionRadius = 0.01f; // Random Radius for the start position
+    float mRandomSoftShadowsDirSpread = 1.f;        // Pixel radius on far plane for spread
 
     //Pipelines / Programms
     struct RayTracingPipeline
@@ -142,5 +225,4 @@ protected:
             pFBO.reset();
         }
     };
-
 };

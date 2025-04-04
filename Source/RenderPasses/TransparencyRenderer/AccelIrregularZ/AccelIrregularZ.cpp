@@ -27,7 +27,9 @@
  **************************************************************************/
 #include "AccelIrregularZ.h"
 #include "Utils/Math/FalcorMath.h"
+#include "Utils/SampleGenerators/DxSamplePattern.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
+#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
 
 namespace
 {
@@ -50,10 +52,16 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
     Sampler::Desc samplerDesc = {};
-    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+    mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
+    FALCOR_ASSERT(mpLinearSampler);
+    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     mpPointSampler = Sampler::create(mpDevice, samplerDesc);
     FALCOR_ASSERT(mpPointSampler);
+
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
+    FALCOR_ASSERT(mpSampleGenerator);
 }
 
 void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -79,7 +87,18 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
 
-    updateSMMatrices(pRenderContext);
+    mResolutionChanged = false;
+
+    //Set Jitter and update Matricies
+    if (mpCPUSampleGenerator)
+    {
+        float2 jitter = mpCPUSampleGenerator->next();
+        jitter *= 1.0f / float2(mResolution);
+        setJitter(jitter);
+    }
+        
+
+    updateSMMatrices();
 
     // Create AVSM trace program
     if (!mGenAccelShadowPip.pProgram)
@@ -349,9 +368,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         mStaggeredDirectionalLightMVP = tmp;
     }
 
-    //Check if opaque shadow map is set and change ray flags accordingly
-    mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
-
     auto& lights = mpScene->getLights();
     uint frameInFlight = mStagingCount; // For sync if optimization is used
 
@@ -370,6 +386,18 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             mGenAccessMips = ComputePass::create(mpDevice, desc, defines, true);
         }
 
+        //One pass to cap the lowest mip at a max value
+        {
+            auto var = mGenAccessMips->getRootVar();
+            for (uint i = 0; i < lights.size(); i++)
+                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(0));
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
+            var["CB"]["gDstSize"] = dispatchDim.xy();
+            var["CB"]["gCapLowestLevel"] = true;
+
+            mGenAccessMips->execute(pRenderContext, dispatchDim);
+        }
+
         for (uint m = 0; m < mAccessTextures[0]->getMipCount() - 1; m++)
         {
             auto var = mGenAccessMips->getRootVar();
@@ -381,6 +409,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
                
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m + 1), mAccessTextures[0]->getHeight(m + 1), lights.size());
             var["CB"]["gDstSize"] = dispatchDim.xy();
+            var["CB"]["gCapLowestLevel"] = false;
 
             mGenAccessMips->execute(pRenderContext, dispatchDim);
         }
@@ -415,7 +444,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             uint mip = mSampleDistribution[0]->getMipCount() - 1;
             var["CB"]["gCalcTotalDispatchCount"] = true;
             var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mDynRCGuardPercentage);
-            var["CB"]["gChangePercentage"] = mDynRCChangePercentage; // 50% for now
+            var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x; 
+            var["CB"]["gChangePercentageDecrease"] = mDynRCChangePercentage.y; 
             var["CB"]["gMaxSampleOverestimate"] = mSampleOverestimate * mSampleOverestimate; //Squared as this is applied to x and y of dispatch resolution
 
             var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
@@ -465,7 +495,11 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     if(mBlurSampleDistribution)
     {
         if (!mpGaussianBlur)
+        {
             mpGaussianBlur = std::make_unique<SMGaussianBlur>(mpDevice);
+            mpGaussianBlur->setBlurKernel(kBlurKernelWidthInit, kBlurSigmaInit);
+        }
+            
 
         //TODO Maybe optimize so that all shaders execute the same step in parallel (e.g. an array version)
         for (uint i = 0; i < lights.size(); i++)
@@ -504,25 +538,29 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
     }
 
-    //Clear AABBs
-    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
     // Clear Counter
     uint clearSize = mUseOneAABBForAllLights ? 1 : lights.size();
     pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, clearSize).get(), uint4(0));
 
     // Defines
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
+    mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
+    mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
     mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("ACCEL_MERGE_BOX_DIST", std::to_string(mMergeBoxDist));
     mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
-
+    mGenAccelShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
+    mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
+    mGenAccelShadowPip.pProgram->addDefine("STORE_LIMITED_OPAQUE_SURFACES", mOpaqueShadowMapEnabled ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); //Trace non-opaque only if mask is used
+    mGenAccelShadowPip.pProgram->addDefine("INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"); // Determines if the castShadow instance mask bit is used
+    
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
     mGenAccelShadowPip.pProgram->addDefine("USE_LOD", useLOD ? "1" : "0");
@@ -535,9 +573,10 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
     {
+        mGenAccelShadowPip.pProgram->addDefines(mpSampleGenerator->getDefines());
         mGenAccelShadowPip.pProgram->setTypeConformances(mpScene->getTypeConformances());
         mGenAccelShadowPip.pVars = RtProgramVars::create(mpDevice, mGenAccelShadowPip.pProgram, mGenAccelShadowPip.pBindingTable);
-        //mpSampleGenerator->setShaderData(mGenAccelShadowPip.pVars->getRootVar());
+        mpSampleGenerator->setShaderData(mGenAccelShadowPip.pVars->getRootVar());
     }
 
     FALCOR_ASSERT(mGenAccelShadowPip.pVars);
@@ -567,7 +606,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gAABB"] = mUseOneAABBForAllLights ? mAccelShadowAABB[0] : mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mUseOneAABBForAllLights ? mAccelShadowData[0] : mAccelShadowData[i];
-        var["gPointSampler"] = mpPointSampler;
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
         var["gHaltonSamples"] = mpHaltonBuffer;
@@ -583,6 +621,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
         // Spawn the rays.
         mpScene->raytrace(pRenderContext, mGenAccelShadowPip.pProgram.get(), mGenAccelShadowPip.pVars, uint3(targetDim, 1));
+
+        mFrameCount++;
     }
 
     const uint numAABBs = mUseOneAABBForAllLights ? 1 : lights.size();
@@ -593,7 +633,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         pRenderContext->copyBufferRegion(
             mAccelShadowCounterCPU[mStagingCount].get(), 0, mAccelShadowCounter[mStagingCount].get(), 0, sizeof(uint32_t) * numAABBs
         );
-        pRenderContext->flush();
+
         // Frame in flight for the counter
         mAccelFenceWaitValues[mStagingCount] = mpFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
         mStagingCount = (mStagingCount + 1) % kFramesInFlight;
@@ -606,7 +646,10 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         std::memcpy(mAccelShadowNumPoints.data(), data, sizeof(uint) * numAABBs);
         mAccelShadowCounterCPU[mStagingCount]->unmap();
     }
-   
+
+    // Clear unused AABBs
+    mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
+
     // Build the Acceleration structure
     std::vector<uint64_t> aabbCount;
     uint totalCount = 0;
@@ -620,14 +663,13 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         {
             float diffPercentage = ((mAccelShadowMaxNumPoints - mAccelShadowNumPoints[i]) / mAccelShadowMaxNumPoints);
             uint maxPossibleCount = diffPercentage > 0.0 && mEnableDynamicRayCountCalc
-                                        ? uint(totalCount * diffPercentage * mDynRCChangePercentage)
+                                        ? uint(totalCount * diffPercentage * mDynRCChangePercentage.y)
                                         : 0.25f * mAccelShadowMaxNumPoints;
             numPoints = std::min(uint(mAccelShadowNumPoints[i] + maxPossibleCount), mAccelShadowMaxNumPoints);
         }
         aabbCount.push_back(numPoints);
     }
     mpShadowAccelerationStrucure->update(pRenderContext, aabbCount);
-    mFrameCount++;
 }
 
 DefineList AccelIrregularZ::getDefines()
@@ -648,13 +690,17 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
+    shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
+    uint2 opaqueSMMaxDispatch = getShaderDispatchSize();
+    shadowVar["SMCB"]["gMaxBufferSize"] = opaqueSMMaxDispatch.x * opaqueSMMaxDispatch.y;
 
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
-        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
-        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
+        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjectionNoJitter;
+        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjectionNoJitter;
         shadowVar["gAccessCounter"][i] = mAccessTextures[i];
+        shadowVar["gSampleDistribution"][i] = mSampleDistribution[i];
     }
     const auto accelDataSize = mUseOneAABBForAllLights ? 1 : lights.size();
     for (uint i = 0; i < accelDataSize; i++)
@@ -663,7 +709,22 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
         shadowVar["gShadowAABBs"][i] = mAccelShadowAABB[i];
     }
 
+    shadowVar["gPointSampler"] = mpPointSampler;
+    shadowVar["gLinearSampler"] = mpLinearSampler;
+
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
+}
+
+void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable)
+{
+    mUseMask = enable;
+    if (mUseMask)
+    {
+        auto shadowVar = var["gAccelIrregularZ"];
+
+        shadowVar["gShadowMask"] = maskTex;
+        shadowVar["gMaskShadowMap"] = maskSM->asBuffer();
+    }
 }
 
 bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
@@ -685,17 +746,21 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                     uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
                     group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
                     group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
-                    std::string accelMem = std::to_string((mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f);
-                    std::string dataMem = std::to_string((mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f);
-                    std::string totalMem = std::to_string((mAccelShadowMaxNumPoints * dataBufferSize * sizeof(AABB)) / 1e6f);
-                    group2.text("AABB Memory:     " + accelMem.substr(0, accelMem.find(".") + 3) + " MB");
-                    group2.text("Data Memory:     " + dataMem.substr(0, dataMem.find(".") + 3) + " MB");
-                    group2.text("Total Memory:    " + totalMem.substr(0, totalMem.find(".") + 3) + " MB");
+                    float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
+                    float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
+                    std::string accelMemStr = std::to_string(accelMem);
+                    std::string dataMemStr = std::to_string(dataMem);
+                    std::string totalMemStr = std::to_string((accelMem + dataMem));
+                    group2.text("AABB Memory:     " + accelMemStr.substr(0, accelMemStr.find(".") + 3) + " MB");
+                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+                    group2.text("Total Memory:    " + totalMemStr.substr(0, totalMemStr.find(".") + 3) + " MB");
 
                     group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
-                    std::string neededAABBMem = std::to_string((mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f);
-                    std::string neededDataMem = std::to_string((mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f);
-                    std::string neededTotalMem = std::to_string((mAccelShadowNumPoints[i] * dataBufferSize * sizeof(AABB)) / 1e6f);
+                    accelMem = (mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f;
+                    dataMem = (mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f;
+                    std::string neededAABBMem = std::to_string(accelMem);
+                    std::string neededDataMem = std::to_string(dataMem);
+                    std::string neededTotalMem = std::to_string(accelMem + dataMem);
                     std::string fillRate =
                         std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
                     group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB" );
@@ -719,10 +784,13 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         mResetRayCount |= group.checkbox("Use GPU Sample Distribution opimization", mEnableDynamicRayCountCalc);
         if (mEnableDynamicRayCountCalc)
         {
-            group.var("GPU SD Total Mult", mDynRCGuardPercentage, 0.001f, 1.f);
-            group.tooltip("Multiplier for the total that is used to calculate the ray count for the current frame");
-            group.var("GPU SD Change Mult", mDynRCChangePercentage, 0.001f, 1.f);
-            group.tooltip("Multiplier for the change value in the Sample Distribution");
+            group.var("GPU SD Fill Guard", mDynRCGuardPercentage, 0.001f, 1.f);
+            group.tooltip("Buffer should be held around this fill percentage. ");
+            group.var("GPU SD Change Mult (Increase/Decrease)", mDynRCChangePercentage, 0.001f, 1.f);
+            group.tooltip(
+                "Multiplier for the change value in the Sample Distribution. There is a different value for increase and decrease. "
+                "Increase should be handled more conserveratively, while the decrease should be quiet aggressive"
+            );
         }
 
         group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
@@ -749,7 +817,7 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         //group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         //group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
 
-        group.dropdown("Subpixel Sample Pattern", mSamplePattern);
+        bool patternChanged = group.dropdown("Subpixel Sample Pattern", mSamplePattern);
         group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
         if (mSamplePattern == SMSamplePattern::Halton)
         {
@@ -757,12 +825,13 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
                 mGenAccelShadowPip.pVars.reset();
             group.tooltip("Number of Halton Samples");
         }
+        else if (mSamplePattern != SMSamplePattern::Center)
+        {
+            patternChanged |= group.var("MatrixSamples", mNumCPUSampleGenSamples, 1u, 1024u, 1u);
+        }
+        if (patternChanged)
+            updateSamplePattern();
 
-        //group.checkbox("Use PCF", mAccelUsePCF);
-        group.var("Merge Boxes Dist", mMergeBoxDist, 0.f, FLT_MAX, 0.000001f, false, "% .6f ");
-        group.tooltip(
-            "Merges Accel Boxes together and takes the transparency of the first box. Can add bias (brightening). \n Set to 0 to disable."
-        );
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         group.tooltip("Only uses the Visibility of the sample with the closest depth. If disabled, the average of all hit Boxes is used");
         if (auto group2 = group.group("Debug"))
@@ -891,3 +960,31 @@ void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& 
 
     pRenderContext->draw(mRasterShowAccelPass.pState.get(), mRasterShowAccelPass.pVars.get(), mAccelShadowMaxNumPoints, 0);
 }
+
+static ref<CPUSampleGenerator> createSamplePattern(AccelIrregularZ::SMSamplePattern type, uint32_t sampleCount)
+{
+    switch (type)
+    {
+    case AccelIrregularZ::SMSamplePattern::Center:
+    case AccelIrregularZ::SMSamplePattern::Halton:
+        return nullptr;
+    case AccelIrregularZ::SMSamplePattern::MatrixDirectX:
+        return DxSamplePattern::create(sampleCount);
+    case AccelIrregularZ::SMSamplePattern::MatrixHalton:
+        return HaltonSamplePattern::create(sampleCount);
+    case AccelIrregularZ::SMSamplePattern::MatrixStratified:
+        return StratifiedSamplePattern::create(sampleCount);
+    default:
+        FALCOR_UNREACHABLE();
+        return nullptr;
+    }
+}
+
+void AccelIrregularZ::updateSamplePattern() {
+    mpCPUSampleGenerator = createSamplePattern(mSamplePattern, mNumCPUSampleGenSamples);
+    if (mpCPUSampleGenerator)
+        mNumCPUSampleGenSamples = mpCPUSampleGenerator->getSampleCount();
+    else
+        setJitter(float2(0)); //reset jitter
+}
+

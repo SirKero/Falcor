@@ -46,8 +46,12 @@ public:
     virtual DefineList getDefines() override;
 
     /** Set the needed shader data for the method (textures,buffer, etc)
-     */
+    */
     virtual void setShaderData(const ShaderVar& var) override;
+
+    /** Additional mask to reject the backprojectio
+    */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable = true) override;
 
     /** Render UI for the method
      */
@@ -57,17 +61,35 @@ public:
      */
     virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
 
+     /*  Returns the sample distribution
+     */
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return &mSampleDistribution; };
+
+     /* Gets dispatch size for the gen shader
+     */
+    virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
+
+    /* Get Sample distribution buffer
+     */
+    virtual const ref<Buffer> getJitterSampleBuffer() const override { return mSamplePattern == SMSamplePattern::Halton ?  mpHaltonBuffer : nullptr;}
+
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 
     enum class SMSamplePattern : uint
     {
         Center = 0,
         Halton = 1,
+        MatrixDirectX = 2,
+        MatrixHalton = 3,
+        MatrixStratified = 4,
     };
 
     FALCOR_ENUM_INFO(SMSamplePattern,{
             {SMSamplePattern::Center, "Center"},
             {SMSamplePattern::Halton, "Halton"},
+            {SMSamplePattern::MatrixDirectX, "MatrixDirectX"},
+            {SMSamplePattern::MatrixHalton, "MatrixHalton"},
+            {SMSamplePattern::MatrixStratified, "MatrixStratified"},
         }
     );
 
@@ -77,8 +99,11 @@ private:
     //Funktion that generates the profiler passes in case they are not executed this frame
     void dummyProfileGeneration(RenderContext* pRenderContext);
 
+    void updateSamplePattern();
+
     //Runtime
     uint mFrameCount = 0;
+    bool mUseMask = false;
 
     //Sync Resources
     static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
@@ -87,6 +112,8 @@ private:
     uint mStagingCount = 0;
 
     //Sample Gen (+Jitter)
+    ref<CPUSampleGenerator> mpCPUSampleGenerator;                ///< Sample generator for uniform camera jitter.
+    uint mNumCPUSampleGenSamples = 16;  //For CPU sample gen
     uint mNumHaltonSamples = 64; //Number of halton samples
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
@@ -96,8 +123,8 @@ private:
     //Dynamic ray count on gpu
     bool mEnableDynamicRayCountCalc = true;
     bool mResetRayCount = false;
-    float mDynRCGuardPercentage = 0.9f; //10% buffer for possible changes
-    float mDynRCChangePercentage = 0.6f; //How much of the optimal value should be taken
+    float mDynRCGuardPercentage = 0.85f; //15% buffer for possible changes
+    float2 mDynRCChangePercentage = float2(0.1f,0.6f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
 
     // Accel shadow settings
     bool mUseOneAABBForAllLights = true;
@@ -110,8 +137,6 @@ private:
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
     bool mAccelUseFrustumCulling = false;
-    RayFlags mAccelRayFlags = RayFlags::None;
-    float mMergeBoxDist = 0.f; //Distance the accel boxes are merged
 
     uint mSkipFrameCount = 0; //Counter for skipping frames
     uint mSkipGenerationFrameCount = 1; //Number of generated frames is 1/X
@@ -132,7 +157,9 @@ private:
     } mAccelDebugShowAS;
 
     ref<Sampler> mpPointSampler;
+    ref<Sampler> mpLinearSampler;
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
+    ref<SampleGenerator> mpSampleGenerator;
 
     std::vector<ref<Buffer>> mAccelShadowAABB;                                 // For Accel AABB points
     std::vector<ref<Buffer>> mAccelShadowCounter;                              // Counter for inserting points

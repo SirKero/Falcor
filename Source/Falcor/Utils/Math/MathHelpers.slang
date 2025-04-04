@@ -673,3 +673,36 @@ float3 rotate_z(const float3 v, const float angle)
     sincos(angle, s, c);
     return float3(v.x * c - v.y * s, v.x * s + v.y * c, v.z);
 }
+
+/** Generates a random spread direction with polar coordinates
+    https://stackoverflow.com/questions/72006596/how-to-expand-particle-system-angle-spread-to-3-dimensions
+    * @param[in] t support vector where the random direction is based on
+    * @param[in] spread spread angle
+    * @param[in] rnd two random values
+    * @return random direction vector that is within the spread of t
+*/
+float3 random_spread_direction(float3 t, float spread, float2 rnd) {
+    float a, r, x, y, z;
+    a = rnd.x * spread * 0.5; // random angle within spread [0,PI]
+    if (a > M_PI_2) {
+        a = M_PI - a;
+        a = sqrt(a * M_2_PI) * M_PI_2;
+        a = M_PI - a;
+    } else {
+        a = sqrt(a * M_2_PI) * M_PI_2;
+    }
+    x = cos(a);                        // convert angle to main axis coordinate
+    r = sqrt(1.0 - (x * x));           // max radius of cone cap still inside unit sphere
+    a = rnd.y * 2.0 * M_PI; // random polar angle inside the cone cap [rad]
+    y = r * cos(a);
+    z = r * sin(a);
+
+    // TBN Matrix
+    float3 b, n;
+    t = normalize(t);
+    n = float3(1, 0, 0);
+    if (abs(dot(n, t)) > 0.75) n = float3(0, 1, 0);
+    n = normalize(cross(n, t));
+    b = normalize(cross(n, t));
+    return (t * x) + (b * y) + (n * z);
+}

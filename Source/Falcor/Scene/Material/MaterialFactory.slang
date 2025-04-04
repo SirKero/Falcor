@@ -177,4 +177,14 @@ extension MaterialSystem
         ExplicitLodTextureSampler explicitLOD = { lod };
         return alphaTest(v, materialID, explicitLOD, alphaThreshold);
     }
+
+     /** Checks if the cast shadow flag is set for the material.
+        \param[in] materialID Material ID at the hit.
+        \return True if the material should cast shadows
+    */
+    bool isCastShadow(const uint materialID){
+        const MaterialHeader header = materialData[materialID].header;
+
+        return header.isCastShadow();
+    }
 }
