@@ -431,6 +431,28 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
                 mLightSampleMode = LightSampleMode::Uniform; // Cheapest light sample mode
         }
 
+        switch (mShadowRenderMethod)
+        {
+        
+        case TransparencyRenderer::ShadowRenderMethod::LinkedList:
+            mSelectedShadowMethod = 1;
+            break;
+        case TransparencyRenderer::ShadowRenderMethod::AccelShadowKBuffer:
+            mSelectedShadowMethod = 2;
+            break;
+        case TransparencyRenderer::ShadowRenderMethod::AccelIrregularZ:
+            mSelectedShadowMethod = 3;
+            break;
+        case TransparencyRenderer::ShadowRenderMethod::LinkedListIrregularZ:
+            mSelectedShadowMethod = 4;
+            break;
+        case TransparencyRenderer::ShadowRenderMethod::RayTracing:
+        case TransparencyRenderer::ShadowRenderMethod::AccelShadow:
+        default:
+            mSelectedShadowMethod = 0;
+            break;
+        }
+
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
 
         auto& sceneAABB = mpScene->getSceneBounds();
