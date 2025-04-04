@@ -766,7 +766,7 @@ void LinkedListIrregularZ::debugPass(
     RenderContext* pRenderContext,
     const RenderData& renderData,
     ref<Texture> debugOut,
-    ref<Texture> colorOut
+    ref<Texture> mask
 )
 {
     // Early out
@@ -804,6 +804,7 @@ void LinkedListIrregularZ::debugPass(
     var["gDebug"] = debugOut;
     var["gSampleDistribution"].setSrv(pSampleDistribution->getSRV(mDebugSelectedMipLevel, 1));
     var["gImportanceMap"].setSrv(pImportanceMap->getSRV(mDebugSelectedMipLevel, 1));
+    var["gMask"] = mask;
 
     mpDebugShowImportancePass->execute(pRenderContext, uint3(targetDim, 1));
 }

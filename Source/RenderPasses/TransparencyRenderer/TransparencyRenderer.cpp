@@ -285,7 +285,15 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
      
     // Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
-        mShadowMethods[mSelectedShadowMethod]->debugPass(pRenderContext, renderData, renderData.getTexture(kOutputDebug), renderData.getTexture(kOutputColor));
+    {
+        ref<Texture> pAdditionalTex = renderData.getTexture(kOutputColor);
+        if (mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ && mpShadowMask)
+            pAdditionalTex = mpShadowMask->getMask();
+        mShadowMethods[mSelectedShadowMethod]->debugPass(
+            pRenderContext, renderData, renderData.getTexture(kOutputDebug), pAdditionalTex
+        );
+    }
+        
 
     mFrameCount++;
 }

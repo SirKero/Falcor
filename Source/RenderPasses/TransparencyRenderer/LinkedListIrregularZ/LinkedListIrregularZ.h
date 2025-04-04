@@ -58,7 +58,7 @@ public:
 
     /** Optional Debug pass
     */
-    virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
+    virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> mask = nullptr) override;
 
     /*  Returns the sample distribution
     */
