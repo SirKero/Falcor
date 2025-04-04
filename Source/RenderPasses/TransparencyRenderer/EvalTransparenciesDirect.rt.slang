@@ -8,13 +8,7 @@ cbuffer CB
     uint gFrameCount; // Current it for sample gen
 }
 
-// Inputs
-Texture2D<PackedHitInfo> gVBuffer;
-Texture2D<float4> gViewW; // Optional
-
 // Depths/MV for TAA or DLSS
-Texture2D<float> gInDepth;
-Texture2D<float2> gInMotion;
 RWTexture2D<float> gOutDepth;
 RWTexture2D<float2> gOutMotion;
 
@@ -218,39 +212,15 @@ void rayGen()
 
     // Prepare path data
     PathData pd = PathData();
-    if (is_valid(gViewW) && !kEvalOpaque) {
-        pd.origin = gScene.camera.getPosition();
-        pd.direction = -gViewW[pixel].xyz;
-    }
-    else {
-        Ray ray = gScene.camera.computeRayPinhole(pixel, frameDim);
-        pd.origin = ray.origin;
-        pd.direction = ray.dir;
-    }
+    Ray camRay = gScene.camera.computeRayPinhole(pixel, frameDim);
+    pd.origin = camRay.origin;
+    pd.direction = camRay.dir;
 
     //Set sampleGenerator
     pd.sg = SampleGenerator(pixel, gFrameCount);
 
     float tMax = gScene.camera.data.farZ;
     float depth = 1;
-    //Get tMax for this either with depth texture or vBuffer
-    if (is_valid(gInDepth) && !kEvalOpaque) {
-        depth = gInDepth[pixel];
-        // Get recreated 3D position
-        float2 ndc = (float2(pixel) + 0.5) / frameDim; // in [0,1]
-        ndc = 2.0 * ndc - 1.0;                         // in [-1,1]
-        float4 recreatedPos = mul(gScene.camera.data.invViewProj, float4(ndc, depth, 1.0));
-        recreatedPos.xyz /= recreatedPos.w; //Perspective division
-
-        tMax = min(tMax, distance(recreatedPos.xyz, pd.origin));
-    } else if(!kEvalOpaque) { //Use VBuffer for hit
-        HitInfo hit = HitInfo(gVBuffer[pixel]);
-        if (hit.isValid()) {
-            const TriangleHit triangleHit = hit.getTriangleHit();
-            VertexData v = gScene.getVertexData(triangleHit);
-            tMax = min(tMax, length(v.posW - pd.origin)); // Linear depth
-        }
-    }
        
     //Prepare Ray
     RayDesc ray;
@@ -263,9 +233,7 @@ void rayGen()
     #if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
         // Motion vector
         float2 mVec = float2(0);
-        if (is_valid(gInMotion) && !kEvalOpaque)
-            mVec = gInMotion[pixel];
-
+        
         bool mVecUpdated = false;
         bool depthUpdated = false;
     #endif

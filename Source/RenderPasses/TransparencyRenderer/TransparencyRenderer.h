@@ -120,21 +120,35 @@ public:
     //Renderers
     enum class CameraRenderMode : uint
     {
-        VBuffer_DirectRT = 0,
-        VBuffer_DirectRT_Reflections = 1,
-        DirectRT= 2,
-        DirectRT_Reflections = 3,
-        PathTracer = 4
+        DirectRT= 0,
+        DirectRT_Reflections = 1,
+        PathTracer = 2
     };
 
     FALCOR_ENUM_INFO(
         CameraRenderMode,
         {
-            {CameraRenderMode::VBuffer_DirectRT, "VBuffer_DirectRT"},
-            {CameraRenderMode::VBuffer_DirectRT_Reflections, "VBuffer_DirectRT+RayReflections"},
             {CameraRenderMode::DirectRT, "DirectRT"},
             {CameraRenderMode::DirectRT_Reflections, "DirectRT+RayReflections"},
             {CameraRenderMode::PathTracer, "PathTracer"},
+        }
+    );
+
+    enum class CamJitterSamplePattern : uint32_t
+    {
+        Center,
+        DirectX,
+        Halton,
+        Stratified,
+    };
+
+    FALCOR_ENUM_INFO(
+        CamJitterSamplePattern,
+        {
+            {CamJitterSamplePattern::Center, "Center"},
+            {CamJitterSamplePattern::DirectX, "DirectX"},
+            {CamJitterSamplePattern::Halton, "Halton"},
+            {CamJitterSamplePattern::Stratified, "Stratified"},
         }
     );
 
@@ -145,8 +159,6 @@ private:
 
     //Prepare additional textures and buffers
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
-    //Evaluate direct light with an Compute Shader
-    void evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData);
     //Evaluates the transparencies until the first opaque surface
     void evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData);
     //Ray Traced Reflections
@@ -154,9 +166,14 @@ private:
     //Path tracing pass
     void evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Camera Jitter
+    void updateFrameDim(const uint2 frameDim);
+    void updateSamplePattern();
+
     // Internal state
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
+    ref<CPUSampleGenerator> mpCameraJitterGenerator;              ///< Sample generator for camera jitter.
     std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
     std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask for Irregular Shadow Maps
 
@@ -179,7 +196,10 @@ private:
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
     ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
-    bool mUseNonOpaqueDepthAndMV = false;
+
+    //Camera Jitter
+    CamJitterSamplePattern mCameraJitterSamplePattern = CamJitterSamplePattern::Halton;
+    uint mCameraJitterNumSamples = 16;
 
     //Reflections
     float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
@@ -231,3 +251,4 @@ FALCOR_ENUM_REGISTER(TransparencyRenderer::ShadowRenderMethod);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::LightSampleMode);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::CameraRenderMode);
 FALCOR_ENUM_REGISTER(TransparencyRenderer::ImportanceMode);
+FALCOR_ENUM_REGISTER(TransparencyRenderer::CamJitterSamplePattern);

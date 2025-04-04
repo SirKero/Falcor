@@ -35,6 +35,10 @@
 #include "AccelIrregularZ/AccelIrregularZ.h"
 #include "LinkedListIrregularZ/LinkedListIrregularZ.h"
 
+#include "Utils/SampleGenerators/DxSamplePattern.h"
+#include "Utils/SampleGenerators/HaltonSamplePattern.h"
+#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
+
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
     registry.registerClass<RenderPass, TransparencyRenderer>();
@@ -51,28 +55,14 @@ namespace
 
     const std::string kShaderModel = "6_6"; //Shader model for compute shader
 
-    const std::string kInputVBuffer = "vbuffer";
-    const std::string kInputDepth = "inDepth";
-    const std::string kInputMV = "inMotion";
     const std::string kOutputColor = "outColor";
     const std::string kOutputDebug = "outDebug";
     const std::string kOutputDepth = "outDepth";
     const std::string kOutputMV = "outMotion";
 
-    const ChannelList kInputChannels = {
-        {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
-        {"viewW", "gViewW", "World-space view direction (xyz float format)", true /* optional */},
-    };
-
     const ChannelList kOutputChannels = {
         {kOutputColor, "gOutputColor", "Output color (sum of direct and indirect)", false, ResourceFormat::RGBA32Float},
         {kOutputDebug, "gDebugOut", "Output debug tex (sum of direct and indirect)", true, ResourceFormat::RGBA32Float},
-    };
-
-    //Additional Geometry information that may need info about the first transparent hit
-    const ChannelList kInputGeometryInfoChannels = {
-        {kInputDepth, "gInDepth", "Depth buffer (NDC)", true /* optional */},
-        {kInputMV, "gInMotion", "Motion vector", true /* optional */},
     };
 
     const ChannelList kOutputGeometryInfoChannels = {
@@ -133,8 +123,6 @@ RenderPassReflection TransparencyRenderer::reflect(const CompileData& compileDat
     RenderPassReflection reflector;
 
     // Define our input/output channels.
-    addRenderPassInputs(reflector, kInputChannels);
-    addRenderPassInputs(reflector, kInputGeometryInfoChannels);
     addRenderPassOutputs(reflector, kOutputChannels, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget);
     addRenderPassOutputs(reflector, kOutputGeometryInfoChannels);
 
@@ -170,21 +158,8 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
         return;
     }
 
-    //Copy depth and mvec
-    if (!mUseNonOpaqueDepthAndMV)
-    {
-        for (uint i=0; i<kInputGeometryInfoChannels.size(); i++)
-        {
-            Texture* pSrc = renderData.getTexture(kInputGeometryInfoChannels[i].name).get();
-            Texture* pDst = renderData.getTexture(kOutputGeometryInfoChannels[i].name).get();
-            if (pSrc && pDst)
-                pRenderContext->copyResource(pDst, pSrc);
-        }
-    }
-
     //Set render dimensions for LOD helper
-    if (any(mRenderDims != renderData.getDefaultTextureDims()))
-        mRenderDims = renderData.getDefaultTextureDims();
+    updateFrameDim(renderData.getDefaultTextureDims());
 
     if (mOpaqueShadowMapModeChanged)
     {
@@ -250,21 +225,6 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     //Render
     switch (mCameraRenderMode)
     {
-    case CameraRenderMode::VBuffer_DirectRT:
-        {
-            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
-            evalDirectTransparency(pRenderContext, renderData);
-            evalDirectOpaque(pRenderContext, renderData);
-        }
-        break;
-    case CameraRenderMode::VBuffer_DirectRT_Reflections:
-        {
-            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
-            evalDirectTransparency(pRenderContext, renderData);
-            evalDirectOpaque(pRenderContext, renderData);
-            evalRayReflections(pRenderContext, renderData);
-        }
-        break;
     case CameraRenderMode::DirectRT:
         {
             FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
@@ -307,9 +267,27 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("Render Settings"))
     {
+        bool updatePattern = widget.dropdown("Camera Jitter", mCameraJitterSamplePattern);
+        widget.tooltip(
+            "Selects sample pattern for anti-aliasing over multiple frames.\n\n"
+            "The camera jitter is set at the start of each frame based on the chosen pattern. All render passes should see the same "
+            "jitter.\n"
+            "'Center' disables anti-aliasing by always sampling at the center of the pixel.",
+            true
+        );
+        if (mCameraJitterSamplePattern != CamJitterSamplePattern::Center)
+        {
+            updatePattern |= widget.var("Sample count", mCameraJitterNumSamples, 1u);
+            widget.tooltip("Number of samples in the anti-aliasing sample pattern.", true);
+        }
+        if (updatePattern)
+        {
+            updateSamplePattern();
+            mOptionsChanged = true;
+        }
+
         switch (mCameraRenderMode)
         {
-        case CameraRenderMode::VBuffer_DirectRT:
         case CameraRenderMode::DirectRT:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
@@ -317,9 +295,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
             dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
             dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
-            dirty |= widget.checkbox("Calc MVec & Depth for non opaque", mUseNonOpaqueDepthAndMV);
             break;
-        case CameraRenderMode::VBuffer_DirectRT_Reflections:
         case CameraRenderMode::DirectRT_Reflections:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
@@ -328,7 +304,6 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
             dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
             dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
-            dirty |= widget.checkbox("Calc MVec & Depth for non opaque", mUseNonOpaqueDepthAndMV);
             break;
         case CameraRenderMode::PathTracer:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
@@ -553,8 +528,7 @@ void TransparencyRenderer::prepareResources(RenderContext* pRenderContext, const
         mpTransparencyThp->setName("TransparencyThp");
     }
 
-    if ((mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections ||
-         mCameraRenderMode == CameraRenderMode::DirectRT_Reflections) &&
+    if (mCameraRenderMode == CameraRenderMode::DirectRT_Reflections &&
         needRebuild(mpReflectionsMask, screenSize))
     {
         mpReflectionsMask = Texture::create2D(
@@ -572,91 +546,6 @@ void TransparencyRenderer::prepareResources(RenderContext* pRenderContext, const
         );
         mpReflectionsHit->setName("ReflectionHitBuffer");
     }
-}
-
-void TransparencyRenderer::evalDirectOpaque(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    FALCOR_PROFILE(pRenderContext, "ShadeOpaque");
-
-    if (!mpEvalDirectPass)
-    {
-        Program::Desc desc;
-        desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderEvalDirect).csEntry("main").setShaderModel(kShaderModel);
-        desc.addTypeConformances(mpScene->getTypeConformances());
-
-        DefineList defines;
-        defines.add(mpScene->getSceneDefines());
-        defines.add(mpSampleGenerator->getDefines());
-        defines.add(getLightEvalDefines());
-        defines.add("RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections ? "1" : "0");
-        defines.add("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
-        
-
-        mpEvalDirectPass = ComputePass::create(mpDevice, desc, defines, true);
-    }
-
-    FALCOR_ASSERT(mpEvalDirectPass);
-
-    // If defines change, refresh the program
-    mpEvalDirectPass->getProgram()->addDefines(getLightEvalDefines());
-    // Reflections
-    mpEvalDirectPass->getProgram()->addDefine(
-        "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections ? "1" : "0"
-    );
-    mpEvalDirectPass->getProgram()->addDefine("REFLECTIONS_ROUGHNESS_THRESHOLD", std::to_string(mRayReflectionsRoughnessThreshold));
-
-    //Dispatch Dims
-    const uint2 targetDim = renderData.getDefaultTextureDims();
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-
-    // Set variables
-    auto var = mpEvalDirectPass->getRootVar();
-
-    mpScene->setRaytracingShaderData(pRenderContext, var, 1); // Set scene data
-    mpSampleGenerator->setShaderData(var);                    // Sample generator
-    var[kParticleMaterialBufferName] = mpParticleMaterials;
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
-        mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
-
-    //Set shadow mask and opaque shadow map
-    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing)) {
-        if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
-            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
-            );
-        else //Non irregular modes
-        {
-            mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
-            );
-        }
-    }
-        
-    if (mEnableOpaqueShadowMaps)
-        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
-
-    var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gFrameDim"] = renderData.getDefaultTextureDims();
-
-    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
-    auto bind = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData.getTexture(desc.name);
-        }
-    };
-    for (auto channel : kInputChannels)
-        bind(channel);
-    var["gMotionVector"] = renderData.getTexture(kOutputMV);
-    var["gOutputColor"] = renderData.getTexture(kOutputColor);
-    var["gTransparencyThp"] = mpTransparencyThp;
-    var["gRayReflectionMask"] = mpReflectionsMask;
-
-    // Execute
-    
-    mpEvalDirectPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
 void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData) {
@@ -696,16 +585,13 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     FALCOR_ASSERT(mEvalTransparencyDirectRay.pProgram);
 
     bool useLodMode = mEnableTransparencyPassLODMode && ((mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs));
-    bool evalOpaque = (mCameraRenderMode == CameraRenderMode::DirectRT || mCameraRenderMode == CameraRenderMode::DirectRT_Reflections);
     // Update define that can change at runtime
     mEvalTransparencyDirectRay.pProgram->addDefines(getLightEvalDefines());
-    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
-    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kInputGeometryInfoChannels, renderData));
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData)); //For NRD
     mEvalTransparencyDirectRay.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
-    mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", mUseNonOpaqueDepthAndMV || evalOpaque ? "1" : "0");
-    mEvalTransparencyDirectRay.pProgram->addDefine("EVAL_OPAQUE_HIT", evalOpaque ? "1" : "0");
+    mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", "1");
+    mEvalTransparencyDirectRay.pProgram->addDefine("EVAL_OPAQUE_HIT", "1");
     mEvalTransparencyDirectRay.pProgram->addDefine(
         "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
     );
@@ -760,10 +646,6 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
             var[desc.texname] = renderData.getTexture(desc.name);
         }
     };
-    for (auto& channel : kInputChannels)
-        bind(channel);
-    for (auto& channel : kInputGeometryInfoChannels)
-        bind(channel);
     for (auto& channel : kOutputGeometryInfoChannels)
         bind(channel);
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
@@ -813,7 +695,6 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
     bool useLodMode = mEnableTransparencyPassLODMode && ((mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs));
     // Update define that can change at runtime
     mReflectionsPass.pProgram->addDefines(getLightEvalDefines());
-    mReflectionsPass.pProgram->addDefines(getValidResourceDefines(kInputChannels, renderData));
 
     // Init Vars
     if (!mReflectionsPass.pVars)
@@ -856,15 +737,8 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
 
     var["CB"]["gFrameCount"] = mFrameCount;
 
-    if (mCameraRenderMode == CameraRenderMode::VBuffer_DirectRT_Reflections)
-    {
-        var["gVBuffer"] = renderData.getTexture(kInputVBuffer);
-    }
-    else
-    {
-        var["gVBuffer"] = mpReflectionsHit;
-    }
-    
+
+    var["gVBuffer"] = mpReflectionsHit;
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gThp"] = mpTransparencyThp;
     var["gReflectionMask"] = mpReflectionsMask;
@@ -968,4 +842,40 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
 
     // Execute
     mpScene->raytrace(pRenderContext, mTransparencyPathTracer.pProgram.get(), mTransparencyPathTracer.pVars, uint3(targetDim, 1));
+}
+
+static ref<CPUSampleGenerator> createSamplePattern(TransparencyRenderer::CamJitterSamplePattern type, uint32_t sampleCount)
+{
+    switch (type)
+    {
+    case TransparencyRenderer::CamJitterSamplePattern::Center:
+        return nullptr;
+    case TransparencyRenderer::CamJitterSamplePattern::DirectX:
+        return DxSamplePattern::create(sampleCount);
+    case TransparencyRenderer::CamJitterSamplePattern::Halton:
+        return HaltonSamplePattern::create(sampleCount);
+    case TransparencyRenderer::CamJitterSamplePattern::Stratified:
+        return StratifiedSamplePattern::create(sampleCount);
+    default:
+        FALCOR_UNREACHABLE();
+        return nullptr;
+    }
+}
+
+void TransparencyRenderer::updateFrameDim(const uint2 frameDim)
+{
+    FALCOR_ASSERT(frameDim.x > 0 && frameDim.y > 0);
+    mRenderDims = frameDim;
+    float2 invFrameDim = 1.f / float2(frameDim);
+
+    // Update sample generator for camera jitter.
+    if (mpScene)
+        mpScene->getCamera()->setPatternGenerator(mpCameraJitterGenerator, invFrameDim);
+}
+
+void TransparencyRenderer::updateSamplePattern()
+{
+    mpCameraJitterGenerator = createSamplePattern(mCameraJitterSamplePattern, mCameraJitterNumSamples);
+    if (mpCameraJitterGenerator)
+        mCameraJitterNumSamples = mpCameraJitterGenerator->getSampleCount();
 }

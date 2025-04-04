@@ -10,7 +10,6 @@ cbuffer CB
 
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
-Texture2D<float4> gViewW; // Optional
 Texture2D<float4> gThp;
 Texture2D<float> gReflectionMask;
 
