@@ -233,10 +233,10 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
 void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
 {
     {
-        FALCOR_PROFILE(pRenderContext, "GenerateAccessMips");
+        FALCOR_PROFILE(pRenderContext, "ImportancesMipMaps");
     }
     {
-        FALCOR_PROFILE(pRenderContext, "CalcShadowSampleDistribution");
+        FALCOR_PROFILE(pRenderContext, "DistributeBudget");
     }
     if (mBlurSampleDistribution && mpGaussianBlur)
     {
@@ -244,14 +244,14 @@ void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
     }
     if (mOptimizeSampleDistribution)
     {
-        FALCOR_PROFILE(pRenderContext, "OptimizeDistributedSamples");
+        FALCOR_PROFILE(pRenderContext, "SampleDistribution");
     }
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
         if (!lights[i]->isActive())
             break;
-        FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        FALCOR_PROFILE(pRenderContext, "Trace Light:" + lights[i]->getName());
         {
             FALCOR_PROFILE(pRenderContext, "raytraceScene");
         }
@@ -260,7 +260,7 @@ void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
 
 void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "GenerateIrregularLinkedList");
+    FALCOR_PROFILE(pRenderContext, "Generate_IDSM_LL");
 
     prepareResources(pRenderContext);
 
@@ -298,7 +298,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
     //Create Access Mips
     {
-        FALCOR_PROFILE(pRenderContext, "GenerateAccessMips");
+        FALCOR_PROFILE(pRenderContext, "ImportancesMipMaps");
         //Create Gen Mips pass
         if (!mGenAccessMips)
         {
@@ -341,7 +341,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     }
     //Distribute Samples
     {
-        FALCOR_PROFILE(pRenderContext, "CalcShadowSampleDistribution");
+        FALCOR_PROFILE(pRenderContext, "DistributeBudget");
         // Create Compute Pass
         if (!mCalcSampleDistribution)
         {
@@ -431,7 +431,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     //Optimize Samples
     if (mOptimizeSampleDistribution)
     {
-        FALCOR_PROFILE(pRenderContext, "OptimizeDistributedSamples");
+        FALCOR_PROFILE(pRenderContext, "SampleDistribution");
         // Create Compute Pass
         if (!mpOptimizeSamples)
         {
@@ -506,7 +506,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     {
         if (!lights[i]->isActive())
             break;
-        FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        FALCOR_PROFILE(pRenderContext, "Trace Light:" + lights[i]->getName());
         // Bind Utility
         bool isDirectional = lights[i]->getType() == LightType::Directional;
 
@@ -622,6 +622,27 @@ void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> mask
 bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
+    #if SIMPLE_UI
+    if (auto group = widget.group("IDSM-LL Settings"))
+    {
+        mResolutionChanged |= group.var("Node Buffer size (Resolution x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
+        group.text("Note: IDSM tries to fill the buffer, so this affects quality and runtime");
+        std::string bufferSize = "Buffer Elements: " + std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel);
+        group.text(bufferSize);
+
+        group.checkbox("Use Gaussian Blur", mBlurSampleDistribution);
+        if (mBlurSampleDistribution && mpGaussianBlur)
+        {
+            if (auto gaussGroup = group.group("Blur Options"))
+                mpGaussianBlur->renderUI(gaussGroup);
+        }
+
+        bool isJitterEnabled = mSamplePattern == SMSamplePattern::Halton;
+        bool changePattern = group.checkbox("Use Subpixel Jitter", isJitterEnabled);
+        if (changePattern)
+            mSamplePattern = isJitterEnabled ? SMSamplePattern::Halton : SMSamplePattern::Center;
+    }
+    #else
     if (auto group = widget.group("Irregular LL Shadow Settings"))
     {
         dirty |= TransparencyShadowMethod::renderUI(widget);
@@ -729,7 +750,7 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
         }
 
     }
-
+    #endif
     return dirty;
 }
 

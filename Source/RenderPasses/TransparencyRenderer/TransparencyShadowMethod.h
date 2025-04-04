@@ -31,6 +31,8 @@
 #include "Rendering/ShadowMaps/ShadowMap.h"
 #include "Rendering/Materials/TexLODTypes.slang"
 
+#define SIMPLE_UI 1
+
 using namespace Falcor;
 
 class TransparencyShadowMethod

@@ -3,14 +3,13 @@ from falcor import *
 
 def render_graph_TransparencyRenderDLSS():
     g = RenderGraph('TransparencyRenderDLSS')
-    g.create_pass('VBufferRT', 'VBufferRT', {'outputSize': 'Default', 'samplePattern': 'Halton', 'sampleCount': 16, 'useAlphaTest': True, 'adjustShadingNormals': True, 'forceCullMode': False, 'cull': 'Back', 'cullNonOpaque': True, 'useTraceRayInline': False, 'useDOF': True})
-    g.create_pass('TransparencyRendererAS', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'AccelIrregularZ', 'EnableMask': True})
+    g.create_pass('TransparencyRendererAS', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'IDSM-AS', 'EnableMask': True})
     g.create_pass('DLSSPassAS', 'DLSSPass', {'enabled': True, 'outputSize': 'Default', 'profile': 'DLAA', 'preset': 'Default(CNN)', 'motionVectorScale': 'Relative', 'isHDR': True, 'useJitteredMV': False, 'sharpness': 0.0, 'exposure': 0.0})
     g.create_pass('VideoRecorder', 'VideoRecorder', {})
     g.create_pass('PathBenchmark', 'PathBenchmark', {})
     g.create_pass('ParticlePass', 'ParticlePass', {})
     g.create_pass('ToneMapperAS', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Aces', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
-    g.create_pass('TransparencyRendererLL', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'LinkedListIrregularZ', 'EnableMask': True})
+    g.create_pass('TransparencyRendererLL', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'IDSM-LL', 'EnableMask': True})
     g.create_pass('TransparencyRendererRay', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'RayTracing', 'EnableMask': False})
     g.create_pass('DLSSPassLL', 'DLSSPass', {'enabled': True, 'outputSize': 'Default', 'profile': 'DLAA', 'preset': 'Default(CNN)', 'motionVectorScale': 'Relative', 'isHDR': True, 'useJitteredMV': False, 'sharpness': 0.0, 'exposure': 0.0})
     g.create_pass('DLSSPassRay', 'DLSSPass', {'enabled': True, 'outputSize': 'Default', 'profile': 'DLAA', 'preset': 'Default(CNN)', 'motionVectorScale': 'Relative', 'isHDR': True, 'useJitteredMV': False, 'sharpness': 0.0, 'exposure': 0.0})

@@ -34,6 +34,8 @@
 #include "Rendering/Materials/TexLODTypes.slang"
 #include "TransparentShadowMask/TransparentShadowMask.h"
 
+#define SIMPLE_UI 1
+
 using namespace Falcor;
 
 class TransparencyRenderer : public RenderPass
@@ -67,11 +69,11 @@ public:
 
     FALCOR_ENUM_INFO(ShadowRenderMethod,  {
             {ShadowRenderMethod::RayTracing, "RayTracing"},
-            {ShadowRenderMethod::AccelIrregularZ, "AccelIrregularZ"},
-            {ShadowRenderMethod::AccelShadow, "AccelShadow"},
+            {ShadowRenderMethod::AccelIrregularZ, "IDSM-AS"},
+            {ShadowRenderMethod::LinkedListIrregularZ, "IDSM-LL"},
+            {ShadowRenderMethod::AccelShadow, "DSM-AS"},
             //{ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"}, //TODO remove
-            {ShadowRenderMethod::LinkedList, "LinkedList"},
-            {ShadowRenderMethod::LinkedListIrregularZ, "LinkedListIrregularZ"},
+            {ShadowRenderMethod::LinkedList, "DSM-LL"},
         }
     );
 
@@ -107,12 +109,12 @@ public:
     FALCOR_ENUM_INFO(
         ImportanceMode,
         {
-            {ImportanceMode::Opacity, "Opacity"},
-            {ImportanceMode::Opacity_Thp, "Opacity*Throughput"},
-            {ImportanceMode::Thp, "Throughput"},
-            {ImportanceMode::Thp_Thp, "ThroughputSquare"},
-            {ImportanceMode::Brdf_Thp, "BRDF*Throughput"},
-            {ImportanceMode::Brdf_Opacity_Thp, "BRDF*Opacity*Throughput"},
+            {ImportanceMode::Opacity, "HitOpacity"},
+            {ImportanceMode::Opacity_Thp, "HitOpacity*Visibility"},
+            {ImportanceMode::Thp, "Visibility"},
+            {ImportanceMode::Thp_Thp, "Visibility*Visibility"},
+            {ImportanceMode::Brdf_Thp, "BRDF*Visibility"},
+            {ImportanceMode::Brdf_Opacity_Thp, "BRDF*HitOpacity*Visibility"},
             {ImportanceMode::Uniform, "Unweighted(Uniform)"},
         }
     );
@@ -205,7 +207,7 @@ private:
     float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
 
     //Shadow Mask
-    bool mIrregularUseShadowMask = false;               //Enables a shadow mask for opaque objects
+    bool mIrregularUseShadowMask = true;               //Enables a shadow mask for opaque objects
     uint mMaskISMMultFactor = 4u;                  // Mult factor for ISM 
     bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable as blacklist for non-opaque objects
 

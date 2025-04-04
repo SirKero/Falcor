@@ -165,7 +165,7 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
 
 void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "GenerateIrregularLinkedList");
+    FALCOR_PROFILE(pRenderContext, "Generate_DSM_LL");
 
     prepareResources(pRenderContext);
 
@@ -208,7 +208,7 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
     {
         if (!lights[i]->isActive())
             break;
-        FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        FALCOR_PROFILE(pRenderContext, "Trace Light:" + lights[i]->getName());
         // Bind Utility
         bool isDirectional = lights[i]->getType() == LightType::Directional;
 
@@ -319,6 +319,9 @@ void LinkedListShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex,
 bool LinkedListShadow::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
+    #if SIMPLE_UI
+
+    #else
     if (auto group = widget.group("Linked List settings"))
     {
         dirty |= TransparencyShadowMethod::renderUI(widget);
@@ -369,6 +372,7 @@ bool LinkedListShadow::renderUI(Gui::Widgets& widget)
             mUseLinkedListPcf = false; // TODO implement pcf with array
         */
     }
+    #endif
     
     return dirty;
 }

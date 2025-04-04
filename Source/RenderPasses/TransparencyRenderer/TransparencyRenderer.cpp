@@ -227,13 +227,13 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     {
     case CameraRenderMode::DirectRT:
         {
-            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
+            //FALCOR_PROFILE(pRenderContext, "CameraTrace");
             evalDirectTransparency(pRenderContext, renderData);
         }
         break;
     case CameraRenderMode::DirectRT_Reflections:
         {
-            FALCOR_PROFILE(pRenderContext, "EvaluateDirect");
+            FALCOR_PROFILE(pRenderContext, "CameraTrace");
             evalDirectTransparency(pRenderContext, renderData);
             evalRayReflections(pRenderContext, renderData);
         }
@@ -261,9 +261,96 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
 void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
+    #if SIMPLE_UI
+    bool useRayReflections = mCameraRenderMode == CameraRenderMode::DirectRT_Reflections;
+    bool reflectionsChanged = widget.checkbox("Use Ray Reflections", useRayReflections);
+    if (reflectionsChanged)
+        mCameraRenderMode = useRayReflections ? CameraRenderMode::DirectRT_Reflections : CameraRenderMode::DirectRT;
 
+    bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
+    if (methodChanged)
+    {
+        mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
+        if (mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ || mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ)
+            mShadowSettings.resolution = 512;
+        else if (mShadowRenderMethod == ShadowRenderMethod::AccelShadow || mShadowRenderMethod == ShadowRenderMethod::LinkedList)
+            mShadowSettings.resolution = 2048;
+    }
+       
+
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+    {
+        widget.checkbox("Enable Mask", mIrregularUseShadowMask);
+        widget.tooltip("Enables the semi-transparent Object Mask for the shadow map methods ");
+        if (mIrregularUseShadowMask &&
+            (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ))
+        {
+            widget.dropdown("ISM Multiplication Factor", kMaskISMMultFactorDropdown, mMaskISMMultFactor);
+            widget.tooltip(
+                "Multiplication factor for the (opaque) Importance Shadow Map used when the mask is active. The dispatch size and all samples in the Sample Distribution will be multiplied with this number."
+            );
+        }
+    }
+
+    if (mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ || mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ)
+    {
+        widget.dropdown("Importance Formula", mImportanceMode);
+    }
+
+    widget.checkbox("Enable Soft Shadows", mShadowSettings.enableSoftShadows);
+    widget.tooltip("Approximate Soft Shadows.");
+
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
+    {
+        if (auto group = widget.group("General Shadow Map Settings"))
+        {
+            mShadowSettings.renderUI(group);
+        }
+    }
+
+    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing && !mShadowMethods.empty() && mShadowMethods[mSelectedShadowMethod])
+    {
+        mShadowMethods[mSelectedShadowMethod]->renderUI(widget);
+    }
+
+    if (auto group = widget.group("Renderer Settings"))
+    {
+        bool updatePattern = widget.dropdown("Camera Jitter", mCameraJitterSamplePattern);
+        widget.tooltip(
+            "Selects sample pattern for anti-aliasing over multiple frames.\n\n"
+            "The camera jitter is set at the start of each frame based on the chosen pattern. All render passes should see the same "
+            "jitter.\n"
+            "'Center' disables anti-aliasing by always sampling at the center of the pixel.",
+            true
+        );
+        if (mCameraJitterSamplePattern != CamJitterSamplePattern::Center)
+        {
+            updatePattern |= widget.var("Camera Jitter Sample count", mCameraJitterNumSamples, 1u);
+            widget.tooltip("Number of samples in the anti-aliasing sample pattern.", true);
+        }
+        if (updatePattern)
+        {
+            updateSamplePattern();
+            mOptionsChanged = true;
+        }
+
+        switch (mCameraRenderMode)
+        {
+        case CameraRenderMode::DirectRT:
+            dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
+            dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
+            dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+            break;
+        case CameraRenderMode::DirectRT_Reflections:
+            dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
+            dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
+            dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
+            dirty |= widget.var("Use RayReflections at spec percentage", mRayReflectionsRoughnessThreshold, 0.f, 1.f);
+            break;
+        }
+    }
+    #else
     dirty |= widget.dropdown("Render Method", mCameraRenderMode);
-
 
     if (auto group = widget.group("Render Settings"))
     {
@@ -381,6 +468,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     {
         mShadowMethods[mSelectedShadowMethod]->renderUI(widget);
     }
+    #endif
 }
 
 void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
@@ -549,7 +637,7 @@ void TransparencyRenderer::prepareResources(RenderContext* pRenderContext, const
 }
 
 void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData) {
-    FALCOR_PROFILE(pRenderContext, "TransparencyOnPrimaryRay");
+    FALCOR_PROFILE(pRenderContext, "TraceCameraRay");
 
     // Create scene ray tracing program.
     if (!mEvalTransparencyDirectRay.pProgram)

@@ -330,7 +330,7 @@ void ParticlePass::renderUI(Gui::Widgets& widget)
     if (particleSystems.empty())
     {
         widget.text(
-            "There are no particle system in the current scene \n Please add one or more in the .pyscene with "
+            "There is no particle system in the current scene \n Please add one or more in the .pyscene with "
             "\"sceneBuilder.addParticleSystem(name, material, numberOfParticles, restPosition)\""
         );
         return;

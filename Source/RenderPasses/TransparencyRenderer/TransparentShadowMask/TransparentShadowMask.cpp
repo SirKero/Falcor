@@ -62,7 +62,7 @@ void TransparentShadowMask::generate(
 }
 
 void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderContext, const RenderData& renderData,const TransparencyShadowMethod* pTransparencyShadowMethod) {
-    FALCOR_PROFILE(pRenderContext,"GenerateTransparencyMasks");
+    FALCOR_PROFILE(pRenderContext,"TransparentObjectsMasks");
 
     auto& lights = mpScene->getLights();
     const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
@@ -129,7 +129,7 @@ void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderConte
     //Raster pass over every light
     for (uint i = 0; i < lights.size(); i++)
     {
-        FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        FALCOR_PROFILE(pRenderContext, "Rasterize_Semi-Transparent: " + lights[i]->getName());
         auto& lightData = lights[i]->getData();
 
         // Get best fitting light direction for particles
@@ -192,7 +192,7 @@ void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderConte
 
     //Dispatch compute
     {
-        FALCOR_PROFILE(pRenderContext, "TemporalAccumulateMask");
+        //FALCOR_PROFILE(pRenderContext, "TemporalAccumulateMask");
         var = mpTemporalAccumulateMaskPass->getRootVar();
         uint3 dispatchDimensions = uint3(mpTransparentShadowMask->getWidth(), mpTransparentShadowMask->getHeight(), lights.size());
 
@@ -210,7 +210,7 @@ void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderConte
 
 void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod, ref<SampleGenerator> pSampleGenerator)
 {
-    FALCOR_PROFILE(pRenderContext, "GenerateOpaqueMaskISM");
+    FALCOR_PROFILE(pRenderContext, "Generate_ISM");
 
     auto& lights = mpScene->getLights();
     const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
@@ -337,7 +337,7 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(
     const TransparencyShadowMethod* pTransparencyShadowMethod
 )
 {
-    FALCOR_PROFILE(pRenderContext, "GenerateOpaqueMaskSM");
+    FALCOR_PROFILE(pRenderContext, "Generate_OpaqueSM");
 
     auto& lights = mpScene->getLights();
     const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();

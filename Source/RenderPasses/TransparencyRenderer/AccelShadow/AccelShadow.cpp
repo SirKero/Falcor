@@ -217,7 +217,7 @@ std::array<float4, 4> AccelShadow::getCameraFrustumPlanes()
 }
 
 void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& renderData) {
-    FALCOR_PROFILE(pRenderContext, "Generate Shadow Acceleration Structure");
+    FALCOR_PROFILE(pRenderContext, "Generate_DSM_AS");
 
     prepareResources(pRenderContext);
 
@@ -264,7 +264,7 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
     {
         if (!lights[i]->isActive())
             break;
-        FALCOR_PROFILE(pRenderContext, lights[i]->getName());
+        FALCOR_PROFILE(pRenderContext, "Trace Light:" + lights[i]->getName());
         bool isDirectional = lights[i]->getType() == LightType::Directional;
         // Bind Utility
         auto var = mGenAccelShadowPip.pVars->getRootVar();
@@ -374,6 +374,9 @@ void AccelShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<
 
 bool AccelShadow::renderUI(Gui::Widgets& widget) {
     bool dirty = false;
+    #if SIMPLE_UI
+
+    #else
     if (auto group = widget.group("Accel Shadow Settings"))
     {
         dirty |= TransparencyShadowMethod::renderUI(widget);
@@ -455,6 +458,7 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
             }
         }
     }
+    #endif
 
     return dirty;
 }
