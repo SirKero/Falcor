@@ -549,7 +549,8 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         mpParticleMaterials =
             Buffer::create(mpDevice, materialCount / 4u, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, particleMaterialsData.data());
         mpParticleMaterials->setName("ParticleMaterialsBuffer");
-        
+
+        updateSamplePattern();
     }
 }
 
