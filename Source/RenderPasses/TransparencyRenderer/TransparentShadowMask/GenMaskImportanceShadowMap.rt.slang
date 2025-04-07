@@ -33,6 +33,7 @@ Texture2DArray<float> gMask; // Non-Opaque object mask
 Texture2D<float> gSampleDistribution; //sample Distribution
 RWBuffer<float> gShadowMap;           // Shadow map
 Buffer<float2> gHaltonSamples;
+RWBuffer<uint> gDispatchFeedbackBuffer;
 
 SamplerState gMaskSampler;
 
@@ -130,7 +131,10 @@ void rayGen()
     float totalSamples = float(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
     totalSamples *= kMultFactor;
     const uint idx1D = pixel.x + pixel.y * frameDim.x; // Create an 1D weight from 2D
-    
+
+    if (idx1D == 0)
+        gDispatchFeedbackBuffer[gLightIdx] = uint(round(totalSamples));
+
     if (idx1D > totalSamples)
         return;
     

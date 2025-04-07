@@ -38,7 +38,10 @@ const std::string kShaderGenerateOpaqueSMRT = "RenderPasses/TransparencyRenderer
 
 TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene)
 {
-
+    mpFence = GpuFence::create(mpDevice);
+    FALCOR_ASSERT(mpFence);
+    for (auto& waitVal : mFenceWaitValues)
+        waitVal = 0;
 }
 
 void TransparentShadowMask::generate(
@@ -216,33 +219,55 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
     const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
     auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
 
-    uint2 targetDim = pTransparencyShadowMethod->getShaderDispatchSize() * mOpaqueImportanceSMMultFactor;
-    size_t targetDim1D = targetDim.x * targetDim.y;
-
+    uint2 maxDispatchDim = pTransparencyShadowMethod->getShaderDispatchSize() * mOpaqueImportanceSMMultFactor;
+   
     auto pHaltonBuffer = pTransparencyShadowMethod->getJitterSampleBuffer();
     // Prepare Resources
-    if (!mpMaskOpaqueImportanceShadowMap || mpMaskOpaqueImportanceShadowMap->getSize() != targetDim1D * sizeof(float) * lights.size())
     {
-        mpMaskOpaqueImportanceShadowMap = Buffer::create(mpDevice, targetDim1D * sizeof(float) * lights.size());
-        /*
-        mpMaskOpaqueShadowMap = Texture::create2D(
-            mpDevice, smRes.x, smRes.y, ResourceFormat::R32Float, lights.size(), 1u, nullptr,
-            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-        );
-        */
-        mpMaskOpaqueImportanceShadowMap->setName("TransparencyMaskOpaqueImportanceShadowMap");
-    }
+        size_t maxDispatchDim1D = maxDispatchDim.x * maxDispatchDim.y;
+        if (!mpMaskOpaqueImportanceShadowMap ||
+            mpMaskOpaqueImportanceShadowMap->getSize() != maxDispatchDim1D * sizeof(float) * lights.size())
+        {
+            mpMaskOpaqueImportanceShadowMap = Buffer::create(mpDevice, maxDispatchDim1D * sizeof(float) * lights.size());
+            /*
+            mpMaskOpaqueShadowMap = Texture::create2D(
+                mpDevice, smRes.x, smRes.y, ResourceFormat::R32Float, lights.size(), 1u, nullptr,
+                ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+            );
+            */
+            mpMaskOpaqueImportanceShadowMap->setName("TransparencyMaskOpaqueImportanceShadowMap");
+        }
 
-    if (!mpMaskSampler)
-    {
-        Sampler::Desc samplerDesc = {};
-        samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
-        samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-        mpMaskSampler = Sampler::create(mpDevice, samplerDesc);
-       
-    }
-    FALCOR_ASSERT(mpMaskSampler);
+        if (!mpMaskSampler)
+        {
+            Sampler::Desc samplerDesc = {};
+            samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
+            samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+            mpMaskSampler = Sampler::create(mpDevice, samplerDesc);
+        }
+        FALCOR_ASSERT(mpMaskSampler);
 
+        if (mDispatchFeedbackBuffers.empty())
+        {
+            std::vector<uint> init(lights.size(), 0);
+            mDispatchFeedbackBuffers.resize(kFramesInFlight);
+            for (uint i = 0; i < kFramesInFlight; i++)
+            {
+                mDispatchFeedbackBuffers[i].gpu = Buffer::create(
+                    mpDevice, lights.size() * sizeof(uint), ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource,
+                    Buffer::CpuAccess::None, init.data()
+                );
+                mDispatchFeedbackBuffers[i].cpu =
+                    Buffer::create(mpDevice, lights.size() * sizeof(uint), ResourceBindFlags::None, Buffer::CpuAccess::Read, init.data());
+                mDispatchFeedbackBuffers[i].gpu->setName("MaskDispatchFeedbackBufferGPU_" + std::to_string(i));
+                mDispatchFeedbackBuffers[i].cpu->setName("MaskDispatchFeedbackBufferCPU_" + std::to_string(i));
+                mDispatchFeedbackBuffers[i].dispatchDims.resize(lights.size());
+                for (auto& disDim : mDispatchFeedbackBuffers[i].dispatchDims)
+                    disDim = uint2(0);
+            }
+        }
+    }
+    
      // Create scene ray tracing program.
     if (!mGenerateMaskImportanceShadowMapRayPass.pProgram)
     {
@@ -293,9 +318,6 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
         
     }
 
-    // Bind shader data
-    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-
     //Get Sample distribution
     FALCOR_ASSERT(pTransparencyShadowMethod->getSamplesDistribution());
     auto sampleDistribution = *(pTransparencyShadowMethod->getSamplesDistribution());
@@ -306,6 +328,12 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
     // Ray pass over every light
     for (uint i = 0; i < lights.size(); i++)
     {
+        // Get dispatch dim from feedback buffer
+        const uint2& feedDims = mDispatchFeedbackBuffers[mStagingCount].dispatchDims[i];
+        uint2 targetDim = feedDims.x >= kOverestimateDispatchConstant || feedDims.y >= kOverestimateDispatchConstant ? feedDims
+                              : maxDispatchDim;
+        FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+
         bool isDirectional = lights[i]->getType() == LightType::Directional;
         var["CB"]["gLightIdx"] = i;
         var["CB"]["gLightPos"] = lights[i]->getData().posW;
@@ -321,6 +349,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
         var["gShadowMap"] = mpMaskOpaqueImportanceShadowMap;
         var["gMaskSampler"] = mpMaskSampler;
         var["gHaltonSamples"] = pHaltonBuffer;
+        var["gDispatchFeedbackBuffer"] = mDispatchFeedbackBuffers[mStagingCount].gpu;
 
         // Execute
         mpScene->raytrace(
@@ -329,6 +358,35 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
     }
 
     mFrameCount++;
+
+    //Feedback buffer
+    {
+        // Copy to CPU
+        pRenderContext->copyBufferRegion(
+            mDispatchFeedbackBuffers[mStagingCount].cpu.get(), 0, mDispatchFeedbackBuffers[mStagingCount].gpu.get(), 0,
+            sizeof(uint32_t) * lights.size()
+        );
+
+        // Frame in flight for the counter
+        mFenceWaitValues[mStagingCount] = mpFence->gpuSignal(pRenderContext->getLowLevelData()->getCommandQueue());
+        mStagingCount = (mStagingCount + 1) % kFramesInFlight;
+
+        uint64_t& fenceWaitVal = mFenceWaitValues[mStagingCount];
+        // Wait for the GPU to finish the frame
+        if (fenceWaitVal > 0)
+            mpFence->syncCpu(fenceWaitVal);
+        std::vector<uint> sampleCount(lights.size(), 0);
+        void* data = mDispatchFeedbackBuffers[mStagingCount].cpu->map(Buffer::MapType::Read);
+        std::memcpy(sampleCount.data(), data, sizeof(uint) * lights.size());
+        mDispatchFeedbackBuffers[mStagingCount].cpu->unmap();
+
+        //Convert to dispatch dimension
+        for (uint i = 0; i < lights.size(); i++)
+        {
+            mDispatchFeedbackBuffers[mStagingCount].dispatchDims[i] =
+                uint2(math::ceil(math::sqrt(double(sampleCount[i])))) + kOverestimateDispatchConstant;
+        }
+    }
 }
 
 void TransparentShadowMask::generateOpaqueMaskShadowMap(
@@ -347,23 +405,26 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(
 
     //auto pHaltonBuffer = pTransparencyShadowMethod->getJitterSampleBuffer();
     // Prepare Resources
-    if (!mpMaskOpaqueShadowMap || mpMaskOpaqueShadowMap->getWidth() != targetDim.x || mpMaskOpaqueShadowMap->getHeight() != targetDim.y)
     {
-        mpMaskOpaqueShadowMap = Texture::create2D(
-            mpDevice, smRes.x, smRes.y, ResourceFormat::R32Float, lights.size(), 1u, nullptr,
-            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-        );
-        mpMaskOpaqueShadowMap->setName("TransparencyMaskOpaqueShadowMap");
-    }
+        if (!mpMaskOpaqueShadowMap || mpMaskOpaqueShadowMap->getWidth() != targetDim.x || mpMaskOpaqueShadowMap->getHeight() != targetDim.y)
+        {
+            mpMaskOpaqueShadowMap = Texture::create2D(
+                mpDevice, smRes.x, smRes.y, ResourceFormat::R32Float, lights.size(), 1u, nullptr,
+                ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+            );
+            mpMaskOpaqueShadowMap->setName("TransparencyMaskOpaqueShadowMap");
+        }
 
-    if (!mpMaskSampler)
-    {
-        Sampler::Desc samplerDesc = {};
-        samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
-        samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-        mpMaskSampler = Sampler::create(mpDevice, samplerDesc);
+        if (!mpMaskSampler)
+        {
+            Sampler::Desc samplerDesc = {};
+            samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
+            samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+            mpMaskSampler = Sampler::create(mpDevice, samplerDesc);
+        }
+        FALCOR_ASSERT(mpMaskSampler);
     }
-    FALCOR_ASSERT(mpMaskSampler);
+    
 
     // Create scene ray tracing program.
     if (!mGenerateMaskShadowMapRayPass.pProgram)

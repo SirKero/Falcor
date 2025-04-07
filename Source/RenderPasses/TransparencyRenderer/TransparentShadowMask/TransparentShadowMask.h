@@ -88,6 +88,13 @@ private:
     //Constants
     const uint kMaxTemporal = 8;    //Max temporal accumulation (8bit)
 
+    // Sync Resources
+    static const uint kFramesInFlight = 3;       ///< Number of frames in flight for GPU/CPU sync
+    static const uint kOverestimateDispatchConstant = 64; // 64 in each direction overestimate
+    ref<GpuFence> mpFence;                       ///< Fence for CPU/GPU syncs
+    std::array<uint64_t,kFramesInFlight> mFenceWaitValues;            // Fence values forCounter sync
+    uint mStagingCount = 0;
+
     //Runtime
     ref<Device> mpDevice;
     ref<Scene> mpScene;
@@ -107,6 +114,15 @@ private:
     ref<Buffer> mpMaskOpaqueImportanceShadowMap;         //Importance shadow map with only opaque objects
     ref<Texture> mpMaskOpaqueShadowMap;          // Importance shadow map with only opaque objects
     ref<Sampler> mpMaskSampler;             //Mask sampler for the gen pass
+
+    struct DispatchFeedback
+    {
+        ref<Buffer> gpu;
+        ref<Buffer> cpu;
+        std::vector<uint2> dispatchDims;
+    };
+    std::vector<DispatchFeedback> mDispatchFeedbackBuffers;
+
     // Pipelines / Programms
     struct RasterPipeline
     {

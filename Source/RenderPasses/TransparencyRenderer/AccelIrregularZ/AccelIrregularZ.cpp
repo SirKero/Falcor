@@ -166,7 +166,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
                 mAccelShadowCounter[i]->setName("AccelShadowAABBCounter_" + std::to_string(i));
 
                 mAccelShadowCounterCPU[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), numAccelBuffers, ResourceBindFlags::None, Buffer::CpuAccess::Read, &initData, false
+                    mpDevice, sizeof(uint), numAccelBuffers, ResourceBindFlags::None, Buffer::CpuAccess::Read, initData.data(), false
                 );
                 mAccelShadowCounterCPU[i]->setName("AccelShadowAABBCounterCPU_" + std::to_string(i));
 
