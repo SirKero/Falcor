@@ -327,8 +327,8 @@ void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& set
 bool TransparencyShadowMethod::GlobalShadowSettings::renderUI(Gui::Widgets& widget) {
     #if SIMPLE_UI
     widget.dropdown("Resolution", kSMResolutionDropdown, resolution);
-    widget.var("Cascaded Size", cascadedSize, 0.f, FLT_MAX, 0.1f);
-    widget.tooltip("Radius for the cascade from Camera Origin. Ray Tracing is used for the area outside of the radius");
+    widget.var("Shadow Map Extend", cascadedSize, 0.f, FLT_MAX, 0.1f);
+    widget.tooltip("Radius for the Shadow Map extends from Camera Origin. Ray Tracing is used for the area outside of the radius");
     widget.var("Midpoint Percentage (Dual Depth SM)", midpointPercentage, 0.f, 1.f, 0.001f);
     widget.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
     widget.var("Depth Bias", depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
