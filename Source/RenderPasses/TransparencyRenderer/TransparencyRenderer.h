@@ -208,7 +208,7 @@ private:
 
     //Shadow Mask
     bool mIrregularUseShadowMask = true;               //Enables a shadow mask for opaque objects
-    uint mMaskISMMultFactor = 4u;                  // Mult factor for ISM 
+    uint mMaskISMMultFactor = 9u;                  // Mult factor for ISM 
     bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable as blacklist for non-opaque objects
 
     TransparencyShadowMethod::GlobalShadowSettings mShadowSettings = {};

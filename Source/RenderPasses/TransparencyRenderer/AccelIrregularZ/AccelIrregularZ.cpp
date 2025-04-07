@@ -738,6 +738,10 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         std::string bufferSize = "Buffer Elements: " + std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel);
         group.text(bufferSize);
 
+        group.var("Sample Dispatch Multiplier", mSampleOverestimate, 1.0f, 4.f);
+        group.tooltip("Constrols the maximum dispatch size of the IDSM generation shader. Defines the upper limit for the budget distribution. \n"
+            "Max Dispatch Size: [SMRes.x * Overestimate , SMRes.y * Overestimate]");
+
         group.checkbox("Use Gaussian Blur", mBlurSampleDistribution);
         if (mBlurSampleDistribution && mpGaussianBlur)
         {

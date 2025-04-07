@@ -118,7 +118,7 @@ private:
     uint mNumHaltonSamples = 64; //Number of halton samples
     SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
-    float mSampleOverestimate = 1.75f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
+    float mSampleOverestimate = 1.00f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
     bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
 
     //Dynamic ray count on gpu
