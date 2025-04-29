@@ -1,3 +1,5 @@
+#include "../LinkedListIrregularZ/LinkedListIrregularZData.slang"
+
 #ifndef MAX_ELEMENTS
 #define MAX_ELEMENTS 256
 #endif
@@ -7,28 +9,16 @@ cbuffer CB
     uint SMSize; // shadow map size
 };
 
-struct ListNode
-{
-    float depth;
-    float visibility;
-    uint next;
-};
-
-struct ListNode2
-{
-    uint prev;
-    uint right;
-    uint bot;
-}
-
-StructuredBuffer<ListNode> gLinkedList;
-RWStructuredBuffer<ListNode2> gLinkedListNeighbors;
+StructuredBuffer<LinkedListNode> gLinkedList;
+RWStructuredBuffer<LinkedListNeighborsNode> gLinkedListNeighbors;
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
 {
+    if (any(pixel > SMSize))
+        return;
     uint index = pixel.y * SMSize + pixel.x;
-    ListNode2 neigh;
+    LinkedListNeighborsNode neigh;
     neigh.prev = 0;
     neigh.right = 0;
     neigh.bot = 0;
@@ -38,15 +28,13 @@ void main(uint2 pixel: SV_DispatchThreadID)
         return; // no neighbors
     }
 
-    ListNode center = gLinkedList[index];
-    uint rightIndex = index + 1;
-    ListNode right = gLinkedList[rightIndex];
-    uint botIndex = index + SMSize;
-    ListNode bot = gLinkedList[botIndex];
+    LinkedListNode center = gLinkedList[index];
+    uint rightIndex = pixel.y * SMSize + pixel.x + 1;
+    LinkedListNode right = gLinkedList[rightIndex];
+    uint botIndex = (pixel.y + 1) * SMSize + pixel.x;
+    LinkedListNode bot = gLinkedList[botIndex];
     for (uint i = 0; i < MAX_ELEMENTS; ++i)
     {
-        
-
         // find right
         for (uint j = 0; j < MAX_ELEMENTS; ++j)
         {

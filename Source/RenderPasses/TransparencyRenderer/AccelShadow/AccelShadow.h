@@ -109,7 +109,8 @@ private:
     std::vector<ref<Buffer>> mAccelShadowCounterCPU;                           // Counter for inserting points
     std::vector<ref<Buffer>> mAccelShadowData;                                 // Transparency Data
     std::unique_ptr<CustomAccelerationStructure> mpShadowAccelerationStrucure; // AS
-    ref<Texture> mpDebugDepth;                                                 // Depth for the debug passs
+    ref<Texture> mpDebugDepth;                                                 // Depth for the debug pass
+    ref<Sampler> mpPointSampler;                                               // Point sampler
 
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
     RasterPipeline mRasterShowAccelPass;

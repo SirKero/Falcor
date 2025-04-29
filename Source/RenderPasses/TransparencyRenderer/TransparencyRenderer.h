@@ -34,7 +34,7 @@
 #include "Rendering/Materials/TexLODTypes.slang"
 #include "TransparentShadowMask/TransparentShadowMask.h"
 
-#define SIMPLE_UI 1
+#define SIMPLE_UI 0
 
 using namespace Falcor;
 

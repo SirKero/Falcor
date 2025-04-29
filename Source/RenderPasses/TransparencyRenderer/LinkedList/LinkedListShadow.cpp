@@ -62,6 +62,7 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
     if (mTransparencyBufferUsesColor != mUseColoredTransparency || mResolutionChanged)
     {
         mLinkedListData.clear();
+        mpLinkedListNeighbors.clear();
         mTransparencyBufferUsesColor = mUseColoredTransparency;
     }
 
@@ -142,7 +143,20 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
                     mpDevice, sizeof(uint) * dataStructSize, mLinkedListNodeBufferSize,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
-                mLinkedListData[i]->setName("LinkedListIrrShadowNodes" + std::to_string(i));
+                mLinkedListData[i]->setName("LinkedListShadowNodes" + std::to_string(i));
+            }
+        }
+
+        if (mUseLinkedListPcf && mpLinkedListNeighbors.empty())
+        {
+            mpLinkedListNeighbors.resize(numAccelBuffers);
+            for (uint i = 0; i < numAccelBuffers; i++)
+            {
+                mpLinkedListNeighbors[i] = Buffer::createStructured(
+                    mpDevice, sizeof(uint) * 3, mLinkedListNodeBufferSize,
+                    ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
+                );
+                mpLinkedListNeighbors[i]->setName("LinkedListShadowNeighbors" + std::to_string(i));
             }
         }
     }
@@ -260,24 +274,44 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
         mLinkedListCounterCPU[mStagingCount]->unmap();
     }
 
-    /*
-        if (mUseLinkedListPcf)
+    //generate PCF neighbor list
+    if (mUseLinkedListPcf)
+    {
+        FALCOR_PROFILE(pRenderContext, "LinkedListGenNeighborList");
+        // Create Compute Pass
+        if (!mpLinkedListNeighborsPass)
         {
-            // link neighbors
+            Program::Desc desc;
+            desc.addShaderLibrary(kShaderLinkedListNeighbors).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+
+            mpLinkedListNeighborsPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        // link neighbors
+        for (uint i = 0; i < lights.size(); i++)
+        {
+            if (!lights[i]->isActive())
+                break;
+
+            FALCOR_PROFILE(pRenderContext, "GenNeigh: " + lights[i]->getName());
             auto var2 = mpLinkedListNeighborsPass->getRootVar();
-            var2["CB"]["SMSize"] = mResolution.x; //width only for buffer offset
-            var2["gLinkedList"] = mpLinkedList[i];
+
+            var2["CB"]["SMSize"] = mResolution.x; // width only for buffer offset
+            var2["gLinkedList"] = mLinkedListData[i];;
             var2["gLinkedListNeighbors"] = mpLinkedListNeighbors[i];
             mpLinkedListNeighborsPass->execute(pRenderContext, mResolution.x, mResolution.y);
         }
-    */
+    }
 }
 
 DefineList LinkedListShadow::getDefines()
 {
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
-    defines.add("LINKED_LIST_PCF", mAccelUsePCF ? "1" : "0");
+    defines.add("LINKED_LIST_PCF", mUseLinkedListPcf ? "1" : "0");
     defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     return defines;
 }
@@ -301,6 +335,8 @@ void LinkedListShadow::setShaderData(const ShaderVar& var)
     for (uint i = 0; i < accelDataSize; i++)
     {
         shadowVar["gLinkedListData"][i] = mLinkedListData[i];
+        if (!mpLinkedListNeighbors.empty())
+            shadowVar["gLinkedListNeighbors"][i] = mpLinkedListNeighbors[i];
     }
 }
 
@@ -365,8 +401,9 @@ bool LinkedListShadow::renderUI(Gui::Widgets& widget)
             group.tooltip("Number of Halton Samples");
         }
 
-        /*
+        
         dirty |= widget.checkbox("Use PCF", mUseLinkedListPcf);
+        /*
         dirty |= widget.checkbox("Store as Array", mUseLinkedListArray);
         if (mUseLinkedListArray)
             mUseLinkedListPcf = false; // TODO implement pcf with array

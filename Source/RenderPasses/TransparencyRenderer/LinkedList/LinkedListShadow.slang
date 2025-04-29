@@ -1,6 +1,7 @@
 #pragma once
-#include "../SharedShadowDefines.slang"
 #include "../LinkedListIrregularZ/LinkedListIrregularZData.slang"
+#include "../SharedShadowDefines.slang"
+#include "Utils/Math/MathConstants.slangh"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
 import Rendering.ShadowMaps.ShadowMapHelpers;
@@ -9,8 +10,8 @@ import Rendering.ShadowMaps.ShadowMapHelpers;
 #define COUNT_LIGHTS 1
 #endif
 
-#ifndef USE_LINKED_PCF
-#define USE_LINKED_PCF 0
+#ifndef LINKED_LIST_PCF
+#define LINKED_LIST_PCF 0
 #endif
 
 #ifndef USE_LINKED_LIST_ARRAY
@@ -35,7 +36,21 @@ struct LinkedListShadow
     }
 
     StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
+    StructuredBuffer<LinkedListNeighborsNode> gLinkedListNeighbors[COUNT_LIGHTS];
     Texture2D<float> gMaskShadowMap;
+
+    //Fetches the 
+    float getLinkedVisibility(LinkedListNode n, float dist, uint lightIdx)
+    {
+        float visibility = 1.0;
+        while (n.depth < dist) {
+            visibility = n.visibility;
+            if (n.next == 0 || n.next >= gMaxBufferSize) break;
+            n = gLinkedListData[lightIdx][n.next];
+        }
+
+        return visibility;
+    }
 
     /** Caculates the shadow value by evaluating the shadow acceleration structure
     * \param[in] index of the current light
@@ -63,7 +78,13 @@ struct LinkedListShadow
             validShadow = false;
         }
 
-        const float2 shadowPixel = shadowPos.xy * gSMSize; // floor((shadowPos.xy * gSMSize) - 0.5) ; //  //TODO strange fix for normal
+        #if LINKED_LIST_PCF
+            float2 gatherUV;
+            float4 gatherWeight = getGatherWeights(shadowPos.xy, gSMSize.x, gatherUV);
+            float2 shadowPixel = gatherUV.xy * gSMSize - 0.5;
+        #else
+            float2 shadowPixel = floor(shadowPos.xy * gSMSize) + 0.5;
+        #endif
         const uint2 uShadowPixel = uint2(floor(shadowPixel));
         float dist = isDirectional ? shadowPos.z : shadowPos.w;
 
@@ -73,8 +94,7 @@ struct LinkedListShadow
 
          //Use Opaque SM
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
-            uint2 shadowPixelU = uint2(shadowPixel);
-            float shadowZ = gMaskShadowMap[shadowPixelU];
+            float shadowZ = gMaskShadowMap[uShadowPixel];
             if(dist > shadowZ)
                 return float3(0);
         }
@@ -87,15 +107,41 @@ struct LinkedListShadow
         if (index >= maxRes)
             return visibility;
 
-        LinkedListNode n = gLinkedListData[0][index];
+        LinkedListNode n = gLinkedListData[lightIdx][index];
         // traverse visibility until dist is reached
-        while (n.depth < dist) {
-            visibility = n.visibility;
-            if (n.next == 0 || n.next >= gMaxBufferSize) break;
-            n = gLinkedListData[lightIdx][n.next];
-        }
         
-        
+
+        #if LINKED_LIST_PCF
+            float4 gatherVis = float4(1);
+            while (n.depth < dist) {
+                gatherVis.w = n.visibility;
+                if (n.next == 0 || n.next >= gMaxBufferSize) break;
+                uint nextIndex = n.next;
+                n = gLinkedListData[lightIdx][n.next];
+                //if (n.depth < dist)
+                //    index = nextIndex;
+            }
+            LinkedListNeighborsNode neighbor = gLinkedListNeighbors[lightIdx][index];
+            uint zIndex = neighbor.right;
+            uint xIndex = neighbor.bot;
+            LinkedListNode nZ = {};
+            nZ.depth = FLT_MAX;
+            nZ = gLinkedListData[lightIdx][zIndex];
+            LinkedListNode nX = {};
+            nX.depth = FLT_MAX;
+            nX = gLinkedListData[lightIdx][xIndex];
+            gatherVis.z = getLinkedVisibility(nZ, dist, lightIdx);
+            gatherVis.x = getLinkedVisibility(nX, dist, lightIdx);
+            uint yIndex = gLinkedListNeighbors[lightIdx][zIndex].bot;
+            LinkedListNode nY = {};
+            nY.depth = FLT_MAX;
+            nY = gLinkedListData[lightIdx][yIndex];
+            gatherVis.y = getLinkedVisibility(nY, dist, lightIdx);
+            visibility = dot(gatherWeight, gatherVis);
+        #else
+            visibility = getLinkedVisibility(n, dist, lightIdx);
+        #endif
+
         return visibility;
     }
     

@@ -16,3 +16,11 @@ struct LinkedListNode
     LL_TRANSPARENCY_FORMAT visibility;
     uint next;
 };
+
+//For PCF on DSM-LL
+struct LinkedListNeighborsNode
+{
+    uint prev;
+    uint right;
+    uint bot;
+}

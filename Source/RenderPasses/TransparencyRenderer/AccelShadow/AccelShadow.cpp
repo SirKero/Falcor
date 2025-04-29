@@ -45,6 +45,15 @@ namespace
 AccelShadow::AccelShadow(ref<Device> pDevice, ref<Scene> pScene): TransparencyShadowMethod(pDevice, pScene) {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
+
+    if (!mpPointSampler)
+    {
+        Sampler::Desc samplerDesc = {};
+        samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+        samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+        mpPointSampler = Sampler::create(mpDevice, samplerDesc);
+    }
+    FALCOR_ASSERT(mpPointSampler);
 }
 
 void AccelShadow::prepareResources(RenderContext* pRenderContext) {
@@ -367,8 +376,8 @@ void AccelShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<
     {
         auto shadowVar = var["gAccelShadow"];
 
-        //shadowVar["gShadowMask"] = maskTex;
         shadowVar["gMaskShadowMap"] = maskSM->asTexture();
+        shadowVar["gMaskSampler"] = mpPointSampler;
     }
 }
 

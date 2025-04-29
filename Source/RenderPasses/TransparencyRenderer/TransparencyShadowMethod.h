@@ -31,7 +31,7 @@
 #include "Rendering/ShadowMaps/ShadowMap.h"
 #include "Rendering/Materials/TexLODTypes.slang"
 
-#define SIMPLE_UI 1
+#define SIMPLE_UI 0
 
 using namespace Falcor;
 
