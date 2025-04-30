@@ -272,9 +272,16 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     {
         mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
         if (mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ || mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ)
+        {
             mShadowSettings.resolution = 512;
+            mShadowSettings.cascadedPutCameraOnGrid = true;
+        }
         else if (mShadowRenderMethod == ShadowRenderMethod::AccelShadow || mShadowRenderMethod == ShadowRenderMethod::LinkedList)
+        {
             mShadowSettings.resolution = 2048;
+            mShadowSettings.cascadedPutCameraOnGrid = false;
+        }
+            
     }
        
 
@@ -404,7 +411,19 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 
     bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
     if (methodChanged)
+    {
         mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
+        if (mShadowRenderMethod == ShadowRenderMethod::LinkedListIrregularZ || mShadowRenderMethod == ShadowRenderMethod::AccelIrregularZ)
+        {
+            mShadowSettings.resolution = 512;
+            mShadowSettings.cascadedPutCameraOnGrid = true;
+        }
+        else if (mShadowRenderMethod == ShadowRenderMethod::AccelShadow || mShadowRenderMethod == ShadowRenderMethod::LinkedList)
+        {
+            mShadowSettings.resolution = 2048;
+            mShadowSettings.cascadedPutCameraOnGrid = false;
+        }
+    }
     dirty |= methodChanged;
 
     //mOpaqueShadowMapModeChanged |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);

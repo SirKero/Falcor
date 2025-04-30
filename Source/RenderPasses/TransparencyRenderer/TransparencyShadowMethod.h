@@ -149,7 +149,7 @@ public:
         bool enableSoftShadows = false;
         float softShadowsPositionRadius = 0.001f;
         float softShadowsDirectionsSpread = 1.f;
-        
+        bool cascadedPutCameraOnGrid = true;
 
         bool renderUI(Gui::Widgets& widget);
     };
@@ -186,6 +186,7 @@ protected:
     float2 mJitter = float2(0, 0);          //Optional Light Camera Jitter
 
     float mCascadedSize = 50.f;
+    bool mCascadedPutCameraOnGrid = true;
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
 

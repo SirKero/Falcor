@@ -28,12 +28,6 @@
 #include "TransparencyShadowMethod.h"
 #include "Utils/Math/FalcorMath.h"
 
-/* There are different cascaded versions, all use a view matrix at the center of the scene as light view
-*  Version 0: More classical approach that tries to put the ortho extends on a grid. However due to variable sizes the sm ratio can change with movement
-*  Version 1: Uses fixed size for the cascade and tries to move the camera to the most suitable edge of the cascaded box. Is ill fitting when high above the air or looking up/down
-*  Version 2: Uses fixed size with the cameraposition snapped to a grid as the center. 
-*/
-#define CASCADE_VERSION 2
 
 namespace
 {
@@ -107,160 +101,36 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
     // Directional light. Create a prespective shadow map
     case LightType::Directional:
     {
+        auto& cameraData = mpScene->getCamera()->getData();
         const AABB& sceneBounds = mpScene->getSceneBounds();
         float3 center = sceneBounds.center();
         const float3 upVec = float3(0, 1, 0);
         lightMVP.view = math::matrixFromLookAt(center, center + lightData.dirW, upVec); // Fixed point for view
 
-        auto& cameraData = mpScene->getCamera()->getData();
-        float camNear = cameraData.nearZ;
-        float camFar = cameraData.farZ;
-        float camFovY = focalLengthToFovY(cameraData.focalLength - 2.f, cameraData.frameHeight);
-
-        // Get the 8 corners of the frustum Part
-        const float4x4 proj = math::perspective(camFovY, cameraData.aspectRatio, camNear, camFar);
-        const float4x4 inv = math::inverse(math::mul(proj, cameraData.viewMat));
-        std::vector<float4> frustumCorners;
-        for (uint x = 0; x <= 1; x++)
-        {
-            for (uint y = 0; y <= 1; y++)
-            {
-                for (uint z = 0; z <= 1; z++)
-                {
-                    const float4 pt = math::mul(inv, float4(2.f * x - 1.f, 2.f * y - 1.f, z, 1.f));
-                    frustumCorners.push_back(pt / pt.w);
-                }
-            }
-        }
-
         // Create a view space AABB to clamp cascaded values
         AABB smViewAABB = sceneBounds.transform(lightMVP.view);
 
-        // Get Box for Orto
-        float minX = std::numeric_limits<float>::max();
-        float maxX = std::numeric_limits<float>::lowest();
-        float minY = std::numeric_limits<float>::max();
-        float maxY = std::numeric_limits<float>::lowest();
-        float minZ = std::numeric_limits<float>::max();
-        float maxZ = std::numeric_limits<float>::lowest();
-        for (const float4& p : frustumCorners)
-        {
-            float3 vp = math::mul(lightMVP.view, p).xyz();
-            minX = std::min(minX, vp.x);
-            maxX = std::max(maxX, vp.x);
-            minY = std::min(minY, vp.y);
-            maxY = std::max(maxY, vp.y);
-            minZ = std::min(minZ, vp.z);
-            maxZ = std::max(maxZ, vp.z);
-        }
         // Set the Z values to min and max for the scene so that all geometry in the way is rendered
-    #if CASCADE_VERSION == 2
-        //Fixed Z
         float distDifference = smViewAABB.maxPoint.z - smViewAABB.minPoint.z;
-        maxZ = math::ceil(smViewAABB.maxPoint.z + distDifference * 0.2f);
-        minZ = math::floor(smViewAABB.minPoint.z);
+        float maxZ = math::ceil(smViewAABB.maxPoint.z + distDifference * 0.2f);
+        float minZ = math::floor(smViewAABB.minPoint.z);
 
-        //Get Camera Position on a grid
+        // Get Camera Position on a grid
         float2 camPosLV = math::mul(lightMVP.view, float4(cameraData.posW, 1.f)).xy();
-        const float2 resF = float2(mResolution);
-        camPosLV = math::round(camPosLV * resF) / resF;
-
-        //Get xy offset adjusted to the grid
-        const float2 halfResF = resF / 2.f;
-        float2 halfResOffset = math::round(mCascadedSize * halfResF) / halfResF;
-        minX = camPosLV.x - halfResOffset.x;
-        maxX = camPosLV.x + halfResOffset.x;
-        minY = camPosLV.y - halfResOffset.y;
-        maxY = camPosLV.y + halfResOffset.y;
-
-    #elif CASCADE_VERSION == 1
-        maxZ = math::ceil(smViewAABB.maxPoint.z);
-        minZ = math::floor(smViewAABB.minPoint.z);
-        auto smallestDistance = [](const float4& dist, uint idx)
+        float2 offset = float2(mCascadedSize/2.f);
+        if (mCascadedPutCameraOnGrid)
         {
-            bool smallest = true;
-            for (uint i = 0; i < 4; i++)
-            {
-                if (i == idx)
-                    continue;
-                smallest &= dist[idx] <= dist[i];
-            }
-            return smallest;
-        };
-
-        float2 camPosLV = math::mul(lightMVP.view, float4(cameraData.posW, 1.f)).xy();
-        float4 distancesToCam = float4(camPosLV.x - minX, maxX - camPosLV.x, camPosLV.y - minY, maxY - camPosLV.y);
-        bool isBot = smallestDistance(distancesToCam, 2);
-        bool isTop = smallestDistance(distancesToCam, 3);
-        bool isLeft = smallestDistance(distancesToCam, 0);
-        bool isRight = smallestDistance(distancesToCam, 1);
-        // Fix camera pox on grid
-        const float2 resF = float2(mResolution);
-        camPosLV = math::round(camPosLV * resF) / resF;
-
-        if (isBot || isTop)
-        {
-            float2 distToCam = float2(camPosLV.x - minX, maxX - camPosLV.x);
-            float totalDist = distToCam.x + distToCam.y;
-            distToCam /= totalDist; //Normalize
-            minX = math::round(mCascadedSize * distToCam.x * resF.x) / resF.x;
-            maxX = math::round(mCascadedSize * distToCam.y * resF.x) / resF.x;
-            if (isTop)
-                distToCam = float2(0.95f, 0.05f);
-            else
-                distToCam = float2(0.05f, 0.95f);
-
-            minY = math::round(mCascadedSize * distToCam.x * resF.y) / resF.y;
-            maxY = math::round(mCascadedSize * distToCam.y * resF.y) / resF.y;
+            const float2 resF = float2(mResolution);
+            float2 sizePixel = (mCascadedSize / (resF/2.f));
+            float2 halfPixel = sizePixel / 2.f;
+            //Put Camera positon on grid
+            camPosLV = (math::round(camPosLV / sizePixel) + halfPixel) * sizePixel;
         }
-        else //Left, Right
-        {
-            float2 distToCam = float2(camPosLV.y - minY, maxY - camPosLV.y);
-            float totalDist = distToCam.x + distToCam.y;
-            distToCam /= totalDist; // Normalize
-            minY = math::round(mCascadedSize * distToCam.x * resF.y) / resF.y;
-            maxY = math::round(mCascadedSize * distToCam.y * resF.y) / resF.y;
-            if (isRight)
-                distToCam = float2(0.95f, 0.05f);
-            else
-                distToCam = float2(0.05f, 0.95f);
-
-            minX = math::round(mCascadedSize * distToCam.x * resF.x) / resF.x;
-            maxX = math::round(mCascadedSize * distToCam.y * resF.x) / resF.x;
-        }
-
-        minX = camPosLV.x - minX;
-        maxX = camPosLV.x + maxX;
-        minY = camPosLV.y - minY;
-        maxY = camPosLV.y + maxY;
-    #elif CASCADE_VERSION == 0
-        maxZ = std::max(maxZ, smViewAABB.maxPoint.z);
-        minZ = std::min(minZ, smViewAABB.minPoint.z);
-
-        const float2 resF = float2(mResolution);
-        const float2 halfRes = float2(mResolution) / 2.f;
-        float2 axisCenter = float2((minX + maxX) / 2.f, (minY + maxY) / 2.f);
-        int2 axisOffset = int2(math::round((maxX - minX) * halfRes.x), math::round((maxY - minY) * halfRes.y));
-        int2 axisCenterI = int2(math::round(axisCenter.x * resF.x), math::round(axisCenter.y * resF.y));
-
-        int2 minCoordinates = int2(axisCenterI.x - axisOffset.x, axisCenterI.y - axisOffset.y);
-        int2 maxCoordinates = int2(axisCenterI.x + axisOffset.x, axisCenterI.y + axisOffset.y);
-        minX = minCoordinates.x / resF.x;
-        minY = minCoordinates.y / resF.y;
-        maxX = maxCoordinates.x / resF.x;
-        maxY = maxCoordinates.y / resF.y;
-
-        /*
-        const float2 resF = float2(mResolution);
-        int2 minCoordinates = int2(math::floor(minX * resF.x), math::floor(minY * resF.y));
-        int2 maxCoordinates = int2(math::ceil(maxX * resF.x), math::ceil(maxY * resF.y));
-        minX = minCoordinates.x/ resF.x;
-        minY = minCoordinates.y / resF.y;
-        maxX = maxCoordinates.x/ resF.x;
-        maxY = maxCoordinates.y / resF.y;
-        */
-    #endif
-
+        float minX = camPosLV.x - offset.x;
+        float maxX = camPosLV.x + offset.x;
+        float minY = camPosLV.y - offset.y;
+        float maxY = camPosLV.y + offset.y;
+            
         lightMVP.projectionNoJitter = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
         lightMVP.spreadAngle = 1.0;
         break;
@@ -314,6 +184,7 @@ void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& set
 
     mNearFar = settings.nearFar;
     mCascadedSize = settings.cascadedSize;
+    mCascadedPutCameraOnGrid = settings.cascadedPutCameraOnGrid;
     mUseColoredTransparency = settings.enableColoredTransparency;
 
     mMidpointPercentage = settings.midpointPercentage;
@@ -339,6 +210,8 @@ bool TransparencyShadowMethod::GlobalShadowSettings::renderUI(Gui::Widgets& widg
     widget.tooltip("Global Near/Far values for all lights spotlights");
     widget.var("Cascaded Size", cascadedSize, 0.f, FLT_MAX, 0.1f);
     widget.tooltip("Radius for the cascade");
+    widget.checkbox("Update Cascade On Grid", cascadedPutCameraOnGrid);
+    widget.tooltip("Fixates the cascaded on an grid with the size of the shadow map resolution");
     widget.checkbox("Enable Colored Transparency", enableColoredTransparency);
     widget.tooltip("Enabled Colored transparency for all methods that support it");
 
