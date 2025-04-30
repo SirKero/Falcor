@@ -62,7 +62,7 @@ struct LinkedListIrregularZShader
         // Check if inside the SM
         if (any(shadowPos.xy < 0.0) || any(shadowPos.xy > 1.0)) {
             if (!isDirectional) {
-                return 0.f;
+                return -1.f;
             }
             validShadow = false;
         }
