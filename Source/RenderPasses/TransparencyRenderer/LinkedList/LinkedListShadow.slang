@@ -38,6 +38,7 @@ struct LinkedListShadow
     StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
     StructuredBuffer<LinkedListNeighborsNode> gLinkedListNeighbors[COUNT_LIGHTS];
     Texture2D<float> gMaskShadowMap;
+    SamplerState gMaskSampler;
 
     //Fetches the 
     float getLinkedVisibility(LinkedListNode n, float dist, uint lightIdx)
@@ -92,11 +93,25 @@ struct LinkedListShadow
         if (!validShadow)
             return -1.f;
 
-         //Use Opaque SM
+        // Use Opaque SM
+        float visibilityOpaqueSM = 1.0;
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
-            float shadowZ = gMaskShadowMap[uShadowPixel];
-            if(dist > shadowZ)
-                return float3(0);
+            #if LINKED_LIST_PCF
+                visibilityOpaqueSM = 0.0;
+                float4 shadowZ = gMaskShadowMap.Gather(gMaskSampler, gatherUV.xy);
+                [unroll]
+                for (uint i = 0; i < 4; i++) {
+                    if (dist <= shadowZ[i]) {
+                        visibilityOpaqueSM += gatherWeight[i];
+                    }
+                }
+                if (visibilityOpaqueSM <= 0)
+                    return float3(0);
+            #else
+                float shadowZ = gMaskShadowMap[uShadowPixel];
+                if(dist > shadowZ)
+                    return float3(0);
+            #endif
         }
 
         float3 visibility = 1.0;
@@ -110,7 +125,6 @@ struct LinkedListShadow
         LinkedListNode n = gLinkedListData[lightIdx][index];
         // traverse visibility until dist is reached
         
-
         #if LINKED_LIST_PCF
             float4 gatherVis = float4(1);
             while (n.depth < dist) {
@@ -142,7 +156,7 @@ struct LinkedListShadow
             visibility = getLinkedVisibility(n, dist, lightIdx);
         #endif
 
-        return visibility;
+        return min(visibility, visibilityOpaqueSM);
     }
     
 } gLinkedListShadow;

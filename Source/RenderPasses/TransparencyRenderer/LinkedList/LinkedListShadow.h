@@ -95,9 +95,11 @@ private:
     std::vector<ref<Buffer>> mLinkedListCounterCPU; // Counter for inserting points
 
     std::vector<ref<Buffer>> mLinkedListData;       // Transparency Data
+    std::vector<ref<Buffer>> mpLinkedListNeighbors; //Neighbor list for fast PCF traversal
+
+    ref<Sampler> mpPointSampler;    //Point Sampler for gather
 
     //TODO
-    std::vector<ref<Buffer>> mpLinkedListNeighbors;
     std::vector<ref<Buffer>> mpLinkedListArray;
     std::vector<ref<Texture>> mpLinkedListArrayOffsets;
  

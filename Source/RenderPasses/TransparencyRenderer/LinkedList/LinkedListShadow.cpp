@@ -45,6 +45,14 @@ LinkedListShadow::LinkedListShadow(ref<Device> pDevice, ref<Scene> pScene) : Tra
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
+    if (!mpPointSampler)
+    {
+        Sampler::Desc samplerDesc = {};
+        samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+        samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+        mpPointSampler = Sampler::create(mpDevice, samplerDesc);
+    }
+    FALCOR_ASSERT(mpPointSampler);
 }
 
 void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
@@ -349,6 +357,7 @@ void LinkedListShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex,
 
         //shadowVar["gShadowMask"] = maskTex;
         shadowVar["gMaskShadowMap"] = maskSM->asTexture();
+        shadowVar["gMaskSampler"] = mpPointSampler;
     }
 }
 
