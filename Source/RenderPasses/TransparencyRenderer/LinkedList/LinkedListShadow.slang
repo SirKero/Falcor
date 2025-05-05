@@ -132,8 +132,8 @@ struct LinkedListShadow
                 if (n.next == 0 || n.next >= gMaxBufferSize) break;
                 uint nextIndex = n.next;
                 n = gLinkedListData[lightIdx][n.next];
-                //if (n.depth < dist)
-                //    index = nextIndex;
+                if (n.depth < dist)
+                    index = nextIndex;
             }
             LinkedListNeighborsNode neighbor = gLinkedListNeighbors[lightIdx][index];
             uint zIndex = neighbor.right;

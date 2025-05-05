@@ -101,7 +101,6 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
-        defines.add("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
 
         mGenLinkedListShadowPip.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -184,7 +183,6 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
     mGenLinkedListShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
     mGenLinkedListShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
-    mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mpHaltonBuffer ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mJitterSampleCount));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
