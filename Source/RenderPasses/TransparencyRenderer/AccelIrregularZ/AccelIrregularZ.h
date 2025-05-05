@@ -69,10 +69,6 @@ public:
      */
     virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
 
-    /* Get Sample distribution buffer
-     */
-    virtual const ref<Buffer> getJitterSampleBuffer() const override { return mSamplePattern == SMSamplePattern::PerSampleHalton ?  mpHaltonBuffer : nullptr;}
-
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }    
 
 private:
@@ -91,8 +87,7 @@ private:
     ref<GpuFence> mpFence;                 ///< Fence for CPU/GPU syncs
     uint mStagingCount = 0;
 
-    //Sample Gen (+Jitter)
-    uint mNumHaltonSamples = 64; //Number of halton samples
+    //Sample Gen
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
     float mSampleOverestimate = 1.0f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
     bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
@@ -147,7 +142,6 @@ private:
     std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
     std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
     ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
-    ref<Buffer> mpHaltonBuffer;                                             //Buffer with precalculated Halton numbers
     
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture

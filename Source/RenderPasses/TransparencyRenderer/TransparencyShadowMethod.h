@@ -86,7 +86,7 @@ public:
         float softShadowsPositionRadius = 0.001f;
         float softShadowsDirectionsSpread = 1.f;
         bool cascadedPutCameraOnGrid = true;
-        SMSamplePattern samplePattern = SMSamplePattern::PerSampleHalton;
+        SMSamplePattern samplePattern = SMSamplePattern::MatrixHalton;
         uint jitterSampleCount = 16;
     };
 
@@ -165,9 +165,9 @@ public:
     */
     virtual const uint2 getShaderDispatchSize() const { return mResolution; }
 
-    /* Get Sample distribution buffer
-    */
-    virtual const ref<Buffer> getJitterSampleBuffer() const{return nullptr;}
+     /* Get Sample distribution buffer. Can be nullptr
+     */
+    const ref<Buffer> getPerSampleJitterBuffer() const { return mpHaltonBuffer; }
 
     bool globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings);
 
@@ -207,9 +207,10 @@ protected:
     bool mCascadedPutCameraOnGrid = true;
 
     //Jitter
-    SMSamplePattern mSamplePattern = SMSamplePattern::PerSampleHalton; // Sample Pattern
+    SMSamplePattern mSamplePattern = SMSamplePattern::MatrixHalton; // Sample Pattern
     ref<CPUSampleGenerator> mpCPUSampleGenerator; ///< Sample generator for uniform camera jitter.
-    uint mJitterSampleCount = 16;            // For CPU sample gen
+    uint mJitterSampleCount = 16;            // Number of jitter samples
+    ref<Buffer> mpHaltonBuffer;             //  GPU per-sample halton buffer
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
 

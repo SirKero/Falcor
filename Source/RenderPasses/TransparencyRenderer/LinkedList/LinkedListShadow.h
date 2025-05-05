@@ -81,11 +81,6 @@ private:
     bool mAccelUsePCF = false;
     bool mTransparencyBufferUsesColor = false; // Checks if the transparency buffer data size matches the global setting
 
-    //Jitter
-    bool mEnableHalton = false;
-    uint mNumHaltonSamples = 64; // Number of halton samples
-    ref<Buffer> mpHaltonBuffer;  // Buffer with precalculated Halton numbers
-
     //TODO
     bool mUseLinkedListPcf = false;
     bool mUseLinkedListArray = false;

@@ -236,21 +236,6 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             );
             mpLastFrameMaxSampleCount->setName("LastFrameMaxSampleDistribution");
         }
-
-        if (!mpHaltonBuffer || mpHaltonBuffer->getElementCount() != mNumHaltonSamples)
-        {
-            //Generate Halton Samples on CPU
-            auto haltonSampler = HaltonSamplePattern::create(mNumHaltonSamples);
-            std::vector<float2> haltonInitData(mNumHaltonSamples);
-            for (uint i = 0; i < mNumHaltonSamples; i++)
-                haltonInitData[i] = haltonSampler->next() + 0.5f; //Halton samples are in [-0.5, 0.5) but we want the samples in [0,1)
-
-            //Create and upload GPU buffer
-            mpHaltonBuffer = Buffer::createTyped<float2>(
-                mpDevice, mNumHaltonSamples, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, haltonInitData.data()
-            );
-            mpHaltonBuffer->setName("HaltonDataBuffer");
-        }
     }
 }
 
@@ -539,10 +524,10 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
-    mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::PerSampleHalton ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mpHaltonBuffer ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mJitterSampleCount));
     mGenAccelShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
@@ -825,13 +810,6 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         {
             if (auto gaussGroup = group.group("Blur Options"))
                 mpGaussianBlur->renderUI(gaussGroup);
-        }
-
-        if (mSamplePattern == SMSamplePattern::PerSampleHalton)
-        {
-            if (group.var("HaltonSamples", mNumHaltonSamples, 1u, 1024u, 1u))
-                mGenAccelShadowPip.pVars.reset();
-            group.tooltip("Number of Halton Samples");
         }
 
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);

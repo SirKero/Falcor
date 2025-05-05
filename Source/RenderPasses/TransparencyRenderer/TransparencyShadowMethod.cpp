@@ -48,6 +48,7 @@ TransparencyShadowMethod::TransparencyShadowMethod(ref<Device> pDevice, ref<Scen
             count++;
         }
     FALCOR_ASSERT(count <= 1); //More than 1 directional light?
+    updateJitterSamplePattern();
     updateSMMatrices(true);
 }
 
@@ -85,6 +86,29 @@ void TransparencyShadowMethod::updateSMMatrices(bool rebuild)
         mJitter = float2(0.5f); //Center
     }
 
+    //Per sample halton jitter
+    if (mSamplePattern == SMSamplePattern::PerSampleHalton)
+    {
+        if (!mpHaltonBuffer || mpHaltonBuffer->getElementCount() != mJitterSampleCount)
+        {
+            // Generate Halton Samples on CPU
+            auto haltonSampler = HaltonSamplePattern::create(mJitterSampleCount);
+            std::vector<float2> haltonInitData(mJitterSampleCount);
+            for (uint i = 0; i < mJitterSampleCount; i++)
+                haltonInitData[i] = haltonSampler->next() + 0.5f; // Halton samples are in [-0.5, 0.5) but we want the samples in [0,1)
+
+            // Create and upload GPU buffer
+            mpHaltonBuffer = Buffer::createTyped<float2>(
+                mpDevice, mJitterSampleCount, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, haltonInitData.data()
+            );
+            mpHaltonBuffer->setName("HaltonJitterSampleBuffer");
+        }
+    }
+    else if (mpHaltonBuffer)
+    {
+        mpHaltonBuffer.reset();
+    }
+    
     // Update view and projection matrices
     for (uint i = 0; i < lights.size(); i++)
     {

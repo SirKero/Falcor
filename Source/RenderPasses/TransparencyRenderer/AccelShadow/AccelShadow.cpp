@@ -177,21 +177,6 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
             );
         }
     }
-
-    if (!mpHaltonBuffer || mpHaltonBuffer->getElementCount() != mNumHaltonSamples)
-    {
-        // Generate Halton Samples on CPU
-        auto haltonSampler = HaltonSamplePattern::create(mNumHaltonSamples);
-        std::vector<float2> haltonInitData(mNumHaltonSamples);
-        for (uint i = 0; i < mNumHaltonSamples; i++)
-            haltonInitData[i] = haltonSampler->next() + 0.5f; // Halton samples are in [-0.5, 0.5) but we want the samples in [0,1)
-
-        // Create and upload GPU buffer
-        mpHaltonBuffer = Buffer::createTyped<float2>(
-            mpDevice, mNumHaltonSamples, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, haltonInitData.data()
-        );
-        mpHaltonBuffer->setName("HaltonDataBuffer");
-    }
 }
 
 std::array<float4, 4> AccelShadow::getCameraFrustumPlanes()
@@ -247,8 +232,8 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
     mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
     mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
-    mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mEnableHalton ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
+    mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mpHaltonBuffer ? "1" : "0");
+    mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mJitterSampleCount));
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
@@ -438,14 +423,6 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
         group.tooltip("Data formats; For more info see AccelShadowData.slang");
         group.checkbox("Use Frustum Culling", mAccelUseFrustumCulling);
         group.tooltip("Uses Frustum Culling to reject the storage of the Accel SM samples");
-
-        group.checkbox("Enable Jitter", mEnableHalton);
-        if (mEnableHalton)
-        {
-            if (group.var("HaltonSamples", mNumHaltonSamples, 1u, 1024u, 1u))
-                mGenAccelShadowPip.pVars.reset();
-            group.tooltip("Number of Halton Samples");
-        }
 
         group.checkbox("Use PCF", mAccelUsePCF);
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);

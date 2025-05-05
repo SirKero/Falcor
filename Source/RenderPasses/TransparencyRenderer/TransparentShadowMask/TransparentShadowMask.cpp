@@ -221,7 +221,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
 
     uint2 maxDispatchDim = pTransparencyShadowMethod->getShaderDispatchSize() * mOpaqueImportanceSMMultFactor;
    
-    auto pHaltonBuffer = pTransparencyShadowMethod->getJitterSampleBuffer();
+    auto pHaltonBuffer = pTransparencyShadowMethod->getPerSampleJitterBuffer();
     // Prepare Resources
     {
         size_t maxDispatchDim1D = maxDispatchDim.x * maxDispatchDim.y;
@@ -403,7 +403,6 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(
 
     uint2 targetDim = pTransparencyShadowMethod->getShaderDispatchSize();
 
-    //auto pHaltonBuffer = pTransparencyShadowMethod->getJitterSampleBuffer();
     // Prepare Resources
     {
         if (!mpMaskOpaqueShadowMap || mpMaskOpaqueShadowMap->getWidth() != targetDim.x || mpMaskOpaqueShadowMap->getHeight() != targetDim.y)
