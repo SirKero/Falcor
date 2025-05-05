@@ -112,7 +112,6 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
-        defines.add("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
 
         mGenAccelShadowPip.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -521,7 +520,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
     mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
@@ -651,7 +649,6 @@ DefineList AccelIrregularZ::getDefines()
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
     defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
-    defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
     defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
     defines.add("ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     return defines;

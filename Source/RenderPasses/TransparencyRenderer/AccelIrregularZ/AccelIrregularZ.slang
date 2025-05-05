@@ -11,10 +11,6 @@ __exported import Scene.Intersection;
 #define COUNT_LIGHTS 1
 #endif
 
-#ifndef SHADOW_ACCEL_PCF
-#define SHADOW_ACCEL_PCF 0
-#endif
-
 #ifndef ACCEL_USE_RAY_INLINE
 #define ACCEL_USE_RAY_INLINE 1
 #endif
@@ -82,11 +78,6 @@ struct AccelIrregularZShader
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
 
-    inline void handelAccelShadowHit(inout AccelShadowRayData rayData, const SHADOW_DATA_FORMAT transparency) {
-        rayData.visibility += transparency;
-        rayData.sampleCount++;
-    }
-
     void traceAccelShadowInline(inout AccelShadowRayData rayData, uint lightIdx, const RayDesc ray) {
         RayQuery<RAY_FLAG_NONE> rayQuery;
         uint rayFlags = 0;
@@ -96,17 +87,14 @@ struct AccelIrregularZShader
         // Start tracing
         while (rayQuery.Proceed()) {
             AABB aabb = gShadowAABBs[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
-            AccelShadowAttribs attribs = {};
-            #if SHADOW_ACCEL_PCF
-                attribs.pixel = (aabb.minPoint.xy + aabb.maxPoint.xy) / 2.0; // Pixel center
-            #endif
 
             // Check if hit is valid
             if (!aabb.contains(ray.Origin))
                 continue;
 
             SHADOW_DATA_FORMAT transparency = gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
-            handelAccelShadowHit(rayData, transparency);
+            rayData.visibility += transparency;
+            rayData.sampleCount += 1;
         }
     }
 
@@ -144,13 +132,7 @@ struct AccelIrregularZShader
             validShadow &= validBackprojection;
         }
 
-    #if SHADOW_ACCEL_PCF
-        float2 gatherUV;
-        float4 w = getGatherWeights(shadowPos.xy, gSMSize.x, gatherUV);
-        const float2 shadowPixel = gatherUV.xy * gSMSize;
-    #else
         const float2 shadowPixel = shadowPos.xy * gSMSize;//floor(shadowPos.xy * gSMSize) + 0.5;
-    #endif
         float dist = isDirectional ? shadowPos.z : shadowPos.w;
 
         // Add access
@@ -259,12 +241,7 @@ struct AccelIrregularZShader
         ray.TMin = 0;
         ray.TMax = 1e-10;
 
-        uint rayFlags = 0;
-        uint instanceMask = 1 << lightIdx;
-        //if (kAccelUseRayInline) //TODO Look into supporting TraceRay again
-            traceAccelShadowInline(rayData, lightIdx, ray);
-        //else
-        //    TraceRay(gShadowAS, rayFlags, instanceMask /* instanceInclusionMask */, 2 /* hitIdx */, 1, 2 /* missIdx */, ray, rayData);
+        traceAccelShadowInline(rayData, lightIdx, ray);
 
         SHADOW_DATA_FORMAT visibility = (rayData.sampleCount > 0) ? (rayData.visibility / rayData.sampleCount) : 1.0;
             

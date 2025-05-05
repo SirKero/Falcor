@@ -76,7 +76,6 @@ static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; //Depth bias applie
 static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;
 static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
-static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
 static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
