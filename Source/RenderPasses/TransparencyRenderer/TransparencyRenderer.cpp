@@ -200,7 +200,6 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     for (auto& method : mShadowMethods)
     {
         method->setShadowLODMode(mShadowLodMode);
-        method->setGlobalShadowSettings(mShadowSettings);
         method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
     }        
     if (mpShadowMask)
@@ -311,7 +310,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     {
         if (auto group = widget.group("General Shadow Map Settings"))
         {
-            mShadowSettings.renderUI(group);
+            mShadowMethods[mSelectedShadowMethod]->globalSettingsRenderUI(group, mShadowSettings);
         }
     }
 
@@ -479,7 +478,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     {
         if (auto group = widget.group("Global Shadow Map Settings"))
         {
-            mShadowSettings.renderUI(group);
+            mShadowMethods[mSelectedShadowMethod]->globalSettingsRenderUI(group, mShadowSettings);
         }
     }
 

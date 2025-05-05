@@ -27,9 +27,7 @@
  **************************************************************************/
 #include "LinkedListIrregularZ.h"
 #include "Utils/Math/FalcorMath.h"
-#include "Utils/SampleGenerators/DxSamplePattern.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
-#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
 
 namespace
 {
@@ -85,14 +83,6 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
 
     mResolutionChanged = false;
-
-    // Set Jitter and update Matricies
-    if (mpCPUSampleGenerator)
-    {
-        float2 jitter = mpCPUSampleGenerator->next();
-        jitter *= 1.0f / float2(mResolution);
-        setJitter(jitter);
-    }
 
     updateSMMatrices();
 
@@ -472,7 +462,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     mGenLinkedListShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
     mGenLinkedListShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mNumHaltonSamples));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
-    mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::Halton ? "1" : "0");
+    mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mSamplePattern == SMSamplePattern::PerSampleHalton ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenLinkedListShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
@@ -592,8 +582,8 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
-        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjectionNoJitter;
-        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjectionNoJitter;
+        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
+        shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
         shadowVar["gAccessCounter"][i] = mAccessTextures[i];
     }
     const auto accelDataSize = lights.size();
@@ -715,21 +705,12 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
                 mpGaussianBlur->renderUI(gaussGroup);
         }
 
-
-        bool patternChanged = group.dropdown("Subpixel Sample Pattern", mSamplePattern);
-        group.tooltip("Changes the Subpixel sample pattern for shadow map generation. Use the option below to change the box size");
-        if (mSamplePattern == SMSamplePattern::Halton)
+        if (mSamplePattern == SMSamplePattern::PerSampleHalton)
         {
             if (group.var("HaltonSamples", mNumHaltonSamples, 1u, 1024u, 1u))
                 mGenLinkedListShadowPip.pVars.reset();
             group.tooltip("Number of Halton Samples");
         }
-        else if (mSamplePattern != SMSamplePattern::Center)
-        {
-            patternChanged |= group.var("MatrixSamples", mNumCPUSampleGenSamples, 1u, 1024u, 1u);
-        }
-        if (patternChanged)
-            updateSamplePattern();
 
         group.checkbox("Debug Show Importance", mDebugEnableShowImportance);
         if (mDebugEnableShowImportance)
@@ -758,35 +739,6 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
     #endif
     return dirty;
 }
-
-static ref<CPUSampleGenerator> createSamplePattern(LinkedListIrregularZ::SMSamplePattern type, uint32_t sampleCount)
-{
-    switch (type)
-    {
-    case LinkedListIrregularZ::SMSamplePattern::Center:
-    case LinkedListIrregularZ::SMSamplePattern::Halton:
-        return nullptr;
-    case LinkedListIrregularZ::SMSamplePattern::MatrixDirectX:
-        return DxSamplePattern::create(sampleCount);
-    case LinkedListIrregularZ::SMSamplePattern::MatrixHalton:
-        return HaltonSamplePattern::create(sampleCount);
-    case LinkedListIrregularZ::SMSamplePattern::MatrixStratified:
-        return StratifiedSamplePattern::create(sampleCount);
-    default:
-        FALCOR_UNREACHABLE();
-        return nullptr;
-    }
-}
-
-void LinkedListIrregularZ::updateSamplePattern()
-{
-    mpCPUSampleGenerator = createSamplePattern(mSamplePattern, mNumCPUSampleGenSamples);
-    if (mpCPUSampleGenerator)
-        mNumCPUSampleGenSamples = mpCPUSampleGenerator->getSampleCount();
-    else
-        setJitter(float2(0)); // reset jitter
-}
-
 
 void LinkedListIrregularZ::debugPass(
     RenderContext* pRenderContext,

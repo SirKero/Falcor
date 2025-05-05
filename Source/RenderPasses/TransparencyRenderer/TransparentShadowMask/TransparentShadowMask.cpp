@@ -174,7 +174,7 @@ void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderConte
         pRenderContext->clearFbo(mGenerateMaskPip.pFBO.get(), float4(0.f), 1.f, 0);
 
         //Set shader data
-        var["CB"]["gViewProjection"] = lightMVPs[i].viewProjectionNoJitter;
+        var["CB"]["gViewProjection"] = lightMVPs[i].viewProjection;
 
         mpScene->rasterize(pRenderContext, mGenerateMaskPip.pState.get(), mGenerateMaskPip.pVars.get(), RasterizerState::CullMode::None,meshRenderMode, !mEnableBlacklistWithMaterialFlag);
     }

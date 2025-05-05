@@ -70,37 +70,14 @@ public:
 
     /* Get Sample distribution buffer
      */
-    virtual const ref<Buffer> getJitterSampleBuffer() const override {return mSamplePattern == SMSamplePattern::Halton ? mpHaltonBuffer : nullptr;}
+    virtual const ref<Buffer> getJitterSampleBuffer() const override {return mSamplePattern == SMSamplePattern::PerSampleHalton ? mpHaltonBuffer : nullptr;}
 
     const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
-
-    enum class SMSamplePattern : uint
-    {
-        Center = 0,
-        Halton = 1,
-        MatrixDirectX = 2,
-        MatrixHalton = 3,
-        MatrixStratified = 4,
-    };
-
-    FALCOR_ENUM_INFO(
-        SMSamplePattern,
-        {
-            {SMSamplePattern::Center, "Center"},
-            {SMSamplePattern::Halton, "Halton"},
-            {SMSamplePattern::MatrixDirectX, "MatrixDirectX"},
-            {SMSamplePattern::MatrixHalton, "MatrixHalton"},
-            {SMSamplePattern::MatrixStratified, "MatrixStratified"},
-        }
-    );
-
 private:
     void prepareResources(RenderContext* pRenderContext);
 
     // Funktion that generates the profiler passes in case they are not executed this frame
     void dummyProfileGeneration(RenderContext* pRenderContext);
-
-    void updateSamplePattern();
 
     //Runtime
     uint mFrameCount = 0;
@@ -112,11 +89,8 @@ private:
     uint mStagingCount = 0;
 
     //Sample Gen (+Jitter)
-    ref<CPUSampleGenerator> mpCPUSampleGenerator; ///< Sample generator for uniform camera jitter.
-    uint mNumCPUSampleGenSamples = 16;            // For CPU sample gen
     std::vector<uint> mHaltonSampleCount;
     uint mNumHaltonSamples = 64; //Number of halton samples
-    SMSamplePattern mSamplePattern = SMSamplePattern::Halton; //Sample Pattern
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
     float mSampleOverestimate = 1.00f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
     bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
@@ -169,4 +143,3 @@ private:
     ref<ComputePass> mpDebugShowImportancePass;     //Debug show importance map or sample distribution
     RayTracingPipeline mGenLinkedListShadowPip; //RayTracingPipeline
 };
-FALCOR_ENUM_REGISTER(LinkedListIrregularZ::SMSamplePattern);

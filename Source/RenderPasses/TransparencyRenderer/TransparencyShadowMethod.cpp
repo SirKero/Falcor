@@ -27,6 +27,9 @@
  **************************************************************************/
 #include "TransparencyShadowMethod.h"
 #include "Utils/Math/FalcorMath.h"
+#include "Utils/SampleGenerators/DxSamplePattern.h"
+#include "Utils/SampleGenerators/HaltonSamplePattern.h"
+#include "Utils/SampleGenerators/StratifiedSamplePattern.h"
 
 
 namespace
@@ -69,6 +72,17 @@ void TransparencyShadowMethod::updateSMMatrices(bool rebuild)
     {
         mShadowMapMVP.resize(lights.size());
         rebuildAll = true;
+    }
+
+    //Set Jitter
+    if (mpCPUSampleGenerator)
+    {
+        mJitter = mpCPUSampleGenerator->next();
+        rebuildAll = true;
+    }
+    else
+    {
+        mJitter = float2(0.5f); //Center
     }
 
     // Update view and projection matrices
@@ -121,17 +135,18 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
         if (mCascadedPutCameraOnGrid)
         {
             const float2 resF = float2(mResolution);
-            float2 sizePixel = (mCascadedSize / (resF/2.f));
-            float2 halfPixel = sizePixel / 2.f;
+            float2 sizePixel = (mCascadedSize / (resF / 2.f));
+            float2 halfPixel = sizePixel * 0.5f;
             //Put Camera positon on grid
             camPosLV = (math::round(camPosLV / sizePixel) + halfPixel) * sizePixel;
         }
+
         float minX = camPosLV.x - offset.x;
         float maxX = camPosLV.x + offset.x;
         float minY = camPosLV.y - offset.y;
         float maxY = camPosLV.y + offset.y;
             
-        lightMVP.projectionNoJitter = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
+        lightMVP.projection = math::ortho(minX, maxX, minY, maxY, -1.f * maxZ, -1.f * minZ); // set projection
         lightMVP.spreadAngle = 1.0;
         break;
     }
@@ -142,7 +157,7 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
         float3 lightTarget = lightMVP.pos + lightData.dirW;
         const float3 up = abs(lightData.dirW.y) == 1 ? float3(0, 0, 1) : float3(0, 1, 0);
         lightMVP.view = math::matrixFromLookAt(lightData.posW, lightTarget, up);
-        lightMVP.projectionNoJitter = math::perspective(openingAngle * 2, 1.f, mNearFar.x, mNearFar.y);
+        lightMVP.projection = math::perspective(openingAngle * 2, 1.f, mNearFar.x, mNearFar.y);
         lightMVP.spreadAngle = std::atan(2.0f * std::tan(openingAngle * 0.5f) / mResolution.y);
         break;
     }
@@ -153,14 +168,14 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
         );
         break;
     }
+
+    //Set Jitter for projection
+    float2 jitter = (mJitter * 2.f) / float2(mResolution);
+    float4x4 jitterMat = math::matrixFromTranslation(float3(jitter.x, jitter.y, 0.0f));
+    lightMVP.projection = math::mul(jitterMat, lightMVP.projection);
 }
 
 void TransparencyShadowMethod::updateMVPAndJitter(LightMVP& lightMVP) {
-
-    float4x4 jitterMat = math::matrixFromTranslation(float3(2.0f * mJitter.x, 2.0f * mJitter.y, 0.0f));
-    lightMVP.projection = math::mul(jitterMat, lightMVP.projectionNoJitter);
-
-    lightMVP.viewProjectionNoJitter = math::mul(lightMVP.projectionNoJitter, lightMVP.view);
     lightMVP.viewProjection = math::mul(lightMVP.projection, lightMVP.view);
     lightMVP.invViewProjection = math::inverse(lightMVP.viewProjection);
     lightMVP.invProjection = math::inverse(lightMVP.projection);
@@ -193,9 +208,13 @@ void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& set
     mEnableRandomSoftShadows = settings.enableSoftShadows;
     mRandomSoftShadowsPositionRadius = settings.softShadowsPositionRadius;
     mRandomSoftShadowsDirSpread = settings.softShadowsDirectionsSpread;
+
+    mSamplePattern = settings.samplePattern;
+    mJitterSampleCount = settings.jitterSampleCount;
 }
 
-bool TransparencyShadowMethod::GlobalShadowSettings::renderUI(Gui::Widgets& widget) {
+bool TransparencyShadowMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings)
+{
     #if SIMPLE_UI
     widget.dropdown("Resolution", kSMResolutionDropdown, resolution);
     widget.var("Shadow Map Extend", cascadedSize, 0.f, FLT_MAX, 0.1f);
@@ -205,21 +224,62 @@ bool TransparencyShadowMethod::GlobalShadowSettings::renderUI(Gui::Widgets& widg
     widget.var("Depth Bias", depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
     widget.tooltip("Depth bias for Dual Depth Shadow Maps. Min(depth + depthBias, midpoint) is used.");
     #else
-    widget.dropdown("ShadowResolution", kSMResolutionDropdown, resolution);
-    widget.var("Near/Far", nearFar, 0.0f, FLT_MAX, 0.001f);
+    widget.dropdown("ShadowResolution", kSMResolutionDropdown, settings.resolution);
+    widget.var("Near/Far", settings.nearFar, 0.0f, FLT_MAX, 0.001f);
     widget.tooltip("Global Near/Far values for all lights spotlights");
-    widget.var("Cascaded Size", cascadedSize, 0.f, FLT_MAX, 0.1f);
+    widget.var("Cascaded Size", settings.cascadedSize, 0.f, FLT_MAX, 0.1f);
     widget.tooltip("Radius for the cascade");
-    widget.checkbox("Update Cascade On Grid", cascadedPutCameraOnGrid);
+    widget.checkbox("Update Cascade On Grid", settings.cascadedPutCameraOnGrid);
     widget.tooltip("Fixates the cascaded on an grid with the size of the shadow map resolution");
-    widget.checkbox("Enable Colored Transparency", enableColoredTransparency);
+    //SM jitter settings
+    bool jitterChanged = widget.dropdown("Shadow Map Jitter Pattern", settings.samplePattern);
+    widget.tooltip("Sets the jitter pattern for the shadow map");
+    if (settings.samplePattern != SMSamplePattern::Center)
+    {
+        jitterChanged |= widget.var("Jitter Sample Count", settings.jitterSampleCount, 1u, 256u, 1u);
+    }
+    
+    widget.checkbox("Enable Colored Transparency", settings.enableColoredTransparency);
     widget.tooltip("Enabled Colored transparency for all methods that support it");
 
-    widget.var("Midpoint Percentage", midpointPercentage, 0.f, 1.f, 0.001f);
+    widget.var("Midpoint Percentage", settings.midpointPercentage, 0.f, 1.f, 0.001f);
     widget.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
-    widget.var("Depth Bias", depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
+    widget.var("Depth Bias", settings.depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
     widget.tooltip("Depth bias for midpoint shadow maps. Min(depth + depthBias, midpoint) is used.");
     #endif
 
+    setGlobalShadowSettings(settings);
+
+    if (jitterChanged)
+    {
+        updateJitterSamplePattern();
+    }
+
     return false;
+}
+
+static ref<CPUSampleGenerator> createSamplePattern(TransparencyShadowMethod::SMSamplePattern type, uint32_t sampleCount)
+{
+    switch (type)
+    {
+    case TransparencyShadowMethod::SMSamplePattern::Center:
+    case TransparencyShadowMethod::SMSamplePattern::PerSampleHalton:
+        return nullptr;
+    case TransparencyShadowMethod::SMSamplePattern::MatrixDirectX:
+        return DxSamplePattern::create(sampleCount);
+    case TransparencyShadowMethod::SMSamplePattern::MatrixHalton:
+        return HaltonSamplePattern::create(sampleCount);
+    case TransparencyShadowMethod::SMSamplePattern::MatrixStratified:
+        return StratifiedSamplePattern::create(sampleCount);
+    default:
+        FALCOR_UNREACHABLE();
+        return nullptr;
+    }
+}
+
+void TransparencyShadowMethod::updateJitterSamplePattern()
+{
+    mpCPUSampleGenerator = createSamplePattern(mSamplePattern, mJitterSampleCount);
+    if (mpCPUSampleGenerator)
+        mJitterSampleCount = mpCPUSampleGenerator->getSampleCount();
 }

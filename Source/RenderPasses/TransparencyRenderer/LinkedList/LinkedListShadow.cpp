@@ -241,7 +241,7 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
         var["CB"]["gSMRes"] = mResolution;
-        var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjectionNoJitter;
+        var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
         var["CB"]["gSpreadAngle"] = mShadowMapMVP[i].spreadAngle;
 
@@ -336,7 +336,7 @@ void LinkedListShadow::setShaderData(const ShaderVar& var)
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
-        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjectionNoJitter;
+        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
     }
 
     const auto accelDataSize = lights.size();

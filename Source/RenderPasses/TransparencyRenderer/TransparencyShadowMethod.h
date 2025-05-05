@@ -46,13 +46,48 @@ public:
         float3 pos = float3(0);
         float spreadAngle = 0;
         float4x4 view = float4x4();
-        float4x4 projectionNoJitter = float4x4();
         float4x4 projection = float4x4();
         float4x4 viewProjection = float4x4();
-        float4x4 viewProjectionNoJitter = float4x4();
         float4x4 invViewProjection = float4x4();
         float4x4 invProjection = float4x4();
         float4x4 invView = float4x4();
+    };
+
+    enum class SMSamplePattern : uint
+    {
+        Center = 0,
+        PerSampleHalton = 1,
+        MatrixDirectX = 2,
+        MatrixHalton = 3,
+        MatrixStratified = 4,
+    };
+
+    FALCOR_ENUM_INFO(
+        SMSamplePattern,
+        {
+            {SMSamplePattern::Center, "Center"},
+            {SMSamplePattern::PerSampleHalton, "PerSampleHalton"},
+            {SMSamplePattern::MatrixDirectX, "MatrixDirectX"},
+            {SMSamplePattern::MatrixHalton, "MatrixHalton"},
+            {SMSamplePattern::MatrixStratified, "MatrixStratified"},
+        }
+    );
+
+    //Global shadow settings valid for every method
+    struct GlobalShadowSettings
+    {
+        uint resolution = 512u;
+        float2 nearFar = float2(0.1f, 60.f);
+        float cascadedSize = 20.f;
+        float midpointPercentage = 0.5f;
+        float depthBias = 1e-2f;
+        bool enableColoredTransparency = false;
+        bool enableSoftShadows = false;
+        float softShadowsPositionRadius = 0.001f;
+        float softShadowsDirectionsSpread = 1.f;
+        bool cascadedPutCameraOnGrid = true;
+        SMSamplePattern samplePattern = SMSamplePattern::PerSampleHalton;
+        uint jitterSampleCount = 16;
     };
 
     /** Generate resources needed to evaluate the Shadow Method (e.g. Shadow Map)
@@ -97,10 +132,6 @@ public:
      */
     void setNearFar(const float2 nearFar);
 
-    /** Set Camera Jitter
-    */
-    void setJitter(float2 jitter) { mJitter = jitter; }
-
     /** Set Soft shadow parameters
     */
     void setSoftShadowParameter(bool enabled, float positionRadius, float directionalSpread)
@@ -138,24 +169,9 @@ public:
     */
     virtual const ref<Buffer> getJitterSampleBuffer() const{return nullptr;}
 
-    struct GlobalShadowSettings
-    {
-        uint resolution = 512u;
-        float2 nearFar = float2(0.1f, 60.f);
-        float cascadedSize = 20.f;
-        float midpointPercentage = 0.5f;
-        float depthBias = 1e-2f;
-        bool enableColoredTransparency = false;
-        bool enableSoftShadows = false;
-        float softShadowsPositionRadius = 0.001f;
-        float softShadowsDirectionsSpread = 1.f;
-        bool cascadedPutCameraOnGrid = true;
-
-        bool renderUI(Gui::Widgets& widget);
-    };
+    bool globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings);
 
     void setGlobalShadowSettings(GlobalShadowSettings& settings);
-
 protected:
     static const uint kBlurKernelWidthInit = 5;
     static const bool kBlurSigmaInit = 1.f;
@@ -168,6 +184,8 @@ protected:
     virtual void updateViewProjection(LightMVP& lightMVP, ref<Light> pLight);
 
     virtual void updateMVPAndJitter(LightMVP& lightMVP);
+
+    void updateJitterSamplePattern();
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
@@ -187,6 +205,11 @@ protected:
 
     float mCascadedSize = 50.f;
     bool mCascadedPutCameraOnGrid = true;
+
+    //Jitter
+    SMSamplePattern mSamplePattern = SMSamplePattern::PerSampleHalton; // Sample Pattern
+    ref<CPUSampleGenerator> mpCPUSampleGenerator; ///< Sample generator for uniform camera jitter.
+    uint mJitterSampleCount = 16;            // For CPU sample gen
 
     std::vector<LightMVP> mShadowMapMVP;    //Collection of all possible view/projection matrices from each light
 
@@ -229,3 +252,5 @@ protected:
         }
     };
 };
+
+FALCOR_ENUM_REGISTER(TransparencyShadowMethod::SMSamplePattern);
