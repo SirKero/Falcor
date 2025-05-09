@@ -36,7 +36,7 @@ struct LinkedListIrregularZShader
     Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
-    Buffer<float> gMaskShadowMap;
+    Buffer<float> gMaskShadowMap[COUNT_LIGHTS];
 
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
@@ -187,8 +187,7 @@ struct LinkedListIrregularZShader
             }
 
             if(selectedMaskISMIndex < gISMMaxSize * kMaskISMMultFactor){
-                uint maskIndex = selectedMaskISMIndex + gMaxBufferSize * kMaskISMMultFactor * lightIdx;
-                float maskSMDepth = gMaskShadowMap[selectedMaskISMIndex];
+                float maskSMDepth = gMaskShadowMap[lightIdx][selectedMaskISMIndex];
                 if (maskSMDepth <= dist)
                     return float3(0.0);
             }

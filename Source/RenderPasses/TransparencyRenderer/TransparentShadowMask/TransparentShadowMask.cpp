@@ -220,22 +220,20 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
     auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
 
     uint2 maxDispatchDim = pTransparencyShadowMethod->getShaderDispatchSize() * mOpaqueImportanceSMMultFactor;
-   
+    
     auto pHaltonBuffer = pTransparencyShadowMethod->getPerSampleJitterBuffer();
     // Prepare Resources
     {
         size_t maxDispatchDim1D = maxDispatchDim.x * maxDispatchDim.y;
-        if (!mpMaskOpaqueImportanceShadowMap ||
-            mpMaskOpaqueImportanceShadowMap->getSize() != maxDispatchDim1D * sizeof(float) * lights.size())
+        if (mMaskOpaqueImportanceShadowMaps.size() != lights.size() || mISMLastFrameBufferSize != maxDispatchDim1D)
         {
-            mpMaskOpaqueImportanceShadowMap = Buffer::create(mpDevice, maxDispatchDim1D * sizeof(float) * lights.size());
-            /*
-            mpMaskOpaqueShadowMap = Texture::create2D(
-                mpDevice, smRes.x, smRes.y, ResourceFormat::R32Float, lights.size(), 1u, nullptr,
-                ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-            );
-            */
-            mpMaskOpaqueImportanceShadowMap->setName("TransparencyMaskOpaqueImportanceShadowMap");
+            mISMLastFrameBufferSize = maxDispatchDim1D;
+            mMaskOpaqueImportanceShadowMaps.resize(lights.size());
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                mMaskOpaqueImportanceShadowMaps[i] = Buffer::create(mpDevice, maxDispatchDim1D * sizeof(float));
+                mMaskOpaqueImportanceShadowMaps[i]->setName("TransparencyMaskOpaqueImportanceShadowMap_" + std::to_string(i));
+            }
         }
 
         if (!mpMaskSampler)
@@ -346,7 +344,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
 
         var["gMask"] = mpTransparentShadowMask;
         var["gSampleDistribution"] = sampleDistribution[i];
-        var["gShadowMap"] = mpMaskOpaqueImportanceShadowMap;
+        var["gShadowMap"] = mMaskOpaqueImportanceShadowMaps[i];
         var["gMaskSampler"] = mpMaskSampler;
         var["gHaltonSamples"] = pHaltonBuffer;
         var["gDispatchFeedbackBuffer"] = mDispatchFeedbackBuffers[mStagingCount].gpu;

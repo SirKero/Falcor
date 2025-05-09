@@ -55,7 +55,7 @@ public:
     ref<Texture> getMask() const { return mpTransparentShadowMask; }
 
     //Get layered mask shadow map
-    ref<Buffer> getMaskImportanceShadowMap() const { return mpMaskOpaqueImportanceShadowMap; }
+    std::vector<ref<Buffer>>& getMaskImportanceShadowMap() { return mMaskOpaqueImportanceShadowMaps; }
 
     //Regular shadow map
     ref<Texture> getMaskShadowMap() const { return mpMaskOpaqueShadowMap; }
@@ -98,6 +98,7 @@ private:
     //Runtime
     ref<Device> mpDevice;
     ref<Scene> mpScene;
+    uint mISMLastFrameBufferSize;   //<To rebuild buffer if size has changed
 
     uint mTemporalCounter = 0;  //< Current frame counter for the temporal mask 
     uint mFrameCount = 0;
@@ -111,7 +112,7 @@ private:
     //Buffer and Textures
     ref<Texture> mpTransparentShadowMaskRaster; //2D Array containing the masks for all shadow maps
     ref<Texture> mpTransparentShadowMask; //Containing the temporally accumulated shadow masks
-    ref<Buffer> mpMaskOpaqueImportanceShadowMap;         //Importance shadow map with only opaque objects
+    std::vector<ref<Buffer>> mMaskOpaqueImportanceShadowMaps;         //Importance shadow map with only opaque objects
     ref<Texture> mpMaskOpaqueShadowMap;          // Importance shadow map with only opaque objects
     ref<Sampler> mpMaskSampler;             //Mask sampler for the gen pass
 

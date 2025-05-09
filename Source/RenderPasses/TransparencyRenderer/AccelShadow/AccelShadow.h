@@ -50,7 +50,7 @@ public:
 
     /** Additional mask to reject the backprojectio
      */
-    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable = true) override;
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable = true) override;
 
     /** Render UI for the method
      */

@@ -73,7 +73,7 @@ struct AccelIrregularZShader
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
-    Buffer<float> gMaskShadowMap;
+    Buffer<float> gMaskShadowMap[COUNT_LIGHTS];
 
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
@@ -227,8 +227,7 @@ struct AccelIrregularZShader
 
             // Check if index is bigger than max size. Can happen if sample count increases drastically compaired to previous frame
             if (choosenSampleCount > 0 && (selectedIndex < gMaxBufferSize * kMaskISMMultFactor)) {
-                uint maskIndex = selectedIndex + gMaxBufferSize * kMaskISMMultFactor * lightIdx;
-                float maskSMDepth = gMaskShadowMap[maskIndex];
+                float maskSMDepth = gMaskShadowMap[lightIdx][selectedIndex];
                 if (maskSMDepth <= dist)
                     return float3(0.0);
             }

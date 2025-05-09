@@ -331,15 +331,14 @@ void LinkedListShadow::setShaderData(const ShaderVar& var)
     }
 }
 
-void LinkedListShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable)
+void LinkedListShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
 {
     mUseOpaqueSM = enable;
     if (mUseOpaqueSM)
     {
         auto shadowVar = var["gLinkedListShadow"];
 
-        //shadowVar["gShadowMask"] = maskTex;
-        shadowVar["gMaskShadowMap"] = maskSM->asTexture();
+        shadowVar["gMaskShadowMap"] = maskSM;
         shadowVar["gMaskSampler"] = mpPointSampler;
     }
 }

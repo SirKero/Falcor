@@ -354,14 +354,14 @@ void AccelShadow::setShaderData(const ShaderVar& var) {
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
 }
 
-void AccelShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable)
+void AccelShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
 {
     mUseOpaqueSM = enable;
     if (mUseOpaqueSM)
     {
         auto shadowVar = var["gAccelShadow"];
 
-        shadowVar["gMaskShadowMap"] = maskSM->asTexture();
+        shadowVar["gMaskShadowMap"] = maskSM;
         shadowVar["gMaskSampler"] = mpPointSampler;
     }
 }

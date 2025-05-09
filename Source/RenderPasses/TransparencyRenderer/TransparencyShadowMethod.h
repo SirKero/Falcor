@@ -105,7 +105,8 @@ public:
 
     /** Some methods can use an additional mask, this is set here
     */
-    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Resource> maskSM, bool enable = true) {}
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable = true) {}
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, std::vector<ref<Buffer>> &maskISM, bool enable = true) {}
 
     /** Render UI for the method
     */
