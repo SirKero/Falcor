@@ -127,12 +127,13 @@ void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderConte
 
     auto var = mGenerateMaskPip.pVars->getRootVar();
 
-    auto meshRenderMode = RasterizerState::MeshRenderMode::SkipOpaque | RasterizerState::MeshRenderMode::SkipParticleCamera;
+   
 
     //Raster pass over every light
     for (uint i = 0; i < lights.size(); i++)
     {
         FALCOR_PROFILE(pRenderContext, "Rasterize_Semi-Transparent: " + lights[i]->getName());
+        auto meshRenderMode = RasterizerState::MeshRenderMode::SkipOpaque | RasterizerState::MeshRenderMode::SkipParticleCamera;
         auto& lightData = lights[i]->getData();
 
         // Get best fitting light direction for particles
