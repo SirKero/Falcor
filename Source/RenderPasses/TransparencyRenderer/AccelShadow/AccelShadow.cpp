@@ -412,6 +412,9 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
                 group2.separator();
             }
         }
+        mResolutionChanged |= group.var("Buffer size (Res x this)", mAccelApproxNumElementsPerPixel, 1u, 64u, 1u);
+        group.tooltip("Multiplier for the Data buffer (how many hits on average per pixel)");
+
         group.checkbox("Use CPU Counter optimization", mAccelShadowUseCPUCounterOptimization);
         group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size.");
         if (mAccelShadowUseCPUCounterOptimization)

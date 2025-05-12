@@ -74,7 +74,7 @@ private:
     uint mStagingCount = 0;
 
     // Accel shadow settings
-    static const uint mAccelApproxNumElementsPerPixel = 4u;
+    uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;

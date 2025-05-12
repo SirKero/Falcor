@@ -480,6 +480,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         {
             mShadowMethods[mSelectedShadowMethod]->globalSettingsRenderUI(group, mShadowSettings);
         }
+        mShadowMethods[mSelectedShadowMethod]->setGlobalShadowSettings(mShadowSettings);
     }
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing && !mShadowMethods.empty() && mShadowMethods[mSelectedShadowMethod])
@@ -541,6 +542,9 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
             mSelectedShadowMethod = 0;
             break;
         }
+
+        //Apply settings for the first chosen method in case a setting is different from the defaults
+        mShadowMethods[mSelectedShadowMethod]->setGlobalShadowSettings(mShadowSettings);
 
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
 

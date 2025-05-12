@@ -489,7 +489,7 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(
         var["CB"]["gViewProjection"] = lightMVPs[i].viewProjection;
 
         var["gMask"] = mpTransparentShadowMask;
-        var["gShadowMap"] = mpMaskOpaqueShadowMap;
+        var["gShadowMap"].setUav(mpMaskOpaqueShadowMap->getUAV(0, i, 1u));
         var["gMaskSampler"] = mpMaskSampler;
         //var["gHaltonSamples"] = pHaltonBuffer;
 
