@@ -191,7 +191,7 @@ private:
     // Runtime data Tracer
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     uint2 mRenderDims = uint2(512);
-    LightSampleMode mLightSampleMode = LightSampleMode::RIS;
+    LightSampleMode mLightSampleMode = LightSampleMode::All;
     bool mOptionsChanged = false;
     bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass
     bool mOpaqueShadowMapModeChanged = false;
