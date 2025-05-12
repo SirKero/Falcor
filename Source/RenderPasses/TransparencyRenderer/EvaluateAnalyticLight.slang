@@ -112,8 +112,9 @@ struct RISReservoir {
  */
 bool isHitObjectAParticle(uint materialID) {
     uint bufferIdx = materialID / 32;
-    uint bitIdx = materialID % 32;
-    return (gParticleMaterials[bufferIdx] & (1 << bitIdx)) > 0;
+    uint bitPos = materialID % 32;
+    uint bitIdx = 1u << bitPos;
+    return (gParticleMaterials[bufferIdx] & bitIdx) > 0;
 }
 
 /** Samples a light index either uniform or with RIS (Good if a couple lights are used that dont overlap each other)
@@ -338,7 +339,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         bool isParticle = isHitObjectAParticle(sd.materialID);
         if (isParticle)
             lightDirection = sd.frontFacing ? sd.faceN : -sd.faceN;
-
+           
         if (!isParticle || !kUseParticleRayOffset)
             minTriSide = 0.0;
 
