@@ -415,6 +415,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         {
             //Get mip level
             uint mip = mSampleDistribution[0]->getMipCount() - 1;
+            var["CB"]["gReduceTest"] = true;
             var["CB"]["gCalcTotalDispatchCount"] = true;
             var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mDynRCGuardPercentage);
             var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x; 
@@ -446,6 +447,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         }
 
         var["CB"]["gCalcTotalDispatchCount"] = false;
+        /*
         for (int m = mSampleDistribution[0]->getMipCount() - 2; m >= 0; m--)
         {
             
@@ -461,6 +463,20 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             var["CB"]["gDstSize"] = dispatchDim.xy();
             
 
+            mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
+        }
+        */
+        {
+            uint mip = mSampleDistribution[0]->getMipCount() - 1;
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                var["gImpt"][i].setSrv(mAccessTextures[i]->getSRV(0, 1u));
+                var["gImptMip"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
+                var["gSmp"][i].setUav(mSampleDistribution[i]->getUAV(0));
+                var["gSmpMip"][i].setSrv(mSampleDistribution[i]->getSRV(mip, 1u));
+            }
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
+            var["CB"]["gDstSize"] = dispatchDim.xy();
             mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
         }
     }

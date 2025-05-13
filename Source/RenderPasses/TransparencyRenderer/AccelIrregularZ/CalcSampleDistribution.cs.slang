@@ -29,6 +29,7 @@ cbuffer CB {
     float gChangePercentageDecrease;    //(0,1] how much can the ray dispatch can decrease
     bool gCalcTotalDispatchCount; // Should only be true on the max mip level
     float gMaxSampleOverestimate;
+    bool gReduceTest;  
 }
 
 [numthreads(16, 16, 1)]
@@ -80,6 +81,18 @@ void main(uint3 thdID: SV_DispatchThreadID)
             gSmp[i][pixel] = newCount;
             gLastFrameSampleCount[i] = uint(newCount);
         }
+    }
+    else if (gReduceTest) {
+        uint2 pixelMip = uint2(0);
+        uint fullImportance = gImptMip[thdID.z][pixelMip];
+        float totalSampleCount = gSmpMip[thdID.z][pixelMip];
+        uint sampleImportance = gImpt[thdID.z][pixel];
+        float weight = float(sampleImportance) / (fullImportance + 1e-10);
+        float samples = 0.0;
+        if (weight > 1e-7)
+            samples = totalSampleCount * weight;
+
+        gSmp[thdID.z][pixel] = samples;
     }
     //Pull ray count to lower levels
     else {       

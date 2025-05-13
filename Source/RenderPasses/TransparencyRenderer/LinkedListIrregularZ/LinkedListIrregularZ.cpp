@@ -340,6 +340,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         {
             //Get mip level
             uint mip = mSampleDistribution[0]->getMipCount() - 1;
+            var["CB"]["gReduceTest"] = false;
             var["CB"]["gCalcTotalDispatchCount"] = true;
             var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mApproxNumElementsPerPixel * mDynRCGuardPercentage);
             var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x;
