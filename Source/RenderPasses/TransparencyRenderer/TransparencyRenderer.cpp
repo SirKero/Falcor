@@ -543,11 +543,10 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
             break;
         }
 
-        //Apply settings for the first chosen method in case a setting is different from the defaults
-        mShadowMethods[mSelectedShadowMethod]->setGlobalShadowSettings(mShadowSettings);
-
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
 
+        //Approximate Cascaded Size
+        //TODO Set size with script and ignore this in this case
         auto& sceneAABB = mpScene->getSceneBounds();
         mShadowSettings.cascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.4f;
 
@@ -572,7 +571,11 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
             Buffer::create(mpDevice, materialCount / 4u, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, particleMaterialsData.data());
         mpParticleMaterials->setName("ParticleMaterialsBuffer");
 
+        //Camera Jitter
         updateSamplePattern();
+
+        // Apply settings for the first chosen method in case a setting is different from the defaults
+        mShadowMethods[mSelectedShadowMethod]->setGlobalShadowSettings(mShadowSettings);
     }
 }
 
