@@ -37,7 +37,7 @@ struct LinkedListShadow
 
     StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
     StructuredBuffer<LinkedListNeighborsNode> gLinkedListNeighbors[COUNT_LIGHTS];
-    Texture2D<float> gMaskShadowMap;
+    Texture2DArray<float> gMaskShadowMap;
     SamplerState gMaskSampler;
 
     //Fetches the 
@@ -98,7 +98,7 @@ struct LinkedListShadow
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
             #if LINKED_LIST_PCF
                 visibilityOpaqueSM = 0.0;
-                float4 shadowZ = gMaskShadowMap.Gather(gMaskSampler, gatherUV.xy);
+                float4 shadowZ = gMaskShadowMap.Gather(gMaskSampler, float3(gatherUV.xy, lightIdx));
                 [unroll]
                 for (uint i = 0; i < 4; i++) {
                     if (dist <= shadowZ[i]) {
@@ -108,7 +108,7 @@ struct LinkedListShadow
                 if (visibilityOpaqueSM <= 0)
                     return float3(0);
             #else
-                float shadowZ = gMaskShadowMap[uShadowPixel];
+                float shadowZ = gMaskShadowMap[uint3(uShadowPixel, lightIdx)];
                 if(dist > shadowZ)
                     return float3(0);
             #endif

@@ -65,7 +65,7 @@ struct AccelShadowShader
     RaytracingAccelerationStructure gShadowAS;
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
     StructuredBuffer<float> gAccelShadowData[COUNT_LIGHTS];
-    Texture2D<float> gMaskShadowMap;
+    Texture2DArray<float> gMaskShadowMap;
 
     SamplerState gMaskSampler;
 
@@ -158,7 +158,7 @@ struct AccelShadowShader
             uint2 shadowPixelU = uint2(shadowPixel);
             #if SHADOW_ACCEL_PCF
                 visibilitySM = 0.0;
-                float4 shadowZ = gMaskShadowMap.Gather(gMaskSampler, gatherUV.xy);
+                float4 shadowZ = gMaskShadowMap.Gather(gMaskSampler, float3(gatherUV.xy, lightIdx));
                 [unroll]
                 for (uint i = 0; i < 4; i++) {
                     if (dist <= shadowZ[i]) {
@@ -168,7 +168,7 @@ struct AccelShadowShader
                 if (visibilitySM <= 0)
                     return float3(0);
             #else
-                float shadowZ = gMaskShadowMap[shadowPixelU];
+                float shadowZ = gMaskShadowMap[uint3(shadowPixelU, lightIdx)];
                 if(dist > shadowZ)
                     return float3(0);
             #endif
