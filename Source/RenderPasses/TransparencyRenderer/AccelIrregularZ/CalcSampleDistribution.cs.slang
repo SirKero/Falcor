@@ -66,18 +66,17 @@ void main(uint3 thdID: SV_DispatchThreadID)
         int countDiff = gMaxNumAABBs - elementCount;
         float diffPercentage = float(countDiff) / gMaxNumAABBs;
         float rayCountChange = 0.0;
-        if (diffPercentage > 0)
-            rayCountChange = totalRayCount * diffPercentage * gChangePercentageIncrease;
-        else
-            rayCountChange = totalRayCount * diffPercentage * gChangePercentageDecrease;
+      
+        rayCountChange = totalRayCount * diffPercentage * gChangePercentageDecrease;
 
         totalRayCount += rayCountChange;
-        totalRayCount = max(totalRayCount, kMinSamples);
 
         // Write new ray counts to textures
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             float w = importances[i] / totalImportance;
             float newCount = min(floor(w * totalRayCount), kMaxSamples * gMaxSampleOverestimate);
+            if(importances[i] > 0)
+                newCount = max(newCount, kMinSamples);  //Force an minimum amount of samples TODO this can push total count over maximum, maybe balance this
             gSmp[i][pixel] = newCount;
             gLastFrameSampleCount[i] = uint(newCount);
         }
