@@ -9,10 +9,10 @@
 #define USE_ONE_BUFFER_FOR_ALL_LIGHTS 0
 #endif
 
-Texture2D<uint> gImpt[COUNT_LIGHTS];
-Texture2D<uint> gImptMip[COUNT_LIGHTS]; 
-RWTexture2D<float> gSmp[COUNT_LIGHTS];   //Distributed Sample (Rays) texture
-Texture2D<float> gSmpMip[COUNT_LIGHTS];
+Texture2D<uint> gImportance[COUNT_LIGHTS];
+Texture2D<uint> gTotalImportance[COUNT_LIGHTS]; //Highest Mip (Size: 1x1) with the total importance
+RWTexture2D<float> gSampleBudget[COUNT_LIGHTS];   //Distributed Sample (Rays) texture
+Texture2D<float> gTotalSampleBudget[COUNT_LIGHTS];
 
 Buffer<uint> gElementCount; // Last frames aabb count
 RWBuffer<uint> gLastFrameSampleCount; //Max number of distributed samples
@@ -24,12 +24,11 @@ static const bool kUseOneBufferForAllLights = USE_ONE_BUFFER_FOR_ALL_LIGHTS;
 
 cbuffer CB {
     uint2 gDstSize;
-    int gMaxNumAABBs;
+    int gMaxNodeSize;                   //Total size of availible nodes
     float gChangePercentageIncrease;    //(0,1] how much can the ray dispatch can increase
     float gChangePercentageDecrease;    //(0,1] how much can the ray dispatch can decrease
-    bool gCalcTotalDispatchCount; // Should only be true on the max mip level
+    bool gDetermineTotalSampleBudget; // Should only be true on the max mip level
     float gMaxSampleOverestimate;
-    bool gReduceTest;  
 }
 
 [numthreads(16, 16, 1)]
@@ -39,8 +38,8 @@ void main(uint3 thdID: SV_DispatchThreadID)
     if (any(pixel > gDstSize))
         return;
 
-    //Calc dynamic amount of rays
-    if (gCalcTotalDispatchCount) {
+    // Determine the Total Sample Budget for this frame
+    if (gDetermineTotalSampleBudget) {
         if (thdID.z > 0 || thdID.x > 0 || thdID.y > 0) //Only one thread is calculating the following
             return;
 
@@ -53,18 +52,18 @@ void main(uint3 thdID: SV_DispatchThreadID)
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             rayCounts[i] = gLastFrameSampleCount[i];
             // Fallback
-            if(rayCounts[i] == 0) 
-                rayCounts[i] = gSmp[i][pixel];
+            if (rayCounts[i] == 0)
+                rayCounts[i] = gSampleBudget[i][uint2(0)];
             totalRayCount += rayCounts[i];
-            importances[i] = gImpt[i][pixel] / float(kMaxAtomicWeight);
+            importances[i] = gImportance[i][uint2(0)] / float(kMaxAtomicWeight);
             totalImportance += importances[i];
             if(!kUseOneBufferForAllLights)
                 elementCount += gElementCount[i];
         }
 
         // adjust ray count based on the fullness of the buffer
-        int countDiff = gMaxNumAABBs - elementCount;
-        float diffPercentage = float(countDiff) / gMaxNumAABBs;
+        int countDiff = gMaxNodeSize - elementCount;
+        float diffPercentage = float(countDiff) / gMaxNodeSize;
         float rayCountChange = 0.0;
       
         rayCountChange = totalRayCount * diffPercentage * gChangePercentageDecrease;
@@ -76,39 +75,23 @@ void main(uint3 thdID: SV_DispatchThreadID)
             float w = importances[i] / totalImportance;
             float newCount = min(floor(w * totalRayCount), kMaxSamples * gMaxSampleOverestimate);
             if(importances[i] > 0)
-                newCount = max(newCount, kMinSamples);  //Force an minimum amount of samples TODO this can push total count over maximum, maybe balance this
-            gSmp[i][pixel] = newCount;
+                newCount = max(newCount, kMinSamples); // Force an minimum amount of samples TODO this can push total count over maximum, maybe balance this
+            gSampleBudget[i][uint2(0)] = newCount;      //Write new total sample budget
             gLastFrameSampleCount[i] = uint(newCount);
         }
     }
-    else if (gReduceTest) {
-        uint2 pixelMip = uint2(0);
-        uint fullImportance = gImptMip[thdID.z][pixelMip];
-        float totalSampleCount = gSmpMip[thdID.z][pixelMip];
-        uint sampleImportance = gImpt[thdID.z][pixel];
-        float weight = float(sampleImportance) / (fullImportance + 1e-10);
+    //Distribute Total Sample Budget
+    else {
+        uint totalImportance = gTotalImportance[thdID.z][uint2(0)];         //Get full importance from the highest MIP
+        float totalSampleCount = gTotalSampleBudget[thdID.z][uint2(0)];                //Get full Sample Budget from the highest MIP
+        float sampleImportance = float(gImportance[thdID.z][pixel]);        //Get importance for the current sample
+
         float samples = 0.0;
-        if (weight > 1e-7)
+        if (totalImportance > 0) {
+            float weight = sampleImportance / (totalImportance);            
             samples = totalSampleCount * weight;
+        }
 
-        gSmp[thdID.z][pixel] = samples;
-    }
-    //Pull ray count to lower levels
-    else {       
-        uint2 pixelMip = pixel / 2;
-        uint fullImportance = gImptMip[thdID.z][pixelMip];
-        uint sampleImportance = gImpt[thdID.z][pixel];    //TODO Gather instead of fetching full importance mip
-        float sampleCount = gSmpMip[thdID.z][pixelMip];
-        //if (gDstSize.x == 2)
-            //sampleCount = min(sampleCount, uint(ceil(float(fullImportance) / kMaxAtomicWeight)));
-
-        float weight = float(sampleImportance) / (fullImportance + 1e-10);
-
-        // TODO error diffusion ?
-        float samples = 0.0;
-        if (weight > 1e-7)
-            samples = sampleCount * weight;
-
-        gSmp[thdID.z][pixel] = samples;
+        gSampleBudget[thdID.z][pixel] = samples;
     }
 }

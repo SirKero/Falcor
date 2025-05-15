@@ -314,9 +314,9 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             mGenAccessMips->execute(pRenderContext, dispatchDim);
         }
     }
-    //Distribute Samples
+    //Distribute Sample Budget
     {
-        FALCOR_PROFILE(pRenderContext, "DistributeBudget");
+        FALCOR_PROFILE(pRenderContext, "DistributeSampleBudget");
         // Create Compute Pass
         if (!mCalcSampleDistribution)
         {
@@ -330,7 +330,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             mCalcSampleDistribution = ComputePass::create(mpDevice, desc, defines, true);
         }
 
-        //Calc ray count dispatch
+        // Determine Total Sample Budget
         auto var = mCalcSampleDistribution->getRootVar();
         mCalcSampleDistribution->getProgram()->addDefine(
             "MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y) 
@@ -340,9 +340,8 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         {
             //Get mip level
             uint mip = mSampleDistribution[0]->getMipCount() - 1;
-            var["CB"]["gReduceTest"] = false;
-            var["CB"]["gCalcTotalDispatchCount"] = true;
-            var["CB"]["gMaxNumAABBs"] = int(mResolution.x * mResolution.y * mApproxNumElementsPerPixel * mDynRCGuardPercentage);
+            var["CB"]["gDetermineTotalSampleBudget"] = true;
+            var["CB"]["gMaxNodeSize"] = int(mResolution.x * mResolution.y * mApproxNumElementsPerPixel * mDynRCGuardPercentage);
             var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x;
             var["CB"]["gChangePercentageDecrease"] = mDynRCChangePercentage.y; 
             var["CB"]["gMaxSampleOverestimate"] = mSampleOverestimate * mSampleOverestimate; // Squared as this is applied to x and y of dispatch resolution
@@ -350,18 +349,18 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
             for (uint i = 0; i < lights.size(); i++)
             {
-                var["gImpt"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
-                var["gSmp"][i].setUav(mSampleDistribution[i]->getUAV(mip));
+                var["gImportance"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
+                var["gSampleBudget"][i].setUav(mSampleDistribution[i]->getUAV(mip));
             }
             int lastFrameInFlight = 0;
             lastFrameInFlight = mStagingCount - 1;
-            lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
-            
+            lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight; 
                  
             var["gElementCount"] = mLinkedListCounter[lastFrameInFlight];
             mCalcSampleDistribution->execute(pRenderContext, uint3(1,1,1));
         }
 
+        // Reset Total Sample Budget to base (Importance Map) resolution
         if (mResetRayCount)
         {
             for (uint i = 0; i < lights.size(); i++)
@@ -372,24 +371,20 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             mResetRayCount = false;
         }
 
-        var["CB"]["gCalcTotalDispatchCount"] = false;
-        for (int m = mSampleDistribution[0]->getMipCount() - 2; m >= 0; m--)
+        var["CB"]["gDetermineTotalSampleBudget"] = false;
+        uint highestMip = mSampleDistribution[0]->getMipCount() - 1;
+        for (uint i = 0; i < lights.size(); i++)
         {
-            
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gImpt"][i].setSrv(mAccessTextures[i]->getSRV(m, 1u));
-                var["gImptMip"][i].setSrv(mAccessTextures[i]->getSRV(m+1, 1u));
-                var["gSmp"][i].setUav(mSampleDistribution[i]->getUAV(m));
-                var["gSmpMip"][i].setSrv(mSampleDistribution[i]->getSRV(m + 1, 1u));
-            }
-
-            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
-            var["CB"]["gDstSize"] = dispatchDim.xy();
-            
-
-            mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
+            var["gImportance"][i].setSrv(mAccessTextures[i]->getSRV(0, 1u));                    //Base Level
+            var["gTotalImportance"][i].setSrv(mAccessTextures[i]->getSRV(highestMip, 1u));      //Highest MIP (1x1)
+            var["gSampleBudget"][i].setUav(mSampleDistribution[i]->getUAV(0));                               //Base Level
+            var["gTotalSampleBudget"][i].setSrv(mSampleDistribution[i]->getSRV(highestMip, 1u));//Highest MIP (1x1)
         }
+
+        uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
+        var["CB"]["gDstSize"] = dispatchDim.xy();
+
+        mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
     }
     //Blur
     if(mBlurSampleDistribution)
