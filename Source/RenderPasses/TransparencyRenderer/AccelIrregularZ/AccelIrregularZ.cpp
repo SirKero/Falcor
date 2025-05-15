@@ -35,6 +35,7 @@ namespace
     const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/AccelIrregularZ/";
     const std::string kGenShader = kShaderFolder + "GenAccelIrregularZ.rt.slang";
     const std::string kAccessMipsShader = kShaderFolder + "GenAccessMips.cs.slang";
+    const std::string kImportanceReductionShader = kShaderFolder + "ReductionImportance.cs.slang";
     const std::string kCalcSampleDistributionShader = kShaderFolder + "CalcSampleDistribution.cs.slang";
     const std::string kOptimizeSamplesShader = kShaderFolder + "OptimizeSamples.cs.slang";
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
@@ -345,6 +346,45 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     uint frameInFlight = mStagingCount; // For sync if optimization is used
 
     //Create Access Mips
+    if (mUseEfficientReduction)
+    {
+        FALCOR_PROFILE(pRenderContext, "ImportanceReduction");
+        // Create Compute Pass
+        if (!mImportanceReductionPass)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kImportanceReductionShader).csEntry("main").setShaderModel("6_6");
+
+            DefineList defines;
+            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
+
+            mImportanceReductionPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+        
+        auto var = mImportanceReductionPass->getRootVar();
+       
+        var["CB"]["gCapLowestLevel"] = true;
+        const uint maxMipCount = mAccessTextures[0]->getMipCount() - 1u;
+        for (uint mip = 0; mip < maxMipCount; mip += 4)
+        {
+            uint dstMip = math::min(maxMipCount, mip + 4);
+
+            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(mip), mAccessTextures[0]->getHeight(mip), lights.size());
+
+            //dispatchDim.xy() = dispatchDim.xy() / 2u;
+
+            var["CB"]["gDstSize"] = dispatchDim.xy();
+            for (uint i = 0; i < lights.size(); i++)
+            {
+                var["gSrc"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
+                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(dstMip,0u,1u));
+            }
+
+            mImportanceReductionPass->execute(pRenderContext, dispatchDim);
+        }
+        
+    }
+    else //TODO Remove?
     {
         FALCOR_PROFILE(pRenderContext, "ImportancesMipMaps");
         //Create Gen Mips pass

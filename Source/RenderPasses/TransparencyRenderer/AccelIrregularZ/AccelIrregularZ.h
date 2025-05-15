@@ -99,6 +99,7 @@ private:
     float2 mDynRCChangePercentage = float2(0.1f,0.6f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
 
     // Accel shadow settings
+    bool mUseEfficientReduction = true;     //Uses the efficient reduction instead of simple MipMap generation
     bool mUseOneAABBForAllLights = true;
     uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
@@ -144,6 +145,7 @@ private:
     ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
     
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
+    ref<ComputePass> mImportanceReductionPass;      //Reduction Pass for the Importance Map
     ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
     ref<ComputePass> mpOptimizeSamples;             //Optimize Sample distribution
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
