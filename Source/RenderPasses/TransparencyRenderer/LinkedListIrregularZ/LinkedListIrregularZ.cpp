@@ -414,8 +414,6 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
             }
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
             var["CB"]["gDispatchSize"] = dispatchDim.xy();
-            var["CB"]["gMipLevel"] = 0; // m - 1;
-            var["CB"]["gLightCount"] = lights.size();
 
             mpOptimizeSamples->execute(pRenderContext, dispatchDim);            
         }

@@ -49,6 +49,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         float totalRayCount = 0;
         float totalImportance = 0.0;
         int elementCount = kUseOneBufferForAllLights ? gElementCount[0] : 0;
+        [unroll]
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             rayCounts[i] = gLastFrameSampleCount[i];
             // Fallback
@@ -70,20 +71,46 @@ void main(uint3 thdID: SV_DispatchThreadID)
 
         totalRayCount += rayCountChange;
 
-        // Write new ray counts to textures
+        // Write new ray counts to textures        
+        #if COUNT_LIGHTS == 1    
+            float w = importances[0] / totalImportance;
+            float newCount = min(floor(w * totalRayCount), kMaxSamples * gMaxSampleOverestimate);
+            if (importances[0] > 0)
+                newCount = max(newCount, kMinSamples); // Force an minimum amount of samples TODO this can push total count over maximum, maybe balance this
+            gSampleBudget[0][uint2(0)] = newCount;     // Write new total sample budget
+            gLastFrameSampleCount[0] = uint(newCount);
+        #else
+        //For Multiple lights, check first if a light has not enough importance. Reduce the ray count from the total
+        float newCounts[COUNT_LIGHTS];
+        float newRayCount = totalRayCount;
+        [unroll]
         for (uint i = 0; i < COUNT_LIGHTS; i++) {
             float w = importances[i] / totalImportance;
-            float newCount = min(floor(w * totalRayCount), kMaxSamples * gMaxSampleOverestimate);
-            if(importances[i] > 0)
-                newCount = max(newCount, kMinSamples); // Force an minimum amount of samples TODO this can push total count over maximum, maybe balance this
-            gSampleBudget[i][uint2(0)] = newCount;      //Write new total sample budget
-            gLastFrameSampleCount[i] = uint(newCount);
+            newCounts[i] = w * totalRayCount;
+            if (importances[i] > 0 && (newCounts[i] < kMinSamples)) {
+                newRayCount -= (kMinSamples - newCounts[i]);
+                newCounts[i] = -1.0;
+            }
         }
+        //Calculate ray counts with new adjusted budget
+        [unroll]
+        for (uint i = 0; i < COUNT_LIGHTS; i++) {
+            float w = importances[i] / totalImportance;
+            if (newCounts[i] > 0) {
+                newCounts[i] = min(floor(w * newRayCount), kMaxSamples * gMaxSampleOverestimate);
+            } else if (newCounts[i] < 0) {
+                newCounts[i] = kMinSamples;
+            }
+            gSampleBudget[i][uint2(0)] = newCounts[i]; // Write new total sample budget
+            gLastFrameSampleCount[i] = uint(newCounts[i]);
+        }
+        #endif
+       
     }
     //Distribute Total Sample Budget
     else {
         uint totalImportance = gTotalImportance[thdID.z][uint2(0)];         //Get full importance from the highest MIP
-        float totalSampleCount = gTotalSampleBudget[thdID.z][uint2(0)];                //Get full Sample Budget from the highest MIP
+        float totalSampleCount = gTotalSampleBudget[thdID.z][uint2(0)];     //Get full Sample Budget from the highest MIP
         float sampleImportance = float(gImportance[thdID.z][pixel]);        //Get importance for the current sample
 
         float samples = 0.0;

@@ -53,6 +53,12 @@ uint2 linearIndexToZCurve(uint index)
         integerCompact(index >> 1));
 }
 
+/*
+    Parallel Reduction. Calculates the Total Importance for the Importance Map
+    The 2D index of the texture is converted to 1D using a Z-curve Pattern.
+    Each Workgroup calculates the sum of the whole group.
+    gDst is the Mip-Level corresponding to the sum Region. (+5 Mip Levels)
+*/
 [numthreads(WK_SIZE, WK_SIZE, 1)]
 void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_GroupThreadID, uint3 workGroupID: SV_GroupID)
 {
@@ -92,7 +98,7 @@ void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_Gro
     // TODO last iterations of the loop could be implemented using WaveOP (WaveActiveSum; WavePrefixSum)
     // https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/hlsl-shader-model-6-0-features-for-direct3d-12#wave-reduction
     // However, due to z curve adressing it seems that [0,1, ... , 32] is not in the same Wave, which results in an incorrect Total Importance
- 
+
     //First thread writes. WorkGroupID is identical to the MIP bound to gDst
     if (tid == 0)
         gDst[lightIdx][workGroupID.xy] = sdata[0];

@@ -11,6 +11,11 @@ cbuffer CB {
     uint2 gDstSize;
 }
 
+/* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
+   gSrc is the lower Mip, gDst is one Mip higher.
+   The dispatch dimensions are derived from gDst. 
+*/
+
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
 {
