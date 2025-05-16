@@ -345,7 +345,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     auto& lights = mpScene->getLights();
     uint frameInFlight = mStagingCount; // For sync if optimization is used
 
-    //Create Access Mips
+    //Reduction for the Importance Map, either by Reduce Compute Shader or Simple MipMap Chain
     if (mUseEfficientReduction)
     {
         FALCOR_PROFILE(pRenderContext, "ImportanceReduction");
@@ -363,17 +363,18 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         
         auto var = mImportanceReductionPass->getRootVar();
        
-        var["CB"]["gCapLowestLevel"] = true;
+        
         const uint maxMipCount = mAccessTextures[0]->getMipCount() - 1u;
-        for (uint mip = 0; mip < maxMipCount; mip += 4)
+        for (uint mip = 0; mip < maxMipCount; mip += 5)
         {
-            uint dstMip = math::min(maxMipCount, mip + 4);
+            uint dstMip = math::min(maxMipCount, mip + 5);
 
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(mip), mAccessTextures[0]->getHeight(mip), lights.size());
 
-            //dispatchDim.xy() = dispatchDim.xy() / 2u;
+            dispatchDim.xy() = dispatchDim.xy() / 2u;
 
             var["CB"]["gDstSize"] = dispatchDim.xy();
+
             for (uint i = 0; i < lights.size(); i++)
             {
                 var["gSrc"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
@@ -399,18 +400,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
             mGenAccessMips = ComputePass::create(mpDevice, desc, defines, true);
         }
 
-        //One pass to cap the lowest mip at a max value
-        {
-            auto var = mGenAccessMips->getRootVar();
-            for (uint i = 0; i < lights.size(); i++)
-                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(0));
-            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
-            var["CB"]["gDstSize"] = dispatchDim.xy();
-            var["CB"]["gCapLowestLevel"] = true;
-
-            mGenAccessMips->execute(pRenderContext, dispatchDim);
-        }
-
         for (uint m = 0; m < mAccessTextures[0]->getMipCount() - 1; m++)
         {
             auto var = mGenAccessMips->getRootVar();
@@ -422,7 +411,6 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
                
             uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m + 1), mAccessTextures[0]->getHeight(m + 1), lights.size());
             var["CB"]["gDstSize"] = dispatchDim.xy();
-            var["CB"]["gCapLowestLevel"] = false;
 
             mGenAccessMips->execute(pRenderContext, dispatchDim);
         }

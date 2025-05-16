@@ -5,17 +5,16 @@
 #endif
 
 #define WK_SIZE 16
-#define WK_SIZE_SQ WK_SIZE * WK_SIZE
+#define WK_TOTAL WK_SIZE * WK_SIZE
 
 Texture2D<uint> gSrc[COUNT_LIGHTS];
 RWTexture2D<uint> gDst[COUNT_LIGHTS];
 
 cbuffer CB {
     uint2 gDstSize;
-    bool gCapLowestLevel;
 }
 
-groupshared uint sdata[WK_SIZE * WK_SIZE];
+groupshared uint sdata[WK_TOTAL];
 
 // "Explodes" an integer, i.e. inserts a 0 between each bit.  Takes inputs up to 16 bit wide.
 //      For example, 0b11111111 -> 0b1010101010101010
@@ -54,44 +53,47 @@ uint2 linearIndexToZCurve(uint index)
         integerCompact(index >> 1));
 }
 
-void warpReduce(inout uint[WK_SIZE_SQ] data, int tid) {
-    data[tid] += data[tid + 32];
-    data[tid] += data[tid + 16];
-    data[tid] += data[tid + 8];
-    data[tid] += data[tid + 4];
-    data[tid] += data[tid + 2];
-    data[tid] += data[tid + 1];
-}
-
-// Inspired by https://developer.download.nvidia.com/compute/cuda/1.1-Beta/x86_website/projects/reduction/doc/reduction.pdf
 [numthreads(WK_SIZE, WK_SIZE, 1)]
-void main(uint3 thdID: SV_DispatchThreadID, uint3 localInvocationID: SV_GroupThreadID, uint3 workGroupID: SV_GroupID)
+void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_GroupThreadID, uint3 workGroupID: SV_GroupID)
 {
-    const uint2 pixel = thdID.xy;
+    const uint2 pixel = dispatchID.xy;
+    const uint lightIdx = dispatchID.z;
     if (any(pixel > gDstSize))
         return;
 
-    uint linTid = zCurveToLinearIndex(localInvocationID.xy);
-    uint linIdx = zCurveToLinearIndex(thdID.xy);
+    // Get Sum of 2x2 field
+    uint2 startIdx = pixel * 2u;
+    uint startSum = 0;
+    startSum += gSrc[lightIdx][startIdx];
+    startSum += gSrc[lightIdx][startIdx + uint2(1, 0)];
+    startSum += gSrc[lightIdx][startIdx + uint2(0, 1)];
+    startSum += gSrc[lightIdx][startIdx + uint2(1, 1)];
+    
+    //In case this was dispatched from the second hightest MIP
+    if (gDstSize.x == 1) {
+        gDst[lightIdx][workGroupID.xy] = startSum;
+        return;
+    }
 
-    sdata[linTid] = gSrc[thdID.z][thdID.xy];
-
+    //Load into shared memory
+    uint tid = zCurveToLinearIndex(localInvocationID.xy);
+    sdata[tid] = startSum;
     GroupMemoryBarrierWithGroupSync();
 
-    const uint maxLoop = min(WK_SIZE_SQ, gDstSize.x * gDstSize.y);
-    
+    // Reduce with Sequential Addressing
+    const uint maxLoop = min(WK_TOTAL, gDstSize.x * gDstSize.y); //Dispatch can theoretically be smaller than Workgroup size
     for (uint s = maxLoop / 2; s > 0; s >>= 1) {
-        if (linTid < s) {
-            sdata[linTid] += sdata[linTid + s];
+        if (tid < s) {
+            sdata[tid] += sdata[tid + s];
         }
         GroupMemoryBarrierWithGroupSync();
     }
 
-    //TODO Try https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/hlsl-shader-model-6-0-features-for-direct3d-12#wave-reduction
-    
-    //if (linTid < 32)
-    //    warpReduce(sdata, linTid);
-
-    if (linTid == 0)
-        gDst[thdID.z][workGroupID.xy] = sdata[0];
+    // TODO last iterations of the loop could be implemented using WaveOP (WaveActiveSum; WavePrefixSum)
+    // https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/hlsl-shader-model-6-0-features-for-direct3d-12#wave-reduction
+    // However, due to z curve adressing it seems that [0,1, ... , 32] is not in the same Wave, which results in an incorrect Total Importance
+ 
+    //First thread writes. WorkGroupID is identical to the MIP bound to gDst
+    if (tid == 0)
+        gDst[lightIdx][workGroupID.xy] = sdata[0];
 }
