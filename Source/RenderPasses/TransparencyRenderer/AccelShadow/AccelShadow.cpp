@@ -107,15 +107,17 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
     // Create / Destroy resources
     {
         uint numBuffers = lights.size();
+        uint numAccelBuffers = mUseOneAABBForAllLights ? 1 : lights.size();
 
         if (mAccelShadowAABB.empty())
         {
-            mAccelShadowAABB.resize(numBuffers);
+            mAccelShadowAABB.resize(numAccelBuffers);
             mAccelShadowMaxNumPoints = mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel;
-            for (uint i = 0; i < numBuffers; i++)
+
+            for (uint i = 0; i < numAccelBuffers; i++)
             {
                 mAccelShadowAABB[i] = Buffer::createStructured(
-                    mpDevice, sizeof(AABB), mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
+                    mpDevice, sizeof(AABB), mAccelShadowMaxNumPoints,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowAABB[i]->setName("AccelShadowAABB_" + std::to_string(i));
@@ -127,35 +129,35 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
             mAccelShadowCounter.resize(kFramesInFlight);
             mAccelShadowCounterCPU.resize(kFramesInFlight);
             mAccelFenceWaitValues.resize(kFramesInFlight);
-            mAccelShadowNumPoints.resize(numBuffers);
+            mAccelShadowNumPoints.resize(numAccelBuffers);
 
-            uint initData = 0;
+            std::vector<uint> initData(numAccelBuffers, 0);
             for (uint i = 0; i < kFramesInFlight; i++)
             {
                 mAccelShadowCounter[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                    Buffer::CpuAccess::None, &initData, false
+                    mpDevice, sizeof(uint), numAccelBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                    Buffer::CpuAccess::None, initData.data(), false
                 );
                 mAccelShadowCounter[i]->setName("AccelShadowAABBCounter_" + std::to_string(i));
 
                 mAccelShadowCounterCPU[i] = Buffer::createStructured(
-                    mpDevice, sizeof(uint), numBuffers, ResourceBindFlags::None, Buffer::CpuAccess::Read, &initData, false
+                    mpDevice, sizeof(uint), numAccelBuffers, ResourceBindFlags::None, Buffer::CpuAccess::Read, initData.data(), false
                 );
                 mAccelShadowCounterCPU[i]->setName("AccelShadowAABBCounterCPU_" + std::to_string(i));
 
                 mAccelFenceWaitValues[i] = 0;
             }
 
-            for (uint i = 0; i < numBuffers; i++)
-                mAccelShadowNumPoints[i] = mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel;
+            for (uint i = 0; i < numAccelBuffers; i++)
+                mAccelShadowNumPoints[i] = mAccelShadowMaxNumPoints;
         }
         if (mAccelShadowData.empty())
         {
-            mAccelShadowData.resize(numBuffers);
-            for (uint i = 0; i < numBuffers; i++)
+            mAccelShadowData.resize(numAccelBuffers);
+            for (uint i = 0; i < numAccelBuffers; i++)
             {
                 mAccelShadowData[i] = Buffer::createStructured(
-                    mpDevice, sizeof(float), mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel,
+                    mpDevice, sizeof(float), mAccelShadowMaxNumPoints,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
                 );
                 mAccelShadowData[i]->setName("AccelShadowData" + std::to_string(i));
@@ -166,9 +168,9 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
         {
             std::vector<uint64_t> aabbCount;
             std::vector<uint64_t> aabbGPUAddress;
-            for (uint i = 0; i < numBuffers; i++)
+            for (uint i = 0; i < numAccelBuffers; i++)
             {
-                aabbCount.push_back(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel);
+                aabbCount.push_back(mAccelShadowMaxNumPoints);
                 aabbGPUAddress.push_back(mAccelShadowAABB[i]->getGpuAddress());
             }
             mpShadowAccelerationStrucure = std::make_unique<CustomAccelerationStructure>(
@@ -226,9 +228,11 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
     uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount : 0; // For sync if optimization is used
 
     // Clear Counter
-    pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, lights.size()).get(), uint4(0));
+    uint clearSize = mUseOneAABBForAllLights ? 1 : lights.size();
+    pRenderContext->clearUAV(mAccelShadowCounter[frameInFlight]->getUAV(0u, clearSize).get(), uint4(0));
 
     // Defines
+    mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel));
     mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_PERCENTAGE", std::to_string(mMidpointPercentage));
     mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
@@ -273,9 +277,9 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
         var["CB"]["gSpreadAngle"] = mShadowMapMVP[i].spreadAngle;
 
-        var["gAABB"] = mAccelShadowAABB[i];
+        var["gAABB"] = mUseOneAABBForAllLights ? mAccelShadowAABB[0] :  mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
-        var["gData"] = mAccelShadowData[i];
+        var["gData"] = mUseOneAABBForAllLights ? mAccelShadowData[0] : mAccelShadowData[i];
         var["gHaltonSamples"] = mpHaltonBuffer;
 
         // Get dimensions of ray dispatch.
@@ -286,16 +290,16 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
         mpScene->raytrace(pRenderContext, mGenAccelShadowPip.pProgram.get(), mGenAccelShadowPip.pVars, uint3(targetDim, 1));
     }
 
-     // Clear unused AABBs
+    // Clear unused AABBs
     mpShadowAccelerationStrucure->clearAABBBuffers(pRenderContext, mAccelShadowAABB, true, mAccelShadowCounter[frameInFlight]);
 
     // Sync Photon copy data
+    const uint numAABBs = mUseOneAABBForAllLights ? 1 : lights.size();
     if (mAccelShadowUseCPUCounterOptimization)
     {
         // Copy to CPU
-        uint numLights = lights.size();
         pRenderContext->copyBufferRegion(
-            mAccelShadowCounterCPU[mStagingCount].get(), 0, mAccelShadowCounter[mStagingCount].get(), 0, sizeof(uint32_t) * numLights
+            mAccelShadowCounterCPU[mStagingCount].get(), 0, mAccelShadowCounter[mStagingCount].get(), 0, sizeof(uint32_t) * numAABBs
         );
         pRenderContext->flush();
         // Frame in flight for the counter
@@ -307,13 +311,13 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
         mpFence->syncCpu(fenceWaitVal);
 
         void* data = mAccelShadowCounterCPU[mStagingCount]->map(Buffer::MapType::Read);
-        std::memcpy(mAccelShadowNumPoints.data(), data, sizeof(uint) * numLights);
+        std::memcpy(mAccelShadowNumPoints.data(), data, sizeof(uint) * numAABBs);
         mAccelShadowCounterCPU[mStagingCount]->unmap();
     }
 
     // Build the Acceleration structure
     std::vector<uint64_t> aabbCount;
-    for (uint i = 0; i < lights.size(); i++)
+    for (uint i = 0; i < numAABBs; i++)
     {
         uint numPoints = mAccelShadowUseCPUCounterOptimization
                              ? std::min(uint(mAccelShadowNumPoints[i] * mAccelShadowOverestimation), mAccelShadowMaxNumPoints)
@@ -331,6 +335,7 @@ DefineList AccelShadow::getDefines() {
     defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
     defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
+    defines.add("ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     return defines;
 }
 
@@ -345,8 +350,12 @@ void AccelShadow::setShaderData(const ShaderVar& var) {
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
-        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
-        //shadowVar["ShadowView"]["gShadowMapView"][i] = mShadowMapMVP[i].view;
+        shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;        
+    }
+
+    const auto accelDataSize = mUseOneAABBForAllLights ? 1 : lights.size();
+    for (uint i = 0; i < accelDataSize; i++)
+    {
         shadowVar["gAccelShadowData"][i] = mAccelShadowData[i];
         shadowVar["gShadowAABBs"][i] = mAccelShadowAABB[i];
     }
@@ -379,12 +388,13 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
         {
             if (auto group2 = group.group("Current size info:"))
             {
-                for (uint i = 0; i < mpScene->getLightCount(); i++)
+                const auto loopSize = mUseOneAABBForAllLights ? 1 : mpScene->getLightCount();
+                for (uint i = 0; i < loopSize; i++)
                 {
                     if (i > 0)
                         group2.separator();
                     uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
-                    group2.text(mpScene->getLight(i)->getName());
+                    group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
                     group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
                     float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
                     float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
@@ -412,8 +422,11 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
                 group2.separator();
             }
         }
-        mResolutionChanged |= group.var("Buffer size (Res x this)", mAccelApproxNumElementsPerPixel, 1u, 64u, 1u);
+        mResolutionChanged |= group.var("Buffer size (Res x this)", mAccelApproxNumElementsPerPixel, 1u, 256u, 1u);
         group.tooltip("Multiplier for the Data buffer (how many hits on average per pixel)");
+
+        mResolutionChanged |= group.checkbox("Use one AABB for all lights", mUseOneAABBForAllLights); // Should trigger rebuild of all buffers
+        group.tooltip("Uses one AABB for all lights. Light coordinates are put side by side on the x axis");
 
         group.checkbox("Use CPU Counter optimization", mAccelShadowUseCPUCounterOptimization);
         group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size.");

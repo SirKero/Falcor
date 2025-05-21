@@ -74,6 +74,7 @@ private:
     uint mStagingCount = 0;
 
     // Accel shadow settings
+    bool mUseOneAABBForAllLights = false;        //Use one data and AABB buffer
     uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync

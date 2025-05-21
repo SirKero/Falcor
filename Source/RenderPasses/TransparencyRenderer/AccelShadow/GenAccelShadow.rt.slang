@@ -66,7 +66,8 @@ RWStructuredBuffer<float> gData;
 Buffer<float2> gHaltonSamples;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
-static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias for midpoint
+static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS;  // Depth bias for midpoint
+static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS; //Use one buffer for all lights
 static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
@@ -196,7 +197,7 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
 
 inline uint getInsertIndex() {
     uint insertIdx = 0;
-    const uint lightIdx = gLightIdx;//kUseOneAABBForAllLights ? 0 : gLightIdx;
+    const uint lightIdx = kUseOneAABBForAllLights ? 0 : gLightIdx;
     InterlockedAdd(gCounter[lightIdx], 1u, insertIdx);
     return insertIdx;
 }
@@ -249,6 +250,12 @@ void rayGen()
         rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
     } else {
         rayDirection = posWPixelNear.xyz - gLightPos;
+    }
+
+    // Add offset to the pixel position if one aabb buffer is used
+    // Currently this is solved simple by just adding an offset of the SM size * LightIndex in x direction
+    if (kUseOneAABBForAllLights) {
+        pixelSample.x += frameDim.x * gLightIdx;
     }
 
     RayDesc ray;

@@ -19,10 +19,6 @@ import Utils.Sampling.SampleGenerator;
 #define MAX_IDX 1
 #endif
 
-#ifndef ACCEL_USE_FRUSTUM_CULLING
-#define ACCEL_USE_FRUSTUM_CULLING 0
-#endif
-
 #ifndef TRACE_NON_OPAQUE_ONLY
 #define TRACE_NON_OPAQUE_ONLY 0
 #endif
@@ -470,8 +466,8 @@ void rayGen()
     } else {
         rayDirection = posWPixelNear.xyz - gLightPos;
     }
-   
-    // Add offset to the pixel position if one aabb is used
+
+    // Add offset to the pixel position if one aabb buffer is used
     // Currently this is solved simple by just adding an offset of the SM size * LightIndex in x direction
     if (kUseOneAABBForAllLights) {
         pixelSample.x += smRes.x * gLightIdx;

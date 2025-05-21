@@ -159,10 +159,6 @@ struct AccelIrregularZShader
         if (!validShadow)
             return float3(-1.0);
 
-        // If only one AABB is used for all lights, offset the pixel pos
-        if (kUseOneAABBForAllLight)
-            shadowPixel.x += gSMSize.x * lightIdx;
-
         // Use transparent shadow map
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
             float2 smUV = shadowPos.xy;
@@ -232,7 +228,11 @@ struct AccelIrregularZShader
                     return float3(0.0);
             }
         }
-        
+
+        // If only one AABB is used for all lights, offset the pixel pos
+        if (kUseOneAABBForAllLight)
+            shadowPixel.x += gSMSize.x * lightIdx;
+
         AccelShadowRayData rayData = AccelShadowRayData();
         RayDesc ray;
         ray.Origin = float3(shadowPixel.x, shadowPixel.y, dist);
