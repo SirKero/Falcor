@@ -20,11 +20,7 @@ target_sources(TransparencyRenderer PRIVATE
 	AccelIrregularZ/GenAccelIrregularZ.rt.slang
 	AccelIrregularZ/AccelIrregularZ.slang
 	AccelIrregularZ/AccelIrregularZData.slang
-	AccelIrregularZ/GenAccessMips.cs.slang
-	AccelIrregularZ/CalcSampleDistribution.cs.slang
-    AccelIrregularZ/ReductionImportance.cs.slang
 	AccelIrregularZ/DebugShowShadowAccel.3d.slang
-	AccelIrregularZ/OptimizeSamples.cs.slang
 
 	LinkedList/LinkedListShadow.h
 	LinkedList/LinkedListShadow.cpp
@@ -38,6 +34,13 @@ target_sources(TransparencyRenderer PRIVATE
 	LinkedListIrregularZ/GenLinkedListIrregularZ.rt.slang
 	LinkedListIrregularZ/LinkedListIrregularZData.slang
 	LinkedListIrregularZ/DebugShowImportance.cs.slang
+
+    ImportanceMapHelpers/ImportanceMapHelper.h
+    ImportanceMapHelpers/ImportanceMapHelper.cpp
+    ImportanceMapHelpers/ReduceMipMaps.cs.slang
+    ImportanceMapHelpers/Reduce.cs.slang
+    ImportanceMapHelpers/DistributeBudget.cs.slang
+    ImportanceMapHelpers/GenSampleDistribution.cs.slang
 
     TransparentShadowMask/TransparentShadowMask.cpp
     TransparentShadowMask/TransparentShadowMask.h

@@ -33,11 +33,7 @@ namespace
 {
     //Shader Paths
     const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/LinkedListIrregularZ/";
-    const std::string kShaderFolderOther = "RenderPasses/TransparencyRenderer/AccelIrregularZ/";
     const std::string kGenShader = kShaderFolder + "GenLinkedListIrregularZ.rt.slang";
-    const std::string kAccessMipsShader = kShaderFolderOther + "GenAccessMips.cs.slang";
-    const std::string kCalcSampleDistributionShader = kShaderFolderOther + "CalcSampleDistribution.cs.slang";
-    const std::string kOptimizeSamplesShader = kShaderFolderOther + "OptimizeSamples.cs.slang";
     const std::string kShaderShowImportanceMap = kShaderFolder + "DebugShowImportance.cs.slang";
 
     //UI
@@ -59,6 +55,8 @@ LinkedListIrregularZ::LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScen
     FALCOR_ASSERT(mpPointSampler);
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
+
+    mpImportanceMapHelper = std::make_unique<ImportanceMapHelper>(mpDevice, mpScene->getLightCount(), mResolution, true);
 }
 
 void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -66,9 +64,7 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
     //This is triggered if either the resolution or number of lights changed
     if (mResolutionChanged)
     {
-        mAccessTextures.clear();
-        mSampleDistribution.clear();
-        mpLastFrameMaxSampleCount.reset();
+        mpImportanceMapHelper->updateResolution(mResolution);
         //The following buffers need to be cleared when light count changes
         mLinkedListCounter.clear();
         mLinkedListCounterCPU.clear();
@@ -162,65 +158,13 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
                 mLinkedListData[i]->setName("LinkedListIrrShadowNodes" + std::to_string(i));
             }
         }
-
-        if (mAccessTextures.empty())
-        {
-            mAccessTextures.resize(numBuffers);
-            for (uint i=0; i<numBuffers; i++)
-            {
-                mAccessTextures[i] = Texture::create2D(
-                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Uint, 1u, Texture::kMaxPossible, nullptr,
-                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-                );
-                mAccessTextures[i]->setName("AccessTextureLightLLI" + std::to_string(i));
-            }
-        }
-
-        if (mSampleDistribution.empty())
-        {
-            mSampleDistribution.resize(numBuffers);
-            for (uint i = 0; i < numBuffers; i++)
-            {
-                mSampleDistribution[i] = Texture::create2D(
-                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Float, 1u, Texture::kMaxPossible, nullptr,
-                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-                );
-                //Set highest mip to total number of samples
-                pRenderContext->clearUAV(
-                    mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), float4(mResolution.x * mResolution.y)
-                );
-                mSampleDistribution[i]->setName("SampleDistributionLLI" + std::to_string(i));
-            }
-        }
-
-        if (!mpLastFrameMaxSampleCount)
-        {
-            std::vector<uint> initData(numBuffers,0);
-            mpLastFrameMaxSampleCount = Buffer::create(
-                mpDevice, sizeof(uint) * numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                Buffer::CpuAccess::None, initData.data()
-            );
-            mpLastFrameMaxSampleCount->setName("LastFrameMaxSampleDistributionLLI");
-        }
     }
 }
 
 void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
 {
-    {
-        FALCOR_PROFILE(pRenderContext, "ImportancesMipMaps");
-    }
-    {
-        FALCOR_PROFILE(pRenderContext, "DistributeBudget");
-    }
-    if (mBlurSampleDistribution && mpGaussianBlur)
-    {
-        mpGaussianBlur->profileDummy(pRenderContext);
-    }
-    if (mOptimizeSampleDistribution)
-    {
-        FALCOR_PROFILE(pRenderContext, "SampleDistribution");
-    }
+    mpImportanceMapHelper->dummyRenderPassProfile(pRenderContext);
+
     auto& lights = mpScene->getLights();
     for (uint i = 0; i < lights.size(); i++)
     {
@@ -269,155 +213,18 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     }
 
     auto& lights = mpScene->getLights();
-    uint frameInFlight = mStagingCount; //Counter GPU CPU sync
+    int frameInFlight = mStagingCount; //Counter GPU CPU sync
 
-    //Create Access Mips
-    {
-        FALCOR_PROFILE(pRenderContext, "ImportancesMipMaps");
-        //Create Gen Mips pass
-        if (!mGenAccessMips)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kAccessMipsShader).csEntry("main").setShaderModel("6_6");
+    int lastFrameInFlight = 0;
+    lastFrameInFlight = frameInFlight - 1;
+    lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
+    uint maxRayBudget = mResolution.x * mResolution.y * mSampleOverestimate * mSampleOverestimate;
+    uint maxNodeSize = mResolution.x * mResolution.y * mApproxNumElementsPerPixel;
 
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-
-            mGenAccessMips = ComputePass::create(mpDevice, desc, defines, true);
-        }
-
-        for (uint m = 0; m < mAccessTextures[0]->getMipCount() - 1; m++)
-        {
-            auto var = mGenAccessMips->getRootVar();
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gSrc"][i].setSrv(mAccessTextures[i]->getSRV(m, 1u));
-                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(m + 1));
-            }
-
-            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m + 1), mAccessTextures[0]->getHeight(m + 1), lights.size());
-            var["CB"]["gDstSize"] = dispatchDim.xy();
-
-            mGenAccessMips->execute(pRenderContext, dispatchDim);
-        }
-    }
-    //Distribute Sample Budget
-    {
-        FALCOR_PROFILE(pRenderContext, "DistributeSampleBudget");
-        // Create Compute Pass
-        if (!mCalcSampleDistribution)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kCalcSampleDistributionShader).csEntry("main").setShaderModel("6_6");
-
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-            defines.add("MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y));
-
-            mCalcSampleDistribution = ComputePass::create(mpDevice, desc, defines, true);
-        }
-
-        // Determine Total Sample Budget
-        auto var = mCalcSampleDistribution->getRootVar();
-        mCalcSampleDistribution->getProgram()->addDefine(
-            "MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y) 
-        );
-
-        if (mEnableDynamicRayCountCalc && mFrameCount > 0)
-        {
-            //Get mip level
-            uint mip = mSampleDistribution[0]->getMipCount() - 1;
-            var["CB"]["gDetermineTotalSampleBudget"] = true;
-            var["CB"]["gMaxNodeSize"] = int(mResolution.x * mResolution.y * mApproxNumElementsPerPixel * mDynRCGuardPercentage);
-            var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x;
-            var["CB"]["gChangePercentageDecrease"] = mDynRCChangePercentage.y; 
-            var["CB"]["gMaxSampleOverestimate"] = mSampleOverestimate * mSampleOverestimate; // Squared as this is applied to x and y of dispatch resolution
-
-            var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gImportance"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
-                var["gSampleBudget"][i].setUav(mSampleDistribution[i]->getUAV(mip));
-            }
-            int lastFrameInFlight = 0;
-            lastFrameInFlight = mStagingCount - 1;
-            lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight; 
-                 
-            var["gElementCount"] = mLinkedListCounter[lastFrameInFlight];
-            mCalcSampleDistribution->execute(pRenderContext, uint3(1,1,1));
-        }
-
-        // Reset Total Sample Budget to base (Importance Map) resolution
-        if (mResetRayCount)
-        {
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                pRenderContext->clearUAV(mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), float4(mResolution.x * mResolution.y));
-            }
-            
-            mResetRayCount = false;
-        }
-
-        var["CB"]["gDetermineTotalSampleBudget"] = false;
-        uint highestMip = mSampleDistribution[0]->getMipCount() - 1;
-        for (uint i = 0; i < lights.size(); i++)
-        {
-            var["gImportance"][i].setSrv(mAccessTextures[i]->getSRV(0, 1u));                    //Base Level
-            var["gTotalImportance"][i].setSrv(mAccessTextures[i]->getSRV(highestMip, 1u));      //Highest MIP (1x1)
-            var["gSampleBudget"][i].setUav(mSampleDistribution[i]->getUAV(0));                               //Base Level
-            var["gTotalSampleBudget"][i].setSrv(mSampleDistribution[i]->getSRV(highestMip, 1u));//Highest MIP (1x1)
-        }
-
-        uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
-        var["CB"]["gDstSize"] = dispatchDim.xy();
-
-        mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
-    }
-    //Blur
-    if(mBlurSampleDistribution)
-    {
-        if (!mpGaussianBlur)
-        {
-            mpGaussianBlur = std::make_unique<SMGaussianBlur>(mpDevice);
-            mpGaussianBlur->setBlurKernel(kBlurKernelWidthInit, kBlurSigmaInit);
-        }
-            
-        //TODO Maybe optimize so that all shaders execute the same step in parallel (e.g. an array version)
-        for (uint i = 0; i < lights.size(); i++)
-            mpGaussianBlur->execute(pRenderContext, mSampleDistribution[i]); 
-    }
-    //Optimize Samples
-    if (mOptimizeSampleDistribution)
-    {
-        FALCOR_PROFILE(pRenderContext, "SampleDistribution");
-        // Create Compute Pass
-        if (!mpOptimizeSamples)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kOptimizeSamplesShader).csEntry("main").setShaderModel("6_6");
-
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-            defines.add("CLEAR_COUNTER", "1");
-
-            mpOptimizeSamples = ComputePass::create(mpDevice, desc, defines, true);
-        }
-        auto var = mpOptimizeSamples->getRootVar();
-
-        var["gCounter"] = mLinkedListCounter[frameInFlight];
-        for (uint m = 1; m < mSampleDistribution[0]->getMipCount(); m++)
-        {
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gSampleDistribution0"][i].setUav(mSampleDistribution[i]->getUAV(m - 1,0,1));
-                var["gSampleDistribution1"][i].setUav(mSampleDistribution[i]->getUAV(m,0,1));
-            }
-            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
-            var["CB"]["gDispatchSize"] = dispatchDim.xy();
-
-            mpOptimizeSamples->execute(pRenderContext, dispatchDim);            
-        }
-    }
+    // Get the sample distribution ready
+    mpImportanceMapHelper->generateSampleDistribution(
+        pRenderContext, mLinkedListCounter[lastFrameInFlight], maxNodeSize, maxNodeSize, mLinkedListCounter[frameInFlight], false
+    );
 
     // Defines
     mGenLinkedListShadowPip.pProgram->addDefine("MAX_IDX", std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel));
@@ -425,7 +232,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     mGenLinkedListShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
-    mGenLinkedListShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
+    mGenLinkedListShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mpImportanceMapHelper->getSampleDistribution(0)->getMipCount()));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mpHaltonBuffer ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mJitterSampleCount));
@@ -472,7 +279,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
         var["CB"]["gLightDir"] = lights[i]->getData().dirW;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
-        var["CB"]["gMipCount"] = mSampleDistribution[i]->getMipCount();
+        var["CB"]["gMipCount"] = mpImportanceMapHelper->getSampleDistribution(i)->getMipCount();
         var["CB"]["gSMRes"] = mResolution;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
@@ -480,8 +287,8 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
         var["gCounter"] = mLinkedListCounter[frameInFlight];
         var["gData"] = mLinkedListData[i];
-        var["gAccessCounter"] = mAccessTextures[i];
-        var["gSampleDistribution"] = mSampleDistribution[i];
+        var["gAccessCounter"] = mpImportanceMapHelper->getImportanceMap(i);
+        var["gSampleDistribution"] = mpImportanceMapHelper->getSampleDistribution(i);
         var["gHaltonSamples"] = mpHaltonBuffer;
 
         // Get dimensions of ray dispatch.
@@ -539,7 +346,7 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
-    shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
+    shadowVar["SMCB"]["gMipCount"] = mpImportanceMapHelper->getSampleDistribution(0)->getMipCount();
     shadowVar["SMCB"]["gMaxBufferSize"] = mLinkedListNodeBufferSize;
     uint2 opaqueSMMaxDispatch = getShaderDispatchSize();
     shadowVar["SMCB"]["gISMMaxSize"] = opaqueSMMaxDispatch.x * opaqueSMMaxDispatch.y;
@@ -550,12 +357,12 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     {
         shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
         shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
-        shadowVar["gAccessCounter"][i] = mAccessTextures[i];
+        shadowVar["gAccessCounter"][i] = mpImportanceMapHelper->getImportanceMap(i);
     }
     const auto accelDataSize = lights.size();
     for (uint i = 0; i < accelDataSize; i++)
     {
-        shadowVar["gSampleDistribution"][i] = mSampleDistribution[i];
+        shadowVar["gSampleDistribution"][i] = mpImportanceMapHelper->getSampleDistribution(i);
         shadowVar["gLinkedListData"][i] = mLinkedListData[i];
     }
 
@@ -641,18 +448,7 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
         mResolutionChanged |= group.var("Node Buffer size (Res x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
         group.tooltip("Multiplier for the Node Data buffer.");
 
-        mResetRayCount |= group.checkbox("Use GPU Sample Distribution opimization", mEnableDynamicRayCountCalc);
-        if (mEnableDynamicRayCountCalc)
-        {
-            group.var("GPU SD Fill Guard", mDynRCGuardPercentage, 0.001f, 1.f);
-            group.tooltip("Buffer should be held around this fill percentage. ");
-            group.var("GPU SD Change Mult (Increase/Decrease)", mDynRCChangePercentage, 0.001f, 1.f);
-            group.tooltip(
-                "Multiplier for the change value in the Sample Distribution. There is a different value for increase and decrease. "
-                "Increase should be handled more conserveratively, while the decrease should be quiet aggressive"
-            );
-        
-        }
+        mpImportanceMapHelper->renderUI(group);
 
         group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
         group.tooltip(
@@ -666,12 +462,6 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
             group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
             group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
         }
-        group.checkbox("Blur Sample distribution", mBlurSampleDistribution);
-        if (mBlurSampleDistribution && mpGaussianBlur)
-        {
-            if (auto gaussGroup = group.group("Blur Options"))
-                mpGaussianBlur->renderUI(gaussGroup);
-        }
 
         group.checkbox("Debug Show Importance", mDebugEnableShowImportance);
         if (mDebugEnableShowImportance)
@@ -684,14 +474,13 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
                 else
                     mDebugSelectedLight = 0;
             }
-            if (!mAccessTextures.empty())
-            {
-                uint mipCount = mAccessTextures[0]->getMipCount();
-                if (mipCount > 1)
-                    group.slider("Selected Mipmap", mDebugSelectedMipLevel, 0u, mipCount - 1u);
-                else
-                    mDebugSelectedMipLevel = 0;
-            }
+
+            uint mipCount = mpImportanceMapHelper->getImportanceMap(0)->getMipCount();
+            if (mipCount > 1)
+                group.slider("Selected Mipmap", mDebugSelectedMipLevel, 0u, mipCount - 1u);
+            else
+                mDebugSelectedMipLevel = 0;
+
             group.var("Scale Factor IM", mDebugScaleFactorIM, 0.f, FLT_MAX, 1.f);
             group.var("Scale Factor SD", mDebugScaleFactorSD, 0.f, FLT_MAX, 1.f);
         }
@@ -709,7 +498,7 @@ void LinkedListIrregularZ::debugPass(
 )
 {
     // Early out
-    if (!mDebugEnableShowImportance || mAccessTextures.empty() || mSampleDistribution.empty())
+    if (!mDebugEnableShowImportance)
         return;
 
     FALCOR_PROFILE(pRenderContext, "ShowSampleDistribution");
@@ -732,8 +521,8 @@ void LinkedListIrregularZ::debugPass(
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     auto var = mpDebugShowImportancePass->getRootVar();
-    auto& pImportanceMap = mAccessTextures[mDebugSelectedLight];
-    auto& pSampleDistribution = mSampleDistribution[mDebugSelectedLight];
+    auto& pImportanceMap = mpImportanceMapHelper->getImportanceMap(mDebugSelectedLight);
+    auto& pSampleDistribution = mpImportanceMapHelper->getSampleDistribution(mDebugSelectedLight);
 
     var["CB"]["gDispatchSize"] = targetDim;
     var["CB"]["gSMRes"] = uint2(pImportanceMap->getWidth(), pImportanceMap->getHeight()) / (1u << mDebugSelectedMipLevel);

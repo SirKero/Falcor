@@ -34,10 +34,6 @@ namespace
     //Shader Paths
     const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/AccelIrregularZ/";
     const std::string kGenShader = kShaderFolder + "GenAccelIrregularZ.rt.slang";
-    const std::string kAccessMipsShader = kShaderFolder + "GenAccessMips.cs.slang";
-    const std::string kImportanceReductionShader = kShaderFolder + "ReductionImportance.cs.slang";
-    const std::string kCalcSampleDistributionShader = kShaderFolder + "CalcSampleDistribution.cs.slang";
-    const std::string kOptimizeSamplesShader = kShaderFolder + "OptimizeSamples.cs.slang";
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //UI
@@ -61,6 +57,8 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
 
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
+
+    mpImportanceMapHelper = std::make_unique<ImportanceMapHelper>(mpDevice, mpScene->getLightCount(), mResolution);
 }
 
 void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
@@ -70,14 +68,12 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
     {
         mAccelShadowAABB.clear();
         mpShadowAccelerationStrucure.reset();
-        mAccessTextures.clear();
-        mSampleDistribution.clear();
-        mpLastFrameMaxSampleCount.reset();
         //The following buffers need to be cleared when light count changes
         mAccelShadowCounter.clear();
         mAccelShadowCounterCPU.clear();
         mAccelFenceWaitValues.clear();
         mAccelShadowNumPoints.clear();
+        mpImportanceMapHelper->updateResolution(mResolution);
     }
 
     if ((mTransparencyBufferUsesColor != mUseColoredTransparency) || mResolutionChanged)
@@ -197,46 +193,6 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             mpShadowAccelerationStrucure->setMinBLASUpdateCount(kMinAABBUpdateCount);
         }
 
-        if (mAccessTextures.empty())
-        {
-            mAccessTextures.resize(numBuffers);
-            for (uint i=0; i<numBuffers; i++)
-            {
-                mAccessTextures[i] = Texture::create2D(
-                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Uint, 1u, Texture::kMaxPossible, nullptr,
-                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-                );
-                mAccessTextures[i]->setName("AccessTextureLight" + std::to_string(i));
-            }
-        }
-
-        if (mSampleDistribution.empty())
-        {
-            mSampleDistribution.resize(numBuffers);
-            for (uint i = 0; i < numBuffers; i++)
-            {
-                mSampleDistribution[i] = Texture::create2D(
-                    mpDevice, mResolution.x, mResolution.y, ResourceFormat::R32Float, 1u, Texture::kMaxPossible, nullptr,
-                    ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-                );
-                //Set highest mip to total number of samples
-                pRenderContext->clearUAV(
-                    mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), float4(mResolution.x * mResolution.y)
-                );
-                mSampleDistribution[i]->setName("SampleDistribution" + std::to_string(i));
-            }
-        }
-
-        if (!mpLastFrameMaxSampleCount)
-        {
-            std::vector<uint> initData(numBuffers,0);
-            mpLastFrameMaxSampleCount = Buffer::create(
-                mpDevice, sizeof(uint) * numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                Buffer::CpuAccess::None, initData.data()
-            );
-            mpLastFrameMaxSampleCount->setName("LastFrameMaxSampleDistribution");
-        }
-
         //For stats
         if (!mpStatsRaysDistributedBuffer)
         {
@@ -289,20 +245,9 @@ std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes()
 }
 
 void AccelIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext) {
-    {
-        FALCOR_PROFILE(pRenderContext, "ImportancesMipMaps");
-    }
-    {
-        FALCOR_PROFILE(pRenderContext, "DistributeBudget");
-    }
-    if (mBlurSampleDistribution && mpGaussianBlur)
-    {
-        mpGaussianBlur->profileDummy(pRenderContext);
-    }
-    if (mOptimizeSampleDistribution)
-    {
-        FALCOR_PROFILE(pRenderContext, "SampleDistribution");
-    }
+
+    mpImportanceMapHelper->dummyRenderPassProfile(pRenderContext);
+
     {
         FALCOR_PROFILE(pRenderContext, "ClearAccelAABBBuffers");
     }
@@ -361,199 +306,19 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     }
 
     auto& lights = mpScene->getLights();
-    uint frameInFlight = mStagingCount; // For sync if optimization is used
+    int frameInFlight = mStagingCount; // For sync if optimization is used
 
-    //Reduction for the Importance Map, either by Reduce Compute Shader or Simple MipMap Chain
-    if (mUseEfficientReduction)
-    {
-        FALCOR_PROFILE(pRenderContext, "ImportanceReduction");
-        // Create Compute Pass
-        if (!mImportanceReductionPass)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kImportanceReductionShader).csEntry("main").setShaderModel("6_6");
+    int lastFrameInFlight = 0;
+    lastFrameInFlight = frameInFlight - 1;
+    lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
+    uint maxRayBudget = mResolution.x * mResolution.y * mSampleOverestimate * mSampleOverestimate;
+    uint maxNodeSize = mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel;                 
 
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-
-            mImportanceReductionPass = ComputePass::create(mpDevice, desc, defines, true);
-        }
-        
-        auto var = mImportanceReductionPass->getRootVar();
-       
-        
-        const uint maxMipCount = mAccessTextures[0]->getMipCount() - 1u;
-        for (uint mip = 0; mip < maxMipCount; mip += 5)
-        {
-            uint dstMip = math::min(maxMipCount, mip + 5);
-
-            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(mip), mAccessTextures[0]->getHeight(mip), lights.size());
-
-            dispatchDim.xy() = dispatchDim.xy() / 2u;
-
-            var["CB"]["gDstSize"] = dispatchDim.xy();
-
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gSrc"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
-                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(dstMip,0u,1u));
-            }
-
-            mImportanceReductionPass->execute(pRenderContext, dispatchDim);
-        }
-        
-    }
-    else //TODO Remove?
-    {
-        FALCOR_PROFILE(pRenderContext, "ImportancesMipMaps");
-        //Create Gen Mips pass
-        if (!mGenAccessMips)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kAccessMipsShader).csEntry("main").setShaderModel("6_6");
-
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-
-            mGenAccessMips = ComputePass::create(mpDevice, desc, defines, true);
-        }
-
-        for (uint m = 0; m < mAccessTextures[0]->getMipCount() - 1; m++)
-        {
-            auto var = mGenAccessMips->getRootVar();
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gSrc"][i].setSrv(mAccessTextures[i]->getSRV(m, 1u));
-                var["gDst"][i].setUav(mAccessTextures[i]->getUAV(m + 1));
-            }
-               
-            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m + 1), mAccessTextures[0]->getHeight(m + 1), lights.size());
-            var["CB"]["gDstSize"] = dispatchDim.xy();
-
-            mGenAccessMips->execute(pRenderContext, dispatchDim);
-        }
-    }
-    //Distribute Sample Budget
-    {
-        FALCOR_PROFILE(pRenderContext, "DistributeSampleBudget");
-        // Create Compute Pass
-        if (!mCalcSampleDistribution)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kCalcSampleDistributionShader).csEntry("main").setShaderModel("6_6");
-
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-            defines.add("MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y));
-            defines.add("USE_ONE_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
-
-            mCalcSampleDistribution = ComputePass::create(mpDevice, desc, defines, true);
-        }
-
-        //Determine Total Sample Budget
-        auto var = mCalcSampleDistribution->getRootVar();
-        mCalcSampleDistribution->getProgram()->addDefine(
-            "MAX_SAMPLES", std::to_string(mResolution.x * mResolution.y) 
-        );
-        mCalcSampleDistribution->getProgram()->addDefine("USE_ONE_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
-
-        if (mEnableDynamicRayCountCalc && mFrameCount > 0)
-        {
-            //Get mip level
-            uint mip = mSampleDistribution[0]->getMipCount() - 1;
-            var["CB"]["gDetermineTotalSampleBudget"] = true;
-            var["CB"]["gMaxNodeSize"] = int(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel * mDynRCGuardPercentage);
-            var["CB"]["gChangePercentageIncrease"] = mDynRCChangePercentage.x; 
-            var["CB"]["gChangePercentageDecrease"] = mDynRCChangePercentage.y; 
-            var["CB"]["gMaxSampleOverestimate"] = mSampleOverestimate * mSampleOverestimate; //Squared as this is applied to x and y of dispatch resolution
-
-            var["gLastFrameSampleCount"] = mpLastFrameMaxSampleCount;
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gImportance"][i].setSrv(mAccessTextures[i]->getSRV(mip, 1u));
-                var["gSampleBudget"][i].setUav(mSampleDistribution[i]->getUAV(mip));
-            }
-            int lastFrameInFlight = 0;
-            lastFrameInFlight = mStagingCount - 1;
-            lastFrameInFlight = lastFrameInFlight < 0 ? kFramesInFlight - 1 : lastFrameInFlight;
-                             
-            var["gElementCount"] = mAccelShadowCounter[lastFrameInFlight];
-            mCalcSampleDistribution->execute(pRenderContext, uint3(1,1,1));
-        }
-
-        //Reset Total Sample Budget to base (Importance Map) resolution
-        if (mResetRayCount)
-        {
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                pRenderContext->clearUAV(mSampleDistribution[i]->getUAV(mSampleDistribution[i]->getMipCount() - 1).get(), float4(mResolution.x * mResolution.y));
-            }
-            
-            mResetRayCount = false;
-        }
-
-        //Compute Pass to distribute Total Sample Budget to Sample Budget Map using the Importance
-
-        var["CB"]["gDetermineTotalSampleBudget"] = false;
-        uint highestMip = mSampleDistribution[0]->getMipCount() - 1;
-        for (uint i = 0; i < lights.size(); i++)
-        {
-            var["gImportance"][i].setSrv(mAccessTextures[i]->getSRV(0, 1u));                    //Base Level
-            var["gTotalImportance"][i].setSrv(mAccessTextures[i]->getSRV(highestMip, 1u));      //Highest MIP (1x1)
-            var["gSampleBudget"][i].setUav(mSampleDistribution[i]->getUAV(0));                               //Base Level
-            var["gTotalSampleBudget"][i].setSrv(mSampleDistribution[i]->getSRV(highestMip, 1u));//Highest MIP (1x1)
-        }
-
-        uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(0), mAccessTextures[0]->getHeight(0), lights.size());
-        var["CB"]["gDstSize"] = dispatchDim.xy();
-
-        mCalcSampleDistribution->execute(pRenderContext, dispatchDim);
-    }
-
-    //Blur
-    if(mBlurSampleDistribution)
-    {
-        if (!mpGaussianBlur)
-        {
-            mpGaussianBlur = std::make_unique<SMGaussianBlur>(mpDevice);
-            mpGaussianBlur->setBlurKernel(kBlurKernelWidthInit, kBlurSigmaInit);
-        }
-            
-
-        //TODO Maybe optimize so that all shaders execute the same step in parallel (e.g. an array version)
-        for (uint i = 0; i < lights.size(); i++)
-            mpGaussianBlur->execute(pRenderContext, mSampleDistribution[i]); 
-    }
-    //Optimize Samples
-    if (mOptimizeSampleDistribution)
-    {
-        FALCOR_PROFILE(pRenderContext, "SampleDistribution");
-        // Create Compute Pass
-        if (!mpOptimizeSamples)
-        {
-            Program::Desc desc;
-            desc.addShaderLibrary(kOptimizeSamplesShader).csEntry("main").setShaderModel("6_6");
-
-            DefineList defines;
-            defines.add("COUNT_LIGHTS", std::to_string(lights.size()));
-
-            mpOptimizeSamples = ComputePass::create(mpDevice, desc, defines, true);
-        }
-
-        auto var = mpOptimizeSamples->getRootVar();
-        for (uint m = 1; m < mSampleDistribution[0]->getMipCount(); m++)
-        {
-            for (uint i = 0; i < lights.size(); i++)
-            {
-                var["gSampleDistribution0"][i].setUav(mSampleDistribution[i]->getUAV(m - 1,0,1));
-                var["gSampleDistribution1"][i].setUav(mSampleDistribution[i]->getUAV(m,0,1));
-            }
-            uint3 dispatchDim = uint3(mAccessTextures[0]->getWidth(m), mAccessTextures[0]->getHeight(m), lights.size());
-            var["CB"]["gDispatchSize"] = dispatchDim.xy();
-
-            mpOptimizeSamples->execute(pRenderContext, dispatchDim);            
-        }
-    }
+    //Get the sample distribution ready
+    mpImportanceMapHelper->generateSampleDistribution(
+        pRenderContext, mAccelShadowCounter[lastFrameInFlight], maxNodeSize, maxNodeSize, mAccelShadowCounter[frameInFlight],
+        mUseOneAABBForAllLights
+    );
 
     // Clear Counter
     uint clearSize = mUseOneAABBForAllLights ? 1 : lights.size();
@@ -565,7 +330,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("MIDPOINT_DEPTH_BIAS", std::to_string(mMidpointDepthBias));
     mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mSampleDistribution[0]->getMipCount()));
+    mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mpImportanceMapHelper->getSampleDistribution(0)->getMipCount()));
     mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mpHaltonBuffer ? "1" : "0");
@@ -614,7 +379,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["CB"]["gLightDir"] = lights[i]->getData().dirW;
         var["CB"]["gFar"] = mNearFar.y;
         var["CB"]["gLightIdx"] = i;
-        var["CB"]["gMipCount"] = mSampleDistribution[i]->getMipCount();
+        var["CB"]["gMipCount"] = mpImportanceMapHelper->getSampleDistribution(i)->getMipCount();
         var["CB"]["gSMRes"] = mResolution;
         var["CB"]["gViewProj"] = mShadowMapMVP[i].viewProjection;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
@@ -623,8 +388,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gAABB"] = mUseOneAABBForAllLights ? mAccelShadowAABB[0] : mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mUseOneAABBForAllLights ? mAccelShadowData[0] : mAccelShadowData[i];
-        var["gAccessCounter"] = mAccessTextures[i];
-        var["gSampleDistribution"] = mSampleDistribution[i];
+        var["gAccessCounter"] = mpImportanceMapHelper->getImportanceMap(i);
+        var["gSampleDistribution"] = mpImportanceMapHelper->getSampleDistribution(i);
         var["gHaltonSamples"] = mpHaltonBuffer;
         var["gStatsTotalSampleCountBuffer"] = mpStatsRaysDistributedBuffer;
 
@@ -670,22 +435,10 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
     // Build the Acceleration structure
     std::vector<uint64_t> aabbCount;
-    uint totalCount = 0;
-    for (uint i = 0; i < numAABBs && mAccelShadowUseCPUCounterOptimization; i++)
-        totalCount += mAccelShadowNumPoints[i];
-
+    
     for (uint i = 0; i < numAABBs; i++)
     {
-        uint numPoints = mAccelShadowMaxNumPoints;
-        if (mAccelShadowUseCPUCounterOptimization)
-        {
-            float diffPercentage = ((mAccelShadowMaxNumPoints - mAccelShadowNumPoints[i]) / mAccelShadowMaxNumPoints);
-            uint maxPossibleCount = diffPercentage > 0.0 && mEnableDynamicRayCountCalc
-                                        ? uint(totalCount * diffPercentage * mDynRCChangePercentage.y)
-                                        : 0.25f * mAccelShadowMaxNumPoints;
-            numPoints = std::min(uint(mAccelShadowNumPoints[i] + maxPossibleCount), mAccelShadowMaxNumPoints);
-        }
-        aabbCount.push_back(numPoints);
+        aabbCount.push_back(mAccelShadowMaxNumPoints);
     }
     mpShadowAccelerationStrucure->update(pRenderContext, aabbCount);
 
@@ -719,7 +472,7 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
     shadowVar["SMCB"]["gFar"] = mNearFar.y;
-    shadowVar["SMCB"]["gMipCount"] = mSampleDistribution[0]->getMipCount();
+    shadowVar["SMCB"]["gMipCount"] = mpImportanceMapHelper->getSampleDistribution(0)->getMipCount();
     uint2 opaqueSMMaxDispatch = getShaderDispatchSize();
     shadowVar["SMCB"]["gMaxBufferSize"] = opaqueSMMaxDispatch.x * opaqueSMMaxDispatch.y;
 
@@ -728,8 +481,8 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     {
         shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
         shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
-        shadowVar["gAccessCounter"][i] = mAccessTextures[i];
-        shadowVar["gSampleDistribution"][i] = mSampleDistribution[i];
+        shadowVar["gAccessCounter"][i] = mpImportanceMapHelper->getImportanceMap(i);
+        shadowVar["gSampleDistribution"][i] = mpImportanceMapHelper->getSampleDistribution(i);
     }
     const auto accelDataSize = mUseOneAABBForAllLights ? 1 : lights.size();
     for (uint i = 0; i < accelDataSize; i++)
@@ -856,36 +609,17 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
         mResolutionChanged |= group.checkbox("Use one AABB for all lights", mUseOneAABBForAllLights); //Should trigger rebuild of all buffers
         group.tooltip("Uses one AABB for all lights. Light coordinates are put side by side on the x axis");
 
-        mResetRayCount |= group.checkbox("Use GPU Sample Distribution opimization", mEnableDynamicRayCountCalc);
-        if (mEnableDynamicRayCountCalc)
-        {
-            group.var("GPU SD Fill Guard", mDynRCGuardPercentage, 0.001f, 1.f);
-            group.tooltip("Buffer should be held around this fill percentage. ");
-            group.var("GPU SD Change Mult (Increase/Decrease)", mDynRCChangePercentage, 0.001f, 1.f);
-            group.tooltip(
-                "Multiplier for the change value in the Sample Distribution. There is a different value for increase and decrease. "
-                "Increase should be handled more conserveratively, while the decrease should be quiet aggressive"
-            );
-        }
+        mpImportanceMapHelper->renderUI(group);
 
         group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
         group.tooltip("Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same Frame)");
 
-        group.checkbox("Use Element Counter to fit Accelertation Structure", mAccelShadowUseCPUCounterOptimization);
-        group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size. Only recommended if there are multiple AABB buffers that are empty or partially filled");
-       
         group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
         group.tooltip("Optimizes the sample distribution texture with an extra compute pass");
         if (mOptimizeSampleDistribution)
         {
             group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
             group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
-        }
-        group.checkbox("Blur Sample distribution", mBlurSampleDistribution);
-        if (mBlurSampleDistribution && mpGaussianBlur)
-        {
-            if (auto gaussGroup = group.group("Blur Options"))
-                mpGaussianBlur->renderUI(gaussGroup);
         }
 
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);

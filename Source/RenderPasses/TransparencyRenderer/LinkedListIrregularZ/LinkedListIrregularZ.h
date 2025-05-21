@@ -27,7 +27,7 @@
  **************************************************************************/
 #pragma once
 #include "../TransparencyShadowMethod.h"
-#include "Rendering/ShadowMaps/Blur/SMGaussianBlur.h"
+#include "../ImportanceMapHelpers/ImportanceMapHelper.h"
 
 class LinkedListIrregularZ : public TransparencyShadowMethod
 {
@@ -62,18 +62,19 @@ public:
 
     /*  Returns the sample distribution
     */
-    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return &mSampleDistribution; };
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return mpImportanceMapHelper->getSamplesDistributionVector();};
 
     /* Gets dispatch size for the gen shader
      */
     virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
-
-    const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }
 private:
     void prepareResources(RenderContext* pRenderContext);
 
-    // Funktion that generates the profiler passes in case they are not executed this frame
+    // Function that generates the profiler passes in case they are not executed this frame
     void dummyProfileGeneration(RenderContext* pRenderContext);
+
+    // Importance Map
+    std::unique_ptr<ImportanceMapHelper> mpImportanceMapHelper;
 
     //Runtime
     uint mFrameCount = 0;
@@ -87,13 +88,6 @@ private:
     //Sample Gen
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
     float mSampleOverestimate = 1.00f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
-    bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
-
-    //Dynamic ray count on gpu
-    bool mEnableDynamicRayCountCalc = true;
-    bool mResetRayCount = false;
-    float mDynRCGuardPercentage = 0.85f;  // 15% buffer for possible changes
-    float2 mDynRCChangePercentage = float2(0.1f, 0.6f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
 
     //Shadow settings
     uint mApproxNumElementsPerPixel = 4u;
@@ -120,19 +114,12 @@ private:
     
     ref<Sampler> mpLinearSampler;
     ref<Sampler> mpPointSampler;
-    std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
     ref<SampleGenerator> mpSampleGenerator;
 
     std::vector<ref<Buffer>> mLinkedListCounter;                              // Counter for inserting points
     std::vector<ref<Buffer>> mLinkedListCounterCPU;                           // Counter for inserting points
     std::vector<ref<Buffer>> mLinkedListData;                                 // Transparency Data
-    std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
-    std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
-    ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
     
-    ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
-    ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
-    ref<ComputePass> mpOptimizeSamples;             //Optimize Sample distribution
     ref<ComputePass> mpDebugShowImportancePass;     //Debug show importance map or sample distribution
     RayTracingPipeline mGenLinkedListShadowPip; //RayTracingPipeline
 };

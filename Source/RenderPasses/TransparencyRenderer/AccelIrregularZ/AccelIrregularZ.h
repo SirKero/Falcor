@@ -27,8 +27,8 @@
  **************************************************************************/
 #pragma once
 #include "../TransparencyShadowMethod.h"
+#include "../ImportanceMapHelpers/ImportanceMapHelper.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
-#include "Rendering/ShadowMaps/Blur/SMGaussianBlur.h"
 
 class AccelIrregularZ : public TransparencyShadowMethod
 {
@@ -63,19 +63,20 @@ public:
 
      /*  Returns the sample distribution
      */
-    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return &mSampleDistribution; };
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return mpImportanceMapHelper->getSamplesDistributionVector(); };
 
      /* Gets dispatch size for the gen shader
      */
     virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
 
-    const std::vector<ref<Texture>>& getAccessTextures() const { return mAccessTextures; }    
-
 private:
     void prepareResources(RenderContext* pRenderContext);
     std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes();
-    //Funktion that generates the profiler passes in case they are not executed this frame
+    //Function that generates the profiler passes in case they are not executed this frame
     void dummyProfileGeneration(RenderContext* pRenderContext);
+
+    //Importance Map
+    std::unique_ptr<ImportanceMapHelper> mpImportanceMapHelper;
 
     //Runtime
     uint mFrameCount = 0;
@@ -90,16 +91,8 @@ private:
     //Sample Gen
     bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
     float mSampleOverestimate = 1.0f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
-    bool mBlurSampleDistribution = true; //Blurs the lowest level of the sample distribution
-
-    //Dynamic ray count on gpu
-    bool mEnableDynamicRayCountCalc = true;
-    bool mResetRayCount = false;
-    float mDynRCGuardPercentage = 0.85f; //15% buffer for possible changes
-    float2 mDynRCChangePercentage = float2(0.1f,0.6f); //(Increase/Decrease) Percentage. How much of the total difference should be used to increase/decrease number of samples
 
     // Accel shadow settings
-    bool mUseEfficientReduction = true;     //Uses the efficient reduction instead of simple MipMap generation
     bool mUseOneAABBForAllLights = true;
     uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
@@ -135,7 +128,6 @@ private:
 
     ref<Sampler> mpPointSampler;
     ref<Sampler> mpLinearSampler;
-    std::unique_ptr<SMGaussianBlur> mpGaussianBlur;
     ref<SampleGenerator> mpSampleGenerator;
 
     std::vector<ref<Buffer>> mAccelShadowAABB;                                 // For Accel AABB points
@@ -144,16 +136,9 @@ private:
     std::vector<ref<Buffer>> mAccelShadowData;                                 // Transparency Data
     std::unique_ptr<CustomAccelerationStructure> mpShadowAccelerationStrucure; // AS
     ref<Texture> mpDebugDepth;                                                 // Depth for the debug passs
-    std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
-    std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
-    ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
     ref<Buffer> mpStatsRaysDistributedBuffer;                                   //Buffer that stores distributed rays.
     ref<Buffer> mpStatsRaysDistributedBufferCPU;                               //CPU Buffer that stores distributed rays.
     
-    ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
-    ref<ComputePass> mImportanceReductionPass;      //Reduction Pass for the Importance Map
-    ref<ComputePass> mCalcSampleDistribution;       //Calcs the sample distribution from the access texture
-    ref<ComputePass> mpOptimizeSamples;             //Optimize Sample distribution
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
     RasterPipeline mRasterShowAccelPass;
 };
