@@ -65,7 +65,9 @@ RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 RWTexture2D<uint> gAccessCounter;
 Texture2D<float> gSampleDistribution;
 
+RWBuffer<uint> gStatsTotalSampleCountBuffer; //Total sample count buffer for stats
 Buffer<float2> gHaltonSamples;
+
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
 static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; //Depth bias applied to tmin to search for the next opaque hit (for midpoint sm)
@@ -82,6 +84,7 @@ static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD;
 static const bool kLimitedOpaqueStore = false; // STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
 static const bool kUseMidpointBias = true; //Uses min between midpoint and a high bias (0.08% of lights far)
 static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
+static const bool kWriteTotalSampleCount = STATS_WRITE_TOTAL_SAMPLE_COUNT;   //For stats
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
@@ -263,11 +266,16 @@ void rayGen()
     // Go through the mip chain
     float pixelCenterOffest = 0.5;
 
-    float totalSamples = float(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
-    totalSamples = min(totalSamples, frameDim.x * frameDim.y);
-    uint idx1D = pixel.x + pixel.y * frameDim.x; // Create an 1D weight from 2D
-    if (idx1D > totalSamples)
+    uint totalRaySamples = uint(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
+    uint idx1D = pixel.x + pixel.y * frameDim.x;                                         // Create an 1D weight from 2D
+    if (idx1D > totalRaySamples)
         return;
+
+    if (kWriteTotalSampleCount) {
+        if (pixel.x == 0 && pixel.y == 0) {
+            gStatsTotalSampleCountBuffer[gLightIdx] = totalRaySamples;
+        }
+    }
 
     int mipMulFactor = 1; // Default Mip 0
     uint index = idx1D;
@@ -275,7 +283,7 @@ void rayGen()
 
     if (!kUseOptimizedSampleDistribution)
     {
-        float weight = idx1D / totalSamples; // weight in [0,1]
+        float weight = idx1D / totalRaySamples; // weight in [0,1]
         // Go through the mip chain
         int mipLevel = gMipCount - 2;
         uint2 mipIdx = uint2(0); // Top left

@@ -236,6 +236,24 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
             );
             mpLastFrameMaxSampleCount->setName("LastFrameMaxSampleDistribution");
         }
+
+        //For stats
+        if (!mpStatsRaysDistributedBuffer)
+        {
+            mStatsDistributedRayCountsPerLight.resize(numBuffers);
+            for (auto& statsBuf : mStatsDistributedRayCountsPerLight)
+                statsBuf = 0;
+            mpStatsRaysDistributedBuffer = Buffer::create(
+                mpDevice, sizeof(uint) * numBuffers, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, mStatsDistributedRayCountsPerLight.data()
+            );
+            mpStatsRaysDistributedBuffer->setName("StatsRaySampleCount");
+            mpStatsRaysDistributedBufferCPU = Buffer::create(
+                mpDevice, sizeof(uint) * numBuffers, ResourceBindFlags::None, Buffer::CpuAccess::Read,
+                mStatsDistributedRayCountsPerLight.data()
+            );
+            mpStatsRaysDistributedBufferCPU->setName("StatsRaySampleCountCPURead");
+        }
     }
 }
 
@@ -558,7 +576,8 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     mGenAccelShadowPip.pProgram->addDefine("STORE_LIMITED_OPAQUE_SURFACES", mOpaqueShadowMapEnabled ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); //Trace non-opaque only if mask is used
     mGenAccelShadowPip.pProgram->addDefine("INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"); // Determines if the castShadow instance mask bit is used
-    
+    mGenAccelShadowPip.pProgram->addDefine("STATS_WRITE_TOTAL_SAMPLE_COUNT", mEnableStats ? "1" : "0");
+
     //LOD
     bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
     mGenAccelShadowPip.pProgram->addDefine("USE_LOD", useLOD ? "1" : "0");
@@ -607,6 +626,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         var["gAccessCounter"] = mAccessTextures[i];
         var["gSampleDistribution"] = mSampleDistribution[i];
         var["gHaltonSamples"] = mpHaltonBuffer;
+        var["gStatsTotalSampleCountBuffer"] = mpStatsRaysDistributedBuffer;
 
         // Get dimensions of ray dispatch.
         uint2 targetDim = mResolution;
@@ -668,6 +688,18 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
         aabbCount.push_back(numPoints);
     }
     mpShadowAccelerationStrucure->update(pRenderContext, aabbCount);
+
+    // Copy Stat Counter
+    {
+        // Copy to CPU
+        pRenderContext->copyBufferRegion(mpStatsRaysDistributedBufferCPU.get(), 0, mpStatsRaysDistributedBuffer.get(), 0,
+                                         sizeof(uint32_t) * lights.size()
+        );
+
+        void* data = mpStatsRaysDistributedBufferCPU->map(Buffer::MapType::Read);
+        std::memcpy(mStatsDistributedRayCountsPerLight.data(), data, sizeof(uint) * lights.size());
+        mpStatsRaysDistributedBufferCPU->unmap();
+    }
 }
 
 DefineList AccelIrregularZ::getDefines()
@@ -795,6 +827,26 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
 
                 }
                 group2.separator();
+            }
+
+            if (auto group2 = group.group("Ray Sample Count Info:"))
+            {
+                mEnableStats = true;
+                uint total = 0;
+                for (const auto& count : mStatsDistributedRayCountsPerLight)
+                    total += count;
+                group2.text("Total Count: " + std::to_string(total));
+                if (mpScene->getLightCount() > 1)
+                {
+                    for (uint i = 0; i < mpScene->getLightCount(); i++)
+                    {
+                        group2.text(mpScene->getLight(i)->getName() + ": " + std::to_string(mStatsDistributedRayCountsPerLight[i]));
+                    }
+                }
+            }
+            else
+            {
+                mEnableStats = false;
             }
         }
 

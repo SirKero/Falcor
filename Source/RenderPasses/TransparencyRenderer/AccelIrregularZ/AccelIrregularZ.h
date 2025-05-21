@@ -117,6 +117,10 @@ private:
     LightMVP mStaggeredDirectionalLightMVP = {};
     int mDirectionalLightIndex = -1; //Used to set LightMVP
 
+    bool mEnableStats = false;
+    std::vector<uint> mStatsDistributedRayCountsPerLight; 
+
+
     struct
     {
         bool enable = false;
@@ -143,6 +147,8 @@ private:
     std::vector<ref<Texture>> mAccessTextures;                                 //Access distribution from the other passes
     std::vector<ref<Texture>> mSampleDistribution;                             //Distribution of samples
     ref<Buffer> mpLastFrameMaxSampleCount;                                  //Buffer to store the sample distribution from last frame. Used with Optimize Sample distribution
+    ref<Buffer> mpStatsRaysDistributedBuffer;                                   //Buffer that stores distributed rays.
+    ref<Buffer> mpStatsRaysDistributedBufferCPU;                               //CPU Buffer that stores distributed rays.
     
     ref<ComputePass> mGenAccessMips;                //Create Prefix Sum Mips for the access texture 
     ref<ComputePass> mImportanceReductionPass;      //Reduction Pass for the Importance Map

@@ -19,8 +19,8 @@ cbuffer CB {
 }
 
 /*
-    Compute Shader that calculates the Sample Distribution from the Sample Budget using the Rules from Chapter 3.1.3 in the Paper
-    The shader always works on the current Mip-Level and the one below, starting from Mip-Level 1
+    Compute Shader that calculates the Sample Distribution from the Sample Budget using the Rules from Chapter 3.1.3 in the Paper.
+    The shader always works on the current Mipmap level and the one below, starting from level 1.
     The incoming Sample Budget is adjusted according to three cases:
     - Case (a):
         The sum of the Sample Budget is smaller than the number of valid budgets (budget > 0).
@@ -32,9 +32,10 @@ cbuffer CB {
         Every sample that has a remaining budget >1, the Grid requirement is applied (next lowest square; Eq.3 in paper).
         The grid requirement allows for uniform subdivision of the base Importance Map resolution.
     - Case (c):
-        If a sample was previously balanced by case b, it cannot be changed anymore as otherwise sampling for the corresponding elements below it would break.
-        Balanced samples are marked with the sign bit. However, it may occur that some of the samples are marked and others are not. In that case, we apply the grid requirement on
-        all non-marked samples. If the sample is smaller than 1, it is increased to 1 to guarantee that at least one sample is distributed. 
+        If a sample was previously balanced by case (b), it cannot be changed anymore as otherwise sampling for the corresponding elements below it would break.
+        Balanced samples are marked with the sign bit. However, it may occur that some of the samples are marked, and others are not. In that case, we apply the grid requirement on
+        all non-marked samples. If the sample is smaller than 1, it is increased to 1 to guarantee that at least one sample is distributed.
+
         
 */             
 [numthreads(16, 16, 1)]
