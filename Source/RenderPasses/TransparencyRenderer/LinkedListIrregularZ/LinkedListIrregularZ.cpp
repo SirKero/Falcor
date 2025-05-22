@@ -223,7 +223,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
 
     // Get the sample distribution ready
     mpImportanceMapHelper->generateSampleDistribution(
-        pRenderContext, mLinkedListCounter[lastFrameInFlight], maxNodeSize, maxNodeSize, mLinkedListCounter[frameInFlight], false
+        pRenderContext, mLinkedListCounter[lastFrameInFlight], maxNodeSize, maxRayBudget, mLinkedListCounter[frameInFlight], false
     );
 
     // Defines

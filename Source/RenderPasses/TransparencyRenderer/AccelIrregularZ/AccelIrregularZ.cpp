@@ -316,7 +316,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
 
     //Get the sample distribution ready
     mpImportanceMapHelper->generateSampleDistribution(
-        pRenderContext, mAccelShadowCounter[lastFrameInFlight], maxNodeSize, maxNodeSize, mAccelShadowCounter[frameInFlight],
+        pRenderContext, mAccelShadowCounter[lastFrameInFlight], maxNodeSize, maxRayBudget, mAccelShadowCounter[frameInFlight],
         mUseOneAABBForAllLights
     );
 
