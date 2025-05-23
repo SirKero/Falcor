@@ -80,7 +80,7 @@ public:
         float2 nearFar = float2(0.1f, 60.f);
         float cascadedSize = 20.f;
         float midpointPercentage = 0.5f;
-        float depthBias = 1e-2f;
+        float depthBias = 1e-3f;
         bool enableColoredTransparency = false;
         bool enableSoftShadows = false;
         float softShadowsPositionRadius = 0.001f;
