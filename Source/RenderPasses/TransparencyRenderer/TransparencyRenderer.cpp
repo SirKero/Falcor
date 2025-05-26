@@ -416,11 +416,13 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         {
             mShadowSettings.resolution = 512;
             mShadowSettings.cascadedPutCameraOnGrid = true;
+            mShadowSettings.samplePattern = TransparencyShadowMethod::SMSamplePattern::MatrixHalton;
         }
         else if (mShadowRenderMethod == ShadowRenderMethod::AccelShadow || mShadowRenderMethod == ShadowRenderMethod::LinkedList)
         {
             mShadowSettings.resolution = 2048;
             mShadowSettings.cascadedPutCameraOnGrid = false;
+            mShadowSettings.samplePattern = TransparencyShadowMethod::SMSamplePattern::Center;
         }
     }
     dirty |= methodChanged;

@@ -233,8 +233,12 @@ void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& set
     mRandomSoftShadowsPositionRadius = settings.softShadowsPositionRadius;
     mRandomSoftShadowsDirSpread = settings.softShadowsDirectionsSpread;
 
-    mSamplePattern = settings.samplePattern;
-    mJitterSampleCount = settings.jitterSampleCount;
+    if (mSamplePattern != settings.samplePattern)
+    {
+        mSamplePattern = settings.samplePattern;
+        mJitterSampleCount = settings.jitterSampleCount;
+        updateJitterSamplePattern();
+    }
 }
 
 bool TransparencyShadowMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings)
@@ -273,11 +277,6 @@ bool TransparencyShadowMethod::globalSettingsRenderUI(Gui::Widgets& widget, Glob
     #endif
 
     setGlobalShadowSettings(settings);
-
-    if (jitterChanged)
-    {
-        updateJitterSamplePattern();
-    }
 
     return false;
 }
