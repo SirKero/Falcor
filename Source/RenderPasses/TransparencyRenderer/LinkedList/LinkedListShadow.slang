@@ -41,9 +41,9 @@ struct LinkedListShadow
     SamplerState gMaskSampler;
 
     //Fetches the 
-    float getLinkedVisibility(LinkedListNode n, float dist, uint lightIdx)
+    float3 getLinkedVisibility(LinkedListNode n, float dist, uint lightIdx)
     {
-        float visibility = 1.0;
+        float3 visibility = 1.0;
         while (n.depth < dist) {
             visibility = n.visibility;
             if (n.next == 0 || n.next >= gMaxBufferSize) break;
@@ -124,11 +124,11 @@ struct LinkedListShadow
 
         LinkedListNode n = gLinkedListData[lightIdx][index];
         // traverse visibility until dist is reached
-        
+
         #if LINKED_LIST_PCF
-            float4 gatherVis = float4(1);
+            float3 gatherVis[4] = { float3(1), float3(1), float3(1), float3(1) };
             while (n.depth < dist) {
-                gatherVis.w = n.visibility;
+                gatherVis[3] = n.visibility;
                 if (n.next == 0 || n.next >= gMaxBufferSize) break;
                 uint nextIndex = n.next;
                 n = gLinkedListData[lightIdx][n.next];
@@ -144,14 +144,14 @@ struct LinkedListShadow
             LinkedListNode nX = {};
             nX.depth = FLT_MAX;
             nX = gLinkedListData[lightIdx][xIndex];
-            gatherVis.z = getLinkedVisibility(nZ, dist, lightIdx);
-            gatherVis.x = getLinkedVisibility(nX, dist, lightIdx);
+            gatherVis[2] = getLinkedVisibility(nZ, dist, lightIdx);
+            gatherVis[0] = getLinkedVisibility(nX, dist, lightIdx);
             uint yIndex = gLinkedListNeighbors[lightIdx][zIndex].bot;
             LinkedListNode nY = {};
             nY.depth = FLT_MAX;
             nY = gLinkedListData[lightIdx][yIndex];
-            gatherVis.y = getLinkedVisibility(nY, dist, lightIdx);
-            visibility = dot(gatherWeight, gatherVis);
+            gatherVis[1] = getLinkedVisibility(nY, dist, lightIdx);
+            visibility = gatherWeight.x * gatherVis[0] + gatherWeight.y * gatherVis[1] + gatherWeight.z * gatherVis[2] + gatherWeight.w * gatherVis[3];
         #else
             visibility = getLinkedVisibility(n, dist, lightIdx);
         #endif
