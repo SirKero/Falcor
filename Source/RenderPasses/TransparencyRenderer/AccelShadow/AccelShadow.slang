@@ -19,6 +19,10 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_RAY_INLINE 1
 #endif
 
+#ifndef ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS
+#define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 0
+#endif
+
 #if 0
 struct AccelShadowRayData {
     float4 visibility;
