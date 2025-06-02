@@ -72,7 +72,6 @@ static const float kMaxTransmittance = 1.0 - kMinOpacity;
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const float kPixelOffset = ACCEL_BOXES_PIXEL_OFFSET; // Either 0.5(Normal) or 1.0(PCF)
-static const uint kRayFlags = ACCEL_RAY_FLAGS;
 static const bool kUseMidpointBias = true; // Uses min between midpoint and a high bias (0.08% of lights far)
 static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 

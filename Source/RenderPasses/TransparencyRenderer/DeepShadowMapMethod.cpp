@@ -25,7 +25,7 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "TransparencyShadowMethod.h"
+#include "DeepShadowMapMethod.h"
 #include "Utils/Math/FalcorMath.h"
 #include "Utils/SampleGenerators/DxSamplePattern.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
@@ -39,7 +39,8 @@ namespace
     };
 }
 
-TransparencyShadowMethod::TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene) {
+DeepShadowMapMethod::DeepShadowMapMethod(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene)
+{
     uint count = 0;
     for (auto& lights : mpScene->getLights())
         if (lights->getType() == LightType::Directional)
@@ -52,19 +53,14 @@ TransparencyShadowMethod::TransparencyShadowMethod(ref<Device> pDevice, ref<Scen
     updateSMMatrices(true);
 }
 
-DefineList TransparencyShadowMethod::getDefines()
+DefineList DeepShadowMapMethod::getDefines()
 {
     DefineList defines;
     defines.add("COUNT_LIGHTS", std::to_string(std::max(mpScene->getLightCount(), 1u)));
     return defines;
 }
 
-bool TransparencyShadowMethod::renderUI(Gui::Widgets& widget) {
-    //Legacy
-    return false;
-}
-
-void TransparencyShadowMethod::updateSMMatrices(bool rebuild)
+void DeepShadowMapMethod::updateSMMatrices(bool rebuild)
 {
     auto& lights = mpScene->getLights();
     // Check if resize is neccessary
@@ -132,7 +128,8 @@ void TransparencyShadowMethod::updateSMMatrices(bool rebuild)
     mUpdateSMMatrices = false;
 }
 
-void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Light> pLight) {
+void DeepShadowMapMethod::updateViewProjection(LightMVP& lightMVP, ref<Light> pLight)
+{
     auto& lightData = pLight->getData();
     switch (pLight->getType())
     {
@@ -199,14 +196,16 @@ void TransparencyShadowMethod::updateViewProjection(LightMVP& lightMVP, ref<Ligh
     lightMVP.projection = math::mul(jitterMat, lightMVP.projection);
 }
 
-void TransparencyShadowMethod::updateMVPAndJitter(LightMVP& lightMVP) {
+void DeepShadowMapMethod::updateMVPAndJitter(LightMVP& lightMVP)
+{
     lightMVP.viewProjection = math::mul(lightMVP.projection, lightMVP.view);
     lightMVP.invViewProjection = math::inverse(lightMVP.viewProjection);
     lightMVP.invProjection = math::inverse(lightMVP.projection);
     lightMVP.invView = math::inverse(lightMVP.view);
 }
 
-void TransparencyShadowMethod::setNearFar(const float2 nearFar) {
+void DeepShadowMapMethod::setNearFar(const float2 nearFar)
+{
     if (mNearFar.x != nearFar.x || mNearFar.y != nearFar.y)
     {
         mNearFar = nearFar;
@@ -214,7 +213,8 @@ void TransparencyShadowMethod::setNearFar(const float2 nearFar) {
     }
 }
 
-void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& settings) {
+void DeepShadowMapMethod::setGlobalShadowSettings(GlobalShadowSettings& settings)
+{
    
     if (mResolution.x != settings.resolution){
         mResolutionChanged = true;
@@ -241,7 +241,7 @@ void TransparencyShadowMethod::setGlobalShadowSettings(GlobalShadowSettings& set
     }
 }
 
-bool TransparencyShadowMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings)
+bool DeepShadowMapMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings)
 {
     #if SIMPLE_UI
     widget.dropdown("Resolution", kSMResolutionDropdown, resolution);
@@ -281,18 +281,18 @@ bool TransparencyShadowMethod::globalSettingsRenderUI(Gui::Widgets& widget, Glob
     return false;
 }
 
-static ref<CPUSampleGenerator> createSamplePattern(TransparencyShadowMethod::SMSamplePattern type, uint32_t sampleCount)
+static ref<CPUSampleGenerator> createSamplePattern(DeepShadowMapMethod::SMSamplePattern type, uint32_t sampleCount)
 {
     switch (type)
     {
-    case TransparencyShadowMethod::SMSamplePattern::Center:
-    case TransparencyShadowMethod::SMSamplePattern::PerSampleHalton:
+    case DeepShadowMapMethod::SMSamplePattern::Center:
+    case DeepShadowMapMethod::SMSamplePattern::PerSampleHalton:
         return nullptr;
-    case TransparencyShadowMethod::SMSamplePattern::MatrixDirectX:
+    case DeepShadowMapMethod::SMSamplePattern::MatrixDirectX:
         return DxSamplePattern::create(sampleCount);
-    case TransparencyShadowMethod::SMSamplePattern::MatrixHalton:
+    case DeepShadowMapMethod::SMSamplePattern::MatrixHalton:
         return HaltonSamplePattern::create(sampleCount);
-    case TransparencyShadowMethod::SMSamplePattern::MatrixStratified:
+    case DeepShadowMapMethod::SMSamplePattern::MatrixStratified:
         return StratifiedSamplePattern::create(sampleCount);
     default:
         FALCOR_UNREACHABLE();
@@ -300,7 +300,7 @@ static ref<CPUSampleGenerator> createSamplePattern(TransparencyShadowMethod::SMS
     }
 }
 
-void TransparencyShadowMethod::updateJitterSamplePattern()
+void DeepShadowMapMethod::updateJitterSamplePattern()
 {
     mpCPUSampleGenerator = createSamplePattern(mSamplePattern, mJitterSampleCount);
     if (mpCPUSampleGenerator)

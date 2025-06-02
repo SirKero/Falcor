@@ -42,8 +42,7 @@ namespace
 
 }; // namespace
 
-IDSMAccelerationStructure::IDSMAccelerationStructure(ref<Device> pDevice, ref<Scene> pScene)
-    : TransparencyShadowMethod(pDevice, pScene)
+IDSMAccelerationStructure::IDSMAccelerationStructure(ref<Device> pDevice, ref<Scene> pScene) : DeepShadowMapMethod(pDevice, pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -341,18 +340,9 @@ void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const Re
     mGenAccelShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(mRandomSoftShadowsPositionRadius));
     mGenAccelShadowPip.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(mRandomSoftShadowsDirSpread));
-    mGenAccelShadowPip.pProgram->addDefine("STORE_LIMITED_OPAQUE_SURFACES", mOpaqueShadowMapEnabled ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); //Trace non-opaque only if mask is used
     mGenAccelShadowPip.pProgram->addDefine("INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"); // Determines if the castShadow instance mask bit is used
     mGenAccelShadowPip.pProgram->addDefine("STATS_WRITE_TOTAL_SAMPLE_COUNT", mEnableStats ? "1" : "0");
-
-    //LOD
-    bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
-    mGenAccelShadowPip.pProgram->addDefine("USE_LOD", useLOD ? "1" : "0");
-    mGenAccelShadowPip.pProgram->addDefine("SHADOW_LOD_MODE", std::to_string((uint)mRayLodMode));
-    float2 invRenderDims = 1.f / float2(mResolution);
-    mGenAccelShadowPip.pProgram->addDefine("INV_FRAME_DIM_X", std::to_string(invRenderDims.x));
-    mGenAccelShadowPip.pProgram->addDefine("INV_FRAME_DIM_Y", std::to_string(invRenderDims.y));
 
 
     // Create Program Vars
@@ -461,7 +451,7 @@ void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const Re
 DefineList IDSMAccelerationStructure::getDefines()
 {
     DefineList defines = {};
-    defines.add(TransparencyShadowMethod::getDefines());
+    defines.add(DeepShadowMapMethod::getDefines());
     defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
     defines.add("ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
@@ -548,8 +538,6 @@ bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
     #else
     if (auto group = widget.group("Accel Shadow Settings"))
     {
-        dirty |= TransparencyShadowMethod::renderUI(widget);
-
         if (mpScene)
         {
             if (auto group2 = group.group("Current size info:"))

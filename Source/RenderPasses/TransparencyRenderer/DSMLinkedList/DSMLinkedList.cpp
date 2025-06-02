@@ -41,7 +41,7 @@ namespace
 
 }; // namespace
 
-DSMLinkedList::DSMLinkedList(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
+DSMLinkedList::DSMLinkedList(ref<Device> pDevice, ref<Scene> pScene) : DeepShadowMapMethod(pDevice, pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -301,7 +301,7 @@ void DSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& re
 DefineList DSMLinkedList::getDefines()
 {
     DefineList defines = {};
-    defines.add(TransparencyShadowMethod::getDefines());
+    defines.add(DeepShadowMapMethod::getDefines());
     defines.add("LINKED_LIST_PCF", mUseLinkedListPcf ? "1" : "0");
     defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     return defines;
@@ -351,8 +351,6 @@ bool DSMLinkedList::renderUI(Gui::Widgets& widget)
     #else
     if (auto group = widget.group("Linked List settings"))
     {
-        dirty |= TransparencyShadowMethod::renderUI(widget);
-
         if (mpScene)
         {
             if (auto group2 = group.group("Current size info:"))

@@ -1,4 +1,3 @@
-#include "../RayLodHelper.slang"
 #include "IDSMLinkedListData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
@@ -143,21 +142,6 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
         return;
 
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-    float2 ddx = float2(0);
-    float2 ddy = float2(0);
-    // LOD
-    if (kShadowLODMode == TexLODMode::RayCones)
-    {
-        computeAnisotropicAxesRayCones(triangleHit, v, -WorldRayDirection(), RayTCurrent(), gSpreadAngle, ddx, ddy);
-        lod = ExplicitGradientTextureSampler(ddx, ddy);
-    }
-    /* //TODO camera parameter is not correct for shadow maps
-    else if (kShadowLODMode == TexLODMode::RayDiffs)
-    {
-        computeRayDifferentials(triangleHit, -WorldRayDirection(), RayTCurrent(), gScene.camera, kInvFrameDim, ddx, ddy); 
-        lod = ExplicitGradientTextureSampler(ddx, ddy);
-    }
-    */
     float3 transmittance = float3(0.0);
 
     if(kUseColorTransparency){

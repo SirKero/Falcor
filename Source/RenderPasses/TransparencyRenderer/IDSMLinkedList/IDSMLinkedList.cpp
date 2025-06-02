@@ -41,7 +41,7 @@ namespace
 
 }; // namespace
 
-IDSMLinkedList::IDSMLinkedList(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
+IDSMLinkedList::IDSMLinkedList(ref<Device> pDevice, ref<Scene> pScene) : DeepShadowMapMethod(pDevice, pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -243,16 +243,6 @@ void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& r
     mGenLinkedListShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseMask ? "1" : "0"); // Trace non-opaque only if mask is used
     mGenLinkedListShadowPip.pProgram->addDefine("INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"); //Determines if the castShadow instance mask bit is used
     
-
-    //LOD
-    bool useLOD = (mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs);
-    mGenLinkedListShadowPip.pProgram->addDefine("USE_LOD", useLOD ? "1" : "0");
-    mGenLinkedListShadowPip.pProgram->addDefine("SHADOW_LOD_MODE", std::to_string((uint)mRayLodMode));
-    float2 invRenderDims = 1.f / float2(mResolution);
-    mGenLinkedListShadowPip.pProgram->addDefine("INV_FRAME_DIM_X", std::to_string(invRenderDims.x));
-    mGenLinkedListShadowPip.pProgram->addDefine("INV_FRAME_DIM_Y", std::to_string(invRenderDims.y));
-
-
     // Create Program Vars
     if (!mGenLinkedListShadowPip.pVars)
     {
@@ -334,7 +324,7 @@ void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& r
 DefineList IDSMLinkedList::getDefines()
 {
     DefineList defines = {};
-    defines.add(TransparencyShadowMethod::getDefines());
+    defines.add(DeepShadowMapMethod::getDefines());
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
     defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     return defines;
@@ -416,8 +406,6 @@ bool IDSMLinkedList::renderUI(Gui::Widgets& widget)
     #else
     if (auto group = widget.group("Irregular LL Shadow Settings"))
     {
-        dirty |= TransparencyShadowMethod::renderUI(widget);
-
         if (mpScene)
         {
             if (auto group2 = group.group("Current size info:"))

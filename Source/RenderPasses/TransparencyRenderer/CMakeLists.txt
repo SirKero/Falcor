@@ -8,13 +8,6 @@ target_sources(TransparencyRenderer PRIVATE
 	DSMAccelerationStructure/DSMAccelerationStructureData.slang
 	DSMAccelerationStructure/DebugShowShadowAccel.3d.slang
 
-	AccelShadowKBuffer/AccelShadowKBuffer.h
-	AccelShadowKBuffer/AccelShadowKBuffer.cpp
-	AccelShadowKBuffer/GenAccelShadowKBuffer.rt.slang
-	AccelShadowKBuffer/AccelShadowKBuffer.slang
-	AccelShadowKBuffer/AccelShadowKBufferData.slang
-	AccelShadowKBuffer/DebugShowShadowAccel.3d.slang
-
     DSMLinkedList/DSMLinkedList.h
 	DSMLinkedList/DSMLinkedList.cpp
 	DSMLinkedList/DSMLinkedList.slang
@@ -50,14 +43,13 @@ target_sources(TransparencyRenderer PRIVATE
     TransparentShadowMask/GenMaskShadowMap.rt.slang
     TransparentShadowMask/GenMaskImportanceShadowMap.rt.slang
 
-	TransparencyShadowMethod.h
-	TransparencyShadowMethod.cpp
+	DeepShadowMapMethod.h
+	DeepShadowMapMethod.cpp
 
 	TransparencyRenderer.cpp
 	TransparencyRenderer.h
 	
 	EvaluateAnalyticLight.slang
-	EvalDirect.cs.slang
 	EvalTransparenciesDirect.rt.slang
     RayReflections.rt.slang
 	PathTracer.rt.slang

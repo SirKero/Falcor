@@ -26,11 +26,11 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "../TransparencyShadowMethod.h"
+#include "../DeepShadowMapMethod.h"
 #include "../ImportanceMapHelpers/ImportanceMapHelper.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 
-class IDSMAccelerationStructure : public TransparencyShadowMethod
+class IDSMAccelerationStructure : public DeepShadowMapMethod
 {
 public:
     virtual ~IDSMAccelerationStructure() = default;

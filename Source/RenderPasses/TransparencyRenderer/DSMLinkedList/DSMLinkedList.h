@@ -26,9 +26,9 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "../TransparencyShadowMethod.h"
+#include "../DeepShadowMapMethod.h"
 
-class DSMLinkedList : public TransparencyShadowMethod
+class DSMLinkedList : public DeepShadowMapMethod
 {
 public:
     virtual ~DSMLinkedList() = default;

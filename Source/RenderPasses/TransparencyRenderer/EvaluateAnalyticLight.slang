@@ -11,13 +11,9 @@ import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Rendering.Lights.LightHelpers;
 import Utils.Color.ColorHelpers;
-#if EVAL_OPAQUE_SHADOW_MAP
-import Rendering.ShadowMaps.ShadowMap;
-#endif
 
 import DSMAccelerationStructure.DSMAccelerationStructure;
 import DSMLinkedList.DSMLinkedList;
-import AccelShadowKBuffer.AccelShadowKBuffer;
 import IDSMAccelerationStructure.IDSMAccelerationStructure;
 import IDSMLinkedList.IDSMLinkedList;
 
@@ -25,9 +21,8 @@ import IDSMLinkedList.IDSMLinkedList;
 #define SHADOW_EVAL_MODE_RAYTRACING 0
 #define SHADOW_EVAL_MODE_DSM_AS 1
 #define SHADOW_EVAL_MODE_DSM_LL 2
-#define SHADOW_EVAL_MODE_AccelKBuffer 3
-#define SHADOW_EVAL_MODE_IDSM_AS 4
-#define SHADOW_EVAL_MODE_IDSM_LL 5
+#define SHADOW_EVAL_MODE_IDSM_AS 3
+#define SHADOW_EVAL_MODE_IDSM_LL 4
 
 #ifndef SHADOW_EVAL_MODE
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
@@ -383,15 +378,12 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         // Test visibility by tracing a shadow ray.
         bool isDirectional = lightType == (uint)LightType::Directional; // Slight different calculations for ortho
         float3 visibility = float3(1.0);
-        
 
         // Shadow maps
         #if SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_DSM_AS
             visibility = gDSMAccelerationStructure.eval(lightIndex, sd.posW, isDirectional,maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_DSM_LL
             visibility = gDSMLinkedList.eval(lightIndex, sd.posW, isDirectional, maskFlags);
-        #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_AccelKBuffer
-            visibility = gAccelShadowKBuffer.eval(lightIndex, sd.posW, ls.posW);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_IDSM_AS
             visibility = gIDSMAccelerationStructure.eval(lightIndex, sd.posW, isDirectional, importance, maskFlags);
         #elif SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_IDSM_LL
@@ -426,15 +418,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
         // Clamp shadow in [0,1]
         visibility = clamp(visibility, 0.0, 1.0);
-        #if EVAL_OPAQUE_SHADOW_MAP
-            LightData lightData = gScene.getLight(lightIndex);
-            SMLightData smData = gShadowMap.getShadowMapLightData(lightData, lightIndex);
-            float opaqueShadow = 1.f;
-            bool isDynamic = false;
-            gShadowMap.evalShadowMap(sd.posW, smData, float4(0.f) /*random (only x is used currently)*/, 0.f /*MipLevel*/, opaqueShadow, isDynamic);
 
-            shadow = min(shadow, opaqueShadow);
-        #endif
         // Evaluate contribution.
         Li += brdf * visibility * ls.Li * invPdf;
     }

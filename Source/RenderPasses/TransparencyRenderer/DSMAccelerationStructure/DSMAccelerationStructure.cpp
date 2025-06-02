@@ -42,7 +42,7 @@ namespace
 
 }; // namespace
 
-DSMAccelerationStructure::DSMAccelerationStructure(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
+DSMAccelerationStructure::DSMAccelerationStructure(ref<Device> pDevice, ref<Scene> pScene) : DeepShadowMapMethod(pDevice, pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -224,8 +224,8 @@ void DSMAccelerationStructure::generate(RenderContext* pRenderContext, const Ren
     if (mAccelDebugShowAS.enable && mAccelDebugShowAS.stopGeneration)
         return;
 
-    //Check if opaque shadow map is set and change ray flags accordingly
-    mAccelRayFlags = mOpaqueShadowMapEnabled ? RayFlags::CullOpaque : RayFlags::None;
+    //Ray Tracing flags
+    mAccelRayFlags = RayFlags::None;
 
     auto& lights = mpScene->getLights();
     uint frameInFlight = mAccelShadowUseCPUCounterOptimization ? mStagingCount : 0; // For sync if optimization is used
@@ -335,7 +335,7 @@ void DSMAccelerationStructure::generate(RenderContext* pRenderContext, const Ren
 DefineList DSMAccelerationStructure::getDefines()
 {
     DefineList defines = {};
-    defines.add(TransparencyShadowMethod::getDefines());
+    defines.add(DeepShadowMapMethod::getDefines());
     defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
     defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
@@ -388,8 +388,6 @@ bool DSMAccelerationStructure::renderUI(Gui::Widgets& widget)
     #else
     if (auto group = widget.group("Accel Shadow Settings"))
     {
-        dirty |= TransparencyShadowMethod::renderUI(widget);
-
         if (mpScene)
         {
             if (auto group2 = group.group("Current size info:"))

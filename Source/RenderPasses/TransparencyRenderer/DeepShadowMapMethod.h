@@ -35,10 +35,10 @@
 
 using namespace Falcor;
 
-class TransparencyShadowMethod
+class DeepShadowMapMethod
 {
 public:
-    virtual ~TransparencyShadowMethod() = default;
+    virtual ~DeepShadowMapMethod() = default;
 
     // Light MVP
     struct LightMVP
@@ -110,20 +110,12 @@ public:
 
     /** Render UI for the method
     */
-    virtual bool renderUI(Gui::Widgets& widget);
+    virtual bool renderUI(Gui::Widgets& widget) { return false; }
 
     /** Optional Debug pass.
         It should be called every frame, so if debug is disabled, the function shoud return before doing any computationally expensive work.
     */
     virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData, ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) {}
-
-    /* Set enable status for the opaque shadow map
-    */
-    void enableOpaqueShadowMap(bool enable = true) { mOpaqueShadowMapEnabled = enable; }
-
-    /* Sets LOD mode for shadow map 
-    */
-    void setShadowLODMode(TexLODMode lodMode) { mRayLodMode = lodMode; }
 
     /* Set Colored Transparency mode
     */
@@ -177,7 +169,7 @@ protected:
     static const uint kBlurKernelWidthInit = 5;
     static const bool kBlurSigmaInit = 1.f;
 
-    TransparencyShadowMethod(ref<Device> pDevice, ref<Scene> pScene);
+    DeepShadowMapMethod(ref<Device> pDevice, ref<Scene> pScene);
 
     //Function to update the Shadow Map Matrices
     virtual void updateSMMatrices(bool rebuild = false);
@@ -190,8 +182,6 @@ protected:
 
     ref<Device> mpDevice;
     ref<Scene> mpScene;
-    TexLODMode mRayLodMode = TexLODMode::Mip0;
-    bool mOpaqueShadowMapEnabled = false;
     bool mHasDirectionalLight = false;      
 
     float mMidpointPercentage = 0.6f;     // Percentage where the midpoint is set. 0.5 is normal midpointSM, 0 is SM without bias
@@ -255,4 +245,4 @@ protected:
     };
 };
 
-FALCOR_ENUM_REGISTER(TransparencyShadowMethod::SMSamplePattern);
+FALCOR_ENUM_REGISTER(DeepShadowMapMethod::SMSamplePattern);

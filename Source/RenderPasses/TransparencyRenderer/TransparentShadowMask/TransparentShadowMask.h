@@ -28,8 +28,7 @@
 #pragma once
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
-#include "../TransparencyShadowMethod.h"
-#include "Rendering/Materials/TexLODTypes.slang"
+#include "../DeepShadowMapMethod.h"
 
 using namespace Falcor;
 
@@ -49,7 +48,13 @@ public:
     /** Generate resources needed to evaluate the Shadow Method (e.g. Shadow Map)
     * Should be called every frame and needs to be called before using any resources from that pass
     */
-    void generate(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod, ref<SampleGenerator> pSampleGenerator, MaskGenerateMode genMode = MaskGenerateMode::Mask_ISM);
+    void generate(
+        RenderContext* pRenderContext,
+        const RenderData& renderData,
+        const DeepShadowMapMethod* pTransparencyShadowMethod,
+        ref<SampleGenerator> pSampleGenerator,
+        MaskGenerateMode genMode = MaskGenerateMode::Mask_ISM
+    );
 
     //Get the layered mask texture
     ref<Texture> getMask() const { return mpTransparentShadowMask; }
@@ -69,20 +74,20 @@ private:
     void generateTransparencyMask(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const TransparencyShadowMethod* pTransparencyShadowMethod
+        const DeepShadowMapMethod* pTransparencyShadowMethod
     );
 
     void generateOpaqueMaskImportanceShadowMap(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const TransparencyShadowMethod* pTransparencyShadowMethod,
+        const DeepShadowMapMethod* pTransparencyShadowMethod,
         ref<SampleGenerator> pSampleGenerator
     );
 
     void generateOpaqueMaskShadowMap(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const TransparencyShadowMethod* pTransparencyShadowMethod
+        const DeepShadowMapMethod* pTransparencyShadowMethod
     );
 
     //Constants

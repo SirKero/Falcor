@@ -30,7 +30,7 @@
 #include "RenderGraph/RenderPass.h"
 
 #include "Rendering/ShadowMaps/ShadowMap.h"
-#include "TransparencyShadowMethod.h"
+#include "DeepShadowMapMethod.h"
 #include "Rendering/Materials/TexLODTypes.slang"
 #include "TransparentShadowMask/TransparentShadowMask.h"
 
@@ -60,11 +60,10 @@ public:
     enum class ShadowRenderMethod : uint
     {
         RayTracing = 0,
-        DSM_AS = 1,             //Deep Shadow Map with Acceleleration Structure
+        DSM_AS = 1,             //Deep Shadow Map with Acceleration Structure
         DSM_LL = 2,             //Deep Shadow Map with Linked List
-        AccelShadowKBuffer = 3,
-        IDSM_AS = 4,            //Importance Deep Shadow Map with Acceleration Structure
-        IDSM_LL = 5             //Importance Deep Shadow Map with Linked List
+        IDSM_AS = 3,            //Importance Deep Shadow Map with Acceleration Structure
+        IDSM_LL = 4             //Importance Deep Shadow Map with Linked List
     };
 
     FALCOR_ENUM_INFO(ShadowRenderMethod,  {
@@ -72,7 +71,6 @@ public:
             {ShadowRenderMethod::IDSM_AS, "IDSM-AS"},
             {ShadowRenderMethod::IDSM_LL, "IDSM-LL"},
             {ShadowRenderMethod::DSM_AS, "DSM-AS"},
-            //{ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"}, //TODO remove
             {ShadowRenderMethod::DSM_LL, "DSM-LL"},
         }
     );
@@ -176,22 +174,20 @@ private:
     ref<Scene> mpScene;                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
     ref<CPUSampleGenerator> mpCameraJitterGenerator;              ///< Sample generator for camera jitter.
-    std::shared_ptr<ShadowMap> mpShadowMap; ///< Possible Opaque shadow map
     std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask for Irregular Shadow Maps
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::IDSM_AS;
     uint mSelectedShadowMethod = std::max((int)mShadowRenderMethod - 1, 0);
 
-    std::vector<std::shared_ptr<TransparencyShadowMethod>> mShadowMethods; //Shadow Methods that rely on extra structures (mSelectedShadowMethod - 1)
+    std::vector<std::shared_ptr<DeepShadowMapMethod>> mShadowMethods; // Shadow Methods that rely on extra structures (mSelectedShadowMethod
+                                                                      // - 1)
 
     // Runtime data Tracer
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
     uint2 mRenderDims = uint2(512);
     LightSampleMode mLightSampleMode = LightSampleMode::All;
     bool mOptionsChanged = false;
-    bool mEnableOpaqueShadowMaps = false;    //Enable opaque shadow pass
-    bool mOpaqueShadowMapModeChanged = false;
     bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
     ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
@@ -208,7 +204,7 @@ private:
     uint mMaskISMMultFactor = 9u;                  // Mult factor for ISM 
     bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable as blacklist for non-opaque objects
 
-    TransparencyShadowMethod::GlobalShadowSettings mShadowSettings = {};
+    DeepShadowMapMethod::GlobalShadowSettings mShadowSettings = {};
 
     //Path Tracer specific settings
     uint mPTMaxBounces = 1024;

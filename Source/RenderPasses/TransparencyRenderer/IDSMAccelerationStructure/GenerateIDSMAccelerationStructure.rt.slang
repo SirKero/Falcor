@@ -1,7 +1,6 @@
 #include "IDSMAccelerationStructureData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
-#include "../RayLodHelper.slang"
 #include "../SharedShadowDefines.slang"
 
 import Scene.Raytracing;
@@ -81,7 +80,6 @@ static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
 static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
-static const bool kLimitedOpaqueStore = false; // STORE_LIMITED_OPAQUE_SURFACES; //Only stores opaque hit if non-opaque geometry is behind it
 static const bool kUseMidpointBias = true; //Uses min between midpoint and a high bias (0.08% of lights far)
 static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
 static const bool kWriteTotalSampleCount = STATS_WRITE_TOTAL_SAMPLE_COUNT;   //For stats
@@ -145,22 +143,6 @@ void anyHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes attribs
     const uint materialID = gScene.getMaterialID(triangleHit.instanceID);
 
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-    float2 ddx = float2(0);
-    float2 ddy = float2(0);
-    // LOD
-    if (kShadowLODMode == TexLODMode::RayCones)
-    {
-        computeAnisotropicAxesRayCones(triangleHit, v, -WorldRayDirection(), RayTCurrent(), gSpreadAngle, ddx, ddy);
-        lod = ExplicitGradientTextureSampler(ddx, ddy);
-    }
-    /* //TODO camera parameter is not correct for shadow maps
-    else if (kShadowLODMode == TexLODMode::RayDiffs)
-    {
-        computeRayDifferentials(triangleHit, -WorldRayDirection(), RayTCurrent(), gScene.camera, kInvFrameDim, ddx, ddy); 
-        lod = ExplicitGradientTextureSampler(ddx, ddy);
-    }
-    */
-
     float3 transmittance = float3(0.0);
 
     if(kUseColorTransparency){
@@ -562,25 +544,6 @@ void rayGen()
 #if TRACE_NON_OPAQUE_ONLY
     storeCurr = true;       //It now cannot be assumed that this is the last hit
 #endif
-
-    //When Limited Opaque store is enabled, only opaque hits that hit non opaque objects after are stored. A ray may be distributed to check (if ray: -> opaqueHit -> opaqueHit)
-    if(kLimitedOpaqueStore){
-        // Distribute ray to check if there is any non opaque geometry
-        storeCurr = !prevHitOpaque;
-        if (prevHitOpaque && currHitOpaque) {
-            rayData.depth = -1;
-            rayData.dist = ray.TMax;
-            rayData.sampleTransmittance = 0.0;
-            uint rayFlags = RAY_FLAG_CULL_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
-            TraceRay(gScene.rtAccel, rayFlags, instanceMask /* kShadowRayInstanceMask instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
-
-            storePrev = rayData.dist >= 0;
-            lastHitMiss = true;
-        } else if (prevHitOpaque && !currHitOpaque) {
-            storePrev = !lastHitMiss;
-            lastHitMiss = true;
-        }
-    }
 
     // Update box
     aabbFrontZ = aabbBackZ;

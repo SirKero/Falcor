@@ -47,7 +47,7 @@ TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pSc
 void TransparentShadowMask::generate(
     RenderContext* pRenderContext,
     const RenderData& renderData,
-    const TransparencyShadowMethod* pTransparencyShadowMethod,
+    const DeepShadowMapMethod* pTransparencyShadowMethod,
     ref<SampleGenerator> pSampleGenerator,
     MaskGenerateMode genMode
 )
@@ -64,7 +64,12 @@ void TransparentShadowMask::generate(
     }   
 }
 
-void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderContext, const RenderData& renderData,const TransparencyShadowMethod* pTransparencyShadowMethod) {
+void TransparentShadowMask::generateTransparencyMask(
+    RenderContext* pRenderContext,
+    const RenderData& renderData,
+    const DeepShadowMapMethod* pTransparencyShadowMethod
+)
+{
     FALCOR_PROFILE(pRenderContext,"TransparentObjectsMasks");
 
     auto& lights = mpScene->getLights();
@@ -212,7 +217,12 @@ void TransparentShadowMask::generateTransparencyMask(RenderContext* pRenderConte
     mTemporalCounter++;
 }
 
-void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext* pRenderContext, const RenderData& renderData, const TransparencyShadowMethod* pTransparencyShadowMethod, ref<SampleGenerator> pSampleGenerator)
+void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
+    RenderContext* pRenderContext,
+    const RenderData& renderData,
+    const DeepShadowMapMethod* pTransparencyShadowMethod,
+    ref<SampleGenerator> pSampleGenerator
+)
 {
     FALCOR_PROFILE(pRenderContext, "Generate_ISM");
 
@@ -391,7 +401,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(RenderContext*
 void TransparentShadowMask::generateOpaqueMaskShadowMap(
     RenderContext* pRenderContext,
     const RenderData& renderData,
-    const TransparencyShadowMethod* pTransparencyShadowMethod
+    const DeepShadowMapMethod* pTransparencyShadowMethod
 )
 {
     FALCOR_PROFILE(pRenderContext, "Generate_OpaqueSM");

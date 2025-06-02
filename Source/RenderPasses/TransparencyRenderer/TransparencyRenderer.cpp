@@ -31,7 +31,6 @@
 
 #include "DSMAccelerationStructure/DSMAccelerationStructure.h"
 #include "DSMLinkedList/DSMLinkedList.h"
-#include "AccelShadowKBuffer/AccelShadowKBuffer.h"
 #include "IDSMAccelerationStructure/IDSMAccelerationStructure.h"
 #include "IDSMLinkedList/IDSMLinkedList.h"
 
@@ -48,7 +47,6 @@ namespace
 {
     // shader
     const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/";
-    const std::string kShaderEvalDirect = kShaderFolder + "EvalDirect.cs.slang";
     const std::string kShaderEvalTransparenciesDirect = kShaderFolder + "EvalTransparenciesDirect.rt.slang";
     const std::string kShaderReflections = kShaderFolder + "RayReflections.rt.slang";
     const std::string kShaderPathTracer = kShaderFolder + "PathTracer.rt.slang";
@@ -161,13 +159,6 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     //Set render dimensions for LOD helper
     updateFrameDim(renderData.getDefaultTextureDims());
 
-    if (mOpaqueShadowMapModeChanged)
-    {
-        mpEvalDirectPass.reset();
-        mEvalTransparencyDirectRay.resetPip();
-        mOpaqueShadowMapModeChanged = false;
-    }
-    
     // Request the light collection if emissive lights are enabled.
     if (mpScene->getRenderSettings().useEmissiveLights)
     {
@@ -176,25 +167,6 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
 
     //Create Textures needed for the renderer
     prepareResources(pRenderContext, renderData);
-
-    //Generate optional opaque shadow map
-    if (mEnableOpaqueShadowMaps && !mpShadowMap)
-    {
-        mpShadowMap = std::make_shared<ShadowMap>(mpDevice, mpScene, ShadowMapType::Variance);
-        mpShadowMap->setOpaqueCullModeNonOpaque();
-    }
-
-    if (mEnableOpaqueShadowMaps && mpShadowMap)
-    {
-        mpShadowMap->update(pRenderContext);
-        for (auto& method : mShadowMethods)
-            method->enableOpaqueShadowMap();
-    }
-    else if (!mEnableOpaqueShadowMaps && mpShadowMap)
-    {
-        for (auto& method : mShadowMethods)
-            method->enableOpaqueShadowMap(false);
-    }
 
     //Enable the use of the blacklist
     for (auto& method : mShadowMethods)
@@ -409,19 +381,16 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         {
             mShadowSettings.resolution = 512;
             mShadowSettings.cascadedPutCameraOnGrid = true;
-            mShadowSettings.samplePattern = TransparencyShadowMethod::SMSamplePattern::MatrixHalton;
+            mShadowSettings.samplePattern = DeepShadowMapMethod::SMSamplePattern::MatrixHalton;
         }
         else if (mShadowRenderMethod == ShadowRenderMethod::DSM_AS || mShadowRenderMethod == ShadowRenderMethod::DSM_LL)
         {
             mShadowSettings.resolution = 2048;
             mShadowSettings.cascadedPutCameraOnGrid = false;
-            mShadowSettings.samplePattern = TransparencyShadowMethod::SMSamplePattern::Center;
+            mShadowSettings.samplePattern = DeepShadowMapMethod::SMSamplePattern::Center;
         }
     }
     dirty |= methodChanged;
-
-    //mOpaqueShadowMapModeChanged |= widget.checkbox("Enable Opaque Shadow Maps", mEnableOpaqueShadowMaps);
-    //widget.tooltip("Enables a extra opaque shadow map pass. Shadow Method should only evaluate non-opaque geometry in that case");
 
     widget.checkbox("Enable Fallback Shadows", mEnableFallbackRayTracedShadows);
     widget.tooltip("Some techniques allow for ray traced shadows as a fallback. They can be toggled on/off manually here");
@@ -458,12 +427,6 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         }
     } 
 
-    if (mEnableOpaqueShadowMaps && mpShadowMap)
-    {
-        if (auto group = widget.group("Opaque Shadow Map Settings"))
-            mpShadowMap->renderUI(group);
-    }
-
     if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
     {
         widget.dropdown("Importance Mode", mImportanceMode);
@@ -492,7 +455,6 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
 
     //Reset all passes
     mShadowMethods.clear();
-    mpShadowMap.reset();
     mpEvalDirectPass.reset();
     mEvalTransparencyDirectRay.resetPip();
     mpParticleMaterials.reset();
@@ -502,41 +464,20 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         mpScene->setRtASAdditionalGeometryFlag(RtGeometryFlags::NoDuplicateAnyHitInvocation); // Add the NoDuplicateAnyHitInvocation flag to
         const auto lightCount = mpScene->getLightCount();
         if (lightCount == 0)
-            logWarning("No analytic light sources in scene. The Transparancy Renderer will not render anything!");
+            logWarning("No analytic light sources in scene. The Transparency Renderer will not render anything!");
         else
         {
             // Add the shadow methods
-            mShadowMethods.push_back(std::make_shared<DSMAccelerationStructure>(mpDevice, mpScene)); // Accel Shadow (0)
-            mShadowMethods.push_back(std::make_shared<DSMLinkedList>(mpDevice, mpScene));             // LinkedList (1)
-            mShadowMethods.push_back(std::make_shared<AccelShadowKBuffer>(mpDevice, mpScene));   // AccelShadow KBuffer (2)
-            mShadowMethods.push_back(std::make_shared<IDSMAccelerationStructure>(mpDevice, mpScene)); // IDSM_AS (3) // (3)
-            mShadowMethods.push_back(std::make_shared<IDSMLinkedList>(mpDevice, mpScene));            // Linked List IrregularZ (4)
+            mShadowMethods.push_back(std::make_shared<DSMAccelerationStructure>(mpDevice, mpScene)); // DSM_AS (0)
+            mShadowMethods.push_back(std::make_shared<DSMLinkedList>(mpDevice, mpScene));             // DSM_LL (1)
+            mShadowMethods.push_back(std::make_shared<IDSMAccelerationStructure>(mpDevice, mpScene)); // IDSM_AS (2)
+            mShadowMethods.push_back(std::make_shared<IDSMLinkedList>(mpDevice, mpScene));            // IDSM_LL (3)
 
             if (lightCount == 1)
                 mLightSampleMode = LightSampleMode::Uniform; // Cheapest light sample mode
         }
 
-        switch (mShadowRenderMethod)
-        {
-        
-        case TransparencyRenderer::ShadowRenderMethod::DSM_LL:
-            mSelectedShadowMethod = 1;
-            break;
-        case TransparencyRenderer::ShadowRenderMethod::AccelShadowKBuffer:
-            mSelectedShadowMethod = 2;
-            break;
-        case TransparencyRenderer::ShadowRenderMethod::IDSM_AS:
-            mSelectedShadowMethod = 3;
-            break;
-        case TransparencyRenderer::ShadowRenderMethod::IDSM_LL:
-            mSelectedShadowMethod = 4;
-            break;
-        case TransparencyRenderer::ShadowRenderMethod::RayTracing:
-        case TransparencyRenderer::ShadowRenderMethod::DSM_AS:
-        default:
-            mSelectedShadowMethod = 0;
-            break;
-        }
+        mSelectedShadowMethod = mShadowRenderMethod == TransparencyRenderer::ShadowRenderMethod::RayTracing ? 0 : (uint) mShadowRenderMethod - 1u;
 
         mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
 
@@ -579,10 +520,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("SHADOW_EVAL_MODE", std::to_string((uint)mShadowRenderMethod));
     defines.add(mShadowMethods[mSelectedShadowMethod]->getDefines());
     defines.add("LIGHT_SAMPLE_MODE", std::to_string((uint)mLightSampleMode));
-    if (mpShadowMap && mEnableOpaqueShadowMaps)
-        defines.add(mpShadowMap->getDefines());
-    defines.add("EVAL_OPAQUE_SHADOW_MAP", mEnableOpaqueShadowMaps ? "1" : "0");
-    RayFlags evalQueryRayFlags = mEnableOpaqueShadowMaps ? RayFlags::CullOpaque : RayFlags::ForceNonOpaque;
+    RayFlags evalQueryRayFlags = RayFlags::ForceNonOpaque;
     evalQueryRayFlags = mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing ? RayFlags::CullNonOpaque : evalQueryRayFlags; 
     evalQueryRayFlags =
         mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing
@@ -732,9 +670,6 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
         }
     }
 
-    if (mEnableOpaqueShadowMaps)
-        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
-
     var["CB"]["gFrameCount"] = mFrameCount;
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
@@ -814,9 +749,6 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
-
-    if (mEnableOpaqueShadowMaps)
-        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     // Set shadow mask and opaque shadow map
     if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
@@ -906,9 +838,6 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
-
-    if (mEnableOpaqueShadowMaps)
-        mpShadowMap->setShaderDataAndBindBlock(var, renderData.getDefaultTextureDims());
 
     // Set shadow mask and opaque shadow map
     if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))

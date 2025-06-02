@@ -26,10 +26,10 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #pragma once
-#include "../TransparencyShadowMethod.h"
+#include "../DeepShadowMapMethod.h"
 #include "../ImportanceMapHelpers/ImportanceMapHelper.h"
 
-class IDSMLinkedList : public TransparencyShadowMethod
+class IDSMLinkedList : public DeepShadowMapMethod
 {
 public:
     virtual ~IDSMLinkedList() = default;
