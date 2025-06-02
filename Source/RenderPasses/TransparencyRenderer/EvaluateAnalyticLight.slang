@@ -2,7 +2,6 @@
 #include "SharedShadowDefines.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
-#include "RayLodHelper.slang"
 
 import Scene.Raytracing;
 import Scene.Intersection;

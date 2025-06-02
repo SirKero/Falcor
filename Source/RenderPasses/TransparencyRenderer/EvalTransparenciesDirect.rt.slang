@@ -18,10 +18,6 @@ RWTexture2D<PackedHitInfo> gRayReflectionVBuffer;
 RWTexture2D<float4> gOutputColor;
 RWTexture2D<float4> gThpOut;
 
-#ifndef ENABLE_TRANSPARENCY_LOD
-#define ENABLE_TRANSPARENCY_LOD 0
-#endif
-
 #ifndef EVAL_OPAQUE_HIT
 #define EVAL_OPAQUE_HIT 0
 #endif
@@ -50,20 +46,11 @@ struct TransparencyRayData {
     float dist;
     bool isOpaque;
 
-    #if ENABLE_TRANSPARENCY_LOD
-    float2 ddx;
-    float2 ddy;
-    #endif
-
     __init(float tMax)
     {
         hit = {}; // Init emtpy
         dist = tMax;
         isOpaque = false;
-        #if ENABLE_TRANSPARENCY_LOD
-        ddx = float2(0);
-        ddy = float2(0);
-        #endif
     }
 }
 
@@ -145,21 +132,6 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
     VertexData v = gScene.getVertexData(triangleHit);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-    #if ENABLE_TRANSPARENCY_LOD
-        float2 ddx = float2(0);
-        float2 ddy = float2(0);
-        //LOD
-        if (kLODMode == TexLODMode::RayCones)
-        {
-            computeAnisotropicAxesRayCones(triangleHit, v, -WorldRayDirection(), RayTCurrent(), kScreenSpacePixelSpreadAngle, ddx, ddy);
-            lod = ExplicitGradientTextureSampler(ddx, ddy);
-        }
-        else if (kLODMode == TexLODMode::RayDiffs)
-        {
-            computeRayDifferentials(triangleHit, -WorldRayDirection(), RayTCurrent(), gScene.camera, kInvFrameDim, ddx, ddy);
-            lod = ExplicitGradientTextureSampler(ddx, ddy);
-        }
-    #endif
 
     if (!gScene.materials.alphaTest(v, materialID, lod, kMinOpacity)) {
         //Update payload
@@ -168,10 +140,6 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
             rayData.hit = HitInfo(triangleHit).getData();
             rayData.dist = RayTCurrent();
             rayData.isOpaque = kShadowMaterialFlagAsBlacklist ? !gScene.materials.isCastShadow(materialID) : false;
-            #if ENABLE_TRANSPARENCY_LOD
-                rayData.ddx = ddx;
-                rayData.ddy = ddy;
-            #endif
         }
     } else {
         IgnoreHit();
@@ -257,9 +225,6 @@ void rayGen()
             break;
 
         ITextureSampler lod = ExplicitLodTextureSampler(0.f);
-        #if ENABLE_TRANSPARENCY_LOD
-            lod = ExplicitGradientTextureSampler(rayData.ddx, rayData.ddy);
-        #endif
         // Get shading data
         float minTriangleSide = 0.0;
         ShadingData sd = loadShadingData(hit, pd.direction, lod, minTriangleSide);

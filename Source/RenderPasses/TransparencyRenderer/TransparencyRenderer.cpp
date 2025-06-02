@@ -196,10 +196,9 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
             method->enableOpaqueShadowMap(false);
     }
 
-    //Update LOD mode and Colored Transparency
+    //Enable the use of the blacklist
     for (auto& method : mShadowMethods)
     {
-        method->setShadowLODMode(mShadowLodMode);
         method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
     }        
     if (mpShadowMask)
@@ -385,18 +384,12 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
             dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
-            dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
-            dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
-            dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
             break;
         case CameraRenderMode::DirectRT_Reflections:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
             dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
             dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
             dirty |= widget.var("Use RayReflections at spec percentage", mRayReflectionsRoughnessThreshold, 0.f, 1.f);
-            dirty |= widget.dropdown("Ray LOD mode", mRayLodMode);
-            dirty |= widget.checkbox("Enable LOD mode for Transparency Pass", mEnableTransparencyPassLODMode);
-            dirty |= widget.dropdown("Shadow LOD mode", mShadowLodMode);
             break;
         case CameraRenderMode::PathTracer:
             dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
@@ -613,14 +606,6 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("SOFT_SHADOWS_POS_RADIUS", std::to_string(mShadowSettings.softShadowsPositionRadius));
     defines.add("SOFT_SHADOWS_DIR_SPREAD", std::to_string(mShadowSettings.softShadowsDirectionsSpread * 0.0001)); //TODO proper conversion
 
-    //LOD
-    defines.add("RAY_LOD_MODE", std::to_string((uint)mRayLodMode));
-    defines.add("SHADOW_LOD_MODE", std::to_string((uint)mShadowLodMode));
-    float2 invRenderDims = 1.f / float2(mRenderDims);
-    defines.add("INV_FRAME_DIM_X", std::to_string(invRenderDims.x));
-    defines.add("INV_FRAME_DIM_Y", std::to_string(invRenderDims.y));
-    defines.add("SCREEN_SPACE_PIXEL_SPREAD_ANGLE", std::to_string(mpScene->getCamera()->computeScreenSpacePixelSpreadAngle(mRenderDims.y)));
-
     return defines;
 }
 
@@ -700,12 +685,10 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     }
     FALCOR_ASSERT(mEvalTransparencyDirectRay.pProgram);
 
-    bool useLodMode = mEnableTransparencyPassLODMode && ((mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs));
     // Update define that can change at runtime
     mEvalTransparencyDirectRay.pProgram->addDefines(getLightEvalDefines());
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData)); //For NRD
-    mEvalTransparencyDirectRay.pProgram->addDefine("ENABLE_TRANSPARENCY_LOD", useLodMode ? "1" : "0");
     mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", "1");
     mEvalTransparencyDirectRay.pProgram->addDefine("EVAL_OPAQUE_HIT", "1");
     mEvalTransparencyDirectRay.pProgram->addDefine(
@@ -808,7 +791,6 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
 
     FALCOR_ASSERT(mReflectionsPass.pProgram);
 
-    bool useLodMode = mEnableTransparencyPassLODMode && ((mRayLodMode == TexLODMode::RayCones) || (mRayLodMode == TexLODMode::RayDiffs));
     // Update define that can change at runtime
     mReflectionsPass.pProgram->addDefines(getLightEvalDefines());
 

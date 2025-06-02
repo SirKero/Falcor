@@ -181,9 +181,6 @@ private:
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::IDSM_AS;
-    TexLODMode mRayLodMode = TexLODMode::Mip0;
-    bool mEnableTransparencyPassLODMode = true;
-    TexLODMode mShadowLodMode = TexLODMode::Mip0;
     uint mSelectedShadowMethod = std::max((int)mShadowRenderMethod - 1, 0);
 
     std::vector<std::shared_ptr<TransparencyShadowMethod>> mShadowMethods; //Shadow Methods that rely on extra structures (mSelectedShadowMethod - 1)

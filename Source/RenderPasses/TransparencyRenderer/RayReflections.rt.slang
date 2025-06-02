@@ -16,10 +16,6 @@ Texture2D<float> gReflectionMask;
 // Outputs
 RWTexture2D<float4> gOutputColor;
 
-#ifndef ENABLE_TRANSPARENCY_LOD
-#define ENABLE_TRANSPARENCY_LOD 0
-#endif
-
 #define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = MIN_OPACITY;
 static const uint kMaxElements = MAX_ELEMENTS; // For now 256 max transparent elements on a ray
@@ -121,10 +117,6 @@ void anyHit(inout TransparencyRayData rayData, BuiltInTriangleIntersectionAttrib
             rayData.hit = HitInfo(triangleHit).getData();
             rayData.dist = RayTCurrent();
             rayData.isOpaque = kShadowMaterialFlagAsBlacklist ? !gScene.materials.isCastShadow(materialID) : false;
-            #if ENABLE_TRANSPARENCY_LOD
-                rayData.ddx = ddx;
-                rayData.ddy = ddy;
-            #endif
         }
     } else {
         IgnoreHit();
@@ -161,9 +153,8 @@ void rayGen()
     if (gReflectionMask[pixel] <= 0)
         return;
 
-    // Load Hit
+    // Load Hit and View vector
     const HitInfo hit = HitInfo(gVBuffer[pixel]);
-    //Load View
     float3 viewDir;
     viewDir = gScene.camera.computeRayPinhole(pixel, frameDim).dir;
 
@@ -185,6 +176,7 @@ void rayGen()
     pd.direction = reflect(viewDir, bsdfProperties.guideNormal);
     pd.sg = SampleGenerator(pixel, gFrameCount + 32);
 
+    //Get Reflection throughput
     //pd.thp = gThp[pixel].xyz * (mi.eval(sd, pd.direction, pd.sg)/  mi.evalPdf(sd, pd.direction)); //Same result als below, but much more expensive
     pd.thp = gThp[pixel].xyz * evalFresnelSchlick(bsdfProperties.specularReflectionAlbedo, 1.0f, max(0.00001f, dot(bsdfProperties.guideNormal, pd.direction))); 
     
@@ -196,12 +188,12 @@ void rayGen()
     ray.TMax = gScene.camera.data.farZ; ;
     TransparencyRayData rayData = TransparencyRayData(ray.TMax);
     const uint instanceMask = getBestParticleShadowPlane(ray.Direction,true);
-    //const uint instanceMask = 3 | kInstanceMaskBitParticleYZ;
+
+    //Main transparency loop
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = 0;
         TraceRay(gScene.rtAccel, rayFlags, instanceMask , 0, rayTypeCount, 0, ray, rayData);
-
         HitInfo hit = HitInfo(rayData.hit);
 
         // Miss, evaluate Env Map
@@ -220,20 +212,21 @@ void rayGen()
         if (kAdjustShadingNormals)
             hints |= (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
-        // Emissive lights
+
+        //Emissive light hits
         BSDFProperties bsdfProperties = mi.getProperties(sd);
         pd.radiance += pd.thp * bsdfProperties.emission * sd.opacity;
 
-        // Analytic
+        // Analytic Lights
         uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE;
         if(kUseIrregularShadowMask)
             maskFlag = rayData.isOpaque ? TRANSPARENCY_MASK_FLAG_USE_MASK : TRANSPARENCY_MASK_FLAG_USE_SM;
         pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag, minTriangleSide) * sd.opacity;
 
-        // Ambient
+        // Ambient light
         pd.radiance += pd.thp * bsdfProperties.diffuseReflectionAlbedo * kAmbientStrength * sd.opacity;
 
-        //Update thp
+        //Update throughput
         float transparency = (1.0 - sd.opacity);
         float3 thp = pd.thp * transparency;
         if (all(thp <= kMinOpacity))
@@ -245,7 +238,6 @@ void rayGen()
         //Update ray
         ray.TMin = rayData.dist + 1e-7;
         rayData = TransparencyRayData(ray.TMax);
-
     }
 
     //Write data

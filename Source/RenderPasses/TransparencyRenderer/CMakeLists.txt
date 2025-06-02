@@ -61,7 +61,6 @@ target_sources(TransparencyRenderer PRIVATE
 	EvalTransparenciesDirect.rt.slang
     RayReflections.rt.slang
 	PathTracer.rt.slang
-	RayLodHelper.slang
     SharedShadowDefines.slang
 )
 
