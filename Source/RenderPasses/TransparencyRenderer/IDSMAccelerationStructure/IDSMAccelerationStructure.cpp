@@ -25,15 +25,15 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "AccelIrregularZ.h"
+#include "IDSMAccelerationStructure.h"
 #include "Utils/Math/FalcorMath.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
 
 namespace
 {
     //Shader Paths
-    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/AccelIrregularZ/";
-    const std::string kGenShader = kShaderFolder + "GenAccelIrregularZ.rt.slang";
+    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/IDSMAccelerationStructure/";
+    const std::string kGenShader = kShaderFolder + "GenerateIDSMAccelerationStructure.rt.slang";
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //UI
@@ -42,7 +42,8 @@ namespace
 
 }; // namespace
 
-AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
+IDSMAccelerationStructure::IDSMAccelerationStructure(ref<Device> pDevice, ref<Scene> pScene)
+    : TransparencyShadowMethod(pDevice, pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -61,7 +62,8 @@ AccelIrregularZ::AccelIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : Trans
     mpImportanceMapHelper = std::make_unique<ImportanceMapHelper>(mpDevice, mpScene->getLightCount(), mResolution);
 }
 
-void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
+void IDSMAccelerationStructure::prepareResources(RenderContext* pRenderContext)
+{
 
     //This is triggered if either the resolution or number of lights changed
     if (mResolutionChanged)
@@ -213,7 +215,7 @@ void AccelIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
 }
 
-std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes()
+std::array<float4, 4> IDSMAccelerationStructure::getCameraFrustumPlanes()
 {
     // TODO add motion prediction
     const CameraData& data = mpScene->getCamera()->getData();
@@ -244,7 +246,8 @@ std::array<float4, 4> AccelIrregularZ::getCameraFrustumPlanes()
     return frustumPlanes;
 }
 
-void AccelIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext) {
+void IDSMAccelerationStructure::dummyProfileGeneration(RenderContext* pRenderContext)
+{
 
     mpImportanceMapHelper->dummyRenderPassProfile(pRenderContext);
 
@@ -269,7 +272,7 @@ void AccelIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext) {
     }
 }
 
-void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
+void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Generate_IDSM_AS");
 
@@ -455,7 +458,7 @@ void AccelIrregularZ::generate(RenderContext* pRenderContext, const RenderData& 
     }
 }
 
-DefineList AccelIrregularZ::getDefines()
+DefineList IDSMAccelerationStructure::getDefines()
 {
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
@@ -465,9 +468,9 @@ DefineList AccelIrregularZ::getDefines()
     return defines;
 }
 
-void AccelIrregularZ::setShaderData(const ShaderVar& var)
+void IDSMAccelerationStructure::setShaderData(const ShaderVar& var)
 {
-    auto shadowVar = var["gAccelIrregularZ"];
+    auto shadowVar = var["gIDSMAccelerationStructure"];
 
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
@@ -497,12 +500,17 @@ void AccelIrregularZ::setShaderData(const ShaderVar& var)
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
 }
 
-void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, std::vector<ref<Buffer>>& maskISM, bool enable)
+void IDSMAccelerationStructure::setShadowMask(
+    const ShaderVar& var,
+    ref<Texture> maskTex,
+    std::vector<ref<Buffer>>& maskISM,
+    bool enable
+)
 {
     mUseMask = enable;
     if (mUseMask)
     {
-        auto shadowVar = var["gAccelIrregularZ"];
+        auto shadowVar = var["gIDSMAccelerationStructure"];
 
         shadowVar["gShadowMask"] = maskTex;
         for (uint i = 0; i < maskISM.size(); i++)
@@ -510,7 +518,7 @@ void AccelIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, 
     }
 }
 
-bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
+bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
     #if SIMPLE_UI
@@ -648,7 +656,12 @@ bool AccelIrregularZ::renderUI(Gui::Widgets& widget)
     return dirty;
 }
 
-void AccelIrregularZ::debugPass(RenderContext* pRenderContext,const RenderData& renderData, ref<Texture> debugOut,  ref<Texture> colorOut)
+void IDSMAccelerationStructure::debugPass(
+    RenderContext* pRenderContext,
+    const RenderData& renderData,
+    ref<Texture> debugOut,
+    ref<Texture> colorOut
+)
 {
     // Early return if disabled
     if (!mAccelDebugShowAS.enable)

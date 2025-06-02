@@ -17,7 +17,7 @@ Texture2D<float> gTotalSampleBudget[COUNT_LIGHTS];
 Buffer<uint> gNodeCount;         // Last frame node buffer element count
 RWBuffer<uint> gLastFrameRayBudget; //Max number of distributed samples
 
-static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT; // Should be the same as in AccelIrregularZ.slang (where the atomic counter is increased)
+static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT; //Needs to be the same as in the shader where the atomic counter is increased.
 static const uint kMinSamples = 4096;                              // Min 64x64 samples
 static const uint kMaxSamples = MAX_RAY_SAMPLES; //Cannot distribute more than this per shadow map
 static const bool kUseOneBufferForAllLights = USE_ONE_BUFFER_FOR_ALL_LIGHTS;

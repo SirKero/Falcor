@@ -10,17 +10,9 @@
 
 static const bool kUseColorTransparency = USE_COLOR_TRANSPARENCY;
 
-struct LinkedListNode
+struct IDSMLinkedListNode
 {
     float depth;
     LL_TRANSPARENCY_FORMAT visibility;
     uint next;
 };
-
-//For PCF on DSM-LL
-struct LinkedListNeighborsNode
-{
-    uint prev;
-    uint right;
-    uint bot;
-}

@@ -25,23 +25,23 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "LinkedListShadow.h"
+#include "DSMLinkedList.h"
 #include "Utils/Math/FalcorMath.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
 
 namespace
 {
     //Shader Paths
-    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/LinkedList/";
-    const std::string kGenShader = kShaderFolder + "GenLinkedList.rt.slang";
-    const std::string kShaderLinkedListNeighbors = kShaderFolder + "GenLinkedListNeighbors.cs.slang";
+    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/DSMLinkedList/";
+    const std::string kGenShader = kShaderFolder + "GenerateDSMLinkedList.rt.slang";
+    const std::string kShaderLinkedListNeighbors = kShaderFolder + "GenerateLinkedListNeighbors.cs.slang";
 
     //UI
     
 
 }; // namespace
 
-LinkedListShadow::LinkedListShadow(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
+DSMLinkedList::DSMLinkedList(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -55,7 +55,7 @@ LinkedListShadow::LinkedListShadow(ref<Device> pDevice, ref<Scene> pScene) : Tra
     FALCOR_ASSERT(mpPointSampler);
 }
 
-void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
+void DSMLinkedList::prepareResources(RenderContext* pRenderContext)
 {
     // This is triggered if either the resolution or number of lights changed
     if (mResolutionChanged)
@@ -169,7 +169,7 @@ void LinkedListShadow::prepareResources(RenderContext* pRenderContext)
     }
 }
 
-void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData& renderData)
+void DSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Generate_DSM_LL");
 
@@ -298,7 +298,7 @@ void LinkedListShadow::generate(RenderContext* pRenderContext, const RenderData&
     }
 }
 
-DefineList LinkedListShadow::getDefines()
+DefineList DSMLinkedList::getDefines()
 {
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
@@ -307,9 +307,9 @@ DefineList LinkedListShadow::getDefines()
     return defines;
 }
 
-void LinkedListShadow::setShaderData(const ShaderVar& var)
+void DSMLinkedList::setShaderData(const ShaderVar& var)
 {
-    auto shadowVar = var["gLinkedListShadow"];
+    auto shadowVar = var["gDSMLinkedList"];
 
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
@@ -331,19 +331,19 @@ void LinkedListShadow::setShaderData(const ShaderVar& var)
     }
 }
 
-void LinkedListShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
+void DSMLinkedList::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
 {
     mUseOpaqueSM = enable;
     if (mUseOpaqueSM)
     {
-        auto shadowVar = var["gLinkedListShadow"];
+        auto shadowVar = var["gDSMLinkedList"];
 
         shadowVar["gMaskShadowMap"] = maskSM;
         shadowVar["gMaskSampler"] = mpPointSampler;
     }
 }
 
-bool LinkedListShadow::renderUI(Gui::Widgets& widget)
+bool DSMLinkedList::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
     #if SIMPLE_UI

@@ -25,15 +25,15 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "LinkedListIrregularZ.h"
+#include "IDSMLinkedList.h"
 #include "Utils/Math/FalcorMath.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
 
 namespace
 {
     //Shader Paths
-    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/LinkedListIrregularZ/";
-    const std::string kGenShader = kShaderFolder + "GenLinkedListIrregularZ.rt.slang";
+    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/IDSMLinkedList/";
+    const std::string kGenShader = kShaderFolder + "GenerateIDSMLinkedList.rt.slang";
     const std::string kShaderShowImportanceMap = kShaderFolder + "DebugShowImportance.cs.slang";
 
     //UI
@@ -41,7 +41,7 @@ namespace
 
 }; // namespace
 
-LinkedListIrregularZ::LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
+IDSMLinkedList::IDSMLinkedList(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -59,7 +59,8 @@ LinkedListIrregularZ::LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScen
     mpImportanceMapHelper = std::make_unique<ImportanceMapHelper>(mpDevice, mpScene->getLightCount(), mResolution, true);
 }
 
-void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
+void IDSMLinkedList::prepareResources(RenderContext* pRenderContext)
+{
 
     //This is triggered if either the resolution or number of lights changed
     if (mResolutionChanged)
@@ -161,7 +162,7 @@ void LinkedListIrregularZ::prepareResources(RenderContext* pRenderContext) {
     }
 }
 
-void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
+void IDSMLinkedList::dummyProfileGeneration(RenderContext* pRenderContext)
 {
     mpImportanceMapHelper->dummyRenderPassProfile(pRenderContext);
 
@@ -177,7 +178,7 @@ void LinkedListIrregularZ::dummyProfileGeneration(RenderContext* pRenderContext)
     }
 }
 
-void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderData& renderData)
+void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Generate_IDSM_LL");
 
@@ -330,7 +331,7 @@ void LinkedListIrregularZ::generate(RenderContext* pRenderContext, const RenderD
     }
 }
 
-DefineList LinkedListIrregularZ::getDefines()
+DefineList IDSMLinkedList::getDefines()
 {
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
@@ -339,9 +340,9 @@ DefineList LinkedListIrregularZ::getDefines()
     return defines;
 }
 
-void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
+void IDSMLinkedList::setShaderData(const ShaderVar& var)
 {
-    auto shadowVar = var["gLinkedListIrregularZ"];
+    auto shadowVar = var["gIDSMLinkedList"];
 
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
@@ -370,12 +371,12 @@ void LinkedListIrregularZ::setShaderData(const ShaderVar& var)
     shadowVar["gPointSampler"] = mpPointSampler;
 }
 
-void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, std::vector<ref<Buffer>>& maskISM, bool enable)
+void IDSMLinkedList::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, std::vector<ref<Buffer>>& maskISM, bool enable)
 {
     mUseMask = enable;
     if (mUseMask)
     {
-        auto shadowVar = var["gLinkedListIrregularZ"];
+        auto shadowVar = var["gIDSMLinkedList"];
 
         shadowVar["gShadowMask"] = maskTex;
         for (uint i = 0; i < maskISM.size(); i++)
@@ -384,7 +385,7 @@ void LinkedListIrregularZ::setShadowMask(const ShaderVar& var, ref<Texture> mask
 }
 
 //TODO Some of the options should not be toggable for this pass as that will probably break the algorithm
-bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
+bool IDSMLinkedList::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
     #if SIMPLE_UI
@@ -490,7 +491,7 @@ bool LinkedListIrregularZ::renderUI(Gui::Widgets& widget)
     return dirty;
 }
 
-void LinkedListIrregularZ::debugPass(
+void IDSMLinkedList::debugPass(
     RenderContext* pRenderContext,
     const RenderData& renderData,
     ref<Texture> debugOut,

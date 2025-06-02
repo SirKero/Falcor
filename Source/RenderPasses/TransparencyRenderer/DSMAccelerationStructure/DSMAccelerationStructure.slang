@@ -1,5 +1,5 @@
 #pragma once
-#include "AccelShadowData.slang"
+#include "DSMAccelerationStructureData.slang"
 #include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
@@ -23,17 +23,6 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 0
 #endif
 
-#if 0
-struct AccelShadowRayData {
-    float4 visibility;
-    float4 hitDepth;
-
-    __init() {
-        this.visibility = float4(0.0);
-        this.hitDepth = float4(-1.0);
-    }
-}
-#else
 struct AccelShadowRayData {
     float visibility;
     float sampleCount;
@@ -43,13 +32,12 @@ struct AccelShadowRayData {
         this.sampleCount = 0.0;
     }
 }
-#endif
 
 struct AccelShadowAttribs {
     float2 pixel;
 }
 
-struct AccelShadowShader
+struct DSMAccelerationStructure
 {
     static const bool kUseNormalizationFactor = false; // TODO make toggable
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE; // TODO currently ignored and always assumed true
@@ -204,4 +192,4 @@ struct AccelShadowShader
         return min(visibility, visibilitySM);
     }
     
-} gAccelShadow;
+} gDSMAccelerationStructure;

@@ -1,5 +1,5 @@
 #pragma once
-#include "AccelIrregularZData.slang"
+#include "IDSMAccelerationStructureData.slang"
 #include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
@@ -19,18 +19,7 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 1
 #endif
 
-#if 0
-struct AccelShadowRayData {
-    float4 visibility;
-    float4 hitDepth;
-
-    __init() {
-        this.visibility = float4(0.0);
-        this.hitDepth = float4(-1.0);
-    }
-}
-#else
-struct AccelShadowRayData {
+struct ASShadowRayData {
     SHADOW_DATA_FORMAT visibility;
     float sampleCount;
 
@@ -39,13 +28,12 @@ struct AccelShadowRayData {
         this.sampleCount = 0.0;
     }
 }
-#endif
 
 struct AccelShadowAttribs {
     float2 pixel;
 }
 
-struct AccelIrregularZShader
+struct IDSMAccelerationStructure
 {
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;       // TODO currently ignored and always assumed true
     static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT;                      // Max value to be added on the atomic counter
@@ -78,7 +66,7 @@ struct AccelIrregularZShader
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
 
-    void traceAccelShadowInline(inout AccelShadowRayData rayData, uint lightIdx, const RayDesc ray) {
+    void traceAccelShadowInline(inout ASShadowRayData rayData, uint lightIdx, const RayDesc ray) {
         RayQuery<RAY_FLAG_NONE> rayQuery;
         uint rayFlags = 0;
         uint instanceMask = kUseOneAABBForAllLight ? 0xFF : 1 << lightIdx;
@@ -233,7 +221,7 @@ struct AccelIrregularZShader
         if (kUseOneAABBForAllLight)
             shadowPixel.x += gSMSize.x * lightIdx;
 
-        AccelShadowRayData rayData = AccelShadowRayData();
+        ASShadowRayData rayData = ASShadowRayData();
         RayDesc ray;
         ray.Origin = float3(shadowPixel.x, shadowPixel.y, dist);
         ray.Direction = float3(0, 0, -1);
@@ -247,4 +235,4 @@ struct AccelIrregularZShader
         return visibility;
     }
     
-} gAccelIrregularZ;
+} gIDSMAccelerationStructure;

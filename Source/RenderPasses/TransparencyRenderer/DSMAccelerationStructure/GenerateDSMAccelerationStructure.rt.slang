@@ -1,5 +1,4 @@
 #include "../SharedShadowDefines.slang"
-//#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 

@@ -27,14 +27,15 @@
  **************************************************************************/
 #pragma once
 #include "../TransparencyShadowMethod.h"
+#include "../ImportanceMapHelpers/ImportanceMapHelper.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 
-class AccelShadow : public TransparencyShadowMethod
+class IDSMAccelerationStructure : public TransparencyShadowMethod
 {
 public:
-    virtual ~AccelShadow() = default;
+    virtual ~IDSMAccelerationStructure() = default;
 
-    AccelShadow(ref<Device> pDevice, ref<Scene> pScene);
+    IDSMAccelerationStructure(ref<Device> pDevice, ref<Scene> pScene);
 
     /** Generate resources needed to evaluate the Shadow Method
      */
@@ -45,12 +46,12 @@ public:
     virtual DefineList getDefines() override;
 
     /** Set the needed shader data for the method (textures,buffer, etc)
-     */
+    */
     virtual void setShaderData(const ShaderVar& var) override;
 
-    /** Additional mask to reject the backprojectio
-     */
-    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable = true) override;
+    /** Additional mask to reject the backprojection
+    */
+    virtual void setShadowMask(const ShaderVar& var, ref<Texture> maskTex, std::vector<ref<Buffer>>& maskISM, bool enable) override;
 
     /** Render UI for the method
      */
@@ -60,33 +61,58 @@ public:
      */
     virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData,  ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) override;
 
+     /*  Returns the sample distribution
+     */
+    virtual const std::vector<ref<Texture>>* getSamplesDistribution() const override { return mpImportanceMapHelper->getSamplesDistributionVector(); };
+
+     /* Gets dispatch size for the gen shader
+     */
+    virtual const uint2 getShaderDispatchSize() const override { return uint2(float2(mResolution) * mSampleOverestimate); }
+
 private:
     void prepareResources(RenderContext* pRenderContext);
-    std::array<float4, 4> AccelShadow::getCameraFrustumPlanes();
+    std::array<float4, 4> IDSMAccelerationStructure::getCameraFrustumPlanes();
+    //Function that generates the profiler passes in case they are not executed this frame
+    void dummyProfileGeneration(RenderContext* pRenderContext);
+
+    //Importance Map
+    std::unique_ptr<ImportanceMapHelper> mpImportanceMapHelper;
 
     //Runtime
     uint mFrameCount = 0;
-    bool mUseOpaqueSM = false;  //Use opaque shadow map
+    bool mUseMask = false;
 
     //Sync Resources
     static const uint kFramesInFlight = 3; ///< Number of frames in flight for GPU/CPU sync
+    static const uint kMinAABBUpdateCount = 128; //Shadow map should not be updated if there is less than this amount of AABBs
     ref<GpuFence> mpFence;                 ///< Fence for CPU/GPU syncs
     uint mStagingCount = 0;
 
+    //Sample Gen
+    bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
+    float mSampleOverestimate = 1.0f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
+
     // Accel shadow settings
-    bool mUseOneAABBForAllLights = false;        //Use one data and AABB buffer
+    bool mUseOneAABBForAllLights = true;
     uint mAccelApproxNumElementsPerPixel = 4u;
     std::vector<uint> mAccelShadowNumPoints;
     std::vector<uint64_t> mAccelFenceWaitValues; // Fence values forCounter sync
     uint mAccelShadowMaxNumPoints = 0;
-    bool mAccelShadowUseCPUCounterOptimization = true;
-    float mAccelShadowOverestimation = 1.1f;
-    uint mAccelDataFormatSize = 4; // Size of the data struct for the accel data
-    bool mRebuildAccelDataBuffer = true;
+    bool mAccelShadowUseCPUCounterOptimization = false;
+    bool mTransparencyBufferUsesColor = false; //Checks if the transparency buffer data size matches the global setting
     bool mAccelUsePCF = false;
     bool mAccelUseRayTracingInline = true;
-    bool mAccelUseFrustumCulling = true;
-    RayFlags mAccelRayFlags = RayFlags::None;
+    bool mAccelUseFrustumCulling = false;
+
+    uint mSkipFrameCount = 0; //Counter for skipping frames
+    uint mSkipGenerationFrameCount = 1; //Number of generated frames is 1/X
+
+    LightMVP mStaggeredDirectionalLightMVP = {};
+    int mDirectionalLightIndex = -1; //Used to set LightMVP
+
+    bool mEnableStats = false;
+    std::vector<uint> mStatsDistributedRayCountsPerLight; 
+
 
     struct
     {
@@ -100,14 +126,20 @@ private:
         bool stopGeneration = false;
     } mAccelDebugShowAS;
 
+    ref<Sampler> mpPointSampler;
+    ref<Sampler> mpLinearSampler;
+    ref<SampleGenerator> mpSampleGenerator;
+
     std::vector<ref<Buffer>> mAccelShadowAABB;                                 // For Accel AABB points
     std::vector<ref<Buffer>> mAccelShadowCounter;                              // Counter for inserting points
     std::vector<ref<Buffer>> mAccelShadowCounterCPU;                           // Counter for inserting points
     std::vector<ref<Buffer>> mAccelShadowData;                                 // Transparency Data
     std::unique_ptr<CustomAccelerationStructure> mpShadowAccelerationStrucure; // AS
-    ref<Texture> mpDebugDepth;                                                 // Depth for the debug pass
-    ref<Sampler> mpPointSampler;                                               // Point sampler
-
+    ref<Texture> mpDebugDepth;                                                 // Depth for the debug passs
+    ref<Buffer> mpStatsRaysDistributedBuffer;                                   //Buffer that stores distributed rays.
+    ref<Buffer> mpStatsRaysDistributedBufferCPU;                               //CPU Buffer that stores distributed rays.
+    
     RayTracingPipeline mGenAccelShadowPip; //RayTracingPipeline
     RasterPipeline mRasterShowAccelPass;
 };
+

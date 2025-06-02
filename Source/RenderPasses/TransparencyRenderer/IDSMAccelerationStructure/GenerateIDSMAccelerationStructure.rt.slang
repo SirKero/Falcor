@@ -1,4 +1,4 @@
-#include "AccelIrregularZData.slang"
+#include "IDSMAccelerationStructureData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 #include "../RayLodHelper.slang"

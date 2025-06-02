@@ -1,5 +1,5 @@
 #include "../RayLodHelper.slang"
-#include "LinkedListIrregularZData.slang"
+#include "IDSMLinkedListData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 #include "../SharedShadowDefines.slang"
@@ -61,7 +61,7 @@ cbuffer CB
 }
 
 RWBuffer<uint> gCounter;
-RWStructuredBuffer<LinkedListNode> gData;
+RWStructuredBuffer<IDSMLinkedListNode> gData;
 RWTexture2D<uint> gAccessCounter;
 Texture2D<float> gSampleDistribution;
 Buffer<float2> gHaltonSamples;
@@ -479,7 +479,7 @@ void rayGen()
     float3 prevTransmittance = float3(1.0); //Tranmission end of previous sample
     const float far = ray.TMax;
 
-    LinkedListNode prevNode;
+    IDSMLinkedListNode prevNode;
     prevNode.depth = FLT_MAX;
     prevNode.visibility = 1.0;
     prevNode.next = 0;

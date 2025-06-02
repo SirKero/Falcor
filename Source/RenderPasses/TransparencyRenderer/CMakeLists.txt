@@ -1,12 +1,12 @@
 add_plugin(TransparencyRenderer)
 
 target_sources(TransparencyRenderer PRIVATE
-	AccelShadow/AccelShadow.h
-	AccelShadow/AccelShadow.cpp
-	AccelShadow/GenAccelShadow.rt.slang
-	AccelShadow/AccelShadow.slang
-	AccelShadow/AccelShadowData.slang
-	AccelShadow/DebugShowShadowAccel.3d.slang
+	DSMAccelerationStructure/DSMAccelerationStructure.h
+	DSMAccelerationStructure/DSMAccelerationStructure.cpp
+	DSMAccelerationStructure/GenerateDSMAccelerationStructure.rt.slang
+	DSMAccelerationStructure/DSMAccelerationStructure.slang
+	DSMAccelerationStructure/DSMAccelerationStructureData.slang
+	DSMAccelerationStructure/DebugShowShadowAccel.3d.slang
 
 	AccelShadowKBuffer/AccelShadowKBuffer.h
 	AccelShadowKBuffer/AccelShadowKBuffer.cpp
@@ -14,26 +14,27 @@ target_sources(TransparencyRenderer PRIVATE
 	AccelShadowKBuffer/AccelShadowKBuffer.slang
 	AccelShadowKBuffer/AccelShadowKBufferData.slang
 	AccelShadowKBuffer/DebugShowShadowAccel.3d.slang
-	
-	AccelIrregularZ/AccelIrregularZ.h
-	AccelIrregularZ/AccelIrregularZ.cpp
-	AccelIrregularZ/GenAccelIrregularZ.rt.slang
-	AccelIrregularZ/AccelIrregularZ.slang
-	AccelIrregularZ/AccelIrregularZData.slang
-	AccelIrregularZ/DebugShowShadowAccel.3d.slang
 
-	LinkedList/LinkedListShadow.h
-	LinkedList/LinkedListShadow.cpp
-	LinkedList/LinkedListShadow.slang
-	LinkedList/GenLinkedList.rt.slang
-	LinkedList/GenLinkedListNeighbors.cs.slang
+    DSMLinkedList/DSMLinkedList.h
+	DSMLinkedList/DSMLinkedList.cpp
+	DSMLinkedList/DSMLinkedList.slang
+	DSMLinkedList/DSMLinkedListData.slang
+	DSMLinkedList/GenerateDSMLinkedList.rt.slang
+	DSMLinkedList/GenerateLinkedListNeighbors.cs.slang
 
-    LinkedListIrregularZ/LinkedListIrregularZ.h
-	LinkedListIrregularZ/LinkedListIrregularZ.cpp
-	LinkedListIrregularZ/LinkedListIrregularZ.slang
-	LinkedListIrregularZ/GenLinkedListIrregularZ.rt.slang
-	LinkedListIrregularZ/LinkedListIrregularZData.slang
-	LinkedListIrregularZ/DebugShowImportance.cs.slang
+	IDSMAccelerationStructure/IDSMAccelerationStructure.h
+	IDSMAccelerationStructure/IDSMAccelerationStructure.cpp
+	IDSMAccelerationStructure/GenerateIDSMAccelerationStructure.rt.slang
+	IDSMAccelerationStructure/IDSMAccelerationStructure.slang
+	IDSMAccelerationStructure/IDSMAccelerationStructureData.slang
+	IDSMAccelerationStructure/DebugShowShadowAccel.3d.slang
+
+    IDSMLinkedList/IDSMLinkedList.h
+	IDSMLinkedList/IDSMLinkedList.cpp
+	IDSMLinkedList/IDSMLinkedList.slang
+	IDSMLinkedList/GenerateIDSMLinkedList.rt.slang
+	IDSMLinkedList/IDSMLinkedListData.slang
+	IDSMLinkedList/DebugShowImportance.cs.slang
 
     ImportanceMapHelpers/ImportanceMapHelper.h
     ImportanceMapHelpers/ImportanceMapHelper.cpp

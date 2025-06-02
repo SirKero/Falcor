@@ -1,4 +1,4 @@
-#include "../LinkedListIrregularZ/LinkedListIrregularZData.slang"
+#include "DSMLinkedListData.slang"
 
 #ifndef MAX_ELEMENTS
 #define MAX_ELEMENTS 256
@@ -9,8 +9,8 @@ cbuffer CB
     uint SMSize; // shadow map size
 };
 
-StructuredBuffer<LinkedListNode> gLinkedList;
-RWStructuredBuffer<LinkedListNeighborsNode> gLinkedListNeighbors;
+StructuredBuffer<DSMLinkedListNode> gLinkedList;
+RWStructuredBuffer<DSMLinkedListNeighborsNode> gLinkedListNeighbors;
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
@@ -18,7 +18,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (any(pixel > SMSize))
         return;
     uint index = pixel.y * SMSize + pixel.x;
-    LinkedListNeighborsNode neigh;
+    DSMLinkedListNeighborsNode neigh;
     neigh.prev = 0;
     neigh.right = 0;
     neigh.bot = 0;
@@ -28,11 +28,11 @@ void main(uint2 pixel: SV_DispatchThreadID)
         return; // no neighbors
     }
 
-    LinkedListNode center = gLinkedList[index];
+    DSMLinkedListNode center = gLinkedList[index];
     uint rightIndex = pixel.y * SMSize + pixel.x + 1;
-    LinkedListNode right = gLinkedList[rightIndex];
+    DSMLinkedListNode right = gLinkedList[rightIndex];
     uint botIndex = (pixel.y + 1) * SMSize + pixel.x;
-    LinkedListNode bot = gLinkedList[botIndex];
+    DSMLinkedListNode bot = gLinkedList[botIndex];
     for (uint i = 0; i < MAX_ELEMENTS; ++i)
     {
         // find right

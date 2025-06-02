@@ -29,12 +29,12 @@
 #include "../TransparencyShadowMethod.h"
 #include "../ImportanceMapHelpers/ImportanceMapHelper.h"
 
-class LinkedListIrregularZ : public TransparencyShadowMethod
+class IDSMLinkedList : public TransparencyShadowMethod
 {
 public:
-    virtual ~LinkedListIrregularZ() = default;
+    virtual ~IDSMLinkedList() = default;
 
-    LinkedListIrregularZ(ref<Device> pDevice, ref<Scene> pScene);
+    IDSMLinkedList(ref<Device> pDevice, ref<Scene> pScene);
 
     /** Generate resources needed to evaluate the Shadow Method
      */

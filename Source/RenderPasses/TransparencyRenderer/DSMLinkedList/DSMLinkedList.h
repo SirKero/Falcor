@@ -28,12 +28,12 @@
 #pragma once
 #include "../TransparencyShadowMethod.h"
 
-class LinkedListShadow : public TransparencyShadowMethod
+class DSMLinkedList : public TransparencyShadowMethod
 {
 public:
-    virtual ~LinkedListShadow() = default;
+    virtual ~DSMLinkedList() = default;
 
-    LinkedListShadow(ref<Device> pDevice, ref<Scene> pScene);
+    DSMLinkedList(ref<Device> pDevice, ref<Scene> pScene);
 
     /** Generate resources needed to evaluate the Shadow Method
      */

@@ -1,5 +1,5 @@
 #pragma once
-#include "../LinkedListIrregularZ/LinkedListIrregularZData.slang"
+#include "DSMLinkedListData.slang"
 #include "../SharedShadowDefines.slang"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -18,7 +18,7 @@ import Rendering.ShadowMaps.ShadowMapHelpers;
 #define USE_LINKED_LIST_ARRAY 0
 #endif
 
-struct LinkedListShadow
+struct DSMLinkedList
 {
 
     //Constant Buffers
@@ -35,13 +35,13 @@ struct LinkedListShadow
         float4x4 gShadowMapVP[COUNT_LIGHTS];
     }
 
-    StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
-    StructuredBuffer<LinkedListNeighborsNode> gLinkedListNeighbors[COUNT_LIGHTS];
+    StructuredBuffer<DSMLinkedListNode> gLinkedListData[COUNT_LIGHTS];
+    StructuredBuffer<DSMLinkedListNeighborsNode> gLinkedListNeighbors[COUNT_LIGHTS];
     Texture2DArray<float> gMaskShadowMap;
     SamplerState gMaskSampler;
 
     //Fetches the 
-    float3 getLinkedVisibility(LinkedListNode n, float dist, uint lightIdx)
+    float3 getLinkedVisibility(DSMLinkedListNode n, float dist, uint lightIdx)
     {
         float3 visibility = 1.0;
         while (n.depth < dist) {
@@ -122,7 +122,7 @@ struct LinkedListShadow
         if (index >= maxRes)
             return visibility;
 
-        LinkedListNode n = gLinkedListData[lightIdx][index];
+        DSMLinkedListNode n = gLinkedListData[lightIdx][index];
         // traverse visibility until dist is reached
 
         #if LINKED_LIST_PCF
@@ -135,19 +135,19 @@ struct LinkedListShadow
                 if (n.depth < dist)
                     index = nextIndex;
             }
-            LinkedListNeighborsNode neighbor = gLinkedListNeighbors[lightIdx][index];
+            DSMLinkedListNeighborsNode neighbor = gLinkedListNeighbors[lightIdx][index];
             uint zIndex = neighbor.right;
             uint xIndex = neighbor.bot;
-            LinkedListNode nZ = {};
+            DSMLinkedListNode nZ = {};
             nZ.depth = FLT_MAX;
             nZ = gLinkedListData[lightIdx][zIndex];
-            LinkedListNode nX = {};
+            DSMLinkedListNode nX = {};
             nX.depth = FLT_MAX;
             nX = gLinkedListData[lightIdx][xIndex];
             gatherVis[2] = getLinkedVisibility(nZ, dist, lightIdx);
             gatherVis[0] = getLinkedVisibility(nX, dist, lightIdx);
             uint yIndex = gLinkedListNeighbors[lightIdx][zIndex].bot;
-            LinkedListNode nY = {};
+            DSMLinkedListNode nY = {};
             nY.depth = FLT_MAX;
             nY = gLinkedListData[lightIdx][yIndex];
             gatherVis[1] = getLinkedVisibility(nY, dist, lightIdx);
@@ -159,4 +159,4 @@ struct LinkedListShadow
         return min(visibility, visibilityOpaqueSM);
     }
     
-} gLinkedListShadow;
+} gDSMLinkedList;

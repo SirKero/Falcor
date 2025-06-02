@@ -25,15 +25,15 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "AccelShadow.h"
+#include "DSMAccelerationStructure.h"
 #include "Utils/Math/FalcorMath.h"
 #include "Utils/SampleGenerators/HaltonSamplePattern.h"
 
 namespace
 {
     //Shader Paths
-    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/AccelShadow/";
-    const std::string kGenShader = kShaderFolder + "GenAccelShadow.rt.slang";
+    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/DSMAccelerationStructure/";
+    const std::string kGenShader = kShaderFolder + "GenerateDSMAccelerationStructure.rt.slang";
     const std::string kShaderDebugShowShadowAccelRaster = kShaderFolder + "DebugShowShadowAccel.3d.slang";
 
     //UI
@@ -42,7 +42,8 @@ namespace
 
 }; // namespace
 
-AccelShadow::AccelShadow(ref<Device> pDevice, ref<Scene> pScene): TransparencyShadowMethod(pDevice, pScene) {
+DSMAccelerationStructure::DSMAccelerationStructure(ref<Device> pDevice, ref<Scene> pScene) : TransparencyShadowMethod(pDevice, pScene)
+{
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
 
@@ -56,7 +57,8 @@ AccelShadow::AccelShadow(ref<Device> pDevice, ref<Scene> pScene): TransparencySh
     FALCOR_ASSERT(mpPointSampler);
 }
 
-void AccelShadow::prepareResources(RenderContext* pRenderContext) {
+void DSMAccelerationStructure::prepareResources(RenderContext* pRenderContext)
+{
 
     if (mResolutionChanged)
     {
@@ -181,7 +183,7 @@ void AccelShadow::prepareResources(RenderContext* pRenderContext) {
     }
 }
 
-std::array<float4, 4> AccelShadow::getCameraFrustumPlanes()
+std::array<float4, 4> DSMAccelerationStructure::getCameraFrustumPlanes()
 {
     // TODO add motion prediction
     const CameraData& data = mpScene->getCamera()->getData();
@@ -212,7 +214,8 @@ std::array<float4, 4> AccelShadow::getCameraFrustumPlanes()
     return frustumPlanes;
 }
 
-void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& renderData) {
+void DSMAccelerationStructure::generate(RenderContext* pRenderContext, const RenderData& renderData)
+{
     FALCOR_PROFILE(pRenderContext, "Generate_DSM_AS");
 
     prepareResources(pRenderContext);
@@ -329,7 +332,8 @@ void AccelShadow::generate(RenderContext* pRenderContext, const RenderData& rend
     mFrameCount++;
 }
 
-DefineList AccelShadow::getDefines() {
+DefineList DSMAccelerationStructure::getDefines()
+{
     DefineList defines = {};
     defines.add(TransparencyShadowMethod::getDefines());
     defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
@@ -339,9 +343,10 @@ DefineList AccelShadow::getDefines() {
     return defines;
 }
 
-void AccelShadow::setShaderData(const ShaderVar& var) {
+void DSMAccelerationStructure::setShaderData(const ShaderVar& var)
+{
 
-    auto shadowVar = var["gAccelShadow"];
+    auto shadowVar = var["gDSMAccelerationStructure"];
 
     shadowVar["SMCB"]["gSMSize"] = mResolution;
     shadowVar["SMCB"]["gNear"] = mNearFar.x;
@@ -363,19 +368,20 @@ void AccelShadow::setShaderData(const ShaderVar& var) {
     mpShadowAccelerationStrucure->bindTlas(shadowVar, "gShadowAS");
 }
 
-void AccelShadow::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
+void DSMAccelerationStructure::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, ref<Texture> maskSM, bool enable)
 {
     mUseOpaqueSM = enable;
     if (mUseOpaqueSM)
     {
-        auto shadowVar = var["gAccelShadow"];
+        auto shadowVar = var["gDSMAccelerationStructure"];
 
         shadowVar["gMaskShadowMap"] = maskSM;
         shadowVar["gMaskSampler"] = mpPointSampler;
     }
 }
 
-bool AccelShadow::renderUI(Gui::Widgets& widget) {
+bool DSMAccelerationStructure::renderUI(Gui::Widgets& widget)
+{
     bool dirty = false;
     #if SIMPLE_UI
 
@@ -465,7 +471,13 @@ bool AccelShadow::renderUI(Gui::Widgets& widget) {
     return dirty;
 }
 
-void AccelShadow::debugPass(RenderContext* pRenderContext, const RenderData& renderData, ref<Texture> debugOut, ref<Texture> colorOut) {
+void DSMAccelerationStructure::debugPass(
+    RenderContext* pRenderContext,
+    const RenderData& renderData,
+    ref<Texture> debugOut,
+    ref<Texture> colorOut
+)
+{
     //Early return if disabled
     if (!mAccelDebugShowAS.enable)
         return;

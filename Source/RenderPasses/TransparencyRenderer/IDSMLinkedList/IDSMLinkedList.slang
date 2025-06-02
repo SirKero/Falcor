@@ -1,5 +1,5 @@
 #pragma once
-#include "LinkedListIrregularZData.slang"
+#include "IDSMLinkedListData.slang"
 #include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
@@ -11,7 +11,7 @@ __exported import Scene.Intersection;
 #define COUNT_LIGHTS 1
 #endif
 
-struct LinkedListIrregularZShader
+struct IDSMLinkedListShader
 {
     static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT; // Max value to be added on the atomic counter
     static const uint kMaskISMMultFactor = MASK_ISM_MULT_FACTOR; // Multiplication factor for the ISM used by the mask
@@ -32,7 +32,7 @@ struct LinkedListIrregularZShader
         float4x4 gStaggeredDirVP; //Only valid if there is a directional light
     }
 
-    StructuredBuffer<LinkedListNode> gLinkedListData[COUNT_LIGHTS];
+    StructuredBuffer<IDSMLinkedListNode> gLinkedListData[COUNT_LIGHTS];
     Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
@@ -193,7 +193,7 @@ struct LinkedListIrregularZShader
             }
         }
 
-        LinkedListNode n = gLinkedListData[lightIdx][selectedIndex];
+        IDSMLinkedListNode n = gLinkedListData[lightIdx][selectedIndex];
         // traverse visibility until dist is reached
         while (n.depth < dist) {
             visibility = n.visibility;
@@ -204,4 +204,4 @@ struct LinkedListIrregularZShader
         return visibility;
     }
     
-} gLinkedListIrregularZ;
+} gIDSMLinkedList;

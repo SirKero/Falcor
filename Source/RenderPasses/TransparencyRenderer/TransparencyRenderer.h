@@ -60,20 +60,20 @@ public:
     enum class ShadowRenderMethod : uint
     {
         RayTracing = 0,
-        AccelShadow = 1,
-        LinkedList = 2,
+        DSM_AS = 1,             //Deep Shadow Map with Acceleleration Structure
+        DSM_LL = 2,             //Deep Shadow Map with Linked List
         AccelShadowKBuffer = 3,
-        AccelIrregularZ = 4,
-        LinkedListIrregularZ = 5
+        IDSM_AS = 4,            //Importance Deep Shadow Map with Acceleration Structure
+        IDSM_LL = 5             //Importance Deep Shadow Map with Linked List
     };
 
     FALCOR_ENUM_INFO(ShadowRenderMethod,  {
             {ShadowRenderMethod::RayTracing, "RayTracing"},
-            {ShadowRenderMethod::AccelIrregularZ, "IDSM-AS"},
-            {ShadowRenderMethod::LinkedListIrregularZ, "IDSM-LL"},
-            {ShadowRenderMethod::AccelShadow, "DSM-AS"},
+            {ShadowRenderMethod::IDSM_AS, "IDSM-AS"},
+            {ShadowRenderMethod::IDSM_LL, "IDSM-LL"},
+            {ShadowRenderMethod::DSM_AS, "DSM-AS"},
             //{ShadowRenderMethod::AccelShadowKBuffer, "AccelShadowKBuffer"}, //TODO remove
-            {ShadowRenderMethod::LinkedList, "DSM-LL"},
+            {ShadowRenderMethod::DSM_LL, "DSM-LL"},
         }
     );
 
@@ -180,7 +180,7 @@ private:
     std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask for Irregular Shadow Maps
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
-    ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::AccelIrregularZ;
+    ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::IDSM_AS;
     TexLODMode mRayLodMode = TexLODMode::Mip0;
     bool mEnableTransparencyPassLODMode = true;
     TexLODMode mShadowLodMode = TexLODMode::Mip0;

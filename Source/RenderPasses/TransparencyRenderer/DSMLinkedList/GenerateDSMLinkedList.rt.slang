@@ -1,4 +1,4 @@
-#include "../LinkedListIrregularZ/LinkedListIrregularZData.slang"
+#include "DSMLinkedListData.slang"
 #include "../SharedShadowDefines.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
@@ -59,7 +59,7 @@ cbuffer CB
 }
 
 RWBuffer<uint> gCounter;
-RWStructuredBuffer<LinkedListNode> gData;
+RWStructuredBuffer<DSMLinkedListNode> gData;
 Buffer<float2> gHaltonSamples;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
@@ -250,7 +250,7 @@ void rayGen()
     float3 prevTransmittance = float3(1.0); // Tranmission end of previous sample
     const float far = ray.TMax;
 
-    LinkedListNode prevNode;
+    DSMLinkedListNode prevNode;
     prevNode.depth = FLT_MAX;
     prevNode.visibility = 1.0;
     prevNode.next = 0;
