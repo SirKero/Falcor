@@ -186,10 +186,8 @@ void rayGen()
 
     //Set sampleGenerator
     pd.sg = SampleGenerator(pixel, gFrameCount);
-
     float tMax = gScene.camera.data.farZ;
-    float depth = 1;
-       
+ 
     //Prepare Ray
     RayDesc ray;
     ray.Origin = pd.origin;
@@ -198,20 +196,13 @@ void rayGen()
     ray.TMax = tMax;
     TransparencyRayData rayData = TransparencyRayData(tMax);
 
-    #if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
-        // Motion vector
-        float2 mVec = float2(0);
-        
-        bool mVecUpdated = false;
-        bool depthUpdated = false;
-    #endif
+    // Motion vector and depth
+    PackedHitInfo packedMvecHit = {};
+    float depth = 1;
 
     for(uint i=0; i<kMaxElements && !pd.terminated; i++){
         // Trace Ray
         uint rayFlags = 0;
-        if (!kEvalOpaque)
-            rayFlags |= RAY_FLAG_CULL_OPAQUE | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
-
         TraceRay(gScene.rtAccel, rayFlags, kInstanceCameraParticle, 0, rayTypeCount, 0, ray, rayData);
 
         //Miss
@@ -266,48 +257,48 @@ void rayGen()
         rayData = TransparencyRayData(ray.TMax);
 
         // Update depth and motion vector if valid
-        #if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
-            bool overThreshold = any(pd.thp > kDepthMVOpacityThreshold);
-            if (is_valid(gOutDepth) && (!depthUpdated || overThreshold ) || kEvalOpaque) {
-                float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
-                depth = curPosH.z / curPosH.w;
-                depthUpdated = true;
-            }
-            if (is_valid(gOutMotion) && (!mVecUpdated || overThreshold) || kEvalOpaque) {
-                // Compute motion vector.
-                float3 prevPosW = gScene.getPrevPosW(hit.getTriangleHit());
-                float2 pixelPos = pixel + float2(0.5f, 0.5f);
-                float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
-                mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
-                mVecUpdated = true;
-            }
-        #endif // CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
+        if (is_valid(gOutDepth)) {
+            float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
+            depth = curPosH.z / curPosH.w;
+        }
+        if (is_valid(gOutMotion)) {
+            packedMvecHit = hit.getData();
+        }
+    }
+
+    //Calc Mvec
+    float2 mVec = float2(0);
+    if (is_valid(gOutMotion)) {
+        HitInfo mVecHit = HitInfo(packedMvecHit);
+        if(mVecHit.isValid()){
+            // Compute motion vector.
+            float3 prevPosW = gScene.getPrevPosW(mVecHit.getTriangleHit());
+            float2 pixelPos = pixel + float2(0.5f, 0.5f);
+            float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
+            mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
+        }
     }
 
     //Env Map
-    if (kEvalOpaque && rayData.dist < 0) {
+    if (rayData.dist < 0) {
         pd.radiance += gScene.envMap.eval(pd.direction) * kEnvMapStrength * pd.thp;
-        #if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
-            if (kCalcEnvMapMotionVectors && all( pd.thp >= 1.0)) {
-                float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, frameDim, /*no jitter*/ false).dir;
-                float3 prevEnvMapDir = mul(gScene.camera.data.prevViewMat, float4(rayDirNoJitter, 0.0)).xyz;
-                float2 prevUV = ViewSpaceToUV(prevEnvMapDir);
-                mVec = prevUV - (float2(pixel) + 0.5) / float2(frameDim);
-            }
-        #endif
+        if (is_valid(gOutMotion) && kCalcEnvMapMotionVectors && all( pd.thp >= 1.0)) {
+            float3 rayDirNoJitter = gScene.camera.computeRayPinhole(pixel, frameDim, /*no jitter*/ false).dir;
+            float3 prevEnvMapDir = mul(gScene.camera.data.prevViewMat, float4(rayDirNoJitter, 0.0)).xyz;
+            float2 prevUV = ViewSpaceToUV(prevEnvMapDir);
+            mVec = prevUV - (float2(pixel) + 0.5) / float2(frameDim);
+        }
     }
 
     //Write data
     gOutputColor[pixel] = float4(pd.radiance, 1.0);
-    if(!kEvalOpaque || kWriteReflectionMask)
+    if(kWriteReflectionMask)
         gThpOut[pixel] = float4(pd.thp, 1.0);
 
-#if CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE
     if (is_valid(gOutMotion))
         gOutMotion[pixel] = mVec;
     if (is_valid(gOutDepth))
         gOutDepth[pixel] = depth;
-#endif
 
 #if RAY_REFLECTIONS_ENABLE
     float isReflection = useRayReflections ? 1.0 : 0.0;

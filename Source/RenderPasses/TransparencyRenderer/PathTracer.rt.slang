@@ -10,13 +10,16 @@ cbuffer CB
 // Outputs
 RWTexture2D<float4> gOutputColor;
 
+// Depths/MV for TAA or DLSS
+RWTexture2D<float> gOutDepth;
+RWTexture2D<float2> gOutMotion;
+
 #define is_valid(name) (is_valid_##name != 0)
 static const float kMinOpacity = MIN_OPACITY;
 static const uint kMaxElements = MAX_ELEMENTS; // For now 256 max transparent elements on a ray
 static const bool kAdjustShadingNormals = true;
 static const bool kUseIrregularShadowMask = USE_IRRGEGULAR_SHADOW_MASK;
 
-// TODO set as CPU defines
 static const uint kMaxBounces = MAX_BOUNCES;           //Max Bounces
 static const bool kUseRussianRoulette = USE_RUSSIAN_ROULETTE; //Russian Roulette
 
@@ -164,7 +167,9 @@ void rayGen()
 
     float tMax = gScene.camera.data.farZ;
 
-    tMax = 100000.0;
+    // Motion vector and depth
+    PackedHitInfo packedMvecHit = {};
+    float depth = 1;
 
     //Prepare Ray
     RayDesc ray;
@@ -216,9 +221,21 @@ void rayGen()
         pd.radiance += evalDirectAnalytic(sd, mi, pd.sg, pd.thp, sd.opacity, maskFlag) * sd.opacity;
 
         //Determine THP and new ray
-        if(i==0)
-            ray.TMax = 100000.0;
+        //if(i==0)
+        //    ray.TMax = 100000.0;
 
+        // Update depth and motion vector if valid
+        if(isPrimaryCameraRay){
+            if (is_valid(gOutDepth)) {
+                float4 curPosH = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1.f));
+                depth = curPosH.z / curPosH.w;
+            }
+            if (is_valid(gOutMotion)) {
+                packedMvecHit = hit.getData();
+            }
+        }
+        
+        //Calc new ray for next iteration
         float pReflect = sampleNext1D(pd.sg);
         if(pReflect < sd.opacity)
         {
@@ -247,13 +264,11 @@ void rayGen()
         if (kUseRussianRoulette) {
             pd.terminated |= russianRoulette(pd.thp, pd.sg);
         }
-        /*
         else {
             //Abort if 
             if (all(pd.thp <= kMinOpacity))
                 pd.terminated = true;
         }
-        */
 
         //Update ray
         rayData = TransparencyRayData(ray.TMax);
@@ -261,6 +276,25 @@ void rayGen()
         ray.Direction = pd.direction;
 
     }
+
+    //Calc Mvec
+    float2 mVec = float2(0);
+    if (is_valid(gOutMotion)) {
+        HitInfo mVecHit = HitInfo(packedMvecHit);
+        if(mVecHit.isValid()){
+            // Compute motion vector.
+            float3 prevPosW = gScene.getPrevPosW(mVecHit.getTriangleHit());
+            float2 pixelPos = pixel + float2(0.5f, 0.5f);
+            float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(prevPosW, 1.f));
+            mVec = calcMotionVector(pixelPos, prevPosH, frameDim) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
+        }
+    }
+
     //Write data
     gOutputColor[pixel] = float4(pd.radiance, 1.0);
+
+    if (is_valid(gOutMotion))
+        gOutMotion[pixel] = mVec;
+    if (is_valid(gOutDepth))
+        gOutDepth[pixel] = depth;
 }

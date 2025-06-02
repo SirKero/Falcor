@@ -626,9 +626,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     // Update define that can change at runtime
     mEvalTransparencyDirectRay.pProgram->addDefines(getLightEvalDefines());
     mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); //For updating depth and motion
-    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData)); //For NRD
-    mEvalTransparencyDirectRay.pProgram->addDefine("CALC_MVEC_AND_DEPTH_FOR_NON_OPAQUE", "1");
-    mEvalTransparencyDirectRay.pProgram->addDefine("EVAL_OPAQUE_HIT", "1");
+    mEvalTransparencyDirectRay.pProgram->addDefines(getValidResourceDefines(kOutputChannels, renderData));
     mEvalTransparencyDirectRay.pProgram->addDefine(
         "RAY_REFLECTIONS_ENABLE", mCameraRenderMode == CameraRenderMode::DirectRT_Reflections ? "1" : "0"
     );
@@ -672,16 +670,13 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
 
     var["CB"]["gFrameCount"] = mFrameCount;
 
-    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
-    auto bind = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData.getTexture(desc.name);
-        }
-    };
+    //Bind Mvec and Depth
     for (auto& channel : kOutputGeometryInfoChannels)
-        bind(channel);
+    {
+        if (!channel.texname.empty())
+            var[channel.texname] = renderData.getTexture(channel.name);
+    }
+    //Bind rest of textures
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
     var["gThpOut"] = mpTransparencyThp;
     var["gRayReflectionMask"] = mpReflectionsMask;
@@ -812,10 +807,9 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
     FALCOR_ASSERT(mTransparencyPathTracer.pProgram);
 
     mTransparencyPathTracer.pProgram->addDefines(getLightEvalDefines());
+    mTransparencyPathTracer.pProgram->addDefines(getValidResourceDefines(kOutputGeometryInfoChannels, renderData)); // For updating depth and motion
     mTransparencyPathTracer.pProgram->addDefine("MAX_BOUNCES", std::to_string(mPTMaxBounces));
     mTransparencyPathTracer.pProgram->addDefine("USE_RUSSIAN_ROULETTE", mPTUseRussianRoulette ? "1" : "0");
-
-    //TODO add support for LOD modes
 
     // Init Vars
     if (!mTransparencyPathTracer.pVars)
@@ -856,16 +850,14 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
 
     var["CB"]["gFrameCount"] = mFrameCount;
 
-    // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
-    auto bind = [&](const ChannelDesc& desc)
-    {
-        if (!desc.texname.empty())
-        {
-            var[desc.texname] = renderData.getTexture(desc.name);
-        }
-    };
+    //Bind MVec and Depth buffer
+    for (auto& channel : kOutputGeometryInfoChannels){
+        if (!channel.texname.empty())
+            var[channel.texname] = renderData.getTexture(channel.name);
+    }
 
     var["gOutputColor"] = renderData.getTexture(kOutputColor);
+    
 
     // Execute
     mpScene->raytrace(pRenderContext, mTransparencyPathTracer.pProgram.get(), mTransparencyPathTracer.pVars, uint3(targetDim, 1));
