@@ -152,11 +152,11 @@ void DeepShadowMapMethod::updateViewProjection(LightMVP& lightMVP, ref<Light> pL
 
         // Get Camera Position on a grid
         float2 camPosLV = math::mul(lightMVP.view, float4(cameraData.posW, 1.f)).xy();
-        float2 offset = float2(mCascadedSize/2.f);
-        if (mCascadedPutCameraOnGrid)
+        float2 offset = float2(mDirLightSMRange/2.f);
+        if (mDirLightSMPutOnCameraGrid)
         {
             const float2 resF = float2(mResolution);
-            float2 sizePixel = (mCascadedSize / (resF / 2.f));
+            float2 sizePixel = (mDirLightSMRange / (resF / 2.f));
             float2 halfPixel = sizePixel * 0.5f;
             //Put Camera positon on grid
             camPosLV = (math::round(camPosLV / sizePixel) + halfPixel) * sizePixel;
@@ -222,8 +222,8 @@ void DeepShadowMapMethod::setGlobalShadowSettings(GlobalShadowSettings& settings
     }
 
     mNearFar = settings.nearFar;
-    mCascadedSize = settings.cascadedSize;
-    mCascadedPutCameraOnGrid = settings.cascadedPutCameraOnGrid;
+    mDirLightSMRange = settings.dirLightRange;
+    mDirLightSMPutOnCameraGrid = settings.dirLightPutCameraOnGrid;
     mUseColoredTransparency = settings.enableColoredTransparency;
 
     mMidpointPercentage = settings.midpointPercentage;
@@ -245,8 +245,8 @@ bool DeepShadowMapMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalSha
 {
     #if SIMPLE_UI
     widget.dropdown("Resolution", kSMResolutionDropdown, resolution);
-    widget.var("Shadow Map Extend", cascadedSize, 0.f, FLT_MAX, 0.1f);
-    widget.tooltip("Radius for the Shadow Map extends from Camera Origin. Ray Tracing is used for the area outside of the radius");
+    widget.var("Dir Light Shadow Map Range", dirLightRange, 0.f, FLT_MAX, 0.1f);
+    widget.tooltip("(World Space) Size for the directional light shadow map.");
     widget.var("Midpoint Percentage (Dual Depth SM)", midpointPercentage, 0.f, 1.f, 0.001f);
     widget.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
     widget.var("Depth Bias", depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
@@ -255,9 +255,9 @@ bool DeepShadowMapMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalSha
     widget.dropdown("ShadowResolution", kSMResolutionDropdown, settings.resolution);
     widget.var("Near/Far", settings.nearFar, 0.0f, FLT_MAX, 0.001f);
     widget.tooltip("Global Near/Far values for all lights spotlights");
-    widget.var("Cascaded Size", settings.cascadedSize, 0.f, FLT_MAX, 0.1f);
-    widget.tooltip("Radius for the cascade");
-    widget.checkbox("Update Cascade On Grid", settings.cascadedPutCameraOnGrid);
+    widget.var("Dir Light Shadow Map Range", settings.dirLightRange, 0.f, FLT_MAX, 0.1f);
+    widget.tooltip("(World Space) Size for the directional light shadow map.");
+    widget.checkbox("Update Cascade On Grid", settings.dirLightPutCameraOnGrid);
     widget.tooltip("Fixates the cascaded on an grid with the size of the shadow map resolution");
     //SM jitter settings
     bool jitterChanged = widget.dropdown("Shadow Map Jitter Pattern", settings.samplePattern);

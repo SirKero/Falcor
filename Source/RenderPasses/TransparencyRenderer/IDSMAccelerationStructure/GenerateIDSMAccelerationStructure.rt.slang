@@ -454,7 +454,7 @@ void rayGen()
     if (gIsDirectional) {
         rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
     } else {
-        rayDirection = posWPixelNear.xyz - gLightPos;
+        rayDirection = posWPixelNear.xyz - lightPos;
     }
 
     // Add offset to the pixel position if one aabb buffer is used

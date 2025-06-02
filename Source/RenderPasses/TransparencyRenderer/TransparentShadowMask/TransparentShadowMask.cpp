@@ -47,34 +47,34 @@ TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pSc
 void TransparentShadowMask::generate(
     RenderContext* pRenderContext,
     const RenderData& renderData,
-    const DeepShadowMapMethod* pTransparencyShadowMethod,
+    const DeepShadowMapMethod* pDeepShadowMapMethod,
     ref<SampleGenerator> pSampleGenerator,
     MaskGenerateMode genMode
 )
 {
     if (genMode != MaskGenerateMode::NoMask_SM)
-        generateTransparencyMask(pRenderContext, renderData, pTransparencyShadowMethod);
+        generateTransparencyMask(pRenderContext, renderData, pDeepShadowMapMethod);
 
     if (mEnableOpaqueMaskShadowMaps)
     {
         if (genMode == MaskGenerateMode::Mask_ISM)
-            generateOpaqueMaskImportanceShadowMap(pRenderContext, renderData, pTransparencyShadowMethod, pSampleGenerator);
+            generateOpaqueMaskImportanceShadowMap(pRenderContext, renderData, pDeepShadowMapMethod, pSampleGenerator);
         else
-            generateOpaqueMaskShadowMap(pRenderContext, renderData, pTransparencyShadowMethod);
+            generateOpaqueMaskShadowMap(pRenderContext, renderData, pDeepShadowMapMethod);
     }   
 }
 
 void TransparentShadowMask::generateTransparencyMask(
     RenderContext* pRenderContext,
     const RenderData& renderData,
-    const DeepShadowMapMethod* pTransparencyShadowMethod
+    const DeepShadowMapMethod* pDeepShadowMapMethod
 )
 {
     FALCOR_PROFILE(pRenderContext,"TransparentObjectsMasks");
 
     auto& lights = mpScene->getLights();
-    const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
-    auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
+    const uint2 smRes = pDeepShadowMapMethod->getShadowMapResolution();
+    auto& lightMVPs = pDeepShadowMapMethod->getLightMVPs();
 
     //Prepare Resources
     //Mask Render target
@@ -220,19 +220,19 @@ void TransparentShadowMask::generateTransparencyMask(
 void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
     RenderContext* pRenderContext,
     const RenderData& renderData,
-    const DeepShadowMapMethod* pTransparencyShadowMethod,
+    const DeepShadowMapMethod* pDeepShadowMapMethod,
     ref<SampleGenerator> pSampleGenerator
 )
 {
     FALCOR_PROFILE(pRenderContext, "Generate_ISM");
 
     auto& lights = mpScene->getLights();
-    const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
-    auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
+    const uint2 smRes = pDeepShadowMapMethod->getShadowMapResolution();
+    auto& lightMVPs = pDeepShadowMapMethod->getLightMVPs();
 
-    uint2 maxDispatchDim = pTransparencyShadowMethod->getShaderDispatchSize() * mOpaqueImportanceSMMultFactor;
+    uint2 maxDispatchDim = pDeepShadowMapMethod->getShaderDispatchSize() * mOpaqueImportanceSMMultFactor;
     
-    auto pHaltonBuffer = pTransparencyShadowMethod->getPerSampleJitterBuffer();
+    auto pHaltonBuffer = pDeepShadowMapMethod->getPerSampleJitterBuffer();
     // Prepare Resources
     {
         size_t maxDispatchDim1D = maxDispatchDim.x * maxDispatchDim.y;
@@ -309,13 +309,19 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
 
     FALCOR_ASSERT(mGenerateMaskImportanceShadowMapRayPass.pProgram);
     uint numHaltonSampls = pHaltonBuffer ? pHaltonBuffer->getElementCount() : 1;
+    bool enableSoftShadows = false;
+    float softShadowsPosRadius, softShadowsDirSpread;
+    pDeepShadowMapMethod->getSoftShadowParameter(enableSoftShadows, softShadowsPosRadius, softShadowsDirSpread);
+
 
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", pHaltonBuffer ? "1" : "0");
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(numHaltonSampls));
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("USE_BLACKLIST", mEnableBlacklistWithMaterialFlag ? "1" : "0");
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("USE_MASK", mGenUseMaskToReject ? "1" : "0");
     mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("MASK_ISM_MULT_FACTOR", std::to_string(mOpaqueImportanceSMMultFactor));
-
+    mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", enableSoftShadows ? "1" : "0");
+    mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("RANDOM_SOFT_SHADOWS_POS_RADIUS", std::to_string(softShadowsPosRadius));
+    mGenerateMaskImportanceShadowMapRayPass.pProgram->addDefine("RANDOM_SOFT_SHADOWS_DIR_SPREAD", std::to_string(softShadowsDirSpread));
 
      // Init Vars
     if (!mGenerateMaskImportanceShadowMapRayPass.pVars)
@@ -328,8 +334,8 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
     }
 
     //Get Sample distribution
-    FALCOR_ASSERT(pTransparencyShadowMethod->getSamplesDistribution());
-    auto sampleDistribution = *(pTransparencyShadowMethod->getSamplesDistribution());
+    FALCOR_ASSERT(pDeepShadowMapMethod->getSamplesDistribution());
+    auto sampleDistribution = *(pDeepShadowMapMethod->getSamplesDistribution());
 
     auto var = mGenerateMaskImportanceShadowMapRayPass.pVars->getRootVar();
     pSampleGenerator->setShaderData(var);
@@ -401,16 +407,16 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
 void TransparentShadowMask::generateOpaqueMaskShadowMap(
     RenderContext* pRenderContext,
     const RenderData& renderData,
-    const DeepShadowMapMethod* pTransparencyShadowMethod
+    const DeepShadowMapMethod* pDeepShadowMapMethod
 )
 {
     FALCOR_PROFILE(pRenderContext, "Generate_OpaqueSM");
 
     auto& lights = mpScene->getLights();
-    const uint2 smRes = pTransparencyShadowMethod->getShadowMapResolution();
-    auto& lightMVPs = pTransparencyShadowMethod->getLightMVPs();
+    const uint2 smRes = pDeepShadowMapMethod->getShadowMapResolution();
+    auto& lightMVPs = pDeepShadowMapMethod->getLightMVPs();
 
-    uint2 targetDim = pTransparencyShadowMethod->getShaderDispatchSize();
+    uint2 targetDim = pDeepShadowMapMethod->getShaderDispatchSize();
 
     // Prepare Resources
     {
@@ -459,16 +465,11 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(
         // Initial defines and program
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
-        //defines.add(pSampleGenerator->getDefines());
 
         mGenerateMaskShadowMapRayPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
 
     FALCOR_ASSERT(mGenerateMaskShadowMapRayPass.pProgram);
-    //uint numHaltonSampls = pHaltonBuffer ? pHaltonBuffer->getElementCount() : 1;
-
-    //mGenerateMaskShadowMapRayPass.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", pHaltonBuffer ? "1" : "0");
-    //mGenerateMaskShadowMapRayPass.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(numHaltonSampls));
     mGenerateMaskShadowMapRayPass.pProgram->addDefine("USE_BLACKLIST", mEnableBlacklistWithMaterialFlag ? "1" : "0");
     mGenerateMaskShadowMapRayPass.pProgram->addDefine("USE_MASK", mGenUseMaskToReject ? "1" : "0");
 
@@ -484,7 +485,6 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     auto var = mGenerateMaskShadowMapRayPass.pVars->getRootVar();
-    //pSampleGenerator->setShaderData(var);
 
     // Ray pass over every light
     for (uint i = 0; i < lights.size(); i++)

@@ -96,7 +96,7 @@ void TransparencyRenderer::parseProperties(const Properties& props)
         else if (key == kPropsShadowMethod)
             mShadowRenderMethod = value;
         else if (key == kPropsEnableMask)
-            mIrregularUseShadowMask = value;
+            mUseNonOpaqueShadowMask = value;
         else if (key == kPropsShadowResolution)
             mShadowSettings.resolution = value;
         else
@@ -110,7 +110,7 @@ Properties TransparencyRenderer::getProperties() const
 
     props[kPropsEnableRenderMode] = mCameraRenderMode;
     props[kPropsShadowMethod] = mShadowRenderMethod;
-    props[kPropsEnableMask] = mIrregularUseShadowMask;
+    props[kPropsEnableMask] = mUseNonOpaqueShadowMask;
     props[kPropsShadowResolution] = mShadowSettings.resolution;
 
     return props;
@@ -171,19 +171,19 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     //Enable the use of the blacklist
     for (auto& method : mShadowMethods)
     {
-        method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
+        method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask);
     }        
     if (mpShadowMask)
     {
         mpShadowMask->setIDMMultFactor(mMaskISMMultFactor);
-        mpShadowMask->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask);
+        mpShadowMask->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask);
     }
 
     //Generate Shadow Structure
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
         mShadowMethods[mSelectedShadowMethod]->generate(pRenderContext, renderData);
 
-    if (mIrregularUseShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
+    if (mUseNonOpaqueShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
         TransparentShadowMask::MaskGenerateMode genMode = TransparentShadowMask::MaskGenerateMode::Mask_ISM;
         if (mShadowRenderMethod == ShadowRenderMethod::DSM_AS || mShadowRenderMethod == ShadowRenderMethod::DSM_LL)
@@ -244,12 +244,12 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_LL|| mShadowRenderMethod == ShadowRenderMethod::IDSM_AS)
         {
             mShadowSettings.resolution = 512;
-            mShadowSettings.cascadedPutCameraOnGrid = true;
+            mShadowSettings.dirLightPutCameraOnGrid = true;
         }
         else if (mShadowRenderMethod == ShadowRenderMethod::DSM_AS || mShadowRenderMethod == ShadowRenderMethod::DSM_LL)
         {
             mShadowSettings.resolution = 2048;
-            mShadowSettings.cascadedPutCameraOnGrid = false;
+            mShadowSettings.dirLightPutCameraOnGrid = false;
         }
             
     }
@@ -257,9 +257,9 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
     {
-        widget.checkbox("Enable Mask", mIrregularUseShadowMask);
+        widget.checkbox("Enable Mask", mUseNonOpaqueShadowMask);
         widget.tooltip("Enables the semi-transparent Object Mask for the shadow map methods ");
-        if (mIrregularUseShadowMask &&
+        if (mUseNonOpaqueShadowMask &&
             (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL))
         {
             widget.dropdown("ISM Multiplication Factor", kMaskISMMultFactorDropdown, mMaskISMMultFactor);
@@ -380,13 +380,13 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_LL|| mShadowRenderMethod == ShadowRenderMethod::IDSM_AS)
         {
             mShadowSettings.resolution = 512;
-            mShadowSettings.cascadedPutCameraOnGrid = true;
+            mShadowSettings.dirLightPutCameraOnGrid = true;
             mShadowSettings.samplePattern = DeepShadowMapMethod::SMSamplePattern::MatrixHalton;
         }
         else if (mShadowRenderMethod == ShadowRenderMethod::DSM_AS || mShadowRenderMethod == ShadowRenderMethod::DSM_LL)
         {
             mShadowSettings.resolution = 2048;
-            mShadowSettings.cascadedPutCameraOnGrid = false;
+            mShadowSettings.dirLightPutCameraOnGrid = false;
             mShadowSettings.samplePattern = DeepShadowMapMethod::SMSamplePattern::Center;
         }
     }
@@ -400,12 +400,12 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
     {
-        widget.checkbox("Enable Shadow Backproject Mask", mIrregularUseShadowMask);
+        widget.checkbox("Enable Shadow Backproject Mask", mUseNonOpaqueShadowMask);
         widget.tooltip(
             "Enables a backprojection mask (non-opaque objects rasterized), that is used to reject samples for only opaque on fully-lit "
             "samples in the backprojection process"
         );
-        if (mIrregularUseShadowMask &&
+        if (mUseNonOpaqueShadowMask &&
             (mShadowRenderMethod != ShadowRenderMethod::IDSM_AS || mShadowRenderMethod != ShadowRenderMethod::IDSM_LL))
         {
             widget.dropdown("Mask ISM Multiplication Factor", kMaskISMMultFactorDropdown, mMaskISMMultFactor);
@@ -484,7 +484,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
         //Approximate Cascaded Size
         //TODO Set size with script and ignore this in this case
         auto& sceneAABB = mpScene->getSceneBounds();
-        mShadowSettings.cascadedSize = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.4f;
+        mShadowSettings.dirLightRange = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.4f;
 
         //Create and fill the particle material buffer
         
@@ -521,9 +521,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add(mShadowMethods[mSelectedShadowMethod]->getDefines());
     defines.add("LIGHT_SAMPLE_MODE", std::to_string((uint)mLightSampleMode));
     RayFlags evalQueryRayFlags = RayFlags::ForceNonOpaque;
-    evalQueryRayFlags = mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing ? RayFlags::CullNonOpaque : evalQueryRayFlags; 
+    evalQueryRayFlags = mUseNonOpaqueShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing ? RayFlags::CullNonOpaque : evalQueryRayFlags; 
     evalQueryRayFlags =
-        mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing
+        mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing
         ? RayFlags::None : evalQueryRayFlags;
     defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
     defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
@@ -534,9 +534,9 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     defines.add("IMPORTANCE_MODE", std::to_string((uint)mImportanceMode));
 
     //Mask
-    defines.add("USE_IRRGEGULAR_SHADOW_MASK", mIrregularUseShadowMask ? "1" : "0");
+    defines.add("USE_IRRGEGULAR_SHADOW_MASK", mUseNonOpaqueShadowMask ? "1" : "0");
     defines
-        .add("SHADOW_MATERIAL_FLAG_AS_BLACKLIST", mUseShadowMaterialFlagAsBlacklist && mIrregularUseShadowMask ? "1" : "0");
+        .add("SHADOW_MATERIAL_FLAG_AS_BLACKLIST", mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask ? "1" : "0");
     defines.add("MASK_ISM_MULT_FACTOR", std::to_string(mMaskISMMultFactor));
 
     //Soft Shadows
@@ -656,14 +656,15 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     // Set shadow mask and opaque shadow map
     if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
+        //Importance based methods
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
             );
-        else // Non irregular modes
+        else //Deep Shadow Map
         {
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
             );
         }
     }
@@ -748,14 +749,15 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
     // Set shadow mask and opaque shadow map
     if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
+        //Importance based Methods
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
             );
-        else // Non irregular modes
+        else //Deep Shadow Maps
         {
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
             );
         }
     }
@@ -836,14 +838,15 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
     // Set shadow mask and opaque shadow map
     if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
+        //Importance based Methods
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mIrregularUseShadowMask
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
             );
-        else // Non irregular modes
+        else // Deep Shadow Maps
         {
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mIrregularUseShadowMask
+                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
             );
         }
     }

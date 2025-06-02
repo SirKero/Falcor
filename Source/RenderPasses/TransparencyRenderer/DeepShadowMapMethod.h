@@ -78,14 +78,14 @@ public:
     {
         uint resolution = 512u;
         float2 nearFar = float2(0.1f, 60.f);
-        float cascadedSize = 20.f;
+        float dirLightRange = 20.f;
         float midpointPercentage = 0.5f;
         float depthBias = 1e-3f;
         bool enableColoredTransparency = false;
         bool enableSoftShadows = false;
         float softShadowsPositionRadius = 0.001f;
         float softShadowsDirectionsSpread = 1.f;
-        bool cascadedPutCameraOnGrid = true;
+        bool dirLightPutCameraOnGrid = true;
         SMSamplePattern samplePattern = SMSamplePattern::MatrixHalton;
         uint jitterSampleCount = 16;
     };
@@ -113,7 +113,7 @@ public:
     virtual bool renderUI(Gui::Widgets& widget) { return false; }
 
     /** Optional Debug pass.
-        It should be called every frame, so if debug is disabled, the function shoud return before doing any computationally expensive work.
+        It should be called every frame, so if debug is disabled, the function should return before doing any computationally expensive work.
     */
     virtual void debugPass(RenderContext* pRenderContext, const RenderData& renderData, ref<Texture> debugOut = nullptr, ref<Texture> colorOut = nullptr) {}
 
@@ -134,9 +134,14 @@ public:
         mRandomSoftShadowsDirSpread = directionalSpread;
     }
 
-    /** Set cascaded size
-    */
-    void setCascadedSize(float cascadedSize) { mCascadedSize = cascadedSize; }
+    /** Set Soft shadow parameters
+     */
+    const void getSoftShadowParameter (bool& isEnabled, float& positionRadius, float& directionalSpread) const
+    {
+        isEnabled = mEnableRandomSoftShadows;
+        positionRadius = mRandomSoftShadowsPositionRadius;
+        directionalSpread = mRandomSoftShadowsDirSpread;
+    }
 
     /** Gets current shadow map resolution
     */
@@ -146,7 +151,7 @@ public:
     */
     void enableBlacklist(bool enable) { mEnableBlacklistWithShadowMaterialFlag = enable; }
 
-    /** Get the light mpvs for the scene
+    /** Get the light MVPS for the scene
     */
     const std::vector<LightMVP>& getLightMVPs() const { return mShadowMapMVP; }
 
@@ -162,10 +167,15 @@ public:
      */
     const ref<Buffer> getPerSampleJitterBuffer() const { return mpHaltonBuffer; }
 
+    /* UI for the settings shared by every deep shadow map method
+     */
     bool globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings);
 
+    /* Setter for the settings struct
+     */
     void setGlobalShadowSettings(GlobalShadowSettings& settings);
 protected:
+    //Init constants for the blur
     static const uint kBlurKernelWidthInit = 5;
     static const bool kBlurSigmaInit = 1.f;
 
@@ -194,8 +204,8 @@ protected:
     bool mUseColoredTransparency = false;   //Enable colored transparency
     float2 mJitter = float2(0, 0);          //Optional Light Camera Jitter
 
-    float mCascadedSize = 50.f;
-    bool mCascadedPutCameraOnGrid = true;
+    float mDirLightSMRange = 50.f;
+    bool mDirLightSMPutOnCameraGrid = true;
 
     //Jitter
     SMSamplePattern mSamplePattern = SMSamplePattern::MatrixHalton; // Sample Pattern
@@ -213,7 +223,7 @@ protected:
     float mRandomSoftShadowsPositionRadius = 0.01f; // Random Radius for the start position
     float mRandomSoftShadowsDirSpread = 1.f;        // Pixel radius on far plane for spread
 
-    //Pipelines / Programms
+    //Pipelines / Programs
     struct RayTracingPipeline
     {
         ref<RtProgram> pProgram;

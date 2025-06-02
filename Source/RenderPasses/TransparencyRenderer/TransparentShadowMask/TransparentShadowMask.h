@@ -51,7 +51,7 @@ public:
     void generate(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const DeepShadowMapMethod* pTransparencyShadowMethod,
+        const DeepShadowMapMethod* pDeepShadowMapMethod,
         ref<SampleGenerator> pSampleGenerator,
         MaskGenerateMode genMode = MaskGenerateMode::Mask_ISM
     );
@@ -74,20 +74,20 @@ private:
     void generateTransparencyMask(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const DeepShadowMapMethod* pTransparencyShadowMethod
+        const DeepShadowMapMethod* pDeepShadowMapMethod
     );
 
     void generateOpaqueMaskImportanceShadowMap(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const DeepShadowMapMethod* pTransparencyShadowMethod,
+        const DeepShadowMapMethod* pDeepShadowMapMethod,
         ref<SampleGenerator> pSampleGenerator
     );
 
     void generateOpaqueMaskShadowMap(
         RenderContext* pRenderContext,
         const RenderData& renderData,
-        const DeepShadowMapMethod* pTransparencyShadowMethod
+        const DeepShadowMapMethod* pDeepShadowMapMethod
     );
 
     //Constants
@@ -129,7 +129,7 @@ private:
     };
     std::vector<DispatchFeedback> mDispatchFeedbackBuffers;
 
-    // Pipelines / Programms
+    // Pipelines / Programs
     struct RasterPipeline
     {
         ref<GraphicsState> pState;

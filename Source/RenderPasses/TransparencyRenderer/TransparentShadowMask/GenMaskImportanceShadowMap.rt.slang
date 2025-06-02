@@ -41,6 +41,10 @@ static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const bool kUseMask = USE_MASK; // USe mask to reject
 static const uint kMultFactor = MASK_ISM_MULT_FACTOR;
+//Soft Shadows
+static const bool kUseRandomSoftShadows = USE_RANDOM_RANDOM_SOFT_SHADOWS;
+static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS; // For Point and Spot
+static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
 
 struct RayData
 {
@@ -220,11 +224,6 @@ void rayGen()
         uint jitterIdx = (subpixelLoc.x + (subpixelLoc.y * samplesSq) + gFrameCount) % kNumHaltonSamples;
         pixelOffset = gHaltonSamples[jitterIdx]; // pixel offset in [0,1]
     }
-    /*
-    else {
-        pixelOffset = sampleNext2D(sg);
-    }
-    */
 
     // X
     float2 border = float2(borderMin.x, borderMin.x + subpixelSize) - 0.5; // From [0, 1] to [-0.5,0.5]
@@ -260,9 +259,21 @@ void rayGen()
     valid = maskVal > TRANSPARENCY_MASK_COMPAIRE_VALUE; // 1.0/255.0
 
     if (valid) {
-        //TODO Soft shadows
+        float3 lightPos = gLightPos;
+        float2 rndOffset = float2(0);
+        // Random offset for position
+        if (kUseRandomSoftShadows) {
+            SampleGenerator sg = SampleGenerator(DispatchRaysIndex().xy, gFrameCount);
+            if (gIsDirectional) {
+                rndOffset = sample_disk_concentric(sampleNext2D(sg));
+                rndOffset *= 1.0 / gSMRes * kRandomSoftShadowsDirSpread;
+            } else {
+                float3 rndPosOffset = sample_sphere(sampleNext2D(sg));
+                lightPos += rndPosOffset * kRandomSoftShadowsPosRadius;
+            }
+        }
 
-        float4 posWPixelNear = mul(gInvViewProjection, float4(relFramePos, 0.0, 1.0));
+        float4 posWPixelNear = mul(gInvViewProjection, float4(relFramePos + rndOffset, 0.0, 1.0));
         float4 posWPixelFar = mul(gInvViewProjection, float4(relFramePos, 1.0, 1.0));
 
         posWPixelNear.xyz /= posWPixelNear.w;
@@ -271,7 +282,7 @@ void rayGen()
         if (gIsDirectional) {
             rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
         } else {
-            rayDirection = posWPixelNear.xyz - gLightPos;
+            rayDirection = posWPixelNear.xyz - lightPos;
         }
 
         RayDesc ray;
@@ -282,8 +293,8 @@ void rayGen()
             ray.Direction = rayDirection / ray.TMax;
         } else {
             ray.TMin = length(rayDirection);                 // Always start at depth 0
-            ray.TMax = distance(gLightPos, posWPixelFar.xyz); // Real far for the pixel
-            ray.Origin = gLightPos;
+            ray.TMax = distance(lightPos, posWPixelFar.xyz); // Real far for the pixel
+            ray.Origin = lightPos;
             ray.Direction = rayDirection / ray.TMin; // World direction
         }
 

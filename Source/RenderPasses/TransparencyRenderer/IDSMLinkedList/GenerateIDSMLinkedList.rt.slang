@@ -438,7 +438,7 @@ void rayGen()
     if (gIsDirectional) {
         rayDirection = posWPixelFar.xyz - posWPixelNear.xyz;
     } else {
-        rayDirection = posWPixelNear.xyz - gLightPos;
+        rayDirection = posWPixelNear.xyz - lightPos;
     }
 
     RayDesc ray;

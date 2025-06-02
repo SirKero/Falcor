@@ -59,7 +59,7 @@ public:
     //Possible shadow render methods
     enum class ShadowRenderMethod : uint
     {
-        RayTracing = 0,
+        RayTracing = 0,         //Deep shadow ray
         DSM_AS = 1,             //Deep Shadow Map with Acceleration Structure
         DSM_LL = 2,             //Deep Shadow Map with Linked List
         IDSM_AS = 3,            //Importance Deep Shadow Map with Acceleration Structure
@@ -92,7 +92,7 @@ public:
         }
     );
 
-    //Importance mode for the per pixel adaptive shadow maps (see EvaluateAnalyticLight.slang)
+    //Importance mode for IDSM (see EvaluateAnalyticLight.slang)
     enum class ImportanceMode : uint
     {
         Opacity = 0,
@@ -153,7 +153,8 @@ public:
     );
 
 private:
-    void parseProperties(const Properties& props); //Properties for render graph
+    // Properties for render graph
+    void parseProperties(const Properties& props); 
     //Defines for the light evaluation. Can update every frame
     DefineList getLightEvalDefines();
 
@@ -171,17 +172,16 @@ private:
     void updateSamplePattern();
 
     // Internal state
-    ref<Scene> mpScene;                     ///< Current scene.
-    ref<SampleGenerator> mpSampleGenerator; ///< GPU sample generator.
-    ref<CPUSampleGenerator> mpCameraJitterGenerator;              ///< Sample generator for camera jitter.
-    std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask for Irregular Shadow Maps
+    ref<Scene> mpScene;                                     ///< Current scene.
+    ref<SampleGenerator> mpSampleGenerator;                 ///< GPU sample generator.
+    ref<CPUSampleGenerator> mpCameraJitterGenerator;        ///< Sample generator for camera jitter.
+    std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask to distribute rays only on non-opaque objects for DSM techniques
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::IDSM_AS;
     uint mSelectedShadowMethod = std::max((int)mShadowRenderMethod - 1, 0);
 
-    std::vector<std::shared_ptr<DeepShadowMapMethod>> mShadowMethods; // Shadow Methods that rely on extra structures (mSelectedShadowMethod
-                                                                      // - 1)
+    std::vector<std::shared_ptr<DeepShadowMapMethod>> mShadowMethods; // Shadow Methods that rely on extra structures (mSelectedShadowMethod - 1)
 
     // Runtime data Tracer
     uint mFrameCount = 0; ///< Frame count since scene was loaded.
@@ -200,9 +200,9 @@ private:
     float mRayReflectionsRoughnessThreshold = 0.7f; //Threshold for ray reflections
 
     //Shadow Mask
-    bool mIrregularUseShadowMask = true;               //Enables a shadow mask for opaque objects
+    bool mUseNonOpaqueShadowMask = true;            //Enables a shadow mask for non-opaque objects
     uint mMaskISMMultFactor = 9u;                  // Mult factor for ISM 
-    bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable as blacklist for non-opaque objects
+    bool mUseShadowMaterialFlagAsBlacklist = true;     //Uses the non-shadow throwable flag as blacklist for non-opaque objects
 
     DeepShadowMapMethod::GlobalShadowSettings mShadowSettings = {};
 
