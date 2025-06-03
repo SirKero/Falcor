@@ -5,7 +5,6 @@ target_sources(TransparencyRenderer PRIVATE
 	DSMAccelerationStructure/DSMAccelerationStructure.cpp
 	DSMAccelerationStructure/GenerateDSMAccelerationStructure.rt.slang
 	DSMAccelerationStructure/DSMAccelerationStructure.slang
-	DSMAccelerationStructure/DSMAccelerationStructureData.slang
 	DSMAccelerationStructure/DebugShowShadowAccel.3d.slang
 
     DSMLinkedList/DSMLinkedList.h
@@ -19,7 +18,6 @@ target_sources(TransparencyRenderer PRIVATE
 	IDSMAccelerationStructure/IDSMAccelerationStructure.cpp
 	IDSMAccelerationStructure/GenerateIDSMAccelerationStructure.rt.slang
 	IDSMAccelerationStructure/IDSMAccelerationStructure.slang
-	IDSMAccelerationStructure/IDSMAccelerationStructureData.slang
 	IDSMAccelerationStructure/DebugShowShadowAccel.3d.slang
 
     IDSMLinkedList/IDSMLinkedList.h

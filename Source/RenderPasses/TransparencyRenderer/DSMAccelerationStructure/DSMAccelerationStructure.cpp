@@ -249,6 +249,7 @@ void DSMAccelerationStructure::generate(RenderContext* pRenderContext, const Ren
     mGenAccelShadowPip.pProgram->addDefine(
         "INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT", mEnableBlacklistWithShadowMaterialFlag ? "0" : "1"
     ); // Determines if the castShadow instance mask bit is used
+    mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
 
     // Create Program Vars
     if (!mGenAccelShadowPip.pVars)
@@ -340,6 +341,7 @@ DefineList DSMAccelerationStructure::getDefines()
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
     defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
     defines.add("ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
+    defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     return defines;
 }
 

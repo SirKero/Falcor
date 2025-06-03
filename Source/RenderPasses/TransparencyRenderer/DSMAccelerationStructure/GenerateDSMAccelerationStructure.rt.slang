@@ -21,7 +21,15 @@ import Utils.Geometry.GeometryHelpers;
 #define TRACE_NON_OPAQUE_ONLY 0
 #endif
 
+#ifndef USE_COLOR_TRANSPARENCY
 #define USE_COLOR_TRANSPARENCY 0
+#endif
+
+#if USE_COLOR_TRANSPARENCY
+#define SHADOW_DATA_FORMAT float3
+#else
+#define SHADOW_DATA_FORMAT float
+#endif
 
 /** Payload for shadow ray. (32B)
  */
@@ -61,7 +69,7 @@ cbuffer CB
 
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
-RWStructuredBuffer<float> gData;
+RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
 Buffer<float2> gHaltonSamples;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set

@@ -1,5 +1,4 @@
 #pragma once
-#include "DSMAccelerationStructureData.slang"
 #include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
@@ -23,8 +22,18 @@ __exported import Scene.Intersection;
 #define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 0
 #endif
 
+#ifndef USE_COLOR_TRANSPARENCY
+#define USE_COLOR_TRANSPARENCY 0
+#endif
+
+#if USE_COLOR_TRANSPARENCY
+#define SHADOW_DATA_FORMAT float3
+#else
+#define SHADOW_DATA_FORMAT float
+#endif
+
 struct AccelShadowRayData {
-    float visibility;
+    SHADOW_DATA_FORMAT visibility;
     float sampleCount;
 
     __init() {
@@ -57,7 +66,7 @@ struct DSMAccelerationStructure
 
     RaytracingAccelerationStructure gShadowAS;
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
-    StructuredBuffer<float> gAccelShadowData[COUNT_LIGHTS];
+    StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
     Texture2DArray<float> gMaskShadowMap;
 
     SamplerState gMaskSampler;
@@ -75,7 +84,7 @@ struct DSMAccelerationStructure
             if (!aabb.contains(ray.Origin))
                 continue;
 
-            float transparency = gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
+            SHADOW_DATA_FORMAT transparency = gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
             rayData.visibility += transparency;
             rayData.sampleCount++;
         }
@@ -107,7 +116,7 @@ struct DSMAccelerationStructure
                     w = weight[1];
             }
 
-            float transparency = gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
+            SHADOW_DATA_FORMAT transparency = gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
             rayData.visibility += transparency * w;
             rayData.sampleCount += w;
         }
@@ -187,7 +196,7 @@ struct DSMAccelerationStructure
             traceAccelShadowInline(rayData, lightIdx, ray);
         #endif
 
-        float visibility = (rayData.sampleCount > 0) ? (rayData.visibility / rayData.sampleCount) : 1.0;
+        SHADOW_DATA_FORMAT visibility = (rayData.sampleCount > 0) ? (rayData.visibility / rayData.sampleCount) : 1.0;
         
         return min(visibility, visibilitySM);
     }

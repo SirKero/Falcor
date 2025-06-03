@@ -1,5 +1,4 @@
 #pragma once
-#include "IDSMAccelerationStructureData.slang"
 #include "../SharedShadowDefines.slang"
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
@@ -17,6 +16,16 @@ __exported import Scene.Intersection;
 
 #ifndef ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS
 #define ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS 1
+#endif
+
+#ifndef USE_COLOR_TRANSPARENCY
+#define USE_COLOR_TRANSPARENCY 0
+#endif
+
+#if USE_COLOR_TRANSPARENCY
+#define SHADOW_DATA_FORMAT float3
+#else
+#define SHADOW_DATA_FORMAT float
 #endif
 
 struct ASShadowRayData {
@@ -38,7 +47,7 @@ struct IDSMAccelerationStructure
     static const bool kAccelUseRayInline = ACCEL_USE_RAY_INLINE;       // TODO currently ignored and always assumed true
     static const uint kMaxAtomicWeight = IMPORTANCE_MAX_ATOMIC_WEIGHT;                      // Max value to be added on the atomic counter
     static const bool kUseOneAABBForAllLight = ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS;
-    static const uint kMaskISMMultFactor = MASK_ISM_MULT_FACTOR;        //Multiplication factor for the ISM used by the mask
+    static const uint kMaskISMMultFactor = MASK_ISM_MULT_FACTOR; // Multiplication factor for the ISM used by the mask
 
     cbuffer SMCB
     {

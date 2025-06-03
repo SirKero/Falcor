@@ -1,4 +1,3 @@
-#include "IDSMAccelerationStructureData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 #include "../SharedShadowDefines.slang"
@@ -20,6 +19,16 @@ import Utils.Sampling.SampleGenerator;
 
 #ifndef TRACE_NON_OPAQUE_ONLY
 #define TRACE_NON_OPAQUE_ONLY 0
+#endif
+
+#ifndef USE_COLOR_TRANSPARENCY
+#define USE_COLOR_TRANSPARENCY 0
+#endif
+
+#if USE_COLOR_TRANSPARENCY
+#define SHADOW_DATA_FORMAT float3
+#else
+#define SHADOW_DATA_FORMAT float
 #endif
 
 /** Payload for shadow ray. (32B)
@@ -73,7 +82,6 @@ static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; //Depth bias applie
 static const bool kUseOptimizedSampleDistribution = USE_OPTIMIZED_SAMPLE_DISTRIBUTION;
 static const float kMinOpacity = MIN_OPACITY;
 static const float kMaxTransmittance = 1.0 - kMinOpacity;
-static const uint kMipLevels = SAMPLE_DIST_MIPS;
 static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
 static const bool kUseOneAABBForAllLights = USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS;
 static const bool kUseHaltonSamplePattern = USE_HALTON_SAMPLE_PATTERN;
@@ -82,7 +90,8 @@ static const float kRandomSoftShadowsPosRadius = RANDOM_SOFT_SHADOWS_POS_RADIUS;
 static const float kRandomSoftShadowsDirSpread = RANDOM_SOFT_SHADOWS_DIR_SPREAD; // For Directional lights
 static const bool kUseMidpointBias = true; //Uses min between midpoint and a high bias (0.08% of lights far)
 static const bool kIncludeCastShadowInstanceMaskBit = INCLUDE_CAST_SHADOW_INSTANCE_MASK_BIT;
-static const bool kWriteTotalSampleCount = STATS_WRITE_TOTAL_SAMPLE_COUNT;   //For stats
+static const bool kWriteTotalSampleCount = STATS_WRITE_TOTAL_SAMPLE_COUNT; // For stats
+static const bool kUseColorTransparency = USE_COLOR_TRANSPARENCY;
 
 /** Setup ShadingData based on loaded vertex/material attributes for a hit point.
     \param[in] hit Hit information.
