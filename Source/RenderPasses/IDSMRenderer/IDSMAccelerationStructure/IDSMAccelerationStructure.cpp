@@ -84,7 +84,6 @@ void IDSMAccelerationStructure::prepareResources(RenderContext* pRenderContext)
     }
 
     mResolutionChanged = false;
-      
     updateSMMatrices();
 
     // Create AVSM trace program
@@ -275,8 +274,6 @@ void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const Re
 {
     FALCOR_PROFILE(pRenderContext, "Generate_IDSM_AS");
 
-    prepareResources(pRenderContext);
-
     // Abort early if disabled
     bool skipGeneration = (mSkipFrameCount % mSkipGenerationFrameCount) != 0;
     mSkipFrameCount++;
@@ -285,7 +282,8 @@ void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const Re
         dummyProfileGeneration(pRenderContext);
         return;
     }
-        
+
+    prepareResources(pRenderContext);
 
     // Handle light MVP for directional lights
     if (mHasDirectionalLight)
@@ -506,7 +504,7 @@ void IDSMAccelerationStructure::setShadowMask(
 bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    #if SIMPLE_UI
+    #if true
     if (auto group = widget.group("IDSM-AS Settings"))
     {
         mResolutionChanged |= group.var("Node Buffer size (Resolution x this)", mAccelApproxNumElementsPerPixel, 1u, 32u, 1u);
@@ -514,21 +512,107 @@ bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
         std::string bufferSize = "Buffer Elements: " + std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel);
         group.text(bufferSize);
 
-        group.var("Sample Dispatch Multiplier", mSampleOverestimate, 1.0f, 4.f);
-        group.tooltip("Constrols the maximum dispatch size of the IDSM generation shader. Defines the upper limit for the budget distribution. \n"
+        group.var("Ray Budget Multiplier", mSampleOverestimate, 1.0f, 4.f);
+        group.tooltip("Controls the maximum dispatch size of the IDSM generation shader. Defines the upper limit for the budget distribution. \n"
             "Max Dispatch Size: [SMRes.x * Overestimate , SMRes.y * Overestimate]");
 
-        group.checkbox("Use Gaussian Blur", mBlurSampleDistribution);
-        if (mBlurSampleDistribution && mpGaussianBlur)
+        mResolutionChanged |= group.checkbox("Use one Acceleration Structure for all IDSMs", mUseOneAABBForAllLights);
+        group.tooltip("Uses one AABB for all lights. Light coordinates are put side by side on the x axis");
+
+        mpImportanceMapHelper->renderUI(group);
+
+        if (auto statsGroup = group.group("Stats"))
         {
-            if (auto gaussGroup = group.group("Blur Options"))
-                mpGaussianBlur->renderUI(gaussGroup);
+            if (mpScene)
+            {
+                if (auto group2 = statsGroup.group("Buffer Size Infos"))
+                {
+                    const auto loopSize = mUseOneAABBForAllLights ? 1 : mpScene->getLightCount();
+                    for (uint i = 0; i < loopSize; i++)
+                    {
+                        if (i > 0)
+                            group2.separator();
+                        uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
+                        group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
+                        group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
+                        float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
+                        float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
+                        std::string accelMemStr = std::to_string(accelMem);
+                        std::string dataMemStr = std::to_string(dataMem);
+                        std::string totalMemStr = std::to_string((accelMem + dataMem));
+                        group2.text("AABB Memory:     " + accelMemStr.substr(0, accelMemStr.find(".") + 3) + " MB");
+                        group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+                        group2.text("Total Memory:    " + totalMemStr.substr(0, totalMemStr.find(".") + 3) + " MB");
+
+                        group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
+                        accelMem = (mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f;
+                        dataMem = (mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f;
+                        std::string neededAABBMem = std::to_string(accelMem);
+                        std::string neededDataMem = std::to_string(dataMem);
+                        std::string neededTotalMem = std::to_string(accelMem + dataMem);
+                        std::string fillRate = std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
+                        group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB");
+                        group2.text("Used Data Memory:   " + neededDataMem.substr(0, neededDataMem.find(".") + 3) + " MB");
+                        group2.text(
+                            "Used Total Memory:   " + neededTotalMem.substr(0, neededTotalMem.find(".") + 3) + " MB (" +
+                            fillRate.substr(0, fillRate.find(".") + 2) + "%)"
+                        );
+                    }
+                    group2.separator();
+                }
+
+                if (auto group2 = statsGroup.group("Ray Sample Count Info"))
+                {
+                    mEnableStats = true;
+                    uint total = 0;
+                    for (const auto& count : mStatsDistributedRayCountsPerLight)
+                        total += count;
+                    group2.text("Total Count: " + std::to_string(total));
+                    if (mpScene->getLightCount() > 1)
+                    {
+                        for (uint i = 0; i < mpScene->getLightCount(); i++)
+                        {
+                            group2.text(mpScene->getLight(i)->getName() + ": " + std::to_string(mStatsDistributedRayCountsPerLight[i]));
+                        }
+                    }
+                }
+                else
+                {
+                    mEnableStats = false;
+                }
+            }
         }
 
-        bool isJitterEnabled = mSamplePattern == SMSamplePattern::Halton;
-        bool changePattern = group.checkbox("Use Subpixel Jitter", isJitterEnabled);
-        if (changePattern)
-            mSamplePattern = isJitterEnabled ? SMSamplePattern::Halton : SMSamplePattern::Center;
+        if (auto group2 = group.group("Debug / Experimental"))
+        {
+            group2.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
+            group2.tooltip(
+               "Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same "
+               "Frame)"
+           );
+
+           group2.checkbox("Enable Accelerations Structure Visualization", mAccelDebugShowAS.enable);
+           if (mAccelDebugShowAS.enable && mpScene)
+           {
+               if (auto group3 = group2.group("AS Visualization Settings", true))
+               {
+                   group3.text("Enable \"List All Outputs\" and switch \"Output\" to ");
+                   group3.text("\"IDSMRenderer.outDebug\". For better visibility stop");
+                   group3.text("the time (Spacebar) and check the \"Stop Generation\" checkbox below.");
+                   if (mpScene->getLightCount() > 1 && !mUseOneAABBForAllLights)
+                       group3.slider("Selected Light", mAccelDebugShowAS.selectedLight, 0u, mpScene->getLightCount() - 1);
+                   group3.var("Clip X", mAccelDebugShowAS.clipX, 0.f, float(mResolution.x), 0.1f);
+                   group3.var("Clip Y", mAccelDebugShowAS.clipY, 0.f, float(mResolution.y), 0.1f);
+                   group3.var("Clip Z", mAccelDebugShowAS.clipZ, -FLT_MAX, FLT_MAX, 0.1f);
+
+                   group3.var("Blend with Output", mAccelDebugShowAS.blendT, 0.f, 1.f, 0.001f);
+                   if (group3.dropdown("Mode", kAccelDebugVisModes, mAccelDebugShowAS.visMode))
+                       mAccelDebugShowAS.stopGeneration = mAccelDebugShowAS.visMode == 1 ? true : mAccelDebugShowAS.stopGeneration;
+                   group3.checkbox("Stop Generation", mAccelDebugShowAS.stopGeneration);
+               }
+           }
+        }
+
     }
     #else
     if (auto group = widget.group("Accel Shadow Settings"))

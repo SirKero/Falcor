@@ -150,15 +150,15 @@ void ImportanceMapHelper::dummyRenderPassProfile(RenderContext* pRenderContext)
 
 void ImportanceMapHelper::renderUI(Gui::Widgets& widget) {
 
-    //mResetRayCount |= widget.checkbox("Use GPU Sample Distribution opimization", mEnableDynamicRayCountCalc); //TODO this seems bugged
+    //mResetRayCount |= widget.checkbox("Use GPU Sample Distribution optimization", mEnableDynamicRayCountCalc); //TODO this seems bugged
     if (mEnableDynamicRayCountCalc)
     {
         widget.var("GPU SD Fill Guard", mDynRCGuardPercentage, 0.001f, 1.f);
-        widget.tooltip("Buffer should be held around this fill percentage. ");
+        widget.tooltip("Data/Node Buffer should be held around this fill percentage. Sample Distribution budget is dynamically changed to retain this fillrate.");
         widget.var("GPU SD Change Mult (Increase/Decrease)", mDynRCChangePercentage, 0.001f, 1.f);
         widget.tooltip(
             "Multiplier for the change value in the Sample Distribution. There is a different value for increase and decrease. "
-            "Increase should be handled more conserveratively, while the decrease should be quiet aggressive"
+            "Increase should be handled more conservatively, while the decrease should be quiet aggressive"
         );
     }
 

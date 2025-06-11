@@ -1,4 +1,3 @@
-#include "AccelIrregularZData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -13,6 +12,12 @@ import Utils.Math.AABB;
 
 #ifndef COUNT_LIGHTS
 #define COUNT_LIGHTS 1
+#endif
+
+#if USE_COLOR_TRANSPARENCY
+#define SHADOW_DATA_FORMAT float3
+#else
+#define SHADOW_DATA_FORMAT float
 #endif
 
 cbuffer CB

@@ -243,22 +243,13 @@ void DeepShadowMapMethod::setGlobalShadowSettings(GlobalShadowSettings& settings
 
 bool DeepShadowMapMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalShadowSettings& settings)
 {
-    #if SIMPLE_UI
-    widget.dropdown("Resolution", kSMResolutionDropdown, resolution);
-    widget.var("Dir Light Shadow Map Range", dirLightRange, 0.f, FLT_MAX, 0.1f);
-    widget.tooltip("(World Space) Size for the directional light shadow map.");
-    widget.var("Midpoint Percentage (Dual Depth SM)", midpointPercentage, 0.f, 1.f, 0.001f);
-    widget.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
-    widget.var("Depth Bias", depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
-    widget.tooltip("Depth bias for Dual Depth Shadow Maps. Min(depth + depthBias, midpoint) is used.");
-    #else
-    widget.dropdown("ShadowResolution", kSMResolutionDropdown, settings.resolution);
-    widget.var("Near/Far", settings.nearFar, 0.0f, FLT_MAX, 0.001f);
-    widget.tooltip("Global Near/Far values for all lights spotlights");
+    widget.dropdown("Resolution", kSMResolutionDropdown, settings.resolution);
+    widget.var("Near/Far Range", settings.nearFar, 0.0f, FLT_MAX, 0.001f);
+    widget.tooltip("Global Near/Far values for all spotlights");
     widget.var("Dir Light Shadow Map Range", settings.dirLightRange, 0.f, FLT_MAX, 0.1f);
     widget.tooltip("(World Space) Size for the directional light shadow map.");
-    widget.checkbox("Update Cascade On Grid", settings.dirLightPutCameraOnGrid);
-    widget.tooltip("Fixates the cascaded on an grid with the size of the shadow map resolution");
+    widget.checkbox("Update Directional Light on Grid", settings.dirLightPutCameraOnGrid);
+    widget.tooltip("Fixates the directional light on an grid with the size of the shadow map resolution");
     //SM jitter settings
     bool jitterChanged = widget.dropdown("Shadow Map Jitter Pattern", settings.samplePattern);
     widget.tooltip("Sets the jitter pattern for the shadow map");
@@ -268,13 +259,12 @@ bool DeepShadowMapMethod::globalSettingsRenderUI(Gui::Widgets& widget, GlobalSha
     }
     
     widget.checkbox("Enable Colored Transparency", settings.enableColoredTransparency);
-    widget.tooltip("Enabled Colored transparency for all methods that support it");
+    widget.tooltip("Enabled Colored transparency for all methods");
 
-    widget.var("Midpoint Percentage", settings.midpointPercentage, 0.f, 1.f, 0.001f);
+    widget.var("Midpoint Relative Position", settings.midpointPercentage, 0.f, 1.f, 0.001f);
     widget.tooltip("Sets where the midpoint of the midpoint depth is set. 0.0 first depth, 1.0 second depth");
     widget.var("Depth Bias", settings.depthBias, 1e-9f, FLT_MAX, 0.00001f, false, "%.7f");
     widget.tooltip("Depth bias for midpoint shadow maps. Min(depth + depthBias, midpoint) is used.");
-    #endif
 
     setGlobalShadowSettings(settings);
 

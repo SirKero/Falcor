@@ -53,7 +53,6 @@ import IDSMLinkedList.IDSMLinkedList;
 Buffer<uint> gParticleMaterials; //Buffer with the bitsize of all materials. Particle materials bits are set
 
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
-static const bool kEnableFallbackRay = ENABLE_FALLBACK_RAY_SHADOWS; // Enable ray tracing for techniques that return a negative shadow value
 static const bool kUseStochasticRayTracing = USE_STOCHASTIC_RAY_TRACING; //Uses the stochastic version of the shadow ray
 static const bool kTRUseColoredTransparency = TR_USE_COLORED_TRANSPARENCY;
 static const bool kUseSoftShadows = USE_SOFT_SHADOWS;
@@ -390,11 +389,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
             visibility = gIDSMLinkedList.eval(lightIndex, sd.posW, isDirectional, importance, maskFlags);
         #endif
 
-        // TODO add quality modes for fallback ray (eg. with fixed alpha values, as it is only in the distance?)
-
         bool useMaskRay = kIrregularShadowMaskUseRay && (maskFlags & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0;
         // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || useMaskRay ||(visibility.x < 0) && kEnableFallbackRay) {
+        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || useMaskRay ||(visibility.x < 0)) {
             if (visibility.x < 0)
                 visibility = 1.0;
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);

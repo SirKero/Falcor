@@ -34,8 +34,6 @@
 #include "Rendering/Materials/TexLODTypes.slang"
 #include "IDSMMaskAndOpaqueShadowMap/IDSMMaskAndOpaqueShadowMap.h"
 
-#define SIMPLE_UI 0
-
 using namespace Falcor;
 
 class IDSMRenderer : public RenderPass
@@ -188,7 +186,6 @@ private:
     uint2 mRenderDims = uint2(512);
     LightSampleMode mLightSampleMode = LightSampleMode::All;
     bool mOptionsChanged = false;
-    bool mEnableFallbackRayTracedShadows = true; //Some techniques allow for fallback shadows
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
     ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
 

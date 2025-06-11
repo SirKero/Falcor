@@ -231,102 +231,6 @@ void IDSMRenderer::execute(RenderContext* pRenderContext, const RenderData& rend
 void IDSMRenderer::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    #if SIMPLE_UI
-    bool useRayReflections = mCameraRenderMode == CameraRenderMode::DirectRT_Reflections;
-    bool reflectionsChanged = widget.checkbox("Use Ray Reflections", useRayReflections);
-    if (reflectionsChanged)
-        mCameraRenderMode = useRayReflections ? CameraRenderMode::DirectRT_Reflections : CameraRenderMode::DirectRT;
-
-    bool methodChanged = widget.dropdown("Shadow Method", mShadowRenderMethod);
-    if (methodChanged)
-    {
-        mSelectedShadowMethod = mShadowRenderMethod == ShadowRenderMethod::RayTracing ? 0 : (uint)mShadowRenderMethod - 1u;
-        if (mShadowRenderMethod == ShadowRenderMethod::IDSM_LL|| mShadowRenderMethod == ShadowRenderMethod::IDSM_AS)
-        {
-            mShadowSettings.resolution = 512;
-            mShadowSettings.dirLightPutCameraOnGrid = true;
-        }
-        else if (mShadowRenderMethod == ShadowRenderMethod::DSM_AS || mShadowRenderMethod == ShadowRenderMethod::DSM_LL)
-        {
-            mShadowSettings.resolution = 2048;
-            mShadowSettings.dirLightPutCameraOnGrid = false;
-        }
-            
-    }
-       
-
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
-    {
-        widget.checkbox("Enable Mask", mUseNonOpaqueShadowMask);
-        widget.tooltip("Enables the semi-transparent Object Mask for the shadow map methods ");
-        if (mUseNonOpaqueShadowMask &&
-            (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL))
-        {
-            widget.dropdown("ISM Multiplication Factor", kMaskISMMultFactorDropdown, mMaskISMMultFactor);
-            widget.tooltip(
-                "Multiplication factor for the (opaque) Importance Shadow Map used when the mask is active. The dispatch size and all samples in the Sample Distribution will be multiplied with this number."
-            );
-        }
-    }
-
-    if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
-    {
-        widget.dropdown("Importance Formula", mImportanceMode);
-    }
-
-    widget.checkbox("Enable Soft Shadows", mShadowSettings.enableSoftShadows);
-    widget.tooltip("Approximate Soft Shadows.");
-
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
-    {
-        if (auto group = widget.group("General Shadow Map Settings"))
-        {
-            mShadowMethods[mSelectedShadowMethod]->globalSettingsRenderUI(group, mShadowSettings);
-        }
-    }
-
-    if (mShadowRenderMethod != ShadowRenderMethod::RayTracing && !mShadowMethods.empty() && mShadowMethods[mSelectedShadowMethod])
-    {
-        mShadowMethods[mSelectedShadowMethod]->renderUI(widget);
-    }
-
-    if (auto group = widget.group("Renderer Settings"))
-    {
-        bool updatePattern = widget.dropdown("Camera Jitter", mCameraJitterSamplePattern);
-        widget.tooltip(
-            "Selects sample pattern for anti-aliasing over multiple frames.\n\n"
-            "The camera jitter is set at the start of each frame based on the chosen pattern. All render passes should see the same "
-            "jitter.\n"
-            "'Center' disables anti-aliasing by always sampling at the center of the pixel.",
-            true
-        );
-        if (mCameraJitterSamplePattern != CamJitterSamplePattern::Center)
-        {
-            updatePattern |= widget.var("Camera Jitter Sample count", mCameraJitterNumSamples, 1u);
-            widget.tooltip("Number of samples in the anti-aliasing sample pattern.", true);
-        }
-        if (updatePattern)
-        {
-            updateSamplePattern();
-            mOptionsChanged = true;
-        }
-
-        switch (mCameraRenderMode)
-        {
-        case CameraRenderMode::DirectRT:
-            dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
-            dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
-            dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
-            break;
-        case CameraRenderMode::DirectRT_Reflections:
-            dirty |= widget.dropdown("Light Sample Mode", mLightSampleMode);
-            dirty |= widget.var("Ambient Strength", mAmbientStrength, 0.f, FLT_MAX);
-            dirty |= widget.var("Env Map Strength", mEnvMapStrength, 0.f, FLT_MAX);
-            dirty |= widget.var("Use RayReflections at spec percentage", mRayReflectionsRoughnessThreshold, 0.f, 1.f);
-            break;
-        }
-    }
-    #else
     dirty |= widget.dropdown("Render Method", mCameraRenderMode);
 
     if (auto group = widget.group("Render Settings"))
@@ -392,18 +296,15 @@ void IDSMRenderer::renderUI(Gui::Widgets& widget)
     }
     dirty |= methodChanged;
 
-    widget.checkbox("Enable Fallback Shadows", mEnableFallbackRayTracedShadows);
-    widget.tooltip("Some techniques allow for ray traced shadows as a fallback. They can be toggled on/off manually here");
-
     widget.checkbox("Enable Stochastic Shadow Ray", mShadowUseStochasticRayTracing);
     widget.tooltip("Toggle Stochastic Ray Tracing for the Visibility ray. Applies to all techniques that use stochastic ray tracing");
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
     {
-        widget.checkbox("Enable Shadow Backproject Mask", mUseNonOpaqueShadowMask);
+        widget.checkbox("Enable IDSM Transparent Object Mask", mUseNonOpaqueShadowMask);
         widget.tooltip(
-            "Enables a backprojection mask (non-opaque objects rasterized), that is used to reject samples for only opaque on fully-lit "
-            "samples in the backprojection process"
+            "Enables the IDSM Object Mask for non opaque objects. Allows the Deep Shadow Map Methods"
+            "to only render the non-opaque shadows while the opaque shadows are handled by ray tracing."
         );
         if (mUseNonOpaqueShadowMask &&
             (mShadowRenderMethod != ShadowRenderMethod::IDSM_AS || mShadowRenderMethod != ShadowRenderMethod::IDSM_LL))
@@ -411,14 +312,11 @@ void IDSMRenderer::renderUI(Gui::Widgets& widget)
             widget.dropdown("Mask ISM Multiplication Factor", kMaskISMMultFactorDropdown, mMaskISMMultFactor);
             widget.tooltip("Multiplication factor for the ISM used when the mask is active. The dispatch size and all samples in the Sample Distribution will be multiplied with this number.");
         }
-        widget.checkbox("Enable shadow material flag as blacklist", mUseShadowMaterialFlagAsBlacklist);
-        widget.tooltip("Uses the \"non-shadow throwable\" material flag as a blacklist.");
     }
 
     if (auto group = widget.group("Soft Shadow Options"))
     {
-        group.text("Info");
-        group.tooltip("Creates fake soft shadows by randomly offset the starting position or direction");
+        group.text("Fake Soft shadows, created with an random offset per sample.");
         group.checkbox("Enable", mShadowSettings.enableSoftShadows);
         if (mShadowSettings.enableSoftShadows)
         {
@@ -429,7 +327,7 @@ void IDSMRenderer::renderUI(Gui::Widgets& widget)
 
     if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
     {
-        widget.dropdown("Importance Mode", mImportanceMode);
+        widget.dropdown("Importance Formula", mImportanceMode);
     }
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
@@ -445,7 +343,6 @@ void IDSMRenderer::renderUI(Gui::Widgets& widget)
     {
         mShadowMethods[mSelectedShadowMethod]->renderUI(widget);
     }
-    #endif
 }
 
 void IDSMRenderer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
@@ -526,7 +423,6 @@ DefineList IDSMRenderer::getLightEvalDefines() {
         mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing
         ? RayFlags::None : evalQueryRayFlags;
     defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
-    defines.add("ENABLE_FALLBACK_RAY_SHADOWS", mEnableFallbackRayTracedShadows ? "1" : "0");
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
     defines.add("USE_STOCHASTIC_RAY_TRACING", mShadowUseStochasticRayTracing ? "1" : "0");
