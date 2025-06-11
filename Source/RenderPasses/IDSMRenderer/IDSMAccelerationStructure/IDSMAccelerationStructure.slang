@@ -69,7 +69,7 @@ struct IDSMAccelerationStructure
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
-    Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
+    Texture2D<uint> gSampleDistribution[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
     Buffer<float> gMaskShadowMap[COUNT_LIGHTS];
 

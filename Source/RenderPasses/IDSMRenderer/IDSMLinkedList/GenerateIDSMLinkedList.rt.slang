@@ -64,7 +64,7 @@ cbuffer CB
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<IDSMLinkedListNode> gData;
 RWTexture2D<uint> gAccessCounter;
-Texture2D<float> gSampleDistribution;
+Texture2D<uint> gSampleDistribution;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
 static const float kMidpointDepthBias = MIDPOINT_DEPTH_BIAS; // Depth bias for midpoint
@@ -216,7 +216,7 @@ void rayGen()
     }
 
     // Check if current thread needs to dispatch a ray sample
-    uint totalRaySamples = uint(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
+    uint totalRaySamples = gSampleDistribution.Load(uint3(0, 0, gMipCount - 1)); // Total number of allowed samples
     uint idx1D = pixel.x + pixel.y * frameDim.x;                    // Create an 1D weight from 2D
     if (idx1D > totalRaySamples)
         return;

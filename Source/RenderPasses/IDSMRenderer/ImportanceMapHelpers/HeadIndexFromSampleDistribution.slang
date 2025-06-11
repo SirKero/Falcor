@@ -7,7 +7,7 @@
     \return uint2 sampleIndex (x: IDSM; y: ISM, multiplied with the sample factor). Negative values indicate that there is no sample present (unshadowed)
 */
 
-int2 getIndexFromSD(Texture2D<float> sampleDistribution, float2 smUV, uint startMip, uint sampleFactorISM = 1u) {
+int2 getIndexFromSD(Texture2D<uint> sampleDistribution, float2 smUV, uint startMip, uint sampleFactorISM = 1u) {
     // Go through the mip chain to get the head buffer index of the sample
     uint2 mipIdx = uint2(0);       // Working index for mip chain traversal. Starts top left (0)
     uint selectedIndex = 0;        // Selected head buffer index.
@@ -17,10 +17,10 @@ int2 getIndexFromSD(Texture2D<float> sampleDistribution, float2 smUV, uint start
     for (int m = startMip; m >= 0; m--) {
         // Fetch samples in 2x2 grid
         uint4 mipSamples;
-        mipSamples[0] = uint(round(sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m))));
-        mipSamples[1] = uint(round(sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
-        mipSamples[2] = uint(round(sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
-        mipSamples[3] = uint(round(sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+        mipSamples[0] = sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m));
+        mipSamples[1] = sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+        mipSamples[2] = sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+        mipSamples[3] = sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
 
         //Select sample using the UV coordinates
         uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];

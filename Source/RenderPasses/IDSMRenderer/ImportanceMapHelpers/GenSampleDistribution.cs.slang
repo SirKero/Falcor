@@ -133,17 +133,22 @@ void main(uint3 thdID: SV_DispatchThreadID)
 
     //Write changed sample distribution values
     {
-        gSampleDistribution0[lightID][pixelLower] = values[0];
-        gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y)] = values[1];
-        gSampleDistribution0[lightID][uint2(pixelLower.x, pixelLower.y + 1)] = values[2];
-        gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y + 1)] = values[3];
+        gSampleDistribution0[lightID][pixelLower] = asfloat(uint(values[0]));
+        gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y)] = asfloat(uint(values[1]));
+        gSampleDistribution0[lightID][uint2(pixelLower.x, pixelLower.y + 1)] = asfloat(uint(values[2]));
+        gSampleDistribution0[lightID][uint2(pixelLower.x + 1, pixelLower.y + 1)] = asfloat(uint(values[3]));
     }
 
-    //Store the sum of the samples for the next iteration
-    //The sum is negative if it was balanced or previously balanced
-    bool storeAsNegative = balance || hasPrevBalanced;
-    storeAsNegative &= all(gDispatchSize > 1); //Last iteration, store positive
-    gSampleDistribution1[lightID][pixel] = storeAsNegative ? -sumOfSamples : sumOfSamples;
+    // Store the sum of the samples for the next iteration
+    // The sum is negative if it was balanced or previously balanced
+    if (all(gDispatchSize == 1)) {
+        gSampleDistribution1[lightID][pixel] = asfloat(uint(sumOfSamples));
+    } else {
+        bool storeAsNegative = balance || hasPrevBalanced;
+        //storeAsNegative &= all(gDispatchSize > 1); // Last iteration, store positive
+        gSampleDistribution1[lightID][pixel] = storeAsNegative ? -sumOfSamples : sumOfSamples;
+    }
+    
 
     // Clear for the head buffer of the linked list
     if (kClearCounter && all(gDispatchSize == 1))

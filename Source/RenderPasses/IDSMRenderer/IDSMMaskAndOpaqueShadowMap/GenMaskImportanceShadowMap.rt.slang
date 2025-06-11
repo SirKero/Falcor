@@ -31,7 +31,7 @@ cbuffer CB
 
 // Textures
 Texture2DArray<float> gMask; // Non-Opaque object mask
-Texture2D<float> gSampleDistribution; //sample Distribution
+Texture2D<uint> gSampleDistribution; //sample Distribution
 RWBuffer<float> gShadowMap;           // Shadow map
 RWBuffer<uint> gDispatchFeedbackBuffer;
 
@@ -120,7 +120,7 @@ void rayGen()
     const uint2 frameDim = DispatchRaysDimensions().xy;
 
     // Check if current thread needs to dispatch a ray sample
-    uint totalRaySamples = uint(gSampleDistribution.Load(uint3(0, 0, gMipCount - 1))); // Total number of allowed samples
+    uint totalRaySamples = gSampleDistribution.Load(uint3(0, 0, gMipCount - 1)); // Total number of allowed samples
     totalRaySamples *= kMultFactor;
     uint idx1D = pixel.x + pixel.y * frameDim.x;                    // Create an 1D weight from 2D
 

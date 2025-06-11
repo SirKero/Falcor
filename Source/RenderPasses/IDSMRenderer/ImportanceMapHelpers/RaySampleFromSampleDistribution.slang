@@ -17,7 +17,7 @@ static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
     \param[in] sampleFactor         ISM sample multiplication factor. Needs to a integer that fulfills x^2 (e.g 1, 4, 9, 16, ..)
     \return Exact pixel location in [0,smRes]. Is fractional
 */
-float2 generateRayTracingSampleFromSD(Texture2D<float> sampleDistribution, uint idx1D, uint2 smRes, uint startMip, uint frameCount, inout float4 pixelExtend, uint sampleFactor = 1u) {
+float2 generateRayTracingSampleFromSD(Texture2D<uint> sampleDistribution, uint idx1D, uint2 smRes, uint startMip, uint frameCount, inout float4 pixelExtend, uint sampleFactor = 1u) {
     // Variables used for traversal
     uint2 mipIdx = uint2(0);       // Working index for mip chain traversal. Starts top left (0)
     uint2 selectedMipIdx = mipIdx; //Selected index for the traversal
@@ -31,10 +31,10 @@ float2 generateRayTracingSampleFromSD(Texture2D<float> sampleDistribution, uint 
     for (int m = startMip; m >= 0; m--) {
         //Fetch samples in 2x2 grid
         uint4 mipSamples;
-        mipSamples[0] = uint(round(sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m))));
-        mipSamples[1] = uint(round(sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
-        mipSamples[2] = uint(round(sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
-        mipSamples[3] = uint(round(sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+        mipSamples[0] = sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y, m));
+        mipSamples[1] = sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+        mipSamples[2] = sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+        mipSamples[3] = sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
         mipSamples *= sampleFactor;
 
         //Select a sample using the current 1D index

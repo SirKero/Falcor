@@ -35,7 +35,7 @@ struct IDSMLinkedListShader
     }
 
     StructuredBuffer<IDSMLinkedListNode> gLinkedListData[COUNT_LIGHTS];
-    Texture2D<float> gSampleDistribution[COUNT_LIGHTS];
+    Texture2D<uint> gSampleDistribution[COUNT_LIGHTS];
     RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
     Buffer<float> gMaskShadowMap[COUNT_LIGHTS];
