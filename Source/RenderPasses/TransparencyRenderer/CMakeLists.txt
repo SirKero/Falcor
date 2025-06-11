@@ -33,6 +33,7 @@ target_sources(TransparencyRenderer PRIVATE
     ImportanceMapHelpers/Reduce.cs.slang
     ImportanceMapHelpers/DistributeBudget.cs.slang
     ImportanceMapHelpers/GenSampleDistribution.cs.slang
+    ImportanceMapHelpers/RaySampleFromSampleDistribution.slang
 
     TransparentShadowMask/TransparentShadowMask.cpp
     TransparentShadowMask/TransparentShadowMask.h

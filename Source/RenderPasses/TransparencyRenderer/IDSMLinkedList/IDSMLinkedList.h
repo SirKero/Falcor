@@ -86,8 +86,7 @@ private:
     uint mStagingCount = 0;
 
     //Sample Gen
-    bool mOptimizeSampleDistribution = true; //Extra pass that redistributes the weights
-    float mSampleOverestimate = 1.00f; //How many more pixels are dispatched than the size of the shadow map. Only used with the opimized sample distribution
+    float mSampleOverestimate = 1.00f; //How many more pixels are dispatched than the size of the shadow map. Only used with the optimized sample distribution
 
     //Shadow settings
     uint mApproxNumElementsPerPixel = 4u;

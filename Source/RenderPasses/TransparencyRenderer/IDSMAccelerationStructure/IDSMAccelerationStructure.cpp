@@ -333,7 +333,6 @@ void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const Re
     mGenAccelShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mpImportanceMapHelper->getSampleDistribution(0)->getMipCount()));
-    mGenAccelShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_ONE_AABB_BUFFER_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mpHaltonBuffer ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mJitterSampleCount));
@@ -387,11 +386,7 @@ void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const Re
         var["gStatsTotalSampleCountBuffer"] = mpStatsRaysDistributedBuffer;
 
         // Get dimensions of ray dispatch.
-        uint2 targetDim = mResolution;
-        if (mOptimizeSampleDistribution)
-        {
-            targetDim = uint2(float2(targetDim) * mSampleOverestimate);
-        }
+        uint2 targetDim = uint2(float2(mResolution) * mSampleOverestimate);
                     
         FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
@@ -610,14 +605,9 @@ bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
         group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
         group.tooltip("Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same Frame)");
 
-        group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
-        group.tooltip("Optimizes the sample distribution texture with an extra compute pass");
-        if (mOptimizeSampleDistribution)
-        {
-            group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
-            group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
-        }
-
+        group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
+        group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
+ 
         group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
         group.tooltip("Only uses the Visibility of the sample with the closest depth. If disabled, the average of all hit Boxes is used");
         if (auto group2 = group.group("Debug"))

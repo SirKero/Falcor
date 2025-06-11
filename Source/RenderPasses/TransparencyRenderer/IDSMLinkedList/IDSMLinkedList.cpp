@@ -234,7 +234,6 @@ void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& r
     mGenLinkedListShadowPip.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
     mGenLinkedListShadowPip.pProgram->addDefine("SAMPLE_DIST_MIPS", std::to_string(mpImportanceMapHelper->getSampleDistribution(0)->getMipCount()));
-    mGenLinkedListShadowPip.pProgram->addDefine("USE_OPTIMIZED_SAMPLE_DISTRIBUTION", mOptimizeSampleDistribution ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("USE_HALTON_SAMPLE_PATTERN", mpHaltonBuffer ? "1" : "0");
     mGenLinkedListShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mJitterSampleCount));
     mGenLinkedListShadowPip.pProgram->addDefine("USE_RANDOM_RANDOM_SOFT_SHADOWS", mEnableRandomSoftShadows ? "1" : "0");
@@ -283,12 +282,8 @@ void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& r
         var["gHaltonSamples"] = mpHaltonBuffer;
 
         // Get dimensions of ray dispatch.
-        uint2 targetDim = mResolution;
-        
-        if (mOptimizeSampleDistribution)
-        {
-            targetDim = uint2(float2(targetDim) * mSampleOverestimate);
-        }
+        uint2 targetDim = uint2(float2(mResolution) * mSampleOverestimate);
+
                
         FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
@@ -444,13 +439,9 @@ bool IDSMLinkedList::renderUI(Gui::Widgets& widget)
             "Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same Frame)"
         );
 
-        group.checkbox("Optimize Sample distribution", mOptimizeSampleDistribution);
-        group.tooltip("Optimizes the sample distribution texture with an extra compute pass");
-        if (mOptimizeSampleDistribution)
-        {
-            group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
-            group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
-        }
+        group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
+        group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
+ 
 
         group.checkbox("Debug Show Importance", mDebugEnableShowImportance);
         if (mDebugEnableShowImportance)
