@@ -380,7 +380,7 @@ void IDSMAccelerationStructure::generate(RenderContext* pRenderContext, const Re
         var["gAABB"] = mUseOneAABBForAllLights ? mAccelShadowAABB[0] : mAccelShadowAABB[i];
         var["gCounter"] = mAccelShadowCounter[frameInFlight];
         var["gData"] = mUseOneAABBForAllLights ? mAccelShadowData[0] : mAccelShadowData[i];
-        var["gAccessCounter"] = mpImportanceMapHelper->getImportanceMap(i);
+        var["gImportanceMap"] = mpImportanceMapHelper->getImportanceMap(i);
         var["gSampleDistribution"] = mpImportanceMapHelper->getSampleDistribution(i);
         var["gHaltonSamples"] = mpHaltonBuffer;
         var["gStatsTotalSampleCountBuffer"] = mpStatsRaysDistributedBuffer;
@@ -469,7 +469,7 @@ void IDSMAccelerationStructure::setShaderData(const ShaderVar& var)
     {
         shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
         shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
-        shadowVar["gAccessCounter"][i] = mpImportanceMapHelper->getImportanceMap(i);
+        shadowVar["gImportanceMap"][i] = mpImportanceMapHelper->getImportanceMap(i);
         shadowVar["gSampleDistribution"][i] = mpImportanceMapHelper->getSampleDistribution(i);
     }
     const auto accelDataSize = mUseOneAABBForAllLights ? 1 : lights.size();

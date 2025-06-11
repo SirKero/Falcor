@@ -277,7 +277,7 @@ void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& r
 
         var["gCounter"] = mLinkedListCounter[frameInFlight];
         var["gData"] = mLinkedListData[i];
-        var["gAccessCounter"] = mpImportanceMapHelper->getImportanceMap(i);
+        var["gImportanceMap"] = mpImportanceMapHelper->getImportanceMap(i);
         var["gSampleDistribution"] = mpImportanceMapHelper->getSampleDistribution(i);
         var["gHaltonSamples"] = mpHaltonBuffer;
 
@@ -343,7 +343,7 @@ void IDSMLinkedList::setShaderData(const ShaderVar& var)
     {
         shadowVar["ShadowVPs"]["gShadowMapVP"][i] = mShadowMapMVP[i].viewProjection;
         shadowVar["ShadowVPs"]["gStaggeredDirVP"] = mStaggeredDirectionalLightMVP.viewProjection;
-        shadowVar["gAccessCounter"][i] = mpImportanceMapHelper->getImportanceMap(i);
+        shadowVar["gImportanceMap"][i] = mpImportanceMapHelper->getImportanceMap(i);
     }
     const auto accelDataSize = lights.size();
     for (uint i = 0; i < accelDataSize; i++)

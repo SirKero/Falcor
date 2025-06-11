@@ -68,7 +68,7 @@ struct IDSMAccelerationStructure
     RaytracingAccelerationStructure gShadowAS;
     StructuredBuffer<AABB> gShadowAABBs[COUNT_LIGHTS];
     StructuredBuffer<SHADOW_DATA_FORMAT> gAccelShadowData[COUNT_LIGHTS];
-    RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
+    RWTexture2D<uint> gImportanceMap[COUNT_LIGHTS];
     Texture2D<uint> gSampleDistribution[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
     Buffer<float> gMaskShadowMap[COUNT_LIGHTS];
@@ -151,7 +151,7 @@ struct IDSMAccelerationStructure
         
         uint backprojectionWeight = clamp(uint(importance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         if(validBackprojection)
-            InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
+            InterlockedAdd(gImportanceMap[lightIdx][uShadowPixel], backprojectionWeight);
 
         // Raytraced shadows as fallback
         if (!validShadow)

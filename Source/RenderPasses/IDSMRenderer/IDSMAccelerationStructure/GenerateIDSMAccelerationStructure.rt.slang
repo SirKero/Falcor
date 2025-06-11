@@ -72,7 +72,7 @@ cbuffer CB
 RWStructuredBuffer<AABB> gAABB;
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<SHADOW_DATA_FORMAT> gData;
-RWTexture2D<uint> gAccessCounter;
+RWTexture2D<uint> gImportanceMap;
 Texture2D<uint> gSampleDistribution;
 
 RWBuffer<uint> gStatsTotalSampleCountBuffer; //Total sample count buffer for stats
@@ -240,7 +240,7 @@ void rayGen()
    
     // Clear access counter
     if (all(pixel < gSMRes)) {
-        gAccessCounter[pixel] = 0; // clear
+        gImportanceMap[pixel] = 0; // clear
     }
 
     //Check if current thread needs to dispatch a ray sample

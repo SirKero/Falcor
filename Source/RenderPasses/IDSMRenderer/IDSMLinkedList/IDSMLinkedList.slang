@@ -36,7 +36,7 @@ struct IDSMLinkedListShader
 
     StructuredBuffer<IDSMLinkedListNode> gLinkedListData[COUNT_LIGHTS];
     Texture2D<uint> gSampleDistribution[COUNT_LIGHTS];
-    RWTexture2D<uint> gAccessCounter[COUNT_LIGHTS];
+    RWTexture2D<uint> gImportanceMap[COUNT_LIGHTS];
     Texture2DArray<float> gShadowMask;
     Buffer<float> gMaskShadowMap[COUNT_LIGHTS];
 
@@ -98,7 +98,7 @@ struct IDSMLinkedListShader
         
         uint backprojectionWeight = clamp(uint(importance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         if(validBackprojection)
-            InterlockedAdd(gAccessCounter[lightIdx][uShadowPixel], backprojectionWeight);
+            InterlockedAdd(gImportanceMap[lightIdx][uShadowPixel], backprojectionWeight);
 
         //Raytraced shadows as fallback
         if (!validShadow)

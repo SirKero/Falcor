@@ -63,7 +63,7 @@ cbuffer CB
 
 RWBuffer<uint> gCounter;
 RWStructuredBuffer<IDSMLinkedListNode> gData;
-RWTexture2D<uint> gAccessCounter;
+RWTexture2D<uint> gImportanceMap;
 Texture2D<uint> gSampleDistribution;
 
 static const float kMidpointPercentage = MIDPOINT_PERCENTAGE; // Percentage of distance the midpoint is set
@@ -212,7 +212,7 @@ void rayGen()
 
     // Clear access counter
     if (all(pixel < gSMRes)) {
-        gAccessCounter[pixel] = 0; // clear
+        gImportanceMap[pixel] = 0; // clear
     }
 
     // Check if current thread needs to dispatch a ray sample
