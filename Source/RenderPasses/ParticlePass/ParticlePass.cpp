@@ -143,6 +143,7 @@ RenderPassReflection ParticlePass::reflect(const CompileData& compileData)
 void ParticlePass::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) {
     if (pScene)
     {
+        mReinitializeBuffer = true;
         mpScene = pScene;
         mScenePath = mpScene->getPath().parent_path();
         refreshFileList(); //Get possible configuration
@@ -447,6 +448,35 @@ void ParticlePass::storeCurrentConfiguration() {
     refreshFileList();
 }
 
+bool checkIfValidConfigurationFile(ref<Scene> pScene, const std::filesystem::path& pathToFile) {
+    std::ifstream ifs(pathToFile);
+    if (!ifs.good())
+    {
+        logWarning("Failed to open Particle Settings file '{}' for reading.", pathToFile);
+        return false;
+    }
+
+    bool valid = true;
+    auto& particleSystems = pScene->getParticleSystem();
+    try
+    {
+        json j = json::parse(ifs);
+        for (uint i = 0; i < particleSystems.size(); i++)
+        {
+            // Check if there is a entry with the particle system name
+            if (!j.contains(particleSystems[i].name))
+                valid = false;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        logWarning("Error when deserializing Particle Setting from '{}': {}", pathToFile, e.what());
+        return false;
+    }
+
+    return valid;
+}
+
 void ParticlePass::refreshFileList()
 {
     if (!mpScene)
@@ -455,13 +485,19 @@ void ParticlePass::refreshFileList()
     mFileList.clear();
     Gui::DropdownValue v;
     v.value = 0;
+
+    std::vector <std::string> validFiles;
+
     for (const auto& entry : std::filesystem::directory_iterator(mScenePath))
     {
         if (entry.is_regular_file() && entry.path().extension() == ".prtsett")
         {
-            v.label = entry.path().filename().replace_extension().string();
-            mFileList.push_back(v);
-            ++v.value;
+            if (checkIfValidConfigurationFile(mpScene, entry.path()))
+            {
+                v.label = entry.path().filename().replace_extension().string();
+                mFileList.push_back(v);
+                ++v.value;
+            }
         }
     }
     mSelectedFile = 0;
