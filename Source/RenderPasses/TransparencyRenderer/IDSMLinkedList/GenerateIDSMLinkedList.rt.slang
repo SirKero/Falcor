@@ -222,7 +222,7 @@ void rayGen()
         return;
 
     // Sample a pixel location by traversing the SD. The pixel location is scaled to the base resolution of the SD
-    float4 pixelExtend = float4(-0.5, 0.5, -0.5, 0.5); // Pixel extend to create AABB (xMin, xMax, yMin, yMax)
+    float4 pixelExtend = float4(-0.5, 0.5, -0.5, 0.5); // Unused for Linked List
     float2 pixelSample = generateRayTracingSampleFromSD(gSampleDistribution, idx1D, gSMRes, gMipCount - 2, gFrameCount, pixelExtend);
 
     float2 relFramePos = pixelSample / gSMRes;

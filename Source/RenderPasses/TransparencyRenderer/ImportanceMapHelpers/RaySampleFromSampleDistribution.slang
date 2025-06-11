@@ -14,9 +14,10 @@ static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
     \param[in] startMip             Start MipMap index for traversal. Traversal starts at the second highest level (2x2)
     \param[in] frameCount           Current frame count needed if per-sample halton jitter is enabled
     \param[in/out] pixelExtend      Size of the current pixel box. Used for the AABBs
+    \param[in] sampleFactor         ISM sample multiplication factor. Needs to a integer that fulfills x^2 (e.g 1, 4, 9, 16, ..)
     \return Exact pixel location in [0,smRes]. Is fractional
 */
-float2 generateRayTracingSampleFromSD(Texture2D<float> sampleDistribution, uint idx1D, uint2 smRes, uint startMip, uint frameCount, inout float4 pixelExtend) {
+float2 generateRayTracingSampleFromSD(Texture2D<float> sampleDistribution, uint idx1D, uint2 smRes, uint startMip, uint frameCount, inout float4 pixelExtend, uint sampleFactor = 1u) {
     //Variables used for traversal
     uint2 mipIdx = uint2(0); //Index for mip chain traversal. Starts top left (0)
     uint2 selectedMipIdx = mipIdx; //Selected index for the traversal
@@ -34,6 +35,7 @@ float2 generateRayTracingSampleFromSD(Texture2D<float> sampleDistribution, uint 
         mipSamples[1] = uint(round(sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
         mipSamples[2] = uint(round(sampleDistribution.Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
         mipSamples[3] = uint(round(sampleDistribution.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
+        mipSamples *= sampleFactor;
 
         //Select a sample using the current 1D index
         uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
