@@ -32,7 +32,7 @@
 namespace
 {
     //Shader Paths
-    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/IDSMLinkedList/";
+    const std::string kShaderFolder = "RenderPasses/IDSMRenderer/IDSMLinkedList/";
     const std::string kGenShader = kShaderFolder + "GenerateIDSMLinkedList.rt.slang";
     const std::string kShaderShowImportanceMap = kShaderFolder + "DebugShowImportance.cs.slang";
 

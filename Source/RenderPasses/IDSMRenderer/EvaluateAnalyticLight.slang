@@ -17,7 +17,7 @@ import DSMLinkedList.DSMLinkedList;
 import IDSMAccelerationStructure.IDSMAccelerationStructure;
 import IDSMLinkedList.IDSMLinkedList;
 
-// Shadow Eval Modes (see TransparencyRenderer.h)
+// Shadow Eval Modes (see IDSMRenderer.h)
 #define SHADOW_EVAL_MODE_RAYTRACING 0
 #define SHADOW_EVAL_MODE_DSM_AS 1
 #define SHADOW_EVAL_MODE_DSM_LL 2
@@ -28,7 +28,7 @@ import IDSMLinkedList.IDSMLinkedList;
 #define SHADOW_EVAL_MODE SHADOW_EVAL_MODE_RAYTRACING
 #endif
 
-// LightSampleModes (see TransparencyRenderer.h)
+// LightSampleModes (see IDSMRenderer.h)
 #define LIGHT_SAMPLE_MODE_UNIFORM 0
 #define LIGHT_SAMPLE_MODE_RIS 1
 #define LIGHT_SAMPLE_MODE_ALL 2
@@ -37,7 +37,7 @@ import IDSMLinkedList.IDSMLinkedList;
 #define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
 #endif
 
-//Imporance modes (see TransparencyRenderer.h)
+//Imporance modes (see IDSMRenderer.h)
 #define IMPORTANCE_MODE_OPACITY 0
 #define IMPORTANCE_MODE_OPACITY_THP 1
 #define IMPORTANCE_MODE_THP 2

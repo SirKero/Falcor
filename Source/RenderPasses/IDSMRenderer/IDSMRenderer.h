@@ -38,14 +38,14 @@
 
 using namespace Falcor;
 
-class TransparencyRenderer : public RenderPass
+class IDSMRenderer : public RenderPass
 {
 public:
-    FALCOR_PLUGIN_CLASS(TransparencyRenderer, "TransparencyRenderer", "Renderer for scenes with Transparencies");
+    FALCOR_PLUGIN_CLASS(IDSMRenderer, "IDSMRenderer", "Renderer for scenes with Transparencies");
 
-    static ref<TransparencyRenderer> create(ref<Device> pDevice, const Properties& props) { return make_ref<TransparencyRenderer>(pDevice, props); }
+    static ref<IDSMRenderer> create(ref<Device> pDevice, const Properties& props) { return make_ref<IDSMRenderer>(pDevice, props); }
 
-    TransparencyRenderer(ref<Device> pDevice, const Properties& props);
+    IDSMRenderer(ref<Device> pDevice, const Properties& props);
 
     virtual Properties getProperties() const override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
@@ -242,8 +242,8 @@ private:
     RayTracingPipeline mReflectionsPass;
 };
 
-FALCOR_ENUM_REGISTER(TransparencyRenderer::ShadowRenderMethod);
-FALCOR_ENUM_REGISTER(TransparencyRenderer::LightSampleMode);
-FALCOR_ENUM_REGISTER(TransparencyRenderer::CameraRenderMode);
-FALCOR_ENUM_REGISTER(TransparencyRenderer::ImportanceMode);
-FALCOR_ENUM_REGISTER(TransparencyRenderer::CamJitterSamplePattern);
+FALCOR_ENUM_REGISTER(IDSMRenderer::ShadowRenderMethod);
+FALCOR_ENUM_REGISTER(IDSMRenderer::LightSampleMode);
+FALCOR_ENUM_REGISTER(IDSMRenderer::CameraRenderMode);
+FALCOR_ENUM_REGISTER(IDSMRenderer::ImportanceMode);
+FALCOR_ENUM_REGISTER(IDSMRenderer::CamJitterSamplePattern);

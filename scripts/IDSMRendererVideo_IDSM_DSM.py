@@ -1,17 +1,17 @@
 from pathlib import WindowsPath, PosixPath
 from falcor import *
 
-def render_graph_TransparencyRenderDLSS():
-    g = RenderGraph('TransparencyRenderDLSS')
-    g.create_pass('IDSM_AS', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'IDSM-AS', 'EnableMask': True, 'ShadowResolution': 512})
+def render_graph_IDSM_Comp():
+    g = RenderGraph('IDSM_Demo')
+    g.create_pass('IDSM_AS', 'IDSMRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'IDSM-AS', 'EnableMask': True, 'ShadowResolution': 512})
     g.create_pass('DLSS_IDSM_AS', 'DLSSPass', {'enabled': True, 'outputSize': 'Default', 'profile': 'DLAA', 'preset': 'Default(CNN)', 'motionVectorScale': 'Relative', 'isHDR': True, 'useJitteredMV': False, 'sharpness': 0.0, 'exposure': 0.0})
     g.create_pass('VideoRecorder', 'VideoRecorder', {})
     g.create_pass('PathBenchmark', 'PathBenchmark', {})
     g.create_pass('ParticlePass', 'ParticlePass', {})
     g.create_pass('ToneMapper_IDSM_AS', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Aces', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
-    g.create_pass('DSM_AS', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'DSM-AS', 'EnableMask': True, 'ShadowResolution': 2048})
-    g.create_pass('DSM_LL', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'DSM-LL', 'EnableMask': True, 'ShadowResolution': 2048})
-    g.create_pass('IDSM_LL', 'TransparencyRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'IDSM-LL', 'EnableMask': True, 'ShadowResolution': 512})
+    g.create_pass('DSM_AS', 'IDSMRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'DSM-AS', 'EnableMask': True, 'ShadowResolution': 2048})
+    g.create_pass('DSM_LL', 'IDSMRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'DSM-LL', 'EnableMask': True, 'ShadowResolution': 2048})
+    g.create_pass('IDSM_LL', 'IDSMRenderer', {'RenderMode': 'DirectRT+RayReflections', 'ShadowMethod': 'IDSM-LL', 'EnableMask': True, 'ShadowResolution': 512})
     g.create_pass('DLSS_DSM_AS', 'DLSSPass', {'enabled': True, 'outputSize': 'Default', 'profile': 'DLAA', 'preset': 'Default(CNN)', 'motionVectorScale': 'Relative', 'isHDR': True, 'useJitteredMV': False, 'sharpness': 0.0, 'exposure': 0.0})
     g.create_pass('DLSS_DSM_LL', 'DLSSPass', {'enabled': True, 'outputSize': 'Default', 'profile': 'DLAA', 'preset': 'Default(CNN)', 'motionVectorScale': 'Relative', 'isHDR': True, 'useJitteredMV': False, 'sharpness': 0.0, 'exposure': 0.0})
     g.create_pass('DLSS_IDSM_LL', 'DLSSPass', {'enabled': True, 'outputSize': 'Default', 'profile': 'DLAA', 'preset': 'Default(CNN)', 'motionVectorScale': 'Relative', 'isHDR': True, 'useJitteredMV': False, 'sharpness': 0.0, 'exposure': 0.0})
@@ -43,6 +43,6 @@ def render_graph_TransparencyRenderDLSS():
     g.mark_output('ToneMapper_IDSM_LL.dst')
     return g
 
-TransparencyRenderDLSS = render_graph_TransparencyRenderDLSS()
-try: m.addGraph(TransparencyRenderDLSS)
+IDSM_Comp = render_graph_IDSM_Comp()
+try: m.addGraph(IDSM_Comp)
 except NameError: None

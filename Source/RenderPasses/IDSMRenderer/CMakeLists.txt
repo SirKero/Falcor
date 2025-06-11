@@ -1,6 +1,6 @@
-add_plugin(TransparencyRenderer)
+add_plugin(IDSMRenderer)
 
-target_sources(TransparencyRenderer PRIVATE
+target_sources(IDSMRenderer PRIVATE
 	DSMAccelerationStructure/DSMAccelerationStructure.h
 	DSMAccelerationStructure/DSMAccelerationStructure.cpp
 	DSMAccelerationStructure/GenerateDSMAccelerationStructure.rt.slang
@@ -46,8 +46,8 @@ target_sources(TransparencyRenderer PRIVATE
 	DeepShadowMapMethod.h
 	DeepShadowMapMethod.cpp
 
-	TransparencyRenderer.cpp
-	TransparencyRenderer.h
+	IDSMRenderer.cpp
+	IDSMRenderer.h
 	
 	EvaluateAnalyticLight.slang
 	EvalTransparenciesDirect.rt.slang
@@ -56,5 +56,5 @@ target_sources(TransparencyRenderer PRIVATE
     SharedShadowDefines.slang
 )
 
-target_copy_shaders(TransparencyRenderer RenderPasses/TransparencyRenderer)
-target_source_group(TransparencyRenderer "RenderPasses")
+target_copy_shaders(IDSMRenderer RenderPasses/IDSMRenderer)
+target_source_group(IDSMRenderer "RenderPasses")

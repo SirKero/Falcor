@@ -30,10 +30,10 @@
 
 namespace
 {
-const std::string kShaderGenRaster = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/GenerateIDSMMask.3d.slang";
-const std::string kShaderAccumulate = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/AccumulateMask.cs.slang";
-const std::string kShaderGenerateOpaqueISMRT = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/GenMaskImportanceShadowMap.rt.slang";
-const std::string kShaderGenerateOpaqueSMRT = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/GenMaskShadowMap.rt.slang";
+const std::string kShaderGenRaster = "RenderPasses/IDSMRenderer/IDSMMaskAndOpaqueShadowMap/GenerateIDSMMask.3d.slang";
+const std::string kShaderAccumulate = "RenderPasses/IDSMRenderer/IDSMMaskAndOpaqueShadowMap/AccumulateMask.cs.slang";
+const std::string kShaderGenerateOpaqueISMRT = "RenderPasses/IDSMRenderer/IDSMMaskAndOpaqueShadowMap/GenMaskImportanceShadowMap.rt.slang";
+const std::string kShaderGenerateOpaqueSMRT = "RenderPasses/IDSMRenderer/IDSMMaskAndOpaqueShadowMap/GenMaskShadowMap.rt.slang";
 }
 
 IDSMMaskAndOpaqueShadowMap::IDSMMaskAndOpaqueShadowMap(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene)

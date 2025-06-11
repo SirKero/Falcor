@@ -31,7 +31,7 @@
 namespace
 {
 // Shader Paths
-const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/ImportanceMapHelpers/";
+const std::string kShaderFolder = "RenderPasses/IDSMRenderer/ImportanceMapHelpers/";
 const std::string kReduceMipMapShader = kShaderFolder + "ReduceMipMaps.cs.slang";
 const std::string kReduceShader = kShaderFolder + "Reduce.cs.slang";
 const std::string kDistributeBudgetShader = kShaderFolder + "DistributeBudget.cs.slang";

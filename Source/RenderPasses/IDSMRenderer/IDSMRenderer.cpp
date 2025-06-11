@@ -25,7 +25,7 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "TransparencyRenderer.h"
+#include "IDSMRenderer.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
 
@@ -40,13 +40,13 @@
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
-    registry.registerClass<RenderPass, TransparencyRenderer>();
+    registry.registerClass<RenderPass, IDSMRenderer>();
 }
 
 namespace
 {
     // shader
-    const std::string kShaderFolder = "RenderPasses/TransparencyRenderer/";
+    const std::string kShaderFolder = "RenderPasses/IDSMRenderer/";
     const std::string kShaderEvalTransparenciesDirect = kShaderFolder + "EvalTransparenciesDirect.rt.slang";
     const std::string kShaderReflections = kShaderFolder + "RayReflections.rt.slang";
     const std::string kShaderPathTracer = kShaderFolder + "PathTracer.rt.slang";
@@ -80,14 +80,14 @@ namespace
 
 }; // namespace
 
-TransparencyRenderer::TransparencyRenderer(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
+IDSMRenderer::IDSMRenderer(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
 {
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
     parseProperties(props);
 }
 
-void TransparencyRenderer::parseProperties(const Properties& props)
+void IDSMRenderer::parseProperties(const Properties& props)
 {
     for (const auto& [key, value] : props)
     {
@@ -100,11 +100,11 @@ void TransparencyRenderer::parseProperties(const Properties& props)
         else if (key == kPropsShadowResolution)
             mShadowSettings.resolution = value;
         else
-            logWarning("Unknown property '{}' in TransparencyRenderers properties.", key);
+            logWarning("Unknown property '{}' in IDSMRenderers properties.", key);
     }
 }
 
-Properties TransparencyRenderer::getProperties() const
+Properties IDSMRenderer::getProperties() const
 {
     Properties props = Properties();
 
@@ -116,7 +116,7 @@ Properties TransparencyRenderer::getProperties() const
     return props;
 }
 
-RenderPassReflection TransparencyRenderer::reflect(const CompileData& compileData)
+RenderPassReflection IDSMRenderer::reflect(const CompileData& compileData)
 {
     RenderPassReflection reflector;
 
@@ -127,7 +127,7 @@ RenderPassReflection TransparencyRenderer::reflect(const CompileData& compileDat
     return reflector;
 }
 
-void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderData& renderData)
+void IDSMRenderer::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
     // Update refresh flag if options that affect the output have changed.
     auto& dict = renderData.getDictionary();
@@ -228,7 +228,7 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     mFrameCount++;
 }
 
-void TransparencyRenderer::renderUI(Gui::Widgets& widget)
+void IDSMRenderer::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
     #if SIMPLE_UI
@@ -448,7 +448,7 @@ void TransparencyRenderer::renderUI(Gui::Widgets& widget)
     #endif
 }
 
-void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
+void IDSMRenderer::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
 {
     // Set new scene.
     mpScene = pScene;
@@ -477,7 +477,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
                 mLightSampleMode = LightSampleMode::Uniform; // Cheapest light sample mode
         }
 
-        mSelectedShadowMethod = mShadowRenderMethod == TransparencyRenderer::ShadowRenderMethod::RayTracing ? 0 : (uint) mShadowRenderMethod - 1u;
+        mSelectedShadowMethod = mShadowRenderMethod == IDSMRenderer::ShadowRenderMethod::RayTracing ? 0 : (uint) mShadowRenderMethod - 1u;
 
         mpIDSMMask = std::make_shared<IDSMMaskAndOpaqueShadowMap>(mpDevice, mpScene);
 
@@ -515,7 +515,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
     }
 }
 
-DefineList TransparencyRenderer::getLightEvalDefines() {
+DefineList IDSMRenderer::getLightEvalDefines() {
     DefineList defines = {};
     defines.add("SHADOW_EVAL_MODE", std::to_string((uint)mShadowRenderMethod));
     defines.add(mShadowMethods[mSelectedShadowMethod]->getDefines());
@@ -547,7 +547,7 @@ DefineList TransparencyRenderer::getLightEvalDefines() {
     return defines;
 }
 
-void TransparencyRenderer::prepareResources(RenderContext* pRenderContext, const RenderData& renderData) {
+void IDSMRenderer::prepareResources(RenderContext* pRenderContext, const RenderData& renderData) {
     // Textures
     const auto& screenSize = renderData.getDefaultTextureDims();
 
@@ -587,7 +587,7 @@ void TransparencyRenderer::prepareResources(RenderContext* pRenderContext, const
     }
 }
 
-void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData) {
+void IDSMRenderer::evalDirectTransparency(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "TraceCameraRay");
 
     // Create scene ray tracing program.
@@ -687,7 +687,7 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
     mpScene->raytrace(pRenderContext, mEvalTransparencyDirectRay.pProgram.get(), mEvalTransparencyDirectRay.pVars, uint3(targetDim, 1));
 }
 
-void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, const RenderData& renderData) {
+void IDSMRenderer::evalRayReflections(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "RayReflections");
 
     // Create Pipeline
@@ -774,7 +774,7 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
     mpScene->raytrace(pRenderContext, mReflectionsPass.pProgram.get(), mReflectionsPass.pVars, uint3(targetDim, 1));
 }
 
-void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData) {
+void IDSMRenderer::evalPathTracer(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "TransparencyPathTracer");
 
     //Create Pipeline
@@ -866,17 +866,17 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
     mpScene->raytrace(pRenderContext, mTransparencyPathTracer.pProgram.get(), mTransparencyPathTracer.pVars, uint3(targetDim, 1));
 }
 
-static ref<CPUSampleGenerator> createSamplePattern(TransparencyRenderer::CamJitterSamplePattern type, uint32_t sampleCount)
+static ref<CPUSampleGenerator> createSamplePattern(IDSMRenderer::CamJitterSamplePattern type, uint32_t sampleCount)
 {
     switch (type)
     {
-    case TransparencyRenderer::CamJitterSamplePattern::Center:
+    case IDSMRenderer::CamJitterSamplePattern::Center:
         return nullptr;
-    case TransparencyRenderer::CamJitterSamplePattern::DirectX:
+    case IDSMRenderer::CamJitterSamplePattern::DirectX:
         return DxSamplePattern::create(sampleCount);
-    case TransparencyRenderer::CamJitterSamplePattern::Halton:
+    case IDSMRenderer::CamJitterSamplePattern::Halton:
         return HaltonSamplePattern::create(sampleCount);
-    case TransparencyRenderer::CamJitterSamplePattern::Stratified:
+    case IDSMRenderer::CamJitterSamplePattern::Stratified:
         return StratifiedSamplePattern::create(sampleCount);
     default:
         FALCOR_UNREACHABLE();
@@ -884,7 +884,7 @@ static ref<CPUSampleGenerator> createSamplePattern(TransparencyRenderer::CamJitt
     }
 }
 
-void TransparencyRenderer::updateFrameDim(const uint2 frameDim)
+void IDSMRenderer::updateFrameDim(const uint2 frameDim)
 {
     FALCOR_ASSERT(frameDim.x > 0 && frameDim.y > 0);
     mRenderDims = frameDim;
@@ -895,7 +895,7 @@ void TransparencyRenderer::updateFrameDim(const uint2 frameDim)
         mpScene->getCamera()->setPatternGenerator(mpCameraJitterGenerator, invFrameDim);
 }
 
-void TransparencyRenderer::updateSamplePattern()
+void IDSMRenderer::updateSamplePattern()
 {
     mpCameraJitterGenerator = createSamplePattern(mCameraJitterSamplePattern, mCameraJitterNumSamples);
     if (mpCameraJitterGenerator)
