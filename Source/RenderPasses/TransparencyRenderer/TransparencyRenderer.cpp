@@ -173,10 +173,10 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     {
         method->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask);
     }        
-    if (mpShadowMask)
+    if (mpIDSMMask)
     {
-        mpShadowMask->setIDMMultFactor(mMaskISMMultFactor);
-        mpShadowMask->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask);
+        mpIDSMMask->setIDMMultFactor(mMaskISMMultFactor);
+        mpIDSMMask->enableBlacklist(mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask);
     }
 
     //Generate Shadow Structure
@@ -185,11 +185,11 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
 
     if (mUseNonOpaqueShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
-        TransparentShadowMask::MaskGenerateMode genMode = TransparentShadowMask::MaskGenerateMode::Mask_ISM;
+        IDSMMaskAndOpaqueShadowMap::MaskGenerateMode genMode = IDSMMaskAndOpaqueShadowMap::MaskGenerateMode::Mask_ISM;
         if (mShadowRenderMethod == ShadowRenderMethod::DSM_AS || mShadowRenderMethod == ShadowRenderMethod::DSM_LL)
-            genMode = TransparentShadowMask::MaskGenerateMode::Mask_SM;
+            genMode = IDSMMaskAndOpaqueShadowMap::MaskGenerateMode::Mask_SM;
 
-        mpShadowMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get(), mpSampleGenerator, genMode);
+        mpIDSMMask->generate(pRenderContext, renderData, mShadowMethods[mSelectedShadowMethod].get(), mpSampleGenerator, genMode);
     }
 
     //Render
@@ -217,8 +217,8 @@ void TransparencyRenderer::execute(RenderContext* pRenderContext, const RenderDa
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
     {
         ref<Texture> pAdditionalTex = renderData.getTexture(kOutputColor);
-        if (mShadowRenderMethod == ShadowRenderMethod::IDSM_LL && mpShadowMask)
-            pAdditionalTex = mpShadowMask->getMask();
+        if (mShadowRenderMethod == ShadowRenderMethod::IDSM_LL && mpIDSMMask)
+            pAdditionalTex = mpIDSMMask->getMask();
         mShadowMethods[mSelectedShadowMethod]->debugPass(
             pRenderContext, renderData, renderData.getTexture(kOutputDebug), pAdditionalTex
         );
@@ -479,7 +479,7 @@ void TransparencyRenderer::setScene(RenderContext* pRenderContext, const ref<Sce
 
         mSelectedShadowMethod = mShadowRenderMethod == TransparencyRenderer::ShadowRenderMethod::RayTracing ? 0 : (uint) mShadowRenderMethod - 1u;
 
-        mpShadowMask = std::make_shared<TransparentShadowMask>(mpDevice, mpScene);
+        mpIDSMMask = std::make_shared<IDSMMaskAndOpaqueShadowMap>(mpDevice, mpScene);
 
         //Approximate Cascaded Size
         //TODO Set size with script and ignore this in this case
@@ -654,17 +654,17 @@ void TransparencyRenderer::evalDirectTransparency(RenderContext* pRenderContext,
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
     // Set shadow mask and opaque shadow map
-    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
+    if (mpIDSMMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
         //Importance based methods
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
+                var, mpIDSMMask->getMask(), mpIDSMMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
             );
         else //Deep Shadow Map
         {
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
+                var, mpIDSMMask->getMask(), mpIDSMMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
             );
         }
     }
@@ -747,17 +747,17 @@ void TransparencyRenderer::evalRayReflections(RenderContext* pRenderContext, con
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
     // Set shadow mask and opaque shadow map
-    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
+    if (mpIDSMMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
         //Importance based Methods
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
+                var, mpIDSMMask->getMask(), mpIDSMMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
             );
         else //Deep Shadow Maps
         {
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
+                var, mpIDSMMask->getMask(), mpIDSMMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
             );
         }
     }
@@ -836,17 +836,17 @@ void TransparencyRenderer::evalPathTracer(RenderContext* pRenderContext, const R
         mShadowMethods[mSelectedShadowMethod]->setShaderData(var);
 
     // Set shadow mask and opaque shadow map
-    if (mpShadowMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
+    if (mpIDSMMask && (mShadowRenderMethod != ShadowRenderMethod::RayTracing))
     {
         //Importance based Methods
         if (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL)
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
+                var, mpIDSMMask->getMask(), mpIDSMMask->getMaskImportanceShadowMap(), mUseNonOpaqueShadowMask
             );
         else // Deep Shadow Maps
         {
             mShadowMethods[mSelectedShadowMethod]->setShadowMask(
-                var, mpShadowMask->getMask(), mpShadowMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
+                var, mpIDSMMask->getMask(), mpIDSMMask->getMaskShadowMap(), mUseNonOpaqueShadowMask
             );
         }
     }

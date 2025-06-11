@@ -32,11 +32,11 @@
 
 using namespace Falcor;
 
-class TransparentShadowMask
+class IDSMMaskAndOpaqueShadowMap
 {
 public:
-    virtual ~TransparentShadowMask() = default;
-    TransparentShadowMask(ref<Device> pDevice, ref<Scene> pScene);
+    virtual ~IDSMMaskAndOpaqueShadowMap() = default;
+    IDSMMaskAndOpaqueShadowMap(ref<Device> pDevice, ref<Scene> pScene);
 
     enum class MaskGenerateMode : uint
     {
@@ -57,7 +57,7 @@ public:
     );
 
     //Get the layered mask texture
-    ref<Texture> getMask() const { return mpTransparentShadowMask; }
+    ref<Texture> getMask() const { return mpMaskTex; }
 
     //Get layered mask shadow map
     std::vector<ref<Buffer>>& getMaskImportanceShadowMap() { return mMaskOpaqueImportanceShadowMaps; }
@@ -115,8 +115,8 @@ private:
     bool mGenUseMaskToReject = true;            //< Enables / Disables mask to reject samples
 
     //Buffer and Textures
-    ref<Texture> mpTransparentShadowMaskRaster; //2D Array containing the masks for all shadow maps
-    ref<Texture> mpTransparentShadowMask; //Containing the temporally accumulated shadow masks
+    ref<Texture> mpMaskRasterTex; //2D Array containing the masks for all shadow maps
+    ref<Texture> mpMaskTex; //Containing the temporally accumulated shadow masks
     std::vector<ref<Buffer>> mMaskOpaqueImportanceShadowMaps;         //Importance shadow map with only opaque objects
     ref<Texture> mpMaskOpaqueShadowMap;          // Importance shadow map with only opaque objects
     ref<Sampler> mpMaskSampler;             //Mask sampler for the gen pass

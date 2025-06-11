@@ -36,12 +36,12 @@ target_sources(TransparencyRenderer PRIVATE
     ImportanceMapHelpers/RaySampleFromSampleDistribution.slang
     ImportanceMapHelpers/HeadIndexFromSampleDistribution.slang
 
-    TransparentShadowMask/TransparentShadowMask.cpp
-    TransparentShadowMask/TransparentShadowMask.h
-    TransparentShadowMask/GenTransparentShadowMask.3d.slang
-    TransparentShadowMask/AccumulateMask.cs.slang
-    TransparentShadowMask/GenMaskShadowMap.rt.slang
-    TransparentShadowMask/GenMaskImportanceShadowMap.rt.slang
+    IDSMMaskAndOpaqueShadowMap/IDSMMaskAndOpaqueShadowMap.cpp
+    IDSMMaskAndOpaqueShadowMap/IDSMMaskAndOpaqueShadowMap.h
+    IDSMMaskAndOpaqueShadowMap/GenerateIDSMMask.3d.slang
+    IDSMMaskAndOpaqueShadowMap/AccumulateMask.cs.slang
+    IDSMMaskAndOpaqueShadowMap/GenMaskShadowMap.rt.slang
+    IDSMMaskAndOpaqueShadowMap/GenMaskImportanceShadowMap.rt.slang
 
 	DeepShadowMapMethod.h
 	DeepShadowMapMethod.cpp

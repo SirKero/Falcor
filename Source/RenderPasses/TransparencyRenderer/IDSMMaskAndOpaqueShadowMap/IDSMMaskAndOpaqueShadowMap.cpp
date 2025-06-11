@@ -25,18 +25,18 @@
  # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
-#include "TransparentShadowMask.h"
+#include "IDSMMaskAndOpaqueShadowMap.h"
 #include "Utils/Math/FalcorMath.h"
 
 namespace
 {
-const std::string kShaderGenRaster = "RenderPasses/TransparencyRenderer/TransparentShadowMask/GenTransparentShadowMask.3d.slang";
-const std::string kShaderAccumulate = "RenderPasses/TransparencyRenderer/TransparentShadowMask/AccumulateMask.cs.slang";
-const std::string kShaderGenerateOpaqueISMRT = "RenderPasses/TransparencyRenderer/TransparentShadowMask/GenMaskImportanceShadowMap.rt.slang";
-const std::string kShaderGenerateOpaqueSMRT = "RenderPasses/TransparencyRenderer/TransparentShadowMask/GenMaskShadowMap.rt.slang";
+const std::string kShaderGenRaster = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/GenerateIDSMMask.3d.slang";
+const std::string kShaderAccumulate = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/AccumulateMask.cs.slang";
+const std::string kShaderGenerateOpaqueISMRT = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/GenMaskImportanceShadowMap.rt.slang";
+const std::string kShaderGenerateOpaqueSMRT = "RenderPasses/TransparencyRenderer/IDSMMaskAndOpaqueShadowMap/GenMaskShadowMap.rt.slang";
 }
 
-TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene)
+IDSMMaskAndOpaqueShadowMap::IDSMMaskAndOpaqueShadowMap(ref<Device> pDevice, ref<Scene> pScene) : mpDevice(pDevice), mpScene(pScene)
 {
     mpFence = GpuFence::create(mpDevice);
     FALCOR_ASSERT(mpFence);
@@ -44,7 +44,7 @@ TransparentShadowMask::TransparentShadowMask(ref<Device> pDevice, ref<Scene> pSc
         waitVal = 0;
 }
 
-void TransparentShadowMask::generate(
+void IDSMMaskAndOpaqueShadowMap::generate(
     RenderContext* pRenderContext,
     const RenderData& renderData,
     const DeepShadowMapMethod* pDeepShadowMapMethod,
@@ -64,7 +64,7 @@ void TransparentShadowMask::generate(
     }   
 }
 
-void TransparentShadowMask::generateTransparencyMask(
+void IDSMMaskAndOpaqueShadowMap::generateTransparencyMask(
     RenderContext* pRenderContext,
     const RenderData& renderData,
     const DeepShadowMapMethod* pDeepShadowMapMethod
@@ -78,23 +78,23 @@ void TransparentShadowMask::generateTransparencyMask(
 
     //Prepare Resources
     //Mask Render target
-    if (!mpTransparentShadowMaskRaster || mpTransparentShadowMaskRaster->getWidth() != smRes.x || mpTransparentShadowMaskRaster->getHeight() != smRes.y ||
-        mpTransparentShadowMaskRaster->getArraySize() != lights.size())
+    if (!mpMaskRasterTex || mpMaskRasterTex->getWidth() != smRes.x || mpMaskRasterTex->getHeight() != smRes.y ||
+        mpMaskRasterTex->getArraySize() != lights.size())
     {
-        mpTransparentShadowMaskRaster = Texture::create2D(
+        mpMaskRasterTex = Texture::create2D(
             mpDevice, smRes.x, smRes.y, ResourceFormat::R8Unorm, lights.size(), 1u, nullptr,
             ResourceBindFlags::RenderTarget | ResourceBindFlags::ShaderResource
         );
-        mpTransparentShadowMaskRaster->setName("TransparentShadowMaskRenderTarget");
+        mpMaskRasterTex->setName("IDSM_Mask_RenderTarget");
     }
     //Mask temporal accumulate
-    if (!mpTransparentShadowMask || mpTransparentShadowMask->getWidth() != smRes.x || mpTransparentShadowMask->getHeight() != smRes.y)
+    if (!mpMaskTex || mpMaskTex->getWidth() != smRes.x || mpMaskTex->getHeight() != smRes.y)
     {
-        mpTransparentShadowMask = Texture::create2D(
+        mpMaskTex = Texture::create2D(
             mpDevice, smRes.x, smRes.y, ResourceFormat::R8Unorm, lights.size(), 1u, nullptr,
             ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
         );
-        mpTransparentShadowMask->setName("TransparentShadowMask");
+        mpMaskTex->setName("IDSM_Mask");
     }
     
      // Init Program
@@ -174,7 +174,7 @@ void TransparentShadowMask::generateTransparencyMask(
         }
 
         //Set and clear FBO
-        mGenerateMaskPip.pFBO->attachColorTarget(mpTransparentShadowMaskRaster, 0u, 0u, i, 1u);
+        mGenerateMaskPip.pFBO->attachColorTarget(mpMaskRasterTex, 0u, 0u, i, 1u);
         mGenerateMaskPip.pState->setFbo(mGenerateMaskPip.pFBO);
 
         pRenderContext->clearFbo(mGenerateMaskPip.pFBO.get(), float4(0.f), 1.f, 0);
@@ -203,13 +203,13 @@ void TransparentShadowMask::generateTransparencyMask(
     {
         //FALCOR_PROFILE(pRenderContext, "TemporalAccumulateMask");
         var = mpTemporalAccumulateMaskPass->getRootVar();
-        uint3 dispatchDimensions = uint3(mpTransparentShadowMask->getWidth(), mpTransparentShadowMask->getHeight(), lights.size());
+        uint3 dispatchDimensions = uint3(mpMaskTex->getWidth(), mpMaskTex->getHeight(), lights.size());
 
         var["CB"]["gDispatchDims"] = dispatchDimensions;
         var["CB"]["gCurrentBit"] = mTemporalCounter % kMaxTemporal;
 
-        var["gCurrentMask"] = mpTransparentShadowMaskRaster;
-        var["gTemporalMask"] = mpTransparentShadowMask;
+        var["gCurrentMask"] = mpMaskRasterTex;
+        var["gTemporalMask"] = mpMaskTex;
 
         mpTemporalAccumulateMaskPass->execute(pRenderContext, dispatchDimensions);
     }
@@ -217,7 +217,7 @@ void TransparentShadowMask::generateTransparencyMask(
     mTemporalCounter++;
 }
 
-void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
+void IDSMMaskAndOpaqueShadowMap::generateOpaqueMaskImportanceShadowMap(
     RenderContext* pRenderContext,
     const RenderData& renderData,
     const DeepShadowMapMethod* pDeepShadowMapMethod,
@@ -359,7 +359,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
         var["CB"]["gInvViewProjection"] = lightMVPs[i].invViewProjection;
         var["CB"]["gViewProjection"] = lightMVPs[i].viewProjection;
 
-        var["gMask"] = mpTransparentShadowMask;
+        var["gMask"] = mpMaskTex;
         var["gSampleDistribution"] = sampleDistribution[i];
         var["gShadowMap"] = mMaskOpaqueImportanceShadowMaps[i];
         var["gMaskSampler"] = mpMaskSampler;
@@ -404,7 +404,7 @@ void TransparentShadowMask::generateOpaqueMaskImportanceShadowMap(
     }
 }
 
-void TransparentShadowMask::generateOpaqueMaskShadowMap(
+void IDSMMaskAndOpaqueShadowMap::generateOpaqueMaskShadowMap(
     RenderContext* pRenderContext,
     const RenderData& renderData,
     const DeepShadowMapMethod* pDeepShadowMapMethod
@@ -498,7 +498,7 @@ void TransparentShadowMask::generateOpaqueMaskShadowMap(
         var["CB"]["gInvViewProjection"] = lightMVPs[i].invViewProjection;
         var["CB"]["gViewProjection"] = lightMVPs[i].viewProjection;
 
-        var["gMask"] = mpTransparentShadowMask;
+        var["gMask"] = mpMaskTex;
         var["gShadowMap"].setUav(mpMaskOpaqueShadowMap->getUAV(0, i, 1u));
         var["gMaskSampler"] = mpMaskSampler;
         //var["gHaltonSamples"] = pHaltonBuffer;

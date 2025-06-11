@@ -32,7 +32,7 @@
 #include "Rendering/ShadowMaps/ShadowMap.h"
 #include "DeepShadowMapMethod.h"
 #include "Rendering/Materials/TexLODTypes.slang"
-#include "TransparentShadowMask/TransparentShadowMask.h"
+#include "IDSMMaskAndOpaqueShadowMap/IDSMMaskAndOpaqueShadowMap.h"
 
 #define SIMPLE_UI 0
 
@@ -175,7 +175,7 @@ private:
     ref<Scene> mpScene;                                     ///< Current scene.
     ref<SampleGenerator> mpSampleGenerator;                 ///< GPU sample generator.
     ref<CPUSampleGenerator> mpCameraJitterGenerator;        ///< Sample generator for camera jitter.
-    std::shared_ptr<TransparentShadowMask> mpShadowMask;    ///< Shadow Mask to distribute rays only on non-opaque objects for DSM techniques
+    std::shared_ptr<IDSMMaskAndOpaqueShadowMap> mpIDSMMask;    ///< Shadow Mask to distribute rays only on non-opaque objects for DSM techniques
 
     CameraRenderMode mCameraRenderMode = CameraRenderMode::DirectRT;
     ShadowRenderMethod mShadowRenderMethod = ShadowRenderMethod::IDSM_AS;
@@ -221,7 +221,7 @@ private:
     ref<Buffer> mpParticleMaterials; //Buffer that stores if the material with index x is a particle
 
     //Passes
-    // Pipelines / Programms
+    // Pipelines / Programs
     struct RayTracingPipeline
     {
         ref<RtProgram> pProgram;
