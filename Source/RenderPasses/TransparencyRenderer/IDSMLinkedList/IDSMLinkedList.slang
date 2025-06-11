@@ -1,6 +1,8 @@
 #pragma once
-#include "IDSMLinkedListData.slang"
+#include "../ImportanceMapHelpers/HeadIndexFromSampleDistribution.slang"
 #include "../SharedShadowDefines.slang"
+#include "IDSMLinkedListData.slang"
+
 
 import Rendering.ShadowMaps.ShadowTestFunctions;
 import Rendering.ShadowMaps.ShadowMapHelpers;
@@ -104,96 +106,22 @@ struct IDSMLinkedListShader
 
         float3 visibility = 1.0;
 
-        //Go through the mip chain to get the head buffer index of the sample
-        uint index = uShadowPixel.y * gSMSize.x + uShadowPixel.x;
-        float2 smUV = shadowPos.xy;
-        uint2 mipIdx = uint2(0); // Top left
-        uint2 selectedMipIdx = mipIdx;
-        uint selectedIndex = 0; // Start index at zero
-        uint choosenSampleCount = 0;
-        const uint highestMip = gMipCount - 2;
-        uint selectedMipLevel = highestMip;
-        for (int m = highestMip; m >= 0; m--) {
-            uint4 mipSamples;
-            mipSamples[0] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x, mipIdx.y, m))));
-            mipSamples[1] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x + 1, mipIdx.y, m))));
-            mipSamples[2] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x, mipIdx.y + 1, m))));
-            mipSamples[3] = uint(round(gSampleDistribution[lightIdx].Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m))));
-            uint totalSamples = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
-            uint pixelLoc = 0;
-            if (smUV.x > 0.5)
-                pixelLoc += 1;
-            if (smUV.y > 0.5)
-                pixelLoc += 2;
-
-            // Check if level is valid and abort if that is the case
-            if (totalSamples < choosenSampleCount)
-                break;
-
-            choosenSampleCount = mipSamples[pixelLoc]; //Update
-
-            // Add to pixel offset
-            for (uint i = 0; i < pixelLoc; i++)
-                selectedIndex += mipSamples[i];
-
-            // Update relative index weight
-            smUV *= 2.0;
-            if (pixelLoc == 1 || pixelLoc == 3) //x > 0.5
-                smUV.x -= 1.0;
-            if (pixelLoc > 1) // y > 0.5
-                smUV.y -= 1.0;
-            smUV = saturate(smUV); //Guarantee [0,1]
-
-            // Update mip idx for next iteration 
-            if (pixelLoc == 1 || pixelLoc == 3)
-                mipIdx.x += 1;
-            if (pixelLoc > 1) // 2 or 3
-                mipIdx.y += 1;
-
-            selectedMipLevel = m;
-            selectedMipIdx = mipIdx;
-            mipIdx *= 2; // Update for new resolution
-        }
-
-        //No head buffer entry found (unshadowed)
-        if (choosenSampleCount == 0)
-            return visibility; //Unshadowed (1.0)
-
-        uint selectedMaskISMIndex = selectedIndex * kMaskISMMultFactor; //Only used when ISM is active
-        //Get final offset (subpixels) for the index
-        if (choosenSampleCount > 1) {
-            uint samplesSq = uint(round(sqrt(choosenSampleCount))); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
-            const float subpixelSize = 1.0 / samplesSq;
-            uint2 subpixelOffset = uint2(smUV / subpixelSize);
-            subpixelOffset.y *= samplesSq;
-            
-            selectedIndex += subpixelOffset.x + subpixelOffset.y;
-        }
-
-        //Check if index is bigger than max size. Can happen if sample count increases drastically compaired to previous frame
-        if (selectedIndex >= gMaxBufferSize)
+        //Get head buffer index for IDSM(x) and ISM(y)
+        uint ismMultFactor = ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) ? kMaskISMMultFactor : 1u;
+        int2 selectedIndex = getIndexFromSD(gSampleDistribution[lightIdx], shadowPos.xy, gMipCount - 2, ismMultFactor);
+        //Check if index is invalid (unshadowed)
+        if (selectedIndex.x < 0)
             return visibility;
 
         if ((maskFlags & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
-            // Get Mask index
-            choosenSampleCount *= kMaskISMMultFactor;
-            if (choosenSampleCount > 1) {
-                uint samplesSq = uint(round(sqrt(choosenSampleCount))); // Num samples should be set capped to grids (e.g. 2x2, 3x3, 4x4)
-                const float subpixelSize = 1.0 / samplesSq;
-                uint2 subpixelOffset = uint2(smUV / subpixelSize);
-                subpixelOffset.y *= samplesSq;
-
-                selectedMaskISMIndex += subpixelOffset.x + subpixelOffset.y;
-            }
-
-            if(selectedMaskISMIndex < gISMMaxSize * kMaskISMMultFactor){
-                float maskSMDepth = gMaskShadowMap[lightIdx][selectedMaskISMIndex];
+            if (selectedIndex.y < gISMMaxSize * kMaskISMMultFactor) {
+                float maskSMDepth = gMaskShadowMap[lightIdx][selectedIndex.y];
                 if (maskSMDepth <= dist)
                     return float3(0.0);
             }
         }
 
-        IDSMLinkedListNode n = gLinkedListData[lightIdx][selectedIndex];
+        IDSMLinkedListNode n = gLinkedListData[lightIdx][selectedIndex.x];
         // traverse visibility until dist is reached
         while (n.depth < dist) {
             visibility = n.visibility;

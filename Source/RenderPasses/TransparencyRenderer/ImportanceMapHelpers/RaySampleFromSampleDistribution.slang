@@ -18,8 +18,8 @@ static const uint kNumHaltonSamples = NUM_HALTON_SAMPLES;
     \return Exact pixel location in [0,smRes]. Is fractional
 */
 float2 generateRayTracingSampleFromSD(Texture2D<float> sampleDistribution, uint idx1D, uint2 smRes, uint startMip, uint frameCount, inout float4 pixelExtend, uint sampleFactor = 1u) {
-    //Variables used for traversal
-    uint2 mipIdx = uint2(0); //Index for mip chain traversal. Starts top left (0)
+    // Variables used for traversal
+    uint2 mipIdx = uint2(0);       // Working index for mip chain traversal. Starts top left (0)
     uint2 selectedMipIdx = mipIdx; //Selected index for the traversal
     uint weightIdx = idx1D; // Uint weight index for traversal
     uint sampleCount = 0;
