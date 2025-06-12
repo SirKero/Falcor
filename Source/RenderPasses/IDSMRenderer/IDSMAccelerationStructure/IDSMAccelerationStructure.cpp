@@ -504,7 +504,6 @@ void IDSMAccelerationStructure::setShadowMask(
 bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    #if true
     if (auto group = widget.group("IDSM-AS Settings"))
     {
         mResolutionChanged |= group.var("Node Buffer size (Resolution x this)", mAccelApproxNumElementsPerPixel, 1u, 32u, 1u);
@@ -512,14 +511,14 @@ bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
         std::string bufferSize = "Buffer Elements: " + std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel);
         group.text(bufferSize);
 
-        group.var("Ray Budget Multiplier", mSampleOverestimate, 1.0f, 4.f);
+        group.var("Ray Budget Multiplier (Resolution x this)", mSampleOverestimate, 1.0f, 4.f);
         group.tooltip("Controls the maximum dispatch size of the IDSM generation shader. Defines the upper limit for the budget distribution. \n"
             "Max Dispatch Size: [SMRes.x * Overestimate , SMRes.y * Overestimate]");
 
-        mResolutionChanged |= group.checkbox("Use one Acceleration Structure for all IDSMs", mUseOneAABBForAllLights);
-        group.tooltip("Uses one AABB for all lights. Light coordinates are put side by side on the x axis");
-
         mpImportanceMapHelper->renderUI(group);
+
+        mResolutionChanged |= group.checkbox("Use one Acceleration Structure for all IDSMs", mUseOneAABBForAllLights);
+        group.tooltip("Uses one AABB Buffer (and therefore BLAS) for all lights. Light coordinates are put side by side on the x axis");
 
         if (auto statsGroup = group.group("Stats"))
         {
@@ -614,107 +613,7 @@ bool IDSMAccelerationStructure::renderUI(Gui::Widgets& widget)
         }
 
     }
-    #else
-    if (auto group = widget.group("Accel Shadow Settings"))
-    {
-        if (mpScene)
-        {
-            if (auto group2 = group.group("Current size info:"))
-            {
-                const auto loopSize = mUseOneAABBForAllLights ? 1 : mpScene->getLightCount();
-                for (uint i = 0; i < loopSize; i++)
-                {
-                    if (i > 0)
-                        group2.separator();
-                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
-                    group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
-                    group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
-                    float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
-                    float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
-                    std::string accelMemStr = std::to_string(accelMem);
-                    std::string dataMemStr = std::to_string(dataMem);
-                    std::string totalMemStr = std::to_string((accelMem + dataMem));
-                    group2.text("AABB Memory:     " + accelMemStr.substr(0, accelMemStr.find(".") + 3) + " MB");
-                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
-                    group2.text("Total Memory:    " + totalMemStr.substr(0, totalMemStr.find(".") + 3) + " MB");
-
-                    group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
-                    accelMem = (mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f;
-                    dataMem = (mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f;
-                    std::string neededAABBMem = std::to_string(accelMem);
-                    std::string neededDataMem = std::to_string(dataMem);
-                    std::string neededTotalMem = std::to_string(accelMem + dataMem);
-                    std::string fillRate =
-                        std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
-                    group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB" );
-                    group2.text("Used Data Memory:   " + neededDataMem.substr(0, neededDataMem.find(".") + 3) + " MB");
-                    group2.text(
-                        "Used Total Memory:   " + neededTotalMem.substr(0, neededTotalMem.find(".") + 3) + " MB (" +
-                        fillRate.substr(0, fillRate.find(".") + 2) + "%)"
-                    );
-
-                }
-                group2.separator();
-            }
-
-            if (auto group2 = group.group("Ray Sample Count Info:"))
-            {
-                mEnableStats = true;
-                uint total = 0;
-                for (const auto& count : mStatsDistributedRayCountsPerLight)
-                    total += count;
-                group2.text("Total Count: " + std::to_string(total));
-                if (mpScene->getLightCount() > 1)
-                {
-                    for (uint i = 0; i < mpScene->getLightCount(); i++)
-                    {
-                        group2.text(mpScene->getLight(i)->getName() + ": " + std::to_string(mStatsDistributedRayCountsPerLight[i]));
-                    }
-                }
-            }
-            else
-            {
-                mEnableStats = false;
-            }
-        }
-
-        mResolutionChanged |= group.var("AABB size (Res x this)", mAccelApproxNumElementsPerPixel, 1u, 32u, 1u);
-        group.tooltip("Multiplier for the AABB buffer size.");
-
-        mResolutionChanged |= group.checkbox("Use one AABB for all lights", mUseOneAABBForAllLights); //Should trigger rebuild of all buffers
-        group.tooltip("Uses one AABB for all lights. Light coordinates are put side by side on the x axis");
-
-        mpImportanceMapHelper->renderUI(group);
-
-        group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
-        group.tooltip("Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same Frame)");
-
-        group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
-        group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
- 
-        group.checkbox("Use Inline RayTracing", mAccelUseRayTracingInline);
-        group.tooltip("Only uses the Visibility of the sample with the closest depth. If disabled, the average of all hit Boxes is used");
-        if (auto group2 = group.group("Debug"))
-        {
-            group2.checkbox("Enable", mAccelDebugShowAS.enable);
-            if (mAccelDebugShowAS.enable && mpScene)
-            {
-                if (mpScene->getLightCount() > 1 && !mUseOneAABBForAllLights)
-                    group2.slider("Selected Light", mAccelDebugShowAS.selectedLight, 0u, mpScene->getLightCount() - 1);
-                group2.var("Clip X", mAccelDebugShowAS.clipX, 0.f, float(mResolution.x), 0.1f);
-                group2.var("Clip Y", mAccelDebugShowAS.clipY, 0.f, float(mResolution.y), 0.1f);
-                group2.var("Clip Z", mAccelDebugShowAS.clipZ, -FLT_MAX, FLT_MAX, 0.1f);
-
-                group2.var("Blend with Output", mAccelDebugShowAS.blendT, 0.f, 1.f, 0.001f);
-                if (group2.dropdown("Mode", kAccelDebugVisModes, mAccelDebugShowAS.visMode))
-                    mAccelDebugShowAS.stopGeneration = mAccelDebugShowAS.visMode == 1 ? true : mAccelDebugShowAS.stopGeneration;
-                group2.checkbox("Stop Generation", mAccelDebugShowAS.stopGeneration);
-                mUpdateDirectional = !mAccelDebugShowAS.stopGeneration;
-            }
-        }
-    }
-    #endif
-
+   
     return dirty;
 }
 

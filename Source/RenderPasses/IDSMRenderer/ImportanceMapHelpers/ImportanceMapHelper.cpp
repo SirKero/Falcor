@@ -162,7 +162,7 @@ void ImportanceMapHelper::renderUI(Gui::Widgets& widget) {
         );
     }
 
-    widget.checkbox("Blur Sample distribution", mUseBlur);
+    widget.checkbox("Blur Sample Distribution", mUseBlur);
     if (mUseBlur && mpGaussianBlur)
     {
         if (auto group = widget.group("Blur Options"))

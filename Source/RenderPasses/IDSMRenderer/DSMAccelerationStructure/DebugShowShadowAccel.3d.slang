@@ -1,4 +1,3 @@
-#include "AccelShadowData.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -7,25 +6,48 @@ import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Math.AABB;
 
+#ifndef USE_ONE_AABB_FOR_ALL
+#define USE_ONE_AABB_FOR_ALL 0
+#endif
+
+#ifndef COUNT_LIGHTS
+#define COUNT_LIGHTS 1
+#endif
+
+#if USE_COLOR_TRANSPARENCY
+#define SHADOW_DATA_FORMAT float3
+#else
+#define SHADOW_DATA_FORMAT float
+#endif
 
 cbuffer CB
 {
-    uint2        gSMSize;       //Current frame count
+    uint2       gSMSize;       //Current frame count
     float       gNear;          //Near Plane
     float       gFar;           //Far Plane
     uint        gSelectedLight; //Selected light
-    float3       gCullMin;       //XYZ culling min
-    float3       gCullMax;       //XYZ culling max
+    float3      gCullMin;       //XYZ culling min
+    float3      gCullMax;       //XYZ culling max
     float       gBlendT;
-    uint        gVisMode;       //Vizualization mode
-    uint3       _pad;
-    float4x4    gInvView;        // Inverse View
-    float4x4    gInvProj;       //Inverse Projection
+    uint        gVisMode;       // Vizualization mode
+    uint        gDirectionalIdx; //Light with this index is directional
+    uint2       _pad;
+   
 }
 
-#define VIS_MODE_VISIBILITY 0
-#define VIS_MODE_AABBINDEX 1
-#define VIS_MODE_FRONTBACKBOX 2
+cbuffer LightMatrices
+{
+    float4x4 gInvView[COUNT_LIGHTS]; // Inverse View
+    float4x4 gInvProj[COUNT_LIGHTS]; // Inverse Projection
+}
+cbuffer InvViewProjections {
+    float4x4 gInvViewProj[COUNT_LIGHTS];
+}
+
+#define VIS_MODE_VISIBILITY 0   //Visibility Heatmap
+#define VIS_MODE_AABBINDEX 1    //Colors AABBs in Index
+#define VIS_MODE_PIXEL 2        //Colors AABBs as Pixel
+#define VIS_MODE_DEPTH 3        //Depth planes as colored pixels
 
 //Inputs
 StructuredBuffer<AABB> gShadowAABB;
@@ -34,6 +56,7 @@ StructuredBuffer<SHADOW_DATA_FORMAT> gShadowData;
 Texture2D<float4> gOutputColor;
 
 static const float kMinOpacity = 1e-7;
+static const bool kUseOneAABBForAll = USE_ONE_AABB_FOR_ALL;
 
 //Heatmap
 static const float4 kHMInferno[8] = {
@@ -59,7 +82,7 @@ static const float3 kColorMap[21] = {
 struct GsOut
 {
     float4 posH : SV_Position;
-    float transparency : TRANSPARENCY;
+    SHADOW_DATA_FORMAT transparency : TRANSPARENCY;
     nointerpolation uint boxIdx : AABB_IDX;
 };
 
@@ -150,12 +173,21 @@ void verticesToCube(const in GsOut[8] vert, inout TriangleStream<GsOut> outStrea
     outStream.RestartStrip();
 }
 
+// Converts the 8 vertices to a cube
+void verticesToPlane(const in GsOut[8] vert, inout TriangleStream<GsOut> outStream) {
+    outStream.Append(vert[0]);
+    outStream.Append(vert[3]);
+    outStream.Append(vert[1]);
+    outStream.Append(vert[2]);
+    outStream.RestartStrip();
+}
+
 /** Geometry shader.
     We place textured emissive triangles in texture space scaled so that we get one
     pixel shader execution per texel. The vertex positions are passed on to the pixel shader.
     Non-textured emissives are culled.
 */
-[maxvertexcount(48)]
+[maxvertexcount(24)]
 void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 {
     const uint count = gShadowCounter[gSelectedLight]; // Get the valid number of aabbs
@@ -182,49 +214,83 @@ void gsMain(uint aabbIdx: SV_PrimitiveID, inout TriangleStream<GsOut> outStream)
 
     // Get AABB and Data
     AABB aabb = gShadowAABB[aabbIdx];
-    AccelShadowData shadowData = AccelShadowData(gShadowData[aabbIdx]);
+    if (isnan(aabb.minPoint.x))
+        return;
 
-    AABB shadowAABB = aabb;
-    for (uint box = 0; box < 2; box++) {
-        if (box == 0) {
-            aabb.maxPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange;
-        } else {
-            aabb = shadowAABB;
-            aabb.minPoint.z = shadowAABB.minPoint.z + shadowData.firstBoxRange + 1e-10;
-        }
-        // Cull AABB
-        if (!cullAABB(aabb))
-            break;
-       
-        //float3 points[8];
-        // getPointFromAABB(aabb, points);
-        float3 points[8] = {
-            aabb.minPoint,
-            float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.minPoint.z),
-            float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
-            float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
-            float3(aabb.minPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
-            float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
-            float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
-            float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
-        };
+    SHADOW_DATA_FORMAT transparency = gShadowData[aabbIdx];
 
-        // Transform all vertices into world space
-        GsOut vert[8];
-        for (uint i = 0; i < 8; i++) {
-            float2 ndc = (2.0 * points[i].xy / gSMSize) - 1.0;
-            ndc.y *= -1.0;
-            float4 rayDir = mul(gInvProj, float4(ndc, 1.0, 1.0));
-            rayDir.xyz /= rayDir.z; //Normalize z
-            float3 posView = rayDir.xyz * (-points[i].z); //view is negative Z
-            float4 worldPos = mul(gInvView, float4(posView, 1.0));
-            vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
-            vert[i].transparency = box == 0 ? shadowData.transparencyStart : shadowData.transparencyEnd; // TODO
-            vert[i].boxIdx = gVisMode == VIS_MODE_FRONTBACKBOX ? box :  aabbIdx;
-                
-        }
-        verticesToCube(vert, outStream);
+    // Get Matrix index
+    uint matrixIdx = gSelectedLight;
+    // Remove offset and get correct matrix index
+    if (kUseOneAABBForAll) {
+        matrixIdx = uint(floor(aabb.minPoint.x / gSMSize.x));
+        aabb.minPoint.x -= gSMSize.x * matrixIdx;
+        aabb.maxPoint.x -= gSMSize.x * matrixIdx;
     }
+
+
+    // Cull AABB
+    if (!cullAABB(aabb))
+        return;
+
+    //float3 points[8];
+    // getPointFromAABB(aabb, points);
+    float3 points[8] = {
+        aabb.minPoint,
+        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.minPoint.z),
+        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
+        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.minPoint.z),
+        float3(aabb.minPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
+        float3(aabb.maxPoint.x, aabb.minPoint.y, aabb.maxPoint.z),
+        float3(aabb.maxPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
+        float3(aabb.minPoint.x, aabb.maxPoint.y, aabb.maxPoint.z),
+    };
+
+    //TODO fix
+    uint sampleCountMult = 1;
+
+    uint pixelID = uint(ceil(aabb.minPoint.x * aabb.minPoint.y * sampleCountMult));
+
+    float hitDepth = (aabb.maxPoint.z + aabb.minPoint.z) / 2.0;
+    // Create depth plane
+    if (gVisMode == VIS_MODE_DEPTH) {
+        [unroll]
+        for (uint i = 0; i < 4; i++) {
+            points[i].z = hitDepth;
+        }
+    }
+
+    // Transform all vertices into world space
+    bool isDirectional = matrixIdx == gDirectionalIdx;
+    GsOut vert[8];
+    [unroll]
+    for (uint i = 0; i < 8; i++) {
+        float2 ndc = (2.0 * points[i].xy / gSMSize) - 1.0;
+        ndc.y *= -1.0;
+        float4 worldPos;
+        if (isDirectional) {
+            worldPos = mul(gInvViewProj[matrixIdx], float4(ndc, points[i].z, 1.0));
+        } else {
+            float4 rayDir = mul(gInvProj[matrixIdx], float4(ndc, 1.0, 1.0));
+            rayDir.xyz /= rayDir.z;                       // Normalize z
+            float3 posView = rayDir.xyz * (-points[i].z); // view is negative Z
+            worldPos = mul(gInvView[matrixIdx], float4(posView, 1.0));
+        }
+        
+        vert[i].posH = mul(gScene.camera.getViewProj(), worldPos);
+        vert[i].transparency = transparency;
+        if (gVisMode == VIS_MODE_AABBINDEX)
+            vert[i].boxIdx = aabbIdx;
+        else
+            vert[i].boxIdx = pixelID ;
+                
+    }
+
+    if (gVisMode == VIS_MODE_DEPTH)
+        verticesToPlane(vert, outStream);
+    else
+        verticesToCube(vert, outStream);
+    
 }
 
 /** Pixel shader.
@@ -233,7 +299,7 @@ float4 psMain(GsOut gsIn) : SV_Target {
     float3 boxColor;
     if (gVisMode == VIS_MODE_VISIBILITY) {
         boxColor = getColorHeatMap(saturate(gsIn.transparency));
-    } else { //(gVisMode == VIS_MODE_AABBINDEX || VIS_MODE_FRONTBACKBOX)
+    } else { //(gVisMode == VIS_MODE_AABBINDEX || VIS_MODE_PIXEL || VIS_MODE_DEPTH)
         boxColor = kColorMap[gsIn.boxIdx % 21] / 255.0;
     }
     float3 inColor = gOutputColor[uint2(gsIn.posH.xy)].xyz;

@@ -346,51 +346,47 @@ void DSMLinkedList::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, re
 bool DSMLinkedList::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    #if SIMPLE_UI
-
-    #else
-    if (auto group = widget.group("Linked List settings"))
+    if (auto group = widget.group("DSM-LL settings"))
     {
-        if (mpScene)
-        {
-            if (auto group2 = group.group("Current size info:"))
-            {
-                const auto loopSize = mpScene->getLightCount();
-                for (uint i = 0; i < loopSize; i++)
-                {
-                    if (i > 0)
-                        group2.separator();
-                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
-                    group2.text(mpScene->getLight(i)->getName());
-                    group2.text("Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
-                    float dataMem = (mLinkedListNodeBufferSize * (sizeof(float) + dataBufferSize)) / 1e6f;
-                    std::string dataMemStr = std::to_string(dataMem);
-                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+        group.text("Note: If the deep shadow glitches in any way, please increase the Node Buffer size.");
+        mResolutionChanged |= group.var("Node Buffer size (Resolution x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
+        std::string bufferSize = "Buffer Elements: " + std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel);
+        group.text(bufferSize);
 
-                    group2.text("Used Elements:    " + std::to_string(uint(mUIElementCounter[i])));
-                    std::string neededMem = std::to_string((mUIElementCounter[i] * (sizeof(float) + mLinkedListDataFormatSize)) / 1e6f);
-                    std::string fillRate = std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
-                    group2.text(
-                        "Used Element Buffer Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
-                        fillRate.substr(0, fillRate.find(".") + 2) + "%)"
-                    );
+        dirty |= widget.checkbox("Use PCF", mUseLinkedListPcf);
+
+        if (auto statsGroup = group.group("Stats"))
+        {
+            if (mpScene)
+            {
+                if (auto group2 = statsGroup.group("Buffer Size Infos"))
+                {
+                    const auto loopSize = mpScene->getLightCount();
+                    for (uint i = 0; i < loopSize; i++)
+                    {
+                        if (i > 0)
+                            group2.separator();
+                        uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
+                        group2.text(mpScene->getLight(i)->getName());
+                        group2.text("Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
+                        float dataMem = (mLinkedListNodeBufferSize * (sizeof(float) + dataBufferSize)) / 1e6f;
+                        std::string dataMemStr = std::to_string(dataMem);
+                        group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+
+                        group2.text("Used Elements:    " + std::to_string(uint(mUIElementCounter[i])));
+                        std::string neededMem = std::to_string((mUIElementCounter[i] * (sizeof(float) + mLinkedListDataFormatSize)) / 1e6f);
+                        std::string fillRate = std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
+                        group2.text(
+                            "Used Element Buffer Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
+                            fillRate.substr(0, fillRate.find(".") + 2) + "%)"
+                        );
+                    }
+                    group2.separator();
                 }
-                group2.separator();
             }
         }
-
-        mResolutionChanged |= group.var("Node Buffer size (Res x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
-        group.tooltip("Multiplier for the Node Data buffer.");
-        
-        dirty |= widget.checkbox("Use PCF", mUseLinkedListPcf);
-        /*
-        dirty |= widget.checkbox("Store as Array", mUseLinkedListArray);
-        if (mUseLinkedListArray)
-            mUseLinkedListPcf = false; // TODO implement pcf with array
-        */
     }
-    #endif
-    
+       
     return dirty;
 }
 

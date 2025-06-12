@@ -182,8 +182,6 @@ void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& r
 {
     FALCOR_PROFILE(pRenderContext, "Generate_IDSM_LL");
 
-    prepareResources(pRenderContext);
-
     // Abort early if disabled
     bool skipGeneration = (mSkipFrameCount % mSkipGenerationFrameCount) != 0;
     mSkipFrameCount++;
@@ -192,6 +190,8 @@ void IDSMLinkedList::generate(RenderContext* pRenderContext, const RenderData& r
         dummyProfileGeneration(pRenderContext);
         return;
     }
+
+    prepareResources(pRenderContext);
 
     // Handle light MVP for directional lights
     if (mHasDirectionalLight)
@@ -369,104 +369,91 @@ void IDSMLinkedList::setShadowMask(const ShaderVar& var, ref<Texture> maskTex, s
     }
 }
 
-//TODO Some of the options should not be toggable for this pass as that will probably break the algorithm
 bool IDSMLinkedList::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    #if SIMPLE_UI
     if (auto group = widget.group("IDSM-LL Settings"))
     {
         mResolutionChanged |= group.var("Node Buffer size (Resolution x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
         group.text("Note: IDSM tries to fill the buffer, so this affects quality and runtime");
         std::string bufferSize = "Buffer Elements: " + std::to_string(mResolution.x * mResolution.y * mApproxNumElementsPerPixel);
         group.text(bufferSize);
-        group.var("Sample Dispatch Multiplier", mSampleOverestimate, 1.0f, 4.f);
+        group.var("Ray Budget Multiplier (Resolution x this)", mSampleOverestimate, 1.0f, 4.f);
         group.tooltip(
-            "Constrols the maximum dispatch size of the IDSM generation shader. Defines the upper limit for the budget distribution. \n"
+            "Controls the maximum dispatch size of the IDSM generation shader. Defines the upper limit for the budget distribution. \n"
             "Max Dispatch Size: [SMRes.x * Overestimate , SMRes.y * Overestimate]"
         );
 
-        group.checkbox("Use Gaussian Blur", mBlurSampleDistribution);
-        if (mBlurSampleDistribution && mpGaussianBlur)
-        {
-            if (auto gaussGroup = group.group("Blur Options"))
-                mpGaussianBlur->renderUI(gaussGroup);
-        }
+       mpImportanceMapHelper->renderUI(group);
 
-        bool isJitterEnabled = mSamplePattern == SMSamplePattern::Halton;
-        bool changePattern = group.checkbox("Use Subpixel Jitter", isJitterEnabled);
-        if (changePattern)
-            mSamplePattern = isJitterEnabled ? SMSamplePattern::Halton : SMSamplePattern::Center;
-    }
-    #else
-    if (auto group = widget.group("Irregular LL Shadow Settings"))
-    {
-        if (mpScene)
-        {
-            if (auto group2 = group.group("Current size info:"))
-            {
-                const auto loopSize = mpScene->getLightCount();
-                for (uint i = 0; i < loopSize; i++)
-                {
-                    if (i > 0)
-                        group2.separator();
-                    uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
-                    group2.text(mpScene->getLight(i)->getName());
-                    group2.text("Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
-                    float dataMem = (mLinkedListNodeBufferSize * (sizeof(float) + dataBufferSize)) / 1e6f;
-                    std::string dataMemStr = std::to_string(dataMem);
-                    group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+       if (auto statsGroup = group.group("Stats"))
+       {
+           if (mpScene)
+           {
+               if (auto group2 = statsGroup.group("Buffer Size Infos"))
+               {
+                   const auto loopSize = mpScene->getLightCount();
+                   for (uint i = 0; i < loopSize; i++)
+                   {
+                       if (i > 0)
+                           group2.separator();
+                       uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
+                       group2.text(mpScene->getLight(i)->getName());
+                       group2.text("Buffer Size:        " + std::to_string(mLinkedListNodeBufferSize));
+                       float dataMem = (mLinkedListNodeBufferSize * (sizeof(float) + dataBufferSize)) / 1e6f;
+                       std::string dataMemStr = std::to_string(dataMem);
+                       group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
 
-                    group2.text("Used Elements:    " + std::to_string(uint(mUIElementCounter[i])));
-                    std::string neededMem = std::to_string((mUIElementCounter[i] * (sizeof(float) + mLinkedListDataFormatSize)) / 1e6f);
-                    std::string fillRate = std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
-                    group2.text(
-                        "Used Element Buffer Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
-                        fillRate.substr(0, fillRate.find(".") + 2) + "%)"
-                    );
-                }
-                group2.separator();
-            }
-        }
+                       group2.text("Used Elements:    " + std::to_string(uint(mUIElementCounter[i])));
+                       std::string neededMem = std::to_string((mUIElementCounter[i] * (sizeof(float) + mLinkedListDataFormatSize)) / 1e6f);
+                       std::string fillRate = std::to_string(((mUIElementCounter[i]) / float(mLinkedListNodeBufferSize)) * 100.f);
+                       group2.text(
+                           "Used Element Buffer Memory:   " + neededMem.substr(0, neededMem.find(".") + 3) + " MB (" +
+                           fillRate.substr(0, fillRate.find(".") + 2) + "%)"
+                       );
+                   }
+                   group2.separator();
+               }
+           }
+       }
 
-        mResolutionChanged |= group.var("Node Buffer size (Res x this)", mApproxNumElementsPerPixel, 1u, 32u, 1u);
-        group.tooltip("Multiplier for the Node Data buffer.");
+       if (auto group2 = group.group("Debug / Experimental"))
+       {
+           group2.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
+           group2.tooltip(
+               "Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same "
+               "Frame)"
+           );
 
-        mpImportanceMapHelper->renderUI(group);
+           group2.checkbox("Debug Show Importance", mDebugEnableShowImportance);
+           if (mDebugEnableShowImportance)
+           {
+               group2.text("Press the \"Show in Debug Window\" on top and select the output");
+               group2.text("\"IDSMRenderer.outDebug\" in the Debug Window. Brightness for IM and SD can be adjusted below.");
+               group2.text("Top Left: Importance Map. For all MipMaps to work, check \"Reduce Use MipMap version\"");
+               group2.text("Top Right: Sample Distribution.");
+               group2.text("Bottom Left: Non-Opaque Object Mask.");
+               if (mpScene)
+               {
+                   uint lightCount = mpScene->getLightCount();
+                   if (lightCount > 1)
+                       group2.slider("Selected Light", mDebugSelectedLight, 0u, lightCount - 1u);
+                   else
+                       mDebugSelectedLight = 0;
+               }
 
-        group.var("Generate only every X Frame", mSkipGenerationFrameCount, 1u, UINT_MAX);
-        group.tooltip(
-            "Number of generated frames is 1/X. Currently poorly optimized (No load distribution, every SM is generated in the same Frame)"
-        );
+               uint mipCount = mpImportanceMapHelper->getImportanceMap(0)->getMipCount();
+               if (mipCount > 1)
+                   group2.slider("Selected Mipmap", mDebugSelectedMipLevel, 0u, mipCount - 1u);
+               else
+                   mDebugSelectedMipLevel = 0;
 
-        group.var("Sample Dispatch Overestimate", mSampleOverestimate, 1.0f, 4.f);
-        group.tooltip("Overestimate for sample dispatch. SMRes * Overestimate");
- 
-
-        group.checkbox("Debug Show Importance", mDebugEnableShowImportance);
-        if (mDebugEnableShowImportance)
-        {
-            if (mpScene)
-            {
-                uint lightCount = mpScene->getLightCount();
-                if (lightCount > 1)
-                    group.slider("Selected Light", mDebugSelectedLight, 0u, lightCount-1u);
-                else
-                    mDebugSelectedLight = 0;
-            }
-
-            uint mipCount = mpImportanceMapHelper->getImportanceMap(0)->getMipCount();
-            if (mipCount > 1)
-                group.slider("Selected Mipmap", mDebugSelectedMipLevel, 0u, mipCount - 1u);
-            else
-                mDebugSelectedMipLevel = 0;
-
-            group.var("Scale Factor IM", mDebugScaleFactorIM, 0.f, FLT_MAX, 1.f);
-            group.var("Scale Factor SD", mDebugScaleFactorSD, 0.f, FLT_MAX, 1.f);
-        }
+               group2.var("Scale Factor IM", mDebugScaleFactorIM, 0.f, FLT_MAX, 1.f);
+               group2.var("Scale Factor SD", mDebugScaleFactorSD, 0.f, FLT_MAX, 1.f);
+           }
+       }
 
     }
-    #endif
     return dirty;
 }
 

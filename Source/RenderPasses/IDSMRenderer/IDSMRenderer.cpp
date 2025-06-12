@@ -301,13 +301,13 @@ void IDSMRenderer::renderUI(Gui::Widgets& widget)
 
     if (mShadowRenderMethod != ShadowRenderMethod::RayTracing)
     {
-        widget.checkbox("Enable IDSM Transparent Object Mask", mUseNonOpaqueShadowMask);
+        widget.checkbox("Enable Non-Opaque Object Mask", mUseNonOpaqueShadowMask);
         widget.tooltip(
-            "Enables the IDSM Object Mask for non opaque objects. Allows the Deep Shadow Map Methods"
+            "Enables the IDSM/DSM Object Mask for non opaque objects. Allows the Deep Shadow Map Methods"
             "to only render the non-opaque shadows while the opaque shadows are handled by ray tracing."
         );
         if (mUseNonOpaqueShadowMask &&
-            (mShadowRenderMethod != ShadowRenderMethod::IDSM_AS || mShadowRenderMethod != ShadowRenderMethod::IDSM_LL))
+            (mShadowRenderMethod == ShadowRenderMethod::IDSM_AS || mShadowRenderMethod == ShadowRenderMethod::IDSM_LL))
         {
             widget.dropdown("Mask ISM Multiplication Factor", kMaskISMMultFactorDropdown, mMaskISMMultFactor);
             widget.tooltip("Multiplication factor for the ISM used when the mask is active. The dispatch size and all samples in the Sample Distribution will be multiplied with this number.");

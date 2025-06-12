@@ -218,11 +218,11 @@ void DSMAccelerationStructure::generate(RenderContext* pRenderContext, const Ren
 {
     FALCOR_PROFILE(pRenderContext, "Generate_DSM_AS");
 
-    prepareResources(pRenderContext);
-
     // Abort early if disabled
     if (mAccelDebugShowAS.enable && mAccelDebugShowAS.stopGeneration)
         return;
+
+    prepareResources(pRenderContext);
 
     //Ray Tracing flags
     mAccelRayFlags = RayFlags::None;
@@ -243,7 +243,6 @@ void DSMAccelerationStructure::generate(RenderContext* pRenderContext, const Ren
     mGenAccelShadowPip.pProgram->addDefine("NUM_HALTON_SAMPLES", std::to_string(mJitterSampleCount));
     mGenAccelShadowPip.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_BOXES_PIXEL_OFFSET", mAccelUsePCF ? "1.0" : "0.5");
-    mGenAccelShadowPip.pProgram->addDefine("ACCEL_USE_FRUSTUM_CULLING", mAccelUseFrustumCulling ? "1" : "0");
     mGenAccelShadowPip.pProgram->addDefine("ACCEL_RAY_FLAGS", std::to_string((uint)mAccelRayFlags));
     mGenAccelShadowPip.pProgram->addDefine("TRACE_NON_OPAQUE_ONLY", mUseOpaqueSM ? "1" : "0"); // Trace non-opaque only if mask is used
     mGenAccelShadowPip.pProgram->addDefine(
@@ -339,7 +338,6 @@ DefineList DSMAccelerationStructure::getDefines()
     defines.add(DeepShadowMapMethod::getDefines());
     defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
     defines.add("SHADOW_ACCEL_PCF", mAccelUsePCF ? "1" : "0");
-    defines.add("ACCEL_USE_RAY_INLINE", mAccelUseRayTracingInline ? "1" : "0");
     defines.add("ACCEL_USE_ONE_AABB_FOR_ALL_LIGHTS", mUseOneAABBForAllLights ? "1" : "0");
     defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
     return defines;
@@ -385,8 +383,87 @@ void DSMAccelerationStructure::setShadowMask(const ShaderVar& var, ref<Texture> 
 bool DSMAccelerationStructure::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
-    #if SIMPLE_UI
+    #if true
+    if (auto group = widget.group("DSM-AS Settings"))
+    {
+        group.text("Note: If the deep shadow glitches in any way, please increase the Node Buffer size.");
+        mResolutionChanged |= group.var("Node Buffer size (Resolution x this)", mAccelApproxNumElementsPerPixel, 1u, 256u, 1u);
+        std::string bufferSize = "Buffer Elements: " + std::to_string(mResolution.x * mResolution.y * mAccelApproxNumElementsPerPixel);
+        group.text(bufferSize);
+        group.checkbox("Use PCF", mAccelUsePCF);
+        mResolutionChanged |= group.checkbox("Use one Acceleration Structure for all IDSMs", mUseOneAABBForAllLights); // Should trigger rebuild of all buffers
+        group.tooltip("Uses one AABB Buffer (and therefore BLAS) for all lights. Light coordinates are put side by side on the x axis");
+        group.checkbox("AS Build: Use CPU Counter optimization", mAccelShadowUseCPUCounterOptimization);
+        group.tooltip("Uses the CPU counter value from a previous frame (async) to estimate the acceleration structure build size.");
+        if (mAccelShadowUseCPUCounterOptimization)
+        {
+            group.var("AS Build: CPU Counter overestimation", mAccelShadowOverestimation, 1.0f, 2.0f, 0.001f);
+            group.tooltip("Overestimation of the CPU counter value. As the value is async, a slight overestimation is recommended");
+        }
+        if (auto statsGroup = group.group("Stats"))
+        {
+            if (mpScene)
+            {
+                if (auto group2 = statsGroup.group("Buffer Size Infos"))
+                {
+                    const auto loopSize = mUseOneAABBForAllLights ? 1 : mpScene->getLightCount();
+                    for (uint i = 0; i < loopSize; i++)
+                    {
+                        if (i > 0)
+                            group2.separator();
+                        uint dataBufferSize = mUseColoredTransparency ? 12u : 4u;
+                        group2.text(mUseOneAABBForAllLights ? "Total" : mpScene->getLight(i)->getName());
+                        group2.text("Buffer Size:        " + std::to_string(mAccelShadowMaxNumPoints));
+                        float accelMem = (mAccelShadowMaxNumPoints * sizeof(AABB)) / 1e6f;
+                        float dataMem = (mAccelShadowMaxNumPoints * dataBufferSize) / 1e6f;
+                        std::string accelMemStr = std::to_string(accelMem);
+                        std::string dataMemStr = std::to_string(dataMem);
+                        std::string totalMemStr = std::to_string((accelMem + dataMem));
+                        group2.text("AABB Memory:     " + accelMemStr.substr(0, accelMemStr.find(".") + 3) + " MB");
+                        group2.text("Data Memory:     " + dataMemStr.substr(0, dataMemStr.find(".") + 3) + " MB");
+                        group2.text("Total Memory:    " + totalMemStr.substr(0, totalMemStr.find(".") + 3) + " MB");
 
+                        group2.text("Used Elements:    " + std::to_string(uint(mAccelShadowNumPoints[i])));
+                        accelMem = (mAccelShadowNumPoints[i] * sizeof(AABB)) / 1e6f;
+                        dataMem = (mAccelShadowNumPoints[i] * dataBufferSize) / 1e6f;
+                        std::string neededAABBMem = std::to_string(accelMem);
+                        std::string neededDataMem = std::to_string(dataMem);
+                        std::string neededTotalMem = std::to_string(accelMem + dataMem);
+                        std::string fillRate = std::to_string(((mAccelShadowNumPoints[i]) / float(mAccelShadowMaxNumPoints)) * 100.f);
+                        group2.text("Used AABB Memory:   " + neededAABBMem.substr(0, neededAABBMem.find(".") + 3) + " MB");
+                        group2.text("Used Data Memory:   " + neededDataMem.substr(0, neededDataMem.find(".") + 3) + " MB");
+                        group2.text(
+                            "Used Total Memory:   " + neededTotalMem.substr(0, neededTotalMem.find(".") + 3) + " MB (" +
+                            fillRate.substr(0, fillRate.find(".") + 2) + "%)"
+                        );
+                    }
+                    group2.separator();
+                }
+            }
+        }
+
+        if (auto group2 = group.group("Debug"))
+        {
+            group2.checkbox("Enable Accelerations Structure Visualization", mAccelDebugShowAS.enable);
+            if (mAccelDebugShowAS.enable && mpScene)
+            {
+                group2.text("Enable \"List All Outputs\" and switch \"Output\" to ");
+                group2.text("\"IDSMRenderer.outDebug\". For better visibility stop");
+                group2.text("the time (Spacebar) and check the \"Stop Generation\" checkbox below.");
+                if (mpScene->getLightCount() > 1)
+                    group2.slider("Selected Light", mAccelDebugShowAS.selectedLight, 0u, mpScene->getLightCount() - 1);
+                group2.var("Clip X", mAccelDebugShowAS.clipX, 0.f, float(mResolution.x), 0.1f);
+                group2.var("Clip Y", mAccelDebugShowAS.clipY, 0.f, float(mResolution.y), 0.1f);
+                group2.var("Clip Z", mAccelDebugShowAS.clipZ, -FLT_MAX, FLT_MAX, 0.1f);
+
+                group2.var("Blend with Output", mAccelDebugShowAS.blendT, 0.f, 1.f, 0.001f);
+                if (group2.dropdown("Mode", kAccelDebugVisModes, mAccelDebugShowAS.visMode))
+                    mAccelDebugShowAS.stopGeneration = mAccelDebugShowAS.visMode == 1 ? true : mAccelDebugShowAS.stopGeneration;
+                group2.checkbox("Stop Generation", mAccelDebugShowAS.stopGeneration);
+            }
+        }
+
+    }
     #else
     if (auto group = widget.group("Accel Shadow Settings"))
     {
@@ -500,7 +577,9 @@ void DSMAccelerationStructure::debugPass(
         desc.setShaderModel("6_6");
 
         auto defines = mpScene->getSceneDefines();
-        defines.add("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+        defines.add("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
+        defines.add("USE_ONE_AABB_FOR_ALL", mUseOneAABBForAllLights ? "1" : "0");
+        defines.add("COUNT_LIGHTS", std::to_string(mpScene->getLightCount()));
         // Create Program and state
         mRasterShowAccelPass.pProgram = GraphicsProgram::create(mpDevice, desc, defines);
         mRasterShowAccelPass.pState = GraphicsState::create(mpDevice);
@@ -526,6 +605,8 @@ void DSMAccelerationStructure::debugPass(
 
     // Runtime Defines
     mRasterShowAccelPass.pProgram->addDefine("SHADOW_DATA_FORMAT_SIZE", std::to_string(mAccelDataFormatSize));
+    mRasterShowAccelPass.pProgram->addDefine("USE_COLOR_TRANSPARENCY", mUseColoredTransparency ? "1" : "0");
+    mRasterShowAccelPass.pProgram->addDefine("USE_ONE_AABB_FOR_ALL", mUseOneAABBForAllLights ? "1" : "0");
 
     // Vars
     if (!mRasterShowAccelPass.pVars)
@@ -536,19 +617,39 @@ void DSMAccelerationStructure::debugPass(
     if (mAccelShadowUseCPUCounterOptimization)
         frameInFlight = mStagingCount == 0 ? kFramesInFlight - 1 : mStagingCount - 1;
 
+    
+     // Get index of directional light if the scene contains it
+    uint directionalIndex = UINT_MAX;
+    auto& lights = mpScene->getLights();
+    for (uint i = 0; i < lights.size(); i++)
+    {
+        if (lights[i]->getType() == LightType::Directional)
+        {
+            directionalIndex = i;
+            break;
+        }
+    }
+
     auto var = mRasterShowAccelPass.pVars->getRootVar();
 
     var["gScene"] = mpScene->getParameterBlock();
     var["CB"]["gSMSize"] = mResolution;
     var["CB"]["gNear"] = mNearFar.x;
     var["CB"]["gFar"] = mNearFar.y;
-    var["CB"]["gSelectedLight"] = mAccelDebugShowAS.selectedLight;
+    var["CB"]["gSelectedLight"] = mUseOneAABBForAllLights ? 0 : mAccelDebugShowAS.selectedLight;
     var["CB"]["gCullMin"] = float3(mAccelDebugShowAS.clipX.x, mAccelDebugShowAS.clipY.x, mAccelDebugShowAS.clipZ.x);
     var["CB"]["gCullMax"] = float3(mAccelDebugShowAS.clipX.y, mAccelDebugShowAS.clipY.y, mAccelDebugShowAS.clipZ.y);
     var["CB"]["gBlendT"] = mAccelDebugShowAS.blendT;
     var["CB"]["gVisMode"] = mAccelDebugShowAS.visMode;
-    var["CB"]["gInvView"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invView;
-    var["CB"]["gInvProj"] = mShadowMapMVP[mAccelDebugShowAS.selectedLight].invProjection;
+    var["CB"]["gDirectionalIdx"] = directionalIndex;
+
+    // Set the viewProj matrices
+    for (uint i = 0; i < mpScene->getLightCount(); i++)
+    {
+        var["LightMatrices"]["gInvView"][i] = mShadowMapMVP[i].invView;
+        var["LightMatrices"]["gInvProj"][i] = mShadowMapMVP[i].invProjection;
+        var["InvViewProjections"]["gInvViewProj"][i] = mShadowMapMVP[i].invViewProjection;
+    }
 
     var["gShadowAABB"] = mAccelShadowAABB[mAccelDebugShowAS.selectedLight];
     var["gShadowCounter"] = mAccelShadowCounter[frameInFlight];

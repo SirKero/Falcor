@@ -7,7 +7,7 @@ cbuffer CB
 }
 
 // Inputs
-Texture2D<float> gSampleDistribution;
+Texture2D<int> gSampleDistribution;
 Texture2D<uint> gImportanceMap;
 Texture2D<float> gMask;
 

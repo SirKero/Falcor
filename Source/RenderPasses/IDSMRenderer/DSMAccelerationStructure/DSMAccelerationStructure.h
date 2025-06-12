@@ -84,8 +84,6 @@ private:
     uint mAccelDataFormatSize = 4; // Size of the data struct for the accel data
     bool mRebuildAccelDataBuffer = true;
     bool mAccelUsePCF = false;
-    bool mAccelUseRayTracingInline = true;
-    bool mAccelUseFrustumCulling = true;
     RayFlags mAccelRayFlags = RayFlags::None;
 
     struct
