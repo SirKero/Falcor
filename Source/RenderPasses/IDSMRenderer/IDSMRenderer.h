@@ -187,6 +187,7 @@ private:
     LightSampleMode mLightSampleMode = LightSampleMode::All;
     bool mOptionsChanged = false;
     bool mShadowUseStochasticRayTracing = false; //Enable stochastic ray tracing for visibility
+    bool mUseDeepShadowRayOutsideOfShadowMap = false;   //Shoots a deep shadow ray if the sample area is not covered by the deep shadow map
     ImportanceMode mImportanceMode = ImportanceMode::Opacity_Thp;
 
     //Camera Jitter

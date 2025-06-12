@@ -33,10 +33,6 @@ import IDSMLinkedList.IDSMLinkedList;
 #define LIGHT_SAMPLE_MODE_RIS 1
 #define LIGHT_SAMPLE_MODE_ALL 2
 
-#ifndef TR_RAY_QUERY_FLAG
-#define TR_RAY_QUERY_FLAG RAY_FLAG_FORCE_NON_OPAQUE
-#endif
-
 //Imporance modes (see IDSMRenderer.h)
 #define IMPORTANCE_MODE_OPACITY 0
 #define IMPORTANCE_MODE_OPACITY_THP 1
@@ -60,6 +56,7 @@ static const float kSoftShadowsPosRadius = SOFT_SHADOWS_POS_RADIUS; // For Point
 static const float kSoftShadowsDirSpread = SOFT_SHADOWS_DIR_SPREAD; // For Directional light
 static const bool kIrregularShadowMaskUseRay = USE_IRRGEGULAR_SHADOW_MASK;
 static const bool kShadowMaterialFlagAsBlacklist = SHADOW_MATERIAL_FLAG_AS_BLACKLIST; // Enables the shadow material flag as blacklist when mask is enabled
+static const bool kUseDeepShadowRayOutsideOfSM = USE_DEEP_SHADOW_RAY_OUTSIDE_OF_SM; //Enables a deep shadow ray outside of the SM
 static const bool kUseParticleRayOffset = false;
 
 
@@ -161,7 +158,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout SampleG
     \param[in] distance Distance to the light source.
     \return Visibility in [0,1]
 */
-float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance, float tMin = 0.0)
+float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance, float tMin = 0.0, bool deepShadowRay = false)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -171,8 +168,8 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
 
     float3 visibility = 1.0;
 
-    RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = kShadowMaterialFlagAsBlacklist && (TR_RAY_QUERY_FLAG != RAY_FLAG_FORCE_NON_OPAQUE) ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir,true);
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist && !deepShadowRay ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir,true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
@@ -226,7 +223,7 @@ float3 traceShadowRay(float3 origin, float3 dir, float3 lightDir, float distance
     \param[inout] Sample Generator
     \return Visbility that is either 0 or 1
 */
-float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg, float TMin = 0.0)
+float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float distance, inout SampleGenerator sg, float TMin = 0.0, bool deepShadowRay = false)
 {
     RayDesc ray;
     ray.Origin = origin;
@@ -236,8 +233,8 @@ float3 traceShadowRayStochastic(float3 origin, float3 dir,float3 lightDir, float
 
     float3 visibility = 1.0; //Visible
 
-    RayQuery<TR_RAY_QUERY_FLAG> rayQuery;
-    const uint instanceMask = kShadowMaterialFlagAsBlacklist && (TR_RAY_QUERY_FLAG != RAY_FLAG_FORCE_NON_OPAQUE) ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir, true);
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+    const uint instanceMask = kShadowMaterialFlagAsBlacklist && !deepShadowRay ? kInstanceNoParticle : getBestParticleShadowPlane(lightDir, true);
     rayQuery.TraceRayInline(gScene.rtAccel, 0, instanceMask, ray);
 
     while (rayQuery.Proceed()) {
@@ -390,8 +387,9 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         #endif
 
         bool useMaskRay = kIrregularShadowMaskUseRay && (maskFlags & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0;
+        bool sampleOutsideSM = (visibility.x < 0);
         // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
-        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || useMaskRay ||(visibility.x < 0)) {
+        if (SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || useMaskRay || sampleOutsideSM) {
             if (visibility.x < 0)
                 visibility = 1.0;
             const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
@@ -406,10 +404,11 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
                 }
             }
             float3 rayVisibility = 1.0;
+            bool shootDeepRay = SHADOW_EVAL_MODE == SHADOW_EVAL_MODE_RAYTRACING || (sampleOutsideSM && kUseDeepShadowRayOutsideOfSM);
             if (kUseStochasticRayTracing)
-                rayVisibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg, minTriSide / 2.0);
+                rayVisibility = traceShadowRayStochastic(origin, ls.dir, ls.normalW, ls.distance, sg, minTriSide / 2.0, shootDeepRay);
             else
-                rayVisibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance, minTriSide / 2.0);
+                rayVisibility = traceShadowRay(origin, ls.dir, ls.normalW, ls.distance, minTriSide / 2.0, shootDeepRay);
             visibility = min(visibility, rayVisibility);
         }
 

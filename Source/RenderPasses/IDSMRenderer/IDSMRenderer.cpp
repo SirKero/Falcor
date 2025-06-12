@@ -296,6 +296,8 @@ void IDSMRenderer::renderUI(Gui::Widgets& widget)
     }
     dirty |= methodChanged;
 
+    widget.checkbox("Use Deep Shadow Ray outside of SM area", mUseDeepShadowRayOutsideOfShadowMap);
+    widget.tooltip("Enables a deep shadow ray for areas where the sample is outside of the shadow map (e.g outside of Directional Light radius)");
     widget.checkbox("Enable Stochastic Shadow Ray", mShadowUseStochasticRayTracing);
     widget.tooltip("Toggle Stochastic Ray Tracing for the Visibility ray. Applies to all techniques that use stochastic ray tracing");
 
@@ -417,17 +419,12 @@ DefineList IDSMRenderer::getLightEvalDefines() {
     defines.add("SHADOW_EVAL_MODE", std::to_string((uint)mShadowRenderMethod));
     defines.add(mShadowMethods[mSelectedShadowMethod]->getDefines());
     defines.add("LIGHT_SAMPLE_MODE", std::to_string((uint)mLightSampleMode));
-    RayFlags evalQueryRayFlags = RayFlags::ForceNonOpaque;
-    evalQueryRayFlags = mUseNonOpaqueShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing ? RayFlags::CullNonOpaque : evalQueryRayFlags; 
-    evalQueryRayFlags =
-        mUseShadowMaterialFlagAsBlacklist && mUseNonOpaqueShadowMask && mShadowRenderMethod != ShadowRenderMethod::RayTracing
-        ? RayFlags::None : evalQueryRayFlags;
-    defines.add("TR_RAY_QUERY_FLAG", std::to_string((uint)evalQueryRayFlags));
     defines.add("AMBIENT_STRENGTH", std::to_string(mAmbientStrength));
     defines.add("ENV_MAP_STRENGTH", std::to_string(mEnvMapStrength));
     defines.add("USE_STOCHASTIC_RAY_TRACING", mShadowUseStochasticRayTracing ? "1" : "0");
     defines.add("TR_USE_COLORED_TRANSPARENCY", mShadowSettings.enableColoredTransparency ? "1" : "0");
     defines.add("IMPORTANCE_MODE", std::to_string((uint)mImportanceMode));
+    defines.add("USE_DEEP_SHADOW_RAY_OUTSIDE_OF_SM", mUseDeepShadowRayOutsideOfShadowMap ? "1" : "0");
 
     //Mask
     defines.add("USE_IRRGEGULAR_SHADOW_MASK", mUseNonOpaqueShadowMask ? "1" : "0");
