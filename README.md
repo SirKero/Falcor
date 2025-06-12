@@ -23,7 +23,12 @@ Teaser:
 * [Building Falcor](#building-falcor)
 
 ## Shader for Paper Methods
-TODO
+We have seperate (commented) shaders for most steps introduced in the paper. The shaders are written in [Slang](https://github.com/shader-slang/slang), which has similar syntax to hlsl. The following sections have seperate shaders:
+- [3.1.2 Distributing the Sample Budget](Source/RenderPasses/IDSMRenderer/ImportanceMapHelpers/DistributeBudget.cs.slang)
+- [3.1.3 Creating the Sample Distribution](Source/RenderPasses/IDSMRenderer/ImportanceMapHelpers/GenSampleDistribution.cs.slang)
+- [3.2.1 Creating Rays from the Sample Distribution](Source/RenderPasses/IDSMRenderer/ImportanceMapHelpers/RaySampleFromSampleDistribution.slang)
+- [3.2.2 Acceleration Structure (Sample from the IDSM AS)](Source/RenderPasses/IDSMRenderer/IDSMAccelerationStructure/IDSMAccelerationStructure.slang)
+- [3.2.3 Linked List (Fetch head buffer index)](Source/RenderPasses/IDSMRenderer/ImportanceMapHelpers/HeadIndexFromSampleDistribution.slang)
 
 ## Demo usage
 After downloading the demo from the release page, it can be executed using the `IDSMDemo[SceneName].bat` file. We provide four scenes with the Demo, two are included in the git repo in the `Models` folder (Ship and Multiple Lights Szene). The other two scenes need to be downloaded separately (Emerald Square and Bistro) from the [Releases Page](https://github.com/TU-Clausthal-Rendering/ImportanceDeepShadowMaps/releases/latest) and unziped into the `Models` folder. For more scenes, see the [Testing with more Scenes](#testing-with-more-scenes) section.

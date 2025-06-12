@@ -30,11 +30,11 @@ __exported import Scene.Intersection;
 #endif
 
 struct ASShadowRayData {
-    SHADOW_DATA_FORMAT visibility;
+    SHADOW_DATA_FORMAT transparency;
     float sampleCount;
 
     __init() {
-        this.visibility = 0.0;
+        this.transparency = 0.0;
         this.sampleCount = 0.0;
     }
 }
@@ -76,22 +76,31 @@ struct IDSMAccelerationStructure
     SamplerState gLinearSampler;
     SamplerState gPointSampler;
 
+    /** Shots an infinetly small ray in the IDSM Acceleration Structure to check if there is a node at the ray origin
+     * \param[in/out] rayData. Contains the transparency and sample count
+     * \param[in] lightIdx. Light Index
+     * \param[in] ray. The infinetly small ray
+    */
     void traceAccelShadowInline(inout ASShadowRayData rayData, uint lightIdx, const RayDesc ray) {
         RayQuery<RAY_FLAG_NONE> rayQuery;
         uint rayFlags = 0;
-        uint instanceMask = kUseOneAABBForAllLight ? 0xFF : 1 << lightIdx;
+        uint instanceMask = kUseOneAABBForAllLight ? 0xFF : 1 << lightIdx; //Set the right bit for the AS instance mask
+        //Trace the ray using a ray querey
         rayQuery.TraceRayInline(gShadowAS, rayFlags, instanceMask, ray);
         const uint aabbIdx = kUseOneAABBForAllLight ? 0 : lightIdx;
-        // Start tracing
+        //Ray query trace loop
         while (rayQuery.Proceed()) {
+            //Fetch corresponding AABB
             AABB aabb = gShadowAABBs[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
 
-            // Check if hit is valid
+            // Check if hit is valid (Sometimes a hit is triggered even if it is outside of actual AABB)
             if (!aabb.contains(ray.Origin))
                 continue;
 
+            //Get Node data and store transparency
             SHADOW_DATA_FORMAT transparency = gAccelShadowData[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
-            rayData.visibility += transparency;
+            //We take the average transparency to be sure, however, for IDSM no more than 1 node should be fetched per ray
+            rayData.transparency += transparency;
             rayData.sampleCount += 1;
         }
     }
@@ -101,11 +110,12 @@ struct IDSMAccelerationStructure
      * \param[in] world position of the current hit
      * \param[in] is the light directional (ortho projection)
      * \param[in] Importance. Is used to weight the access texture. Should be in (0, 1]
-     * \return visibility in [0,1]
+     * \param[in] Mask Flag. Flag if the mask is used and the ISM should be sampled
+     * \return transparency in [0,1]
      */
     float3 eval(uint lightIdx, float3 posW, bool isDirectional = false, float importance = 1.0, uint maskFlag = TRANSPARENCY_MASK_FLAG_NONE) {
+        //Get shadow coordinates for the current (world) position
         float4 shadowPos = mul(gShadowMapVP[lightIdx], float4(posW, 1));
-
         if (!isDirectional) {
             shadowPos.xyz /= shadowPos.w;
             shadowPos.z = (shadowPos.w - gNear) / (gFar - gNear); // Linear distance
@@ -114,7 +124,7 @@ struct IDSMAccelerationStructure
         shadowPos.xy = shadowPos.xy * 0.5 + 0.5;              // UV from [-1,1] to [0,1]
 
         bool validShadow = true;
-        // Check if inside the SM
+        // Check if (world) position is inside the Shadow Map
         if (any(shadowPos.xy < 0.0) || any(shadowPos.xy > 1.0)) {
             if (!isDirectional) {
                 return float3(-1.f);
@@ -122,7 +132,7 @@ struct IDSMAccelerationStructure
             validShadow = false;
         }
 
-        // Get mask value
+        //If mask is enabled, check if the bit is set
         bool validBackprojection = true;
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_MASK) != 0) {
             float maskVal = gShadowMask.SampleLevel(gLinearSampler, float3(shadowPos.xy, lightIdx), 0);
@@ -130,14 +140,13 @@ struct IDSMAccelerationStructure
             validShadow &= validBackprojection;
         }
 
-        const float2 shadowPixel = shadowPos.xy * gSMSize;//floor(shadowPos.xy * gSMSize) + 0.5;
-        float dist = isDirectional ? shadowPos.z : shadowPos.w;
-
-        // Add access
+        //Get pixel coordinates for the current shadow position
+        const float2 shadowPixel = shadowPos.xy * gSMSize;  //UV to pixel
+        float dist = isDirectional ? shadowPos.z : shadowPos.w; //Distance in shadow map        
         uint2 uShadowPixel;
         if (validBackprojection) {
             if (isDirectional) {
-                // For directional use the staggered MVP for access
+                // For directional we use the staggered MVP for access
                 float2 dirShadowPixel = mul(gStaggeredDirVP, float4(posW, 1)).xy;
                 dirShadowPixel.y *= -1;                            // Flip
                 dirShadowPixel.xy = dirShadowPixel.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
@@ -148,16 +157,17 @@ struct IDSMAccelerationStructure
             else
                 uShadowPixel = uint2(shadowPixel);
         }
-        
+
+        // Add Importance of the current sample to the Importance Map
         uint backprojectionWeight = clamp(uint(importance * kMaxAtomicWeight),1, kMaxAtomicWeight);
         if(validBackprojection)
             InterlockedAdd(gImportanceMap[lightIdx][uShadowPixel], backprojectionWeight);
 
-        // Raytraced shadows as fallback
+        //If reprojection was not valid, dispatch a ray as fallback
         if (!validShadow)
             return float3(-1.0);
 
-        // Use transparent shadow map
+        //Get opaque shadow from ISM if the mask is enabled
         if ((maskFlag & TRANSPARENCY_MASK_FLAG_USE_SM) != 0) {
             //Get head buffer index. We only need y component here (x is for Linked List IDSM)
             int2 selectedIndex = getIndexFromSD(gSampleDistribution[lightIdx], shadowPos.xy, gMipCount - 2, kMaskISMMultFactor);               
@@ -170,22 +180,23 @@ struct IDSMAccelerationStructure
             }
         }
 
-        // If only one AABB is used for all lights, offset the pixel pos
+        // If only one AABB Buffer/BLAS is used for all lights, offset the pixel pos on the x-axis
         if (kUseOneAABBForAllLight)
             shadowPixel.x += gSMSize.x * lightIdx;
 
+        //Prepare the infinetly small ray.
         ASShadowRayData rayData = ASShadowRayData();
         RayDesc ray;
-        ray.Origin = float3(shadowPixel.x, shadowPixel.y, dist);
+        ray.Origin = float3(shadowPixel.x, shadowPixel.y, dist); //xy is shadow UV, z is depth.
         ray.Direction = float3(0, 0, -1);
         ray.TMin = 0;
         ray.TMax = 1e-10;
 
         traceAccelShadowInline(rayData, lightIdx, ray);
 
-        SHADOW_DATA_FORMAT visibility = (rayData.sampleCount > 0) ? (rayData.visibility / rayData.sampleCount) : 1.0;
-            
-        return visibility;
+        SHADOW_DATA_FORMAT transparency = (rayData.sampleCount > 0) ? (rayData.transparency / rayData.sampleCount) : 1.0;
+
+        return transparency;
     }
     
 } gIDSMAccelerationStructure;
