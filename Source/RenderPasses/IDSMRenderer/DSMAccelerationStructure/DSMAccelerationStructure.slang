@@ -74,9 +74,9 @@ struct DSMAccelerationStructure
     void traceAccelShadowInline(inout AccelShadowRayData rayData, uint lightIdx, const RayDesc ray) {
         RayQuery<RAY_FLAG_NONE> rayQuery;
         uint rayFlags = 0;
-        uint instanceMask = 1 << lightIdx;
+        uint instanceMask = kUseOneAABBForAllLight ? 0xFF : 1 << lightIdx;
         rayQuery.TraceRayInline(gShadowAS, rayFlags, instanceMask, ray);
-        const uint aabbIdx = lightIdx;
+        const uint aabbIdx = kUseOneAABBForAllLight ? 0 : lightIdx;
         // Start tracing
         while (rayQuery.Proceed()) {
             AABB aabb = gShadowAABBs[aabbIdx][rayQuery.CandidatePrimitiveIndex()];
