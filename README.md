@@ -31,11 +31,13 @@ We have seperate (commented) shaders for most steps introduced in the paper. The
 - [3.2.3 Linked List (Fetch head buffer index)](Source/RenderPasses/IDSMRenderer/ImportanceMapHelpers/HeadIndexFromSampleDistribution.slang)
 
 ## Demo usage
-After downloading the demo from the release page, it can be executed using the `IDSMDemo[SceneName].bat` file. We provide four scenes with the Demo, two are included in the git repo in the `Models` folder (Ship and Multiple Lights Szene). The other two scenes need to be downloaded separately (Emerald Square and Bistro) from the [Releases Page](https://github.com/TU-Clausthal-Rendering/ImportanceDeepShadowMaps/releases/latest) and unziped into the `Models` folder. For more scenes, see the [Testing with more Scenes](#testing-with-more-scenes) section.
+After downloading the demo from the release page, it can be executed using the `IDSMDemo[SceneName].bat` file. We provide four scenes with the Demo which are located in the `scenes` folder. Two of the scenes require downloading additional resources ([Emerald Square](https://developer.nvidia.com/orca/nvidia-emerald-square) and [Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro)). For more info on how to load your own scenes see the [Testing with more Scenes](#testing-with-more-scenes) section.
 
-To change the settings of our algorithm, navigate to the `IDSM Demo` group in the UI. For more information about a setting, hover over the `(?)`. 
+To change the settings of our algorithm, navigate to the `IDSMRenderer` group in the UI. For more information about a setting, hover over the `(?)`. Here is an overview of the important UI elements:
 
-TODO
+![](docs/images/UI.png)
+
+For more infos on the `ParticlePass` see the [Testing with more Scenes](#testing-with-more-scenes) section.
 
 Controls:
 - `WASD` - Camera movement
@@ -47,7 +49,9 @@ Controls:
 - `F6` - Toggels Graphs UI menu (Enabled by default)
 
 ## Testing with more Scenes
-Testing with other scenes is possible but requires some additional steps. A detailed desciption will be added later.
+Testing with other scenes is possible but requires some additional steps.
+
+TODO Particles and pyscene
 
 Falcor supports a variety of scene types:
 - Falcor's `.pyscene` format ([more details](docs/usage/scene-formats.md))
