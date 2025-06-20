@@ -380,10 +380,9 @@ void IDSMRenderer::setScene(RenderContext* pRenderContext, const ref<Scene>& pSc
 
         mpIDSMMask = std::make_shared<IDSMMaskAndOpaqueShadowMap>(mpDevice, mpScene);
 
-        //Approximate Cascaded Size
-        //TODO Set size with script and ignore this in this case
+        //Approximate extent of directional light shadow map
         auto& sceneAABB = mpScene->getSceneBounds();
-        mShadowSettings.dirLightRange = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.4f;
+        mShadowSettings.dirLightRange = math::max(sceneAABB.maxPoint.x - sceneAABB.minPoint.x, sceneAABB.maxPoint.y - sceneAABB.minPoint.y) * 0.7f;
 
         //Create and fill the particle material buffer
         
