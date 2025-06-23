@@ -3,7 +3,12 @@
 ![](docs/images/teaserIDSM.png)
 
 ## Introduction
-This repository contains the source code and an interactive demo for the soon-to-be-published CGF/EGSR paper.
+This repository contains the source code and an interactive demo for the [the following CGF and EGSR paper:](https://diglib.eg.org/items/ff5055b6-be32-414a-8d63-41fdb7296e10)
+
+> **[Real-Time Importance Deep Shadows Maps
+ with Hardware Ray Tracing](https://diglib.eg.org/items/ff5055b6-be32-414a-8d63-41fdb7296e10)** <br>
+> René Kern, Felix Brüll, Thorsten Grosch <br>
+> TU Clausthal, Germany
 
 This protoype implements Importance Deep Shadow Maps (IDSM), a real-time deep shadow algorithm that adaptively distributes Deep Shadow samples based on importance captured from the current camera viewport. Additionally, we propose a novel DSM data structure built on the ray tracing acceleration structure improving performance for scenarios requiring many samples per DSM texel. We also provide commented Slang (similar to hlsl) shaders for parts of our method [here](#shader-for-paper-methods).
 
@@ -12,8 +17,8 @@ This project was implemented using NVIDIA's Falcor rendering framework. See [REA
 The executable demo can be downloaded from the [Releases Page](https://github.com/TU-Clausthal-Rendering/ImportanceDeepShadowMaps/releases/latest). Alternatively the project can be built by following the instructions in [Building Falcor](#building-falcor) or the build instructions in the original [readme](README_Falcor.md).
 
 Teaser:
+[<img src="http://i.ytimg.com/vi/BvkLhBASKwY/maxresdefault.jpg" width="700">](https://youtu.be/BvkLhBASKwY)
 
-[Coming Soon]
 
 ## Contents:
 * [Shader for Paper Methods](#shader-for-paper-methods)
@@ -31,7 +36,7 @@ We have seperate (commented) shaders for most steps introduced in the paper. The
 - [3.2.3 Linked List (Fetch head buffer index)](Source/RenderPasses/IDSMRenderer/ImportanceMapHelpers/HeadIndexFromSampleDistribution.slang)
 
 ## Demo usage
-After downloading the demo from the release page, it can be executed using the `IDSMDemo[SceneName].bat` file. We provide four scenes with the Demo which are located in the `scenes` folder. Two of the scenes require downloading additional resources ([Emerald Square](https://developer.nvidia.com/orca/nvidia-emerald-square) and [Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro)). For more info on how to load your own scenes see the [Testing with more Scenes](#testing-with-more-scenes) section.
+After downloading the demo from the release page, it can be executed using the `IDSMDemo_[SceneName].bat` file. We provide four scenes with the Demo which are located in the `scenes` folder. Two of the scenes require downloading additional resources ([Emerald Square](https://developer.nvidia.com/orca/nvidia-emerald-square) and [Lumberyard Bistro](https://developer.nvidia.com/orca/amazon-lumberyard-bistro)). For more info on how to load your own scenes see the [Testing with more Scenes](#testing-with-more-scenes) section.
 
 To change the settings of our algorithm, navigate to the `IDSMRenderer` group in the UI. For more information about a setting, hover over the `(?)`. Here is an overview of the important UI elements:
 
@@ -49,9 +54,33 @@ Controls:
 - `F6` - Toggels Graphs UI menu (Enabled by default)
 
 ## Testing with more Scenes
-Testing with other scenes is possible but requires some additional steps.
+Testing with other scenes is possible but requires some additional steps if particles should be used. Particles needs to be added to the `.pyscene`. Here is an example:
+```python
+#Load scene
+sceneBuilder.importScene("scene.gltf")
+#Add particle material
+particle = StandardMaterial('TestParticle')
+particle.baseColor = float4(1.0, 1.0, 1.0, 0.7) #Optional; Color if texture is removed (RGBA)
+particle.roughness = 1.0    #Material roughness
+particle.metallic = 0.0     #Material metalness
+particle.doubleSided = True #Mandatory
+particle.thinSurface = True #Recommended
+particle.loadTexture(MaterialTextureSlot.BaseColor, 'myParticleFolder/myTexture.png') #Texture
+#Add particle to scene
+#sceneBuilder.addParticleSystem(Name, Material, NumberOfParticles, SpawnPosition)
+sceneBuilder.addParticleSystem("ParticleSystem1", particle, 1000, float3(0,-2,0))
+#This adds a particle system with "1000" individual particles. The system has the name "ParticleName", the material "particle" and spawns at the position (0,-2,0). 
+```
+The particles are always quads. All properties are handled by the `ParticlePass` during runtime. A settings file (`.prtsett`) is loaded on startup if available. If not, all particle systems are initialized with a default.
+Here is an overview of the `ParticlePass` UI:
 
-TODO Particles and pyscene
+![](docs/images/GitHubParticleUI.png)
+
+Tips:
+- Use the "Reset All" button after changing a setting to immediately see the effects.
+- Use between 800-3000 particles, depending on system capabilites.
+- Start with a smaller particle radius and a bigger spawn radius and adjust step-by-step to avoid crashing the demo program.
+
 
 Falcor supports a variety of scene types:
 - Falcor's `.pyscene` format ([more details](docs/usage/scene-formats.md))
