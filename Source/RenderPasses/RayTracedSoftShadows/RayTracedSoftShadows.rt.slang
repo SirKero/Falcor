@@ -28,6 +28,10 @@
 
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
+#define NRD_COMPILER_DXC
+#define NRD_NORMAL_ENCODING 0
+#define NRD_ROUGHNESS_ENCODING 0
+#include "nrd/Shaders/Source/NRD.hlsli"
 
 import Scene.Raytracing;
 import Scene.Intersection;
@@ -70,6 +74,7 @@ cbuffer CB
     float gAmbientFactor;  //Tells if the LTT mask is valid
     float gEmissiveFactor;
     float gEnvMapFactor;
+    float gNRDLightSize;    //Approximated light size
 }
 
 // Static configuration based on defines set from the host.
@@ -239,7 +244,7 @@ void rayGen()
                     #if NRD_DEMODULATION
                     else {
                         hitT = shadowData.distance;
-                        penumbra = hitT;
+                        penumbra = SIGMA_FrontEnd_PackPenumbra(hitT, distance(ls.origin, sd.posW), gNRDLightSize);
                     }
                     #endif
                 }

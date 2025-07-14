@@ -79,6 +79,7 @@ private:
     uint mSPP = 1;             //<Shadow Samples per pixel
     bool mEnableNRD = true; //<Demodulate colors
     bool mClearDemodulationTextures = false; //< Clear textures when demodulation is turned on/off
+    float mNRDLightSize = 1.0f; //Approximated light size
 
     float mAmbientFactor = 0.01f; //<Ambient light factor
     float mEnvMapFactor = 0.3f;  //< Env Map factor

@@ -237,6 +237,7 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
     var["CB"]["gAmbientFactor"] = mAmbientFactor;
     var["CB"]["gEmissiveFactor"] = mEmissiveFactor;
     var["CB"]["gEnvMapFactor"] = mEnvMapFactor;
+    var["CB"]["gNRDLightSize"] = mNRDLightSize;
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -270,6 +271,8 @@ void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
     widget.tooltip("Factor for the emissive light strength");
     dirty |= widget.var("EnvMap Factor", mEnvMapFactor);
     widget.tooltip("Factor for the env map sample");
+    dirty |= widget.var("NRD Sigma Light Size", mNRDLightSize, 0.f, FLT_MAX, 0.001f);
+    widget.tooltip("Light size input parameter for NRD. Not available in Falcor so it needs to be approximated by hand");
 
     mClearDemodulationTextures |= widget.checkbox("Enable NRD", mEnableNRD);
     dirty |= mClearDemodulationTextures;
