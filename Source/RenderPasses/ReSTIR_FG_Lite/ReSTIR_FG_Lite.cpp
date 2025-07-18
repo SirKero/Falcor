@@ -1,0 +1,418 @@
+/***************************************************************************
+ # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without
+ # modification, are permitted provided that the following conditions
+ # are met:
+ #  * Redistributions of source code must retain the above copyright
+ #    notice, this list of conditions and the following disclaimer.
+ #  * Redistributions in binary form must reproduce the above copyright
+ #    notice, this list of conditions and the following disclaimer in the
+ #    documentation and/or other materials provided with the distribution.
+ #  * Neither the name of NVIDIA CORPORATION nor the names of its
+ #    contributors may be used to endorse or promote products derived
+ #    from this software without specific prior written permission.
+ #
+ # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
+ # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ **************************************************************************/
+#include "ReSTIR_FG_Lite.h"
+#include <memory>
+#include "RenderGraph/RenderPassHelpers.h"
+#include "RenderGraph/RenderPassStandardFlags.h"
+
+#include "Rendering/Lights/EmissivePowerSampler.h"
+
+
+namespace
+{
+    const std::string kShaderFolder = "RenderPasses/ReSTIR_FG_Lite/";
+    const std::string kShaderTracePhotons = kShaderFolder + "TracePhotons.rt.slang";
+    const std::string kShaderGenInitialSamples = kShaderFolder + "GenerateInitialSamples.rt.slang";
+    const std::string kShaderReservoirResamplingPass = kShaderFolder + "ReservoirResampling.cs.slang";
+    const std::string kShaderEvaluateReservoirs = kShaderFolder + "EvaluateReservoirs.cs.slang";
+
+    const std::string kShaderModel = "6_5";
+
+    // Render Pass inputs and outputs
+    const std::string kInputVBuffer = "vbuffer";
+    const std::string kInputMotionVectors = "mvec";
+
+    const Falcor::ChannelList kInputChannels{
+        {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
+        {kInputMotionVectors, "gMotionVectors", "Motion vector buffer (float format)", true /* optional */},
+    };
+
+    //Outputs
+    const std::string kOutputColor = "color";
+
+    const Falcor::ChannelList kOutputChannels{
+        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float}
+    };
+
+
+}; // namespace
+
+extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
+{
+    registry.registerClass<RenderPass, ReSTIR_FG_Lite>();
+}
+
+ReSTIR_FG_Lite::ReSTIR_FG_Lite(ref<Device> pDevice, const Properties& props)
+    : RenderPass(pDevice)
+{
+    if (!mpDevice->isShaderModelSupported(Device::ShaderModel::SM6_5))
+    {
+        throw RuntimeError("ReSTIR_FG: Shader Model 6.5 is not supported by the current device");
+    }
+    if (!mpDevice->isFeatureSupported(Device::SupportedFeatures::RaytracingTier1_1))
+    {
+        throw RuntimeError("ReSTIR_FG: Raytracing Tier 1.1 is not supported by the current device");
+    }
+
+    // Create sample generator.
+    mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
+}
+
+Properties ReSTIR_FG_Lite::getProperties() const
+{
+    return {}; //TODO
+}
+
+RenderPassReflection ReSTIR_FG_Lite::reflect(const CompileData& compileData)
+{
+    //In and Output textures
+    RenderPassReflection reflector;
+    addRenderPassInputs(reflector, kInputChannels);
+    addRenderPassOutputs(reflector, kOutputChannels);
+    return reflector;
+}
+
+void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
+
+}
+
+void ReSTIR_FG_Lite::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) {
+    // Reset Scene
+    mpScene = pScene;
+
+    //Reset all passes and sampling helpers
+    mpPhotonAS.reset();
+    mpEmissiveLightSampler.reset();
+    mpRTXDI.reset();
+
+
+    if (mpScene)
+    {
+        if (mpScene->hasGeometryType(Scene::GeometryType::Custom))
+        {
+            logWarning("This render pass only supports triangles. Other types of geometry will be ignored.");
+        }
+    }
+}
+
+void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    if (!mpScene)
+        return;
+
+    //Add refresh flag if options changed
+    auto& dict = renderData.getDictionary();
+    auto flags = dict.getValue(kRenderPassRefreshFlags, RenderPassRefreshFlags::None);
+    if (mOptionsChanged)
+    {
+        dict[Falcor::kRenderPassRefreshFlags] = flags | Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
+        mOptionsChanged = false;
+    }
+
+    //Init ReSTIR DI
+    const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
+    if (!mpRTXDI)
+        mpRTXDI = std::make_unique<RTXDI>(mpScene, mRTXDIOptions);
+
+    //Prepare needed Falcor helpers and Buffers/Textures
+    prepareLightingStructure(pRenderContext);
+    if (!mHasLights)
+    {
+        logWarningOnce("Scene has no lights, pass will not execute!");
+        return;
+    }
+
+    prepareResources(pRenderContext, renderData);
+
+    preparePhotonAccelerationStructure();
+
+    mpRTXDI->beginFrame(pRenderContext, mScreenRes);
+
+    //Trace Photons
+    tracePhotonsPass(pRenderContext, renderData, !mMixedLights && mHasAnalyticLights, !mMixedLights);
+    if (mMixedLights)
+        tracePhotonsPass(pRenderContext, renderData, true); // Second pass. Always Analytic
+
+    //Initial Samples for ReSTIR FG and inti RTXDI structs
+    generateInitialSamplesPass(pRenderContext, renderData);
+
+    // ReSTIR DI pass
+    mpRTXDI->update(pRenderContext, pMotionVectors);
+
+    //Spatiotemporal resampling
+    resamplingPass(pRenderContext, renderData);
+
+    //Finalize Reservoirs
+    evaluateReservoirsPass(pRenderContext, renderData);
+
+    //End ReSTIR
+    mpRTXDI->endFrame(pRenderContext);
+
+    mFrameCount++;
+}
+
+void ReSTIR_FG_Lite::prepareLightingStructure(RenderContext* pRenderContext)
+{
+    // Make sure that the emissive light is up to date
+    auto& pLights = mpScene->getLightCollection(pRenderContext);
+
+    bool emissiveUsed = mpScene->useEmissiveLights();
+    bool analyticUsed = mpScene->useAnalyticLights();
+
+    mHasLights = analyticUsed || emissiveUsed;
+    mHasAnalyticLights = analyticUsed;
+    mMixedLights = emissiveUsed && analyticUsed;
+
+    if (emissiveUsed)
+    {
+        if (!mpEmissiveLightSampler)
+        {
+            FALCOR_ASSERT(pLights && pLights->getActiveLightCount(pRenderContext) > 0);
+            mpEmissiveLightSampler = std::make_unique<EmissivePowerSampler>(pRenderContext, mpScene);
+        }
+    }
+    else
+    {
+        if (mpEmissiveLightSampler)
+        {
+            mpEmissiveLightSampler = nullptr;
+            mTracePhotonPass.pVars.reset();
+        }
+    }
+}
+
+void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    auto& screenDims = renderData.getDefaultTextureDims();
+    if (screenDims.x != mScreenRes.x || screenDims.y != mScreenRes.y)
+    {
+        mScreenRes = screenDims;
+        mResetScreenTex = true;
+    }
+
+    if (mChangePhotonLightBufferSize)
+    {
+        mpPhotonAABB[0].reset();
+        mpPhotonAABB[1].reset();
+        mpPhotonData[0].reset();
+        mpPhotonData[1].reset();
+        //Flag will be reset in preparePhotonAccelerationStructure()
+    }
+
+    if (mResetScreenTex)
+    {
+        mResetScreenTex = false;
+    }
+
+    //Buffers that exist two times
+    for (uint i = 0; i < 2; i++)
+    {
+        if (!mpPhotonAABB[i])
+        {
+            mpPhotonAABB[i] = Buffer::createStructured(
+                mpDevice, sizeof(AABB), mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPhotonAABB[i]->setName("PhotonAABB" + std::to_string(i));
+        }
+        if (!mpPhotonData[i])
+        {
+            mpPhotonData[i] = Buffer::createStructured(
+                mpDevice, sizeof(float) * 12, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPhotonData[i]->setName("PhotonAABB" + std::to_string(i));
+        }
+       
+    }
+}
+
+void ReSTIR_FG_Lite::preparePhotonAccelerationStructure()
+{
+    // Delete the Photon AS if max Buffer size changes
+    if (mChangePhotonLightBufferSize)
+    {
+        mpPhotonAS.reset();
+        mChangePhotonLightBufferSize = false;
+    }
+
+    // Create the Photon AS
+    if (!mpPhotonAS)
+    {
+        std::vector<uint64_t> aabbCount = {mNumMaxPhotons[0], mNumMaxPhotons[1]};
+        std::vector<uint64_t> aabbGPUAddress = {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()};
+        mpPhotonAS = std::make_unique<CustomAccelerationStructure>(
+            mpDevice, aabbCount, aabbGPUAddress, CustomAccelerationStructure::BuildMode::FastBuild,
+            CustomAccelerationStructure::UpdateMode::TLASOnly
+        );
+    }
+}
+
+void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData,  bool analyticOnly,  bool buildAS)
+{
+
+}
+
+void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "InitialSamples");
+
+    //Init Shader
+    if (!mGenerateInitialSamplesPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderGenInitialSamples);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mGenerateInitialSamplesPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mGenerateInitialSamplesPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        mGenerateInitialSamplesPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+    }
+
+    //Defines
+    mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
+
+
+    //Program Vars
+    if (!mGenerateInitialSamplesPass.pVars)
+        mGenerateInitialSamplesPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+
+    FALCOR_ASSERT(mGenerateInitialSamplesPass.pVars);
+    auto var = mGenerateInitialSamplesPass.pVars->getRootVar();
+
+    //Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+
+    //RTXDI Resources
+    mpRTXDI->setShaderData(var);
+
+    //Input
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+
+    //Output
+
+
+    //Dispatch Shader
+    mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
+}
+
+void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+
+}
+
+void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "EvaluateReservoirs");
+
+    // Create pass
+    if (!mpEvaluateReservoirsPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderEvaluateReservoirs).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(mpRTXDI->getDefines());
+        defines.add(getMaterialDefines());
+
+        mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpEvaluateReservoirsPass);
+
+    //Runtime Defines
+    mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
+    mpEvaluateReservoirsPass->getProgram()->addDefines(getMaterialDefines());
+    mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+
+    // Set variables
+    auto var = mpEvaluateReservoirsPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                    // Sample generator
+
+    //Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+
+    //RTXDI resources
+    mpRTXDI->setShaderData(var);
+
+    //Input
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+
+    //Output
+    var["gOutColor"] = renderData[kOutputColor]->asTexture();
+
+    // Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpEvaluateReservoirsPass->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+DefineList ReSTIR_FG_Lite::getMaterialDefines()
+{
+    DefineList defines;
+    defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    defines.add("enableDiffuse", "1");
+    defines.add("enableSpecular", "1");
+    defines.add("enableTranslucency", "1");
+    return defines;
+}
+
+void ReSTIR_FG_Lite::RayTraceProgramHelper::initProgramVars(ref<Device> pDevice, ref<Scene> pScene, ref<SampleGenerator> pSampleGenerator)
+{
+    FALCOR_ASSERT(pProgram);
+
+    // Configure program.
+    pProgram->addDefines(pSampleGenerator->getDefines());
+    pProgram->setTypeConformances(pScene->getTypeConformances());
+    // Create program variables for the current program.
+    // This may trigger shader compilation. If it fails, throw an exception to abort rendering.
+    pVars = RtProgramVars::create(pDevice, pProgram, pBindingTable);
+
+    // Bind utility classes into shared data.
+    auto var = pVars->getRootVar();
+    pSampleGenerator->setShaderData(var);
+}
