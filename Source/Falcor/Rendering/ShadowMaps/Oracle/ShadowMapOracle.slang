@@ -83,6 +83,8 @@ struct ShadowMapOracle
         //Get the cos theta between normal and vectors
         float angleCamera = abs(dot(sd.V, N));
         float angleLight = abs(dot(toLight, N));
+        angleCamera *= angleCamera;
+        angleLight *= angleLight;
         
         float projAreaCam = kCameraNPS * rayDistance * rayDistance;
         float pixelAreaSM = kLightsNPS[lightIdx];
@@ -148,6 +150,8 @@ struct ShadowMapOracle
         //Get the cos theta between normal and vectors
         float angleCamera = abs(dot(sd.V, N));
         float angleLight = abs(dot(toLight, N));
+        angleCamera *= angleCamera;
+        angleLight *= angleLight;
         
         float projAreaCam = kCameraNPS * rayDistance * rayDistance;
         float pixelAreaSM = kLightsNPS[lightIdx];

@@ -727,7 +727,7 @@ void TestPathSM::traceScene(RenderContext* pRenderContext, const RenderData& ren
     mTracer.pProgram->addDefine("PATHSM_LIGHT_SAMPLE_MODE", std::to_string((uint32_t)mPathLightSampleMode));
     mTracer.pProgram->addDefine("USE_SEPERATE_LIGHT_SAMPLER", mUseSeperateLightSampler ? "1" : "0");
     mTracer.pProgram->addDefine("LIGHT_SAMPLER_BLOCK_SIZE", std::to_string(mSeperateLightSamplerBlockSize));
-    mTracer.pProgram->addDefine("USE_SHADOW_RAY", mShadowMode != ShadowMode::ShadowMap ? "1" : "0");
+    mTracer.pProgram->addDefine("USE_SHADOW_RAY", mShadowMode != ShadowMode::ShadowMap || mpShadowMapOracle->isEnabled() ? "1" : "0");
     mTracer.pProgram->addDefine("USE_MIN_MAX_SM", mUseMinMaxShadowMap ? "1" : "0");
     mTracer.pProgram->addDefine("LT_BOUNDS_START", std::to_string(mLtBoundsStart));
     mTracer.pProgram->addDefine("USE_DEBUG", mEnableDebug ? "1" : "0");
