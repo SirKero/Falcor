@@ -66,6 +66,9 @@ private:
     //Traces the photons and builds the photon Acceleration Structure
     void tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool analyticOnly = false, bool buildAS = true);
 
+    // Handles readback of the photon counter
+    void handlePhotonCounter(RenderContext* pRenderContext);
+
     //Generates the initial Samples for the reservoirs (FG) and initializes RTXDI surfaces
     void generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -106,7 +109,6 @@ private:
     bool mHasLights = false;           //True if the scene has any light sources
     bool mHasAnalyticLights = false;   // True if there are analytic lights
     bool mMixedLights = false;         // True if analytic and emissive lights are in the scene
-    float mPhotonAnalyticRatio = 0.5f; // Analytic photon distribution ratio in a mixed light case. E.g. 0.3 -> 30% analytic, 70% emissive
 
     //ReSTIR-FG Reservoirs
     bool mRebuildReservoirBuffer = false; // Rebuild the reservoir buffer
@@ -126,13 +128,22 @@ private:
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons; //For UI, as changing happes with a button
     bool mChangePhotonLightBufferSize = true; //If buffer size has changed
     float mASBuildBufferPhotonOverestimate = 1.15f; //Guard percentage for AS building
+    uint2 mCurrentPhotonCount = mNumMaxPhotons;
     float2 mPhotonRadius = float2(0.020f, 0.005f); //Global/Caustic Radius.
+    float mPhotonAnalyticRatio = 0.5f;   // Analytic photon distribution ratio in a mixed light case. E.g. 0.3 -> 30% analytic, 70% emissive
+
+    bool mUseDynamicPhotonDispatchCount = true;          // Dynamically change the number of photons to fit the max photon number
+    uint mPhotonDynamicDispatchMax = 4000000;            // Max value for dynamically dispatched photons
+    float mPhotonDynamicGuardPercentage = 0.08f;  // Determines how much space of the buffer is used to guard against buffer overflows
+    float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
 
     //
     // Resources
     //
     ref<Buffer> mpPhotonAABB[2]; // Photon AABBs for Acceleration Structure building
     ref<Buffer> mpPhotonData[2]; // Additional Photon data (flux, dir)
+    ref<Buffer> mpPhotonCounter; // Photon Counter
+    ref<Buffer> mpPhotonCounterCPU; // CPU copy of counter for readback
 
 
     //

@@ -27,10 +27,12 @@
  **************************************************************************/
 #include "ReSTIR_FG_Lite.h"
 #include <memory>
+#include <utility>
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
 
 #include "Rendering/Lights/EmissivePowerSampler.h"
+
 
 
 namespace
@@ -154,8 +156,8 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     mpRTXDI->beginFrame(pRenderContext, mScreenRes);
 
     //Trace Photons
-    tracePhotonsPass(pRenderContext, renderData, !mMixedLights && mHasAnalyticLights, !mMixedLights);
-    if (mMixedLights)
+    tracePhotonsPass(pRenderContext, renderData, !mMixedLights && mHasAnalyticLights, !mMixedLights && mPhotonAnalyticRatio > 0);
+    if (mMixedLights && mPhotonAnalyticRatio > 0)
         tracePhotonsPass(pRenderContext, renderData, true); // Second pass. Always Analytic
 
     //Initial Samples for ReSTIR FG and inti RTXDI structs
@@ -248,7 +250,19 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
             );
             mpPhotonData[i]->setName("PhotonAABB" + std::to_string(i));
         }
-       
+    }
+
+    if (!mpPhotonCounter)
+    {
+        mpPhotonCounter = Buffer::create(
+            mpDevice, sizeof(uint2), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None
+        );
+        mpPhotonCounter->setName("PhotonCounter");
+
+        mpPhotonCounterCPU = Buffer::create(
+            mpDevice, sizeof(uint2), ResourceBindFlags::None, Buffer::CpuAccess::Read
+        );
+        mpPhotonCounterCPU->setName("PhotonCounterCPU");
     }
 }
 
@@ -275,7 +289,148 @@ void ReSTIR_FG_Lite::preparePhotonAccelerationStructure()
 
 void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData,  bool analyticOnly,  bool buildAS)
 {
+    FALCOR_PROFILE(pRenderContext, "Trace Photons");
 
+    //Clear Photon Counter
+    pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
+
+    // Init Shader
+    if (!mTracePhotonPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderTracePhotons);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mTracePhotonPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mTracePhotonPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+        DefineList defines;
+        defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
+        defines.add(mpScene->getSceneDefines());
+
+
+        mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
+    }
+    // Defines
+    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
+    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
+    mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mTracePhotonPass.pProgram->addDefines(getMaterialDefines());
+    if (mpEmissiveLightSampler)
+        mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+
+    // Program Vars
+    if (!mTracePhotonPass.pVars)
+        mTracePhotonPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+
+    FALCOR_ASSERT(mTracePhotonPass.pVars);
+    auto var = mTracePhotonPass.pVars->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var);
+
+    // Handle shader dimension
+    uint dispatchedPhotons = mNumDispatchedPhotons;
+    if (mMixedLights)
+    {
+        float dispatchedF = float(dispatchedPhotons);
+        dispatchedF *= analyticOnly ? mPhotonAnalyticRatio : 1.f - mPhotonAnalyticRatio;
+        dispatchedPhotons = uint(dispatchedF);
+    }
+
+    uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
+    shaderDispatchDim = std::max(32u, shaderDispatchDim);
+
+    //Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gPhotonRadius"] = mPhotonRadius;
+    var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
+    var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
+    var["CB"]["gUseAnalyticLights"] = analyticOnly;
+    var["CB"]["gDispatchDimension"] = shaderDispatchDim;
+
+    //Structures
+    if (mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+
+    //Output
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPackedPhotonData"][i] = mpPhotonData[i];
+    }
+    var["gPhotonCounter"] = mpPhotonCounter;
+
+    mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1));
+
+    if (buildAS)
+    {
+        //Clear values after the counter
+        std::vector<ref<Buffer>> aabbs = {mpPhotonAABB[0], mpPhotonAABB[1]};
+        mpPhotonAS->clearAABBBuffers(pRenderContext, aabbs, false, mpPhotonCounter);
+
+        //Copy counter to CPU
+        handlePhotonCounter(pRenderContext);
+
+        //Build acceleration structure
+        uint2 currentPhotons = mFrameCount > 0 ? uint2(float2(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
+        std::vector<uint64_t> photonBuildSize = {
+            std::min(mNumMaxPhotons[0], currentPhotons[0]), std::min(mNumMaxPhotons[1], currentPhotons[1])
+        };
+        mpPhotonAS->update(pRenderContext, photonBuildSize);
+    }
+
+}
+
+void ReSTIR_FG_Lite::handlePhotonCounter(RenderContext* pRenderContext) {
+    // Copy the photonCounter to a CPU Buffer
+    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint2));
+
+    void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
+    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint2));
+    mpPhotonCounterCPU->unmap();
+
+    // Change Photon dispatch count dynamically.
+    if (mUseDynamicPhotonDispatchCount)
+    {
+        // Only use global photons for the dynamic dispatch count
+        uint globalPhotonCount = mCurrentPhotonCount[0];
+        uint globalMaxPhotons = mNumMaxPhotons[0];
+        uint causticPhotonCount = mCurrentPhotonCount[1];
+        uint causticMaxPhotons = mNumMaxPhotons[1];
+        // If counter is invalid, reset
+        if (globalPhotonCount == 0)
+        {
+            mNumDispatchedPhotons = mPhotonDynamicDispatchMax / 2;
+        }
+        uint globBufferSizeCompValue = (uint)(globalMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
+        uint globChangeSize = (uint)(globalMaxPhotons * mPhotonDynamicChangePercentage);
+        uint causticBufferSizeCompValue = (uint)(causticMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
+        uint causticChangeSize = (uint)(causticMaxPhotons * mPhotonDynamicChangePercentage);
+        uint changeSize = std::max(globChangeSize, causticChangeSize);
+
+        // If smaller, increase dispatch size
+        if ((globalPhotonCount < globBufferSizeCompValue) && (causticPhotonCount < causticBufferSizeCompValue))
+        {
+            uint newDispatched = (uint)(mNumDispatchedPhotons + changeSize);
+            mNumDispatchedPhotons = std::min(newDispatched, mPhotonDynamicDispatchMax);
+        }
+        //Reduce dispatch size
+        else 
+        {
+            uint newDispatched = (uint)(mNumDispatchedPhotons - changeSize);
+            mNumDispatchedPhotons = std::max(newDispatched, 1024u);
+        }
+    }
 }
 
 void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData)

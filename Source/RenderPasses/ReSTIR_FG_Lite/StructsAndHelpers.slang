@@ -1,5 +1,14 @@
 import Scene.Raytracing;
 
+struct PhotonData {
+    float3 posW;
+    uint _pad1;
+    float3 normalW;
+    uint _pad2;
+    float3 flux;
+    uint _pad3;
+}
+
 //Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
@@ -10,3 +19,5 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     
     return sd;
 }
+
+
