@@ -11,6 +11,6 @@ target_sources(ReSTIR_FG_Lite PRIVATE
     TracePhotons.rt.slang
 )
 
-target_copy_shaders(ReSTIR_FG RenderPasses/ReSTIR_FG)
+target_copy_shaders(ReSTIR_FG_Lite RenderPasses/ReSTIR_FG_Lite)
 target_source_group(ReSTIR_FG_Lite "RenderPasses")
 

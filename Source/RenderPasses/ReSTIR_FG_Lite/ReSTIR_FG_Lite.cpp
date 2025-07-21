@@ -100,6 +100,80 @@ RenderPassReflection ReSTIR_FG_Lite::reflect(const CompileData& compileData)
 }
 
 void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
+    bool changed = false;
+
+    if (auto group = widget.group("Photon Options"))
+    {
+        if (mUseDynamicPhotonDispatchCount)
+        {
+            group.text("Dispatched Photons: " + std::to_string(mNumDispatchedPhotons));
+        }
+        else
+        {
+            group.var("Dispatched Photons", mNumDispatchedPhotons, 1024u, 67108864u, 1u); //Max is 8192^2
+        }
+        
+        group.text("Global Photons: " + std::to_string(mCurrentPhotonCount[0]) + " / " + std::to_string(mNumMaxPhotons[0]));
+        group.text("Caustic photons: " + std::to_string(mCurrentPhotonCount[1]) + " / " + std::to_string(mNumMaxPhotons[1]));
+        group.text("Photon Buffer Size:");
+        group.indent(10.f);
+        group.var(" ##MaxPhotonUI", mNumMaxPhotonsUI, 100u, 100000000u, 100);
+        group.tooltip("First -> Global, Second -> Caustic");
+        mChangePhotonLightBufferSize = group.button("Apply", true);
+        group.indent(-10.f);
+        if (auto groupGen = group.group("Generation Settings", true))
+        {
+            if (mMixedLights)
+            {
+                changed |= groupGen.var("Mixed Analytic Ratio", mPhotonAnalyticRatio, 0.f, 1.f, 0.01f);
+                groupGen.tooltip("Analytic photon distribution ratio in a mixed light case. E.g. 0.3 -> 30% analytic, 70% emissive");
+            }
+
+            changed |= groupGen.checkbox("Enable dynamic photon dispatch", mUseDynamicPhotonDispatchCount);
+            groupGen.tooltip("Changed the number of dispatched photons dynamically. Tries to fill the photon buffer");
+            if (mUseDynamicPhotonDispatchCount)
+            {
+                if (auto groupDynChange = groupGen.group("DynamicDispatchOptions"))
+                {
+                    changed |= groupDynChange.var("Max dispatched", mPhotonDynamicDispatchMax, 1024u, 67108864u);
+                    changed |= groupDynChange.var("Guard Percentage", mPhotonDynamicGuardPercentage, 0.0f, 1.f, 0.001f);
+                    groupDynChange.tooltip(
+                        "If current fill rate is under PhotonBufferSize * (1-pGuard), the values are accepted. Reduces the changes "
+                        "every frame"
+                    );
+                    changed |= groupDynChange.var("Percentage Change", mPhotonDynamicChangePercentage, 0.01f, 10.f, 0.01f);
+                    groupDynChange.tooltip(
+                        "Increase/Decrease percentage from the Buffer Size. With current value a increase/decrease of :" +
+                        std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons[0]) + "is expected"
+                    );
+                }
+            }
+
+            changed |= groupGen.var("Light Store Probability", mGlobalPhotonRejection, 0.f, 1.f, 0.0001f);
+            group.tooltip("Probability a photon light is stored on diffuse hit. Flux is scaled up appropriately");
+
+            changed |= groupGen.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
+
+            groupGen.separator();
+        }
+        group.text("Photon Radius(Global / Caustic):");
+        group.indent(10.f);
+        group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
+        group.indent(-10.f);
+
+    }
+
+    if (auto group = widget.group("RTXDI"))
+    {
+        if (mpRTXDI)
+        {
+            mpRTXDI->renderUI(group);
+        }
+        else
+        {
+            group.text("Load a scene for RTXDI options");
+        }
+    }
 
 }
 
@@ -366,7 +440,7 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     for (uint32_t i = 0; i < 2; i++)
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPackedPhotonData"][i] = mpPhotonData[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
     }
     var["gPhotonCounter"] = mpPhotonCounter;
 
