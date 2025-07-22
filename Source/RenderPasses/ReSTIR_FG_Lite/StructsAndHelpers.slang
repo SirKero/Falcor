@@ -16,14 +16,6 @@ struct PhotonData {
         this._pad2 = 0;
         this._pad3 = 0;
     }
-    __init(float3 flux, float3 dir, float3 normalW) {
-        this.dir = dir;
-        this.normalW = normalW;
-        this.flux = flux;
-        this._pad1 = 0;
-        this._pad2 = 0;
-        this._pad3 = 0;
-    }
 }
 
 enum class PhotonType // : uint32_t
@@ -31,6 +23,20 @@ enum class PhotonType // : uint32_t
     Global = 0,
     Caustic = 1
 };
+
+struct Reservoir {
+    PackedHitInfo sample;   //HitSample
+    float wSum;             // W and wsum
+    uint c;                 // Confidence weight
+    uint2 _pad;
+
+    __init() {
+        sample = {};
+        wSum = 0;
+        c = 0;
+        _pad = uint2(0);
+    }
+}
 
 //Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)

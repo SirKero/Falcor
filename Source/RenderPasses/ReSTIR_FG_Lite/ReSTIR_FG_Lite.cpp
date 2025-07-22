@@ -280,6 +280,9 @@ void ReSTIR_FG_Lite::prepareLightingStructure(RenderContext* pRenderContext)
             mTracePhotonPass.pVars.reset();
         }
     }
+
+    if (mpEmissiveLightSampler)
+        mpEmissiveLightSampler->update(pRenderContext);
 }
 
 void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const RenderData& renderData)
@@ -293,6 +296,7 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
 
     if (mChangePhotonLightBufferSize)
     {
+        mNumMaxPhotons = mNumMaxPhotonsUI;
         mpPhotonAABB[0].reset();
         mpPhotonAABB[1].reset();
         mpPhotonData[0].reset();
@@ -322,7 +326,7 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
                 mpDevice, sizeof(float) * 12, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
-            mpPhotonData[i]->setName("PhotonAABB" + std::to_string(i));
+            mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
         }
     }
 
@@ -450,11 +454,11 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     {
         //Clear values after the counter
         std::vector<ref<Buffer>> aabbs = {mpPhotonAABB[0], mpPhotonAABB[1]};
-        mpPhotonAS->clearAABBBuffers(pRenderContext, aabbs, false, mpPhotonCounter);
+        mpPhotonAS->clearAABBBuffers(pRenderContext, aabbs, true, mpPhotonCounter);
 
         //Copy counter to CPU
         handlePhotonCounter(pRenderContext);
-
+        
         //Build acceleration structure
         uint2 currentPhotons = mFrameCount > 0 ? uint2(float2(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
         std::vector<uint64_t> photonBuildSize = {
@@ -511,6 +515,9 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 {
     FALCOR_PROFILE(pRenderContext, "InitialSamples");
 
+    //TODO remove when photons are properly handled by reservoirs
+    pRenderContext->clearUAV(renderData[kOutputColor]->asTexture()->getUAV().get(), float4(0));
+
     //Init Shader
     if (!mGenerateInitialSamplesPass.pProgram)
     {
@@ -555,12 +562,21 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    mpPhotonAS->bindTlas(var, "gPhotonAS");
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
+    }
 
     //Output
-
-
+    var["gOutColor"] = renderData[kOutputColor]->asTexture();
+    
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
+
+    // TODO remove when photons are properly handled by reservoirs
+    pRenderContext->uavBarrier(renderData[kOutputColor]->asTexture().get());
 }
 
 void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData)

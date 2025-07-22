@@ -14,7 +14,7 @@ cbuffer CB
 {
     uint gMaxBounces;   // Max number of bounces allowed
     uint gFrameCount;   // Frame count since scene was loaded.
-    uint2 gPhotonRadius;//Global/Caustic radius
+    float2 gPhotonRadius;//Global/Caustic radius
 
     uint gDispatchDimension;    //Dispatch dims (x,y identical) 
     float gGlobalRejectionProb; //Rejection Probability for global photons
@@ -185,7 +185,7 @@ void closestHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersec
 void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
-    uint2 dispatchDims = gDispatchDimension;
+    uint2 dispatchDims = uint2(gDispatchDimension);
     if (any(pixel >= dispatchDims))
         return;
 
@@ -222,8 +222,9 @@ void rayGen()
     }
 #endif
 
+    //pls.flux = float3(500) * M_PI;
     pls.flux /= dispatchDims.x * dispatchDims.y; // Division through all dipatched photons
-
+    
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
     ray.TMin = 0.0f;
@@ -235,7 +236,10 @@ void rayGen()
     float3 photonStartFlux = pls.flux;
     float3 thp = float3(1.0); //Throughput
 
-    PhotonData photon = PhotonData(photonStartFlux, ray.Direction, pls.normal);
+    PhotonData photon = PhotonData();
+    photon.flux = photonStartFlux;
+    photon.dir = ray.Direction;
+    photon.normalW = pls.normal;
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {
@@ -268,7 +272,9 @@ void rayGen()
                 uint photonTypeIdx = (uint)photonType;
                 uint photonInsertIndex = 0;
                 InterlockedAdd(gPhotonCounter[photonTypeIdx], 1u, photonInsertIndex);
-                if (photonInsertIndex <= kPhotonBufferSize[photonTypeIdx]) {
+                if (photonInsertIndex <= kPhotonBufferSize[photonTypeIdx])
+                {
+                    // photon.flux = float3(1, 0, 0);
                     AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
                     gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
                     gPhotonData[photonTypeIdx][photonInsertIndex] = photon;

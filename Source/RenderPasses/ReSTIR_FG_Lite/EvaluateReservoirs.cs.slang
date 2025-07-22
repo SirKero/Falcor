@@ -42,7 +42,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
         // Add Emissive
         outColor += bsdfProperties.emission;
-        outColor += bsdfProperties.diffuseReflectionAlbedo;
+        //outColor += bsdfProperties.diffuseReflectionAlbedo;
 
         //Eval ReSTIR DI
         float distance = 1.f;
@@ -58,7 +58,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
             if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
                 rtxdiValid = false;
         }
-        if (true)
+        if (rtxdiValid)
         {
             outColor += bsdf.eval(sd, dir, sg) * Li;
         }
@@ -66,5 +66,5 @@ void main(uint2 pixel: SV_DispatchThreadID)
         outColor = gScene.envMap.eval(viewDir);
     }
 
-    gOutColor[pixel] = float4(outColor, 1.0);
+    gOutColor[pixel] += float4(outColor, 1.0);
 }
