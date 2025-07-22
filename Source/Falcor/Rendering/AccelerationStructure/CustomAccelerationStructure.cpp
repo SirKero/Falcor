@@ -205,6 +205,7 @@ namespace Falcor
 
         for (uint i = 0; i < mNumberBlas; i++)
         {
+            mBlasData[i].blasByteSize = align_to((uint64_t)kAccelerationStructureByteAlignment, mBlasData[i].blasByteSize);
             mBlas[i] = Buffer::create(mpDevice, mBlasData[i].blasByteSize, Buffer::BindFlags::AccelerationStructure);
             mBlas[i]->setName("CustomAS::BlasBuffer" + std::to_string(i));
 
@@ -316,9 +317,13 @@ namespace Falcor
             asDesc.inputs = blas.buildInputs;
             asDesc.scratchData = mBlasScratch->getGpuAddress();
             asDesc.dest = mBlasObjects[i].get();
+            
 
             if (mAccelerationStructureWasBuild && (mUpdateMode == UpdateMode::BLASOnly || (mUpdateMode == UpdateMode::All)))
+            {
+                asDesc.source = asDesc.dest;
                 asDesc.inputs.flags |= RtAccelerationStructureBuildFlags::PerformUpdate;
+            }
 
             // Build the acceleration structure
             pRenderContext->buildAccelerationStructure(asDesc, 0, nullptr);
@@ -337,10 +342,14 @@ namespace Falcor
         asDesc.inputs.instanceDescs = mTlas.pInstanceDescs->getGpuAddress();
         asDesc.scratchData = mTlasScratch->getGpuAddress();
         asDesc.dest = mTlas.pTlasObject.get();
+        
 
         if (mAccelerationStructureWasBuild && (mUpdateMode == UpdateMode::TLASOnly || (mUpdateMode == UpdateMode::All)))
+        {
+            asDesc.source = asDesc.dest;
             asDesc.inputs.flags |= RtAccelerationStructureBuildFlags::PerformUpdate;
-
+        }
+            
         // Create TLAS
         if (mTlas.pInstanceDescs)
         {
@@ -360,7 +369,6 @@ namespace Falcor
         clearAABBBuffers(pRenderContext, pAABBs, clearToNaN, pCounterBuffer);
     }
 
-    //TODO add a gpu counter or cpu counter input to only clear a selected range 
     void CustomAccelerationStructure::clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN, ref<Buffer> pCounterBuffer) {
         FALCOR_PROFILE(pRenderContext, "ClearAccelAABBBuffers");
 
@@ -401,6 +409,7 @@ namespace Falcor
             var["gAABB"] = pAABB;
 
             mpClearAABBsPass->execute(pRenderContext, dispatchSize);
+            pRenderContext->resourceBarrier(pAABB.get(), Resource::State::ShaderResource);
         }
     }
 

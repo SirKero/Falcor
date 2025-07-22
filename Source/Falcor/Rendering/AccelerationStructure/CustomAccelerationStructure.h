@@ -84,6 +84,11 @@ public:
     void clearAABBBuffers(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer, bool clearToNaN = true, ref<Buffer> pCounterBuffer = nullptr);
     void clearAABBBuffers(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers, bool clearToNaN = true, ref<Buffer> pCounterBuffer = nullptr);
 
+    /* Inserts a barrier and transitions buffer to the correct state
+    */
+    void AABBBufferBarrier(RenderContext* pRenderContext, const ref<Buffer> pAABBBuffer);
+    void AABBBufferBarrier(RenderContext* pRenderContext, const std::vector<ref<Buffer>>& pAABBBuffers);
+
 private:
     /*  * Creates the acceleration structure.
      * Has to be called at least once to create the AS. buildAccelerationStructure(...) needs to be called after that to build/update the AS
