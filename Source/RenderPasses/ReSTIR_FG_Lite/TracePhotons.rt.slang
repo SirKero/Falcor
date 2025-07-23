@@ -222,7 +222,6 @@ void rayGen()
     }
 #endif
 
-    //pls.flux = float3(500) * M_PI;
     pls.flux /= dispatchDims.x * dispatchDims.y; // Division through all dipatched photons
     
     //Prepare the rest of the ray

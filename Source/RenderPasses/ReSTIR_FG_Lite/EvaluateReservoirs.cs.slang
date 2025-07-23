@@ -7,6 +7,7 @@ import Rendering.RTXDI.RTXDI;
 import StructsAndHelpers;
 
 Texture2D<PackedHitInfo> gVBuffer;
+StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 
 RWTexture2D<float4> gOutColor;
 
@@ -19,6 +20,33 @@ cbuffer CB
 static const float kRayEpsilon = 0.98f;
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 
+float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
+    float3 outColor = float3(0);
+    ReservoirFG fgReservoir = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
+    if (!fgReservoir.isValid())
+        return outColor;
+
+    // Get surface
+    HitInfo hitInfo = HitInfo(fgReservoir.sampleSurface);
+
+    let lod = ExplicitLodTextureSampler(0.f);
+    uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+    ShadingData sd = loadShadingData(hitInfo, -fgReservoir.sampleView, lod);
+    let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+    let bsdfProperties = mi.getProperties(sd);
+
+    float3 toSurface = sd.posW - fgReservoir.sampleData.posW;
+    float distance = length(toSurface);
+    toSurface /= distance;
+    float jacobianDeterminant = dot(fgReservoir.sampleData.normal, toSurface) / (distance * distance);
+    jacobianDeterminant /= fgReservoir.jacobianDeterminant;
+    outColor = fgReservoir.sampleData.radianceOut * fgReservoir.sampleData.thp * jacobianDeterminant;
+    outColor *= fgReservoir.wSum;
+    //TODO visibility ray
+    outColor *= mi.eval(sd, -toSurface, sg);
+
+    return outColor;
+}
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
@@ -37,8 +65,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
         // Get Material properties
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
-        let bsdf = gScene.materials.getMaterialInstance(sd, lod, hints);
-        let bsdfProperties = bsdf.getProperties(sd);
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        let bsdfProperties = mi.getProperties(sd);
 
         // Add Emissive
         outColor += bsdfProperties.emission;
@@ -60,8 +88,11 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
         if (rtxdiValid)
         {
-            outColor += bsdf.eval(sd, dir, sg) * Li;
+            outColor += mi.eval(sd, dir, sg) * Li;
         }
+
+        outColor += evaluateFinalGatherReservoir(pixel, sg);
+
     }else{
         outColor = gScene.envMap.eval(viewDir);
     }

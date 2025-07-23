@@ -324,11 +324,6 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
         //Flag will be reset in preparePhotonAccelerationStructure()
     }
 
-    if (mResetScreenTex)
-    {
-        mResetScreenTex = false;
-    }
-
     //Buffers that exist two times
     for (uint i = 0; i < 2; i++)
     {
@@ -348,6 +343,14 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
         }
+        if (!mpFinalGatherReservoir[i] || mResetScreenTex)
+        {
+            mpFinalGatherReservoir[i] = Buffer::createStructured(
+                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpFinalGatherReservoir[i]->setName("FinalGatherReservoir");
+        }
     }
 
     if (!mpPhotonCounter)
@@ -362,6 +365,8 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
         );
         mpPhotonCounterCPU->setName("PhotonCounterCPU");
     }
+
+    mResetScreenTex = false;
 }
 
 void ReSTIR_FG_Lite::preparePhotonAccelerationStructure()
@@ -584,6 +589,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     mpPhotonAS->bindTlas(var, "gPhotonAS");
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     for (uint32_t i = 0; i < 2; i++)
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
@@ -647,6 +653,7 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
 
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
 
     //Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();

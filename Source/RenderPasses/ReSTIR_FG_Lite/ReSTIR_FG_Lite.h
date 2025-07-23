@@ -145,7 +145,7 @@ private:
     ref<Buffer> mpPhotonData[2]; // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter; // Photon Counter
     ref<Buffer> mpPhotonCounterCPU; // CPU copy of counter for readback
-
+    ref<Buffer> mpFinalGatherReservoir[2];  //Reservoir for the Final Gather sample
 
     //
     // Render Passes/Programms

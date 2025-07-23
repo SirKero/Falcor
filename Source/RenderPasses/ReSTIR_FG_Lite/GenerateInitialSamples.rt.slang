@@ -12,6 +12,7 @@ StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
 RaytracingAccelerationStructure gPhotonAS;
 
+RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWTexture2D<float4> gOutColor;
 
 static const float kPhotonCollectTMax = 1e-7;
@@ -80,12 +81,12 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
             continue;
 
         float3 bsdf = mi.eval(sd, -photonData.dir, sg); //;
-        collectedRadiance += max(0, (photonData.flux * bsdf) / (radius * radius * NdotL)); //NdotL needs to be taken out of the bsdf for Photon Mapping
+        collectedRadiance += max(0, (photonData.flux * bsdf) / (M_PI * radius * radius * NdotL)); //NdotL needs to be taken out of the bsdf for Photon Mapping
     }
     return collectedRadiance;
 }
 
-bool generateFGSampleRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout float3 thp, inout RayDesc ray) {
+bool generateFGSampleRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout float3 thp, inout float pdf, inout RayDesc ray) {
     // Photon Bounce for next iteration
     BSDFSample bsdfSample;
     bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
@@ -93,20 +94,23 @@ bool generateFGSampleRay(ShadingData sd, IMaterialInstance mi, inout SampleGener
     ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
     ray.Direction = bsdfSample.wo;
     thp *= bsdfSample.weight;
+    pdf = bsdfSample.pdf;
 
     return validSample;
 }
 
-void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough , inout float3 thp, inout bool valid, inout float3 FGLi, inout float3 causticLi) {
+void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inout float3 thp, inout float pdf, inout bool valid, inout ReservoirFG reservoirFG, inout float3 causticLi) {
     RayPayload rayPayload = RayPayload();
     uint pathLength = 0;
     bool collectCaustics = !prevHitIsRough;
+    float3 prevThp = float3(1); //Needed for reservoir
     for (pathLength; pathLength < gFGRayMaxPathLength && valid; pathLength++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
         // Get surface hit info
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         if (!hit.isValid()) {
             valid = false;
+            //TODO add valid reservoir if envMap was hit
             return;
         }
 
@@ -125,14 +129,32 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough , ino
             causticLi *= thp;
             collectCaustics = false;
         }
-        
+
+        //Check if this is a valid final gather surface
         if (hitIsRough && prevHitIsRough) {
-            float3 photonRad = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
-            FGLi = (photonRad + bsdfProperties.emission) * thp;
+            //Collect photons and fill reservoir
+            reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
+            reservoirFG.sampleData.radianceOut += bsdfProperties.emission;
+            reservoirFG.sampleData.thp = prevThp;
+            reservoirFG.sampleData.posW = sd.posW;
+            reservoirFG.sampleData.normal = bsdfProperties.guideNormal; // Face normal?
+            reservoirFG.wSum = 1.0 / pdf;
+            reservoirFG.c = 1;
+            float distanceToSample = distance(ray.Origin, sd.posW);
+            reservoirFG.jacobianDeterminant = dot(bsdfProperties.guideNormal, sd.V) / (distanceToSample * distanceToSample);
+
             return;
         }
-        //Else
-        valid = generateFGSampleRay(sd, mi, sg, thp, ray);
+        // Else
+
+        //Update reservoir
+        reservoirFG.sampleSurface = hit.getData(); // Update surface
+        reservoirFG.pathLength++;                  // Increase path length
+        reservoirFG.sampleView = -ray.Direction;
+        prevThp = thp;
+
+        //Next ray
+        valid = generateFGSampleRay(sd, mi, sg, thp, pdf, ray);
         prevHitIsRough = hitIsRough;
     }
     valid = false;
@@ -179,6 +201,7 @@ void rayGen()
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     float3 viewDir = -gScene.camera.computeRayPinhole(pixel, dispatchDims).dir;
     float3 outColor = float3(0);
+    ReservoirFG finalGatherReservoir = ReservoirFG();
 
     if (hitInfo.isValid()) {
         //Set RTXDI data
@@ -199,22 +222,27 @@ void rayGen()
         if (hitIsRough)
             causticRadiance = collectPhotons(sd, mi, bsdfProperties.guideNormal, 2, sg);
 
+        //Store surface
+        finalGatherReservoir.sampleSurface = hitInfo.getData();
+        finalGatherReservoir.sampleView = viewDir;
+
         // Distribute a Final Gather ray
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
         float3 fgThp = float3(1.0);
-        bool validFGRay = generateFGSampleRay(sd, mi, sg, fgThp, ray);
+        float fgPdf = 0;
+        bool validFGRay = generateFGSampleRay(sd, mi, sg, fgThp, fgPdf, ray);
 
-        float3 fgOut = float3(0);
-        traceFGRay(ray, sg, hitIsRough, fgThp, validFGRay, fgOut, causticRadiance);
+        traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticRadiance);
 
-        outColor += causticRadiance + fgOut;
+        outColor += causticRadiance;
 
     } else {
         // Set invalid RTXDI data
         gRTXDI.setInvalidSurfaceData(pixel);
     }
 
+    gFinalGatherReservoir[index2Dto1D(pixel, dispatchDims.x)] = finalGatherReservoir;
     gOutColor[pixel] += float4(outColor, 0.0);
 }
