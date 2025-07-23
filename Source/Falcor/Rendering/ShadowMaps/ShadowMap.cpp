@@ -1047,7 +1047,7 @@ bool ShadowMap::rasterSpotLight(uint index, ref<Light> light, RenderContext* pRe
     bool dynamicMode = (mShadowMapUpdateMode != SMUpdateMode::Static) || mClearDynamicSM;
 
     bool lightMoved = is_set(changes, Light::Changes::Position) || is_set(changes, Light::Changes::Direction);
-    bool updateVP = is_set(changes, Light::Changes::Active) || lightMoved || mUpdateShadowMap; 
+    bool updateVP = is_set(changes, Light::Changes::Active) || lightMoved || mUpdateShadowMap || mpJitterSampleGenerator; 
 
     if (!light->isActive())
     {
@@ -1063,6 +1063,7 @@ bool ShadowMap::rasterSpotLight(uint index, ref<Light> light, RenderContext* pRe
         const float3 up = abs(lightData.dirW.y) == 1 ? float3(0, 0, 1) : float3(0, 1, 0);
         float4x4 viewMat = math::matrixFromLookAt(lightData.posW, lightTarget, up);
         float4x4 projMat = math::perspective(lightData.openingAngle * 2, 1.f, mNear, mFar);
+        addJitterToProjection(projMat, uint2(mShadowMapSize));
         mSpotDirViewProjMat[index] = math::mul(projMat, viewMat);
 
         if (mUseFrustumCulling)
@@ -1567,6 +1568,9 @@ bool ShadowMap::update(RenderContext* pRenderContext)
     //Handle Blur
     prepareGaussianBlur();
 
+    //Handle Jitter
+    prepareJitter();
+
     // Loop over all lights
     const std::vector<ref<Light>>& lights = mpScene->getLights();
 
@@ -1741,6 +1745,19 @@ bool ShadowMap::renderUILeakTracing(Gui::Widgets& widget, bool leakTracingEnable
             widget.checkbox("Render every frame", mRerenderStatic);
             widget.tooltip("Rerenders the shadow map every frame");
         }
+
+        //Jitter
+        bool jitterChanged = widget.dropdown("Shadow Map Jitter Pattern", mJitterPattern);
+        widget.tooltip("Sets the jitter pattern for the shadow map");
+        if (mJitterPattern != ShadowMapJitterPattern::None)
+        {
+            jitterChanged |= widget.var("Jitter Sample Count", mJitterCount, 1u, 256u, 1u);
+        }
+        if (jitterChanged)
+        {
+            mpJitterSampleGenerator.reset();
+        }
+
         group.separator();
     }
 
@@ -2048,6 +2065,17 @@ bool ShadowMap::renderUI(Gui::Widgets& widget)
     {
         widget.checkbox("Render every frame", mRerenderStatic);
         widget.tooltip("Rerenders the shadow map every frame");
+    }
+
+    bool jitterChanged = widget.dropdown("Shadow Map Jitter Pattern", mJitterPattern);
+    widget.tooltip("Sets the jitter pattern for the shadow map");
+    if (mJitterPattern != ShadowMapJitterPattern::None)
+    {
+        jitterChanged |= widget.var("Jitter Sample Count", mJitterCount, 1u, 256u, 1u);
+    }
+    if (jitterChanged)
+    {
+        mpJitterSampleGenerator.reset();
     }
 
     static uint3 resolution = uint3(mShadowMapSize, mShadowMapSizeCube, mShadowMapSizeCascaded);
@@ -2399,6 +2427,47 @@ inline void ShadowMap::handleOpaqueCullingRaster(RasterizerState::MeshRenderMode
         renderMode |= RasterizerState::MeshRenderMode::SkipOpaque;
     if (mOpaqueCullMode == OpaqueCullMode::CullNonOpaque)
         renderMode |= RasterizerState::MeshRenderMode::SkipNonOpaque;
+}
+
+void ShadowMap::prepareJitter() {
+    //Create Jitter pattern generator if the pattern is not none
+    if (!mpJitterSampleGenerator && mJitterPattern != ShadowMapJitterPattern::None)
+    {
+        switch (mJitterPattern)
+        {
+        case ShadowMapJitterPattern::DirectX:
+            mpJitterSampleGenerator = DxSamplePattern::create(mJitterCount);
+            break;
+        case ShadowMapJitterPattern::Halton:
+            mpJitterSampleGenerator = HaltonSamplePattern::create(mJitterCount);
+            break;
+        case ShadowMapJitterPattern::Stratified:
+            mpJitterSampleGenerator = StratifiedSamplePattern::create(mJitterCount);
+            break; 
+        }
+
+        if (mpJitterSampleGenerator)
+            mJitterCount = mpJitterSampleGenerator->getSampleCount();
+    }
+
+    //Destroy the Jitter sample generator if pattern is none
+    if (mpJitterSampleGenerator && mJitterPattern == ShadowMapJitterPattern::None)
+        mpJitterSampleGenerator.reset();
+
+    if (mpJitterSampleGenerator)
+    {
+        mJitter = mpJitterSampleGenerator->next();
+    }
+    else
+    {
+        mJitter = float2(0);
+    }
+}
+
+void ShadowMap::addJitterToProjection(float4x4& projectionMat, uint2 smRes) {
+    float2 jitter = (mJitter * 2.f) / float2(smRes);
+    float4x4 jitterMat = math::matrixFromTranslation(float3(jitter.x, jitter.y, 0.0f));
+    projectionMat = math::mul(jitterMat, projectionMat);
 }
 
 }

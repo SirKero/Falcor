@@ -123,6 +123,22 @@ public:
         CullNonOpaque = 2u
     };
 
+    enum class ShadowMapJitterPattern : uint32_t
+    {
+        None = 0u,
+        DirectX = 1u,
+        Halton = 2u,
+        Stratified = 3u
+    };
+
+     FALCOR_ENUM_INFO(ShadowMapJitterPattern,
+    {
+        {ShadowMapJitterPattern::None, "None"},
+        {ShadowMapJitterPattern::DirectX, "DirectX"},
+        {ShadowMapJitterPattern::Halton, "Halton"},
+        {ShadowMapJitterPattern::Stratified, "Stratified"},
+    });
+
 private:
     const float kEVSM_ExponentialConstantMax = 42.f;    //Max exponential constant for Exponential Variance Shadow Maps
     const float kESM_ExponentialConstantMax = 84.f;     //Max exponential constant for Exponential Shadow Maps
@@ -162,9 +178,11 @@ private:
     void prepareRasterProgramms();
     void prepareProgramms();
     void prepareGaussianBlur();
+    void prepareJitter();
     void setSMShaderVars(ShaderVar& var, ShaderParameters& params);
     void updateRasterizerStates();
     void updateSMVPBuffer(RenderContext* pRenderContext, VPMatrixBuffer& vpBuffer, std::vector<float4x4>& vpMatrix);
+    void addJitterToProjection(float4x4& projectionMat, uint2 smRes);
 
     DefineList getDefinesShadowMapGenPass(bool addAlphaModeDefines = true) const;
 
@@ -194,6 +212,7 @@ private:
     //Internal Refs
     ref<Device> mpDevice;                               ///< Graphics device
     ref<Scene> mpScene;                                 ///< Scene                       
+    ref<CPUSampleGenerator> mpJitterSampleGenerator;    ///< Sample generator for shadow map jitter
 
     //FBOs
     ref<Fbo> mpFbo;
@@ -236,6 +255,10 @@ private:
 
     bool mUseShadowMipMaps = false; ///< Uses mip maps for applyable shadow maps
     float mShadowMipBias = 1.0f;    ///< Bias used in mips (cos theta)^bias
+
+    ShadowMapJitterPattern mJitterPattern = ShadowMapJitterPattern::None;
+    uint mJitterCount = 32;
+    float2 mJitter = float2(0);
 
     //Cascaded
     CascadedFrustumMode mCascadedFrustumMode = CascadedFrustumMode::AutomaticNvidia;
@@ -365,4 +388,5 @@ private:
     RasterizerPass mShadowMapCascadedRasterPass;
 };
 
+FALCOR_ENUM_REGISTER(ShadowMap::ShadowMapJitterPattern);
 }
