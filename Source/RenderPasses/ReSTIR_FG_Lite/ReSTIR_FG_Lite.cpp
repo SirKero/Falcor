@@ -175,6 +175,26 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
         }
     }
 
+    if (auto group = widget.group("ReSTIR FG"))
+    {
+        group.var("Final Gather Path Length", mFGRayMaxPathLength, 1u, 64u, 1u);
+        group.tooltip(
+            "Path length for a final gather sample. A final gather sample stops when it encounters a rough enough surface (see Material "
+            "Options)"
+        );
+    }
+
+    if (auto group = widget.group("Material Options"))
+    {
+        group.checkbox("Use Lambertian Diffuse BRDF", mUseLambertianDiffuse);
+        group.tooltip("BRDF used by ReSTIR PT and Suffix ReSTIR prototype");
+
+        group.text("Diffuse Classification Roughness Threshold:");
+        group.tooltip("Surfaces with roughness above this threshold are considered diffuse");
+        group.indent(10.f);
+        group.var("##RoughnessThreshold", mSpecularRoughnessThreshold, 0.f, 1.f, 0.001f);
+        group.indent(-10.f);
+    }
 }
 
 void ReSTIR_FG_Lite::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) {
@@ -545,7 +565,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 
     //Defines
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
-
+    mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
 
     //Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -556,6 +576,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
 
     //RTXDI Resources
     mpRTXDI->setShaderData(var);

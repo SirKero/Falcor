@@ -25,16 +25,18 @@ enum class PhotonType // : uint32_t
 };
 
 struct Reservoir {
-    PackedHitInfo sample;   //HitSample
-    float wSum;             // W and wsum
-    uint c;                 // Confidence weight
-    uint2 _pad;
+    PackedHitInfo sampleSurface;    //HitSample
+    float wSum;                     // W and wsum
+    uint c;                         // Confidence weight
+    uint pathLength;                //Path Length
+    uint _pad;
 
     __init() {
-        sample = {};
+        sampleSurface = {};
         wSum = 0;
         c = 0;
-        _pad = uint2(0);
+        pathLength = 0;
+        _pad = uint(0);
     }
 }
 

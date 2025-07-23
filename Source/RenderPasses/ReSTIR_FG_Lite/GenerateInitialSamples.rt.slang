@@ -19,9 +19,11 @@ static const float kPhotonCollectTMax = 1e-7;
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
+    uint gFGRayMaxPathLength; //Max path length for a Final Gather sample
 }
 
 static const bool kAlphaTest = true;
+static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 
 struct RayPayload
 {
@@ -29,21 +31,9 @@ struct RayPayload
 
     /** Create ray payload with default parameters.
      */
-    static RayPayload create()
+    __init()
     {
-        RayPayload d;
-        d.packedHitInfo = {};
-        return d;
-    }
-}
-
-struct PhotonRadiance {
-    float3 globalPhotonRadiance;
-    float3 causticPhotonRadiance;
-
-    __init() {
-        globalPhotonRadiance = float3(0);
-        causticPhotonRadiance = float3(0);
+        this.packedHitInfo = {};
     }
 }
 
@@ -58,7 +48,8 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
     return false;
 }
 
-void collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N , inout SampleGenerator sg, inout PhotonRadiance photonRad) {
+float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
+    float3 collectedRadiance = float3(0);
     //Prepare ray
     RayDesc ray;
     ray.Origin = sd.posW;
@@ -67,8 +58,8 @@ void collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N , inout Sampl
     ray.TMax = kPhotonCollectTMax;
 
     RayQuery<RAY_FLAG_NONE> rayQuery;
-    
-    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, 0xFF, ray);
+
+    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
     while (rayQuery.Proceed()) {
         
         if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
@@ -89,16 +80,62 @@ void collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N , inout Sampl
             continue;
 
         float3 bsdf = mi.eval(sd, -photonData.dir, sg); //;
-        float3 radiance = max(0, (photonData.flux * bsdf) / (radius * radius * NdotL)); //NdotL needs to be taken out of the bsdf for Photon Mapping
-        //float3 radiance = float3(1,0,0);
-        //float3 radiance = photonData.flux;
-        if (instanceIdx == (uint)PhotonType::Global)
-            photonRad.globalPhotonRadiance += radiance;
-        else
-            photonRad.causticPhotonRadiance += radiance;
-        
+        collectedRadiance += max(0, (photonData.flux * bsdf) / (radius * radius * NdotL)); //NdotL needs to be taken out of the bsdf for Photon Mapping
     }
-    
+    return collectedRadiance;
+}
+
+bool generateFGSampleRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout float3 thp, inout RayDesc ray) {
+    // Photon Bounce for next iteration
+    BSDFSample bsdfSample;
+    bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+    bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+    ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
+    ray.Direction = bsdfSample.wo;
+    thp *= bsdfSample.weight;
+
+    return validSample;
+}
+
+void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough , inout float3 thp, inout bool valid, inout float3 FGLi, inout float3 causticLi) {
+    RayPayload rayPayload = RayPayload();
+    uint pathLength = 0;
+    bool collectCaustics = !prevHitIsRough;
+    for (pathLength; pathLength < gFGRayMaxPathLength && valid; pathLength++) {
+        TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
+        // Get surface hit info
+        HitInfo hit = HitInfo(rayPayload.packedHitInfo);
+        if (!hit.isValid()) {
+            valid = false;
+            return;
+        }
+
+        // Get shading infos
+        let lod = ExplicitLodTextureSampler(0);
+
+        // Get Material properties
+        uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        ShadingData sd = loadShadingData(hit, ray.Direction, lod);
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        let bsdfProperties = mi.getProperties(sd);
+        bool hitIsRough = bsdfProperties.roughness > kRoughnessThreshold;
+
+        if (collectCaustics && hitIsRough) {
+            causticLi = collectPhotons(sd, mi, bsdfProperties.guideNormal, 2, sg);
+            causticLi *= thp;
+            collectCaustics = false;
+        }
+        
+        if (hitIsRough && prevHitIsRough) {
+            float3 photonRad = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
+            FGLi = (photonRad + bsdfProperties.emission) * thp;
+            return;
+        }
+        //Else
+        valid = generateFGSampleRay(sd, mi, sg, thp, ray);
+        prevHitIsRough = hitIsRough;
+    }
+    valid = false;
 }
 
 [shader("miss")]
@@ -145,7 +182,7 @@ void rayGen()
 
     if (hitInfo.isValid()) {
         //Set RTXDI data
-        let lod = ExplicitLodTextureSampler(0.f);
+        let lod = ExplicitLodTextureSampler(0);
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 4 + 1);
 
         ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
@@ -156,11 +193,23 @@ void rayGen()
 
         gRTXDI.setSurfaceData(pixel, sd.computeNewRayOrigin(), bsdfProperties.guideNormal, bsdfProperties.diffuseReflectionAlbedo, bsdfProperties.specularReflectance, bsdfProperties.roughness, distanceToSurface);
 
-        // Collect photons
-        PhotonRadiance photonRadiance = PhotonRadiance();
-        collectPhotons(sd, mi, bsdfProperties.guideNormal, sg, photonRadiance);
+        bool hitIsRough = bsdfProperties.roughness > kRoughnessThreshold;
+        // Collect Caustic photons
+        float3 causticRadiance = float3(0);
+        if (hitIsRough)
+            causticRadiance = collectPhotons(sd, mi, bsdfProperties.guideNormal, 2, sg);
 
-        outColor += photonRadiance.globalPhotonRadiance + photonRadiance.causticPhotonRadiance;
+        // Distribute a Final Gather ray
+        RayDesc ray = {};
+        ray.TMin = 0;
+        ray.TMax = FLT_MAX;
+        float3 fgThp = float3(1.0);
+        bool validFGRay = generateFGSampleRay(sd, mi, sg, fgThp, ray);
+
+        float3 fgOut = float3(0);
+        traceFGRay(ray, sg, hitIsRough, fgThp, validFGRay, fgOut, causticRadiance);
+
+        outColor += causticRadiance + fgOut;
 
     } else {
         // Set invalid RTXDI data

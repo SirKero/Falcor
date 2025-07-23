@@ -111,6 +111,7 @@ private:
     bool mMixedLights = false;         // True if analytic and emissive lights are in the scene
 
     //ReSTIR-FG Reservoirs
+    uint mFGRayMaxPathLength = 10;        //Max path length for the final gather ray
     bool mRebuildReservoirBuffer = false; // Rebuild the reservoir buffer
     bool mClearReservoir = true;          // Clears both reservoirs
     uint mConfidenceCap = 20;            //Maximum confidence allowed

@@ -250,13 +250,13 @@ void rayGen()
             return;
 
         // Get shading infos
-        let lod = ExplicitLodTextureSampler(0.f);
+        let lod = ExplicitLodTextureSampler(0);
 
         // Get Material properties
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
-        let bsdf = gScene.materials.getMaterialInstance(sd, lod, hints);
-        let bsdfProperties = bsdf.getProperties(sd);
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        let bsdfProperties = mi.getProperties(sd);
 
         // Store Photon
         photon.normalW = sd.faceN;
@@ -284,7 +284,7 @@ void rayGen()
 
         //Photon Bounce for next iteration
         BSDFSample bsdfSample;
-        bool validSample = bsdf.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+        bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
         if (!validSample)
             return;
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
