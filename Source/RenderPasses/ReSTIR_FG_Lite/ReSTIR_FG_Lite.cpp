@@ -182,6 +182,12 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
             "Path length for a final gather sample. A final gather sample stops when it encounters a rough enough surface (see Material "
             "Options)"
         );
+        group.checkbox("Enable Resampling", mUseResampling);
+        group.var("Confidence Cap", mConfidenceCap, 1u, UINT_MAX, 1u);
+        group.tooltip("Maximum confidence a reservoir can have");
+        group.var("Normal Rejection Threshold", mNormalThreshold, 0.f, 1.0f, 0.001f);
+        group.tooltip("Threshold of dot product between both reservoir face normals");
+        group.var("Sample Distance Threshold", mJacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
     }
 
     if (auto group = widget.group("Material Options"))
@@ -345,6 +351,7 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
         }
         if (!mpFinalGatherReservoir[i] || mResetScreenTex)
         {
+            mReservoirValid = false;
             mpFinalGatherReservoir[i] = Buffer::createStructured(
                 mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
@@ -605,11 +612,63 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 
     // TODO remove when photons are properly handled by reservoirs
     pRenderContext->uavBarrier(renderData[kOutputColor]->asTexture().get());
+
+    //Reservoir barrier
+    pRenderContext->uavBarrier(mpFinalGatherReservoir[mFrameCount % 2].get());
 }
 
 void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    FALCOR_PROFILE(pRenderContext, "Resampling");
+    // Create pass
+    if (!mpReservoirResamplingPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReservoirResamplingPass).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
 
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(mpRTXDI->getDefines());
+        defines.add(getMaterialDefines());
+
+        mpReservoirResamplingPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpReservoirResamplingPass);
+    mpReservoirResamplingPass->getProgram()->addDefines(getMaterialDefines());
+
+    //Return early if there is no previous reservoir
+    if ((!mCanResample) || !mUseResampling)
+    {
+        mCanResample = mUseResampling;
+        return;
+    }
+
+    // Set variables
+    auto var = mpReservoirResamplingPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gConfidenceLimit"] = mConfidenceCap;
+    var["CB"]["gSpatialRadius"] = mSamplingRadius;
+    var["CB"]["gNormalThreshold"] = mNormalThreshold;
+    var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
+
+    // Input
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount +1) % 2];
+    var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+
+    // Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpReservoirResamplingPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
 void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)

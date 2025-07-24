@@ -111,22 +111,25 @@ private:
     bool mMixedLights = false;         // True if analytic and emissive lights are in the scene
 
     //ReSTIR-FG Reservoirs
+    bool mUseResampling = true;           // If false, resampling is disabled
     uint mFGRayMaxPathLength = 10;        //Max path length for the final gather ray
     bool mRebuildReservoirBuffer = false; // Rebuild the reservoir buffer
     bool mClearReservoir = true;          // Clears both reservoirs
+    bool mCanResample = false;          //Resampling is only allowed if last iterations reservoir was created
     uint mConfidenceCap = 20;            //Maximum confidence allowed
     uint mSpatialSamples = 1;            // Number of spatial samples
     uint mDisocclusionBoostSamples = 2;  // Number of spatial samples if no temporal surface was found
     float mSamplingRadius = 20.f;        // Sampling radius in pixel
     float mRelativeDepthThreshold = 0.15f; // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;        // Cosine of maximum angle between both normals allowed
+    float mJacobianDistanceThreshold = 0.001f;  //Threshold for jacobian distances
 
     //Photon Distribution
     uint mPhotonMaxBounces = 10;  // Number of Photon bounces
     float mGlobalPhotonRejection = 0.3f; // Probability a global photon is stored
     uint mNumDispatchedPhotons = 2000000; // Number of Photons dispatched
     uint2 mNumMaxPhotons = uint2(400000, 300000); // Size of the photon buffer
-    uint2 mNumMaxPhotonsUI = mNumMaxPhotons; //For UI, as changing happes with a button
+    uint2 mNumMaxPhotonsUI = mNumMaxPhotons; //For UI, as changing happens with a button
     bool mChangePhotonLightBufferSize = true; //If buffer size has changed
     float mASBuildBufferPhotonOverestimate = 1.15f; //Guard percentage for AS building
     uint2 mCurrentPhotonCount = mNumMaxPhotons;

@@ -17,7 +17,6 @@ cbuffer CB
     uint2 gFrameDim;          // Frame Dimensions for camera dir
 }
 
-static const float kRayEpsilon = 0.98f;
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
@@ -33,16 +32,9 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
     ShadingData sd = loadShadingData(hitInfo, -fgReservoir.sampleData.sampleView, lod);
     let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
-    let bsdfProperties = mi.getProperties(sd);
 
-    float3 toSurface = sd.posW - fgReservoir.sampleData.posW;
-    float distance = length(toSurface);
-    toSurface /= distance;
-    float jacobianDeterminant = dot(fgReservoir.sampleData.normal, toSurface) / (distance * distance);
-    jacobianDeterminant /= fgReservoir.jacobianDeterminant;
-    outColor = fgReservoir.sampleData.radianceOut * fgReservoir.thp * jacobianDeterminant;
-    outColor *= fgReservoir.wSum;
-    outColor *= mi.eval(sd, -toSurface, sg);
+    outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
+    outColor *= fgReservoir.thp * fgReservoir.wSum;
 
     return outColor;
 }
@@ -72,18 +64,14 @@ void main(uint2 pixel: SV_DispatchThreadID)
         //outColor += bsdfProperties.diffuseReflectionAlbedo;
 
         //Eval ReSTIR DI
-        float distance = 1.f;
+        float dist = 1.f;
         float3 dir = {};
         float3 Li = {};
-        bool rtxdiValid = gRTXDI.getFinalSample(pixel, dir, distance, Li);
+        bool rtxdiValid = gRTXDI.getFinalSample(pixel, dir, dist, Li);
         
         if (rtxdiValid)
         {
-            // Create a DXR 1.1 query object to trace a ray (the <1> means use alpha testing)
-            SceneRayQuery<1> rayQuery;
-            const Ray ray = Ray(sd.computeNewRayOrigin(), dir, 0.f, distance * kRayEpsilon);
-            if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
-                rtxdiValid = false;
+            rtxdiValid = dispatchShadowRay(sd, dir, dist);
         }
         if (rtxdiValid)
         {
