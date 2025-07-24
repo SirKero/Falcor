@@ -571,6 +571,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //Defines
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mGenerateInitialSamplesPass.pProgram->addDefines(getMaterialDefines());
 
     //Program Vars
     if (!mGenerateInitialSamplesPass.pVars)

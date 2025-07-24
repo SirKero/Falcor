@@ -185,9 +185,7 @@ void closestHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersec
 void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
-    uint2 dispatchDims = uint2(gDispatchDimension);
-    if (any(pixel >= dispatchDims))
-        return;
+    uint2 dispatchDims = DispatchRaysDimensions().xy;
 
     const float invRejection = 1.f / gGlobalRejectionProb;
 
