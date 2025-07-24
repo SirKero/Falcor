@@ -111,7 +111,7 @@ bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
     return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
 }
 
-//Unbiased f(x) without jacobian determinant
+//Unbiased f(x) without jacobian determinant TODO seems that jacobian and visibility is not needed, as this is handled by MIS during resampling
 float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg) {
     float3 Li = float3(0);
 

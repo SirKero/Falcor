@@ -51,11 +51,15 @@ ReservoirFG combineReservoirsFG(ReservoirFG reservoir0, ShadingData sd0, BSDFPro
 
     float3 toSurfaceR1 = sd0.posW - reservoir1.sampleData.posW;
     float distToSurfaceR1 = length(toSurfaceR1);
-    if (reservoir1.isValid() && distToSurfaceR1 > gJacobianDistanceThreshold) {
+    bool jacobianThreshold = distToSurfaceR1 > gJacobianDistanceThreshold;
+    if (reservoir1.isValid() && jacobianThreshold) {
         m_1 = generalizedBalanceHeuristic(reservoir1, sd1, bsdf1, sd0, bsdf0, reservoir0.c);
         w_1 = m_1 * evaluateFinalGatherSampleApproximateUnbiased(reservoir1, sd1, bsdf1) * reservoir1.wSum;
     }
-    r.c += reservoir1.c;
+
+    //Increase confidence weight only if jacobian threshold was fulfilled or if the sample is not valid
+    if (jacobianThreshold || !reservoir1.isValid())
+        r.c += reservoir1.c;
 
     r.wSum += w_1;
 
@@ -128,8 +132,6 @@ void main(uint2 pixel: SV_DispatchThreadID)
     // Reservoirs are valid, resample
     if (combine)
         current = combineReservoirsFG(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg);
-    else
-        current.c += temporal.c;
 
     gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)] = current;
 }
