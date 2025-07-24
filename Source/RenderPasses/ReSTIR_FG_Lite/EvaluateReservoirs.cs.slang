@@ -31,7 +31,7 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
 
     let lod = ExplicitLodTextureSampler(0.f);
     uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-    ShadingData sd = loadShadingData(hitInfo, -fgReservoir.sampleView, lod);
+    ShadingData sd = loadShadingData(hitInfo, -fgReservoir.sampleData.sampleView, lod);
     let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
     let bsdfProperties = mi.getProperties(sd);
 
@@ -40,9 +40,8 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     toSurface /= distance;
     float jacobianDeterminant = dot(fgReservoir.sampleData.normal, toSurface) / (distance * distance);
     jacobianDeterminant /= fgReservoir.jacobianDeterminant;
-    outColor = fgReservoir.sampleData.radianceOut * fgReservoir.sampleData.thp * jacobianDeterminant;
+    outColor = fgReservoir.sampleData.radianceOut * fgReservoir.thp * jacobianDeterminant;
     outColor *= fgReservoir.wSum;
-    //TODO visibility ray
     outColor *= mi.eval(sd, -toSurface, sg);
 
     return outColor;

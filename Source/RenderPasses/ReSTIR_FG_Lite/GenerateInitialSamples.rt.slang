@@ -135,7 +135,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
             //Collect photons and fill reservoir
             reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
             reservoirFG.sampleData.radianceOut += bsdfProperties.emission;
-            reservoirFG.sampleData.thp = prevThp;
+            reservoirFG.thp = prevThp;
             reservoirFG.sampleData.posW = sd.posW;
             reservoirFG.sampleData.normal = bsdfProperties.guideNormal; // Face normal?
             reservoirFG.wSum = 1.0 / pdf;
@@ -150,7 +150,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         //Update reservoir
         reservoirFG.sampleSurface = hit.getData(); // Update surface
         reservoirFG.pathLength++;                  // Increase path length
-        reservoirFG.sampleView = -ray.Direction;
+        reservoirFG.sampleData.sampleView = -ray.Direction;
         prevThp = thp;
 
         //Next ray
@@ -224,7 +224,7 @@ void rayGen()
 
         //Store surface
         finalGatherReservoir.sampleSurface = hitInfo.getData();
-        finalGatherReservoir.sampleView = viewDir;
+        finalGatherReservoir.sampleData.sampleView = viewDir;
 
         // Distribute a Final Gather ray
         RayDesc ray = {};

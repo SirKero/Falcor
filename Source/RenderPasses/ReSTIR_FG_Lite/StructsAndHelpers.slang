@@ -26,11 +26,11 @@ enum class PhotonType // : uint32_t
 
 //Data for the FG sample 64B
 struct FGSampleData {
-    float3 posW;
+    float3 posW;        //Position
     float normalX;
-    float3 radianceOut;
+    float3 radianceOut; //Radiance
     float normalY;
-    float3 thp;
+    float3 sampleView; //Incoming View
     float normalZ;
 
     __init() {
@@ -39,7 +39,7 @@ struct FGSampleData {
         normalY = 1;
         normalZ = 0;
         radianceOut = float3(0);
-        thp = float3(1);
+        sampleView = float3(0);
     }
 
     //Normal helper
@@ -55,8 +55,8 @@ struct FGSampleData {
 
 //Reservoir for a Final Gather Sample 112B
 struct ReservoirFG {
-    PackedHitInfo sampleSurface;    // HitSample 16B
-    float3 sampleView;              // View vector for the sample
+    PackedHitInfo sampleSurface; // HitSample 16B
+    float3 thp;                     //Throughput
     float targetFunction;           // Store target function
     FGSampleData sampleData;        // Data of the sample
     float wSum;                     // W and wsum
@@ -66,7 +66,7 @@ struct ReservoirFG {
 
     __init() {
         sampleSurface = {};
-        sampleView = float3(0);
+        thp = float3(1);
         targetFunction = 0;
         sampleData = FGSampleData();
         wSum = 0;
