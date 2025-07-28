@@ -7,10 +7,10 @@ def render_graph_SMPathTracer_Error():
     g.create_pass('ToneMapper', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Linear', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
     g.create_pass('VBufferRT', 'VBufferRT', {'outputSize': 'Default', 'samplePattern': 'Stratified', 'sampleCount': 32, 'useAlphaTest': True, 'adjustShadingNormals': True, 'forceCullMode': False, 'cull': 'Back', 'useTraceRayInline': False, 'useDOF': True})
     g.create_pass('TestPathSM', 'TestPathSM', {'maxBounces': 10, 'computeDirect': True, 'useImportanceSampling': True, 'shadowTracingMode': 'LeakTracing'})
-    g.create_pass('AccumulatePass', 'AccumulatePass', {'enabled': True, 'outputSize': 'Default', 'autoReset': True, 'precisionMode': 'Double', 'maxFrameCount': 10000, 'overflowMode': 'Stop'})
+    g.create_pass('AccumulatePass', 'AccumulatePass', {'enabled': True, 'outputSize': 'Default', 'autoReset': True, 'precisionMode': 'Double', 'maxFrameCount': 2048, 'overflowMode': 'Stop'})
     g.create_pass('ErrorMeasurePass', 'ErrorMeasurePass', {'ReferenceImagePath': '', 'MeasurementsFilePath': '', 'IgnoreBackground': True, 'ComputeSquaredDifference': True, 'ComputeAverage': False, 'UseLoadedReference': False, 'ReportRunningError': True, 'RunningErrorSigma': 0.9950000047683716, 'SelectedOutputId': 'Difference', 'EnablePerFrameError': False})
     g.create_pass('Ref_TestPathSM', 'TestPathSM', {'maxBounces': 10, 'computeDirect': True, 'useImportanceSampling': True, 'shadowTracingMode': 'RayShadows'})
-    g.create_pass('Ref_AccumulatePass', 'AccumulatePass', {'enabled': True, 'outputSize': 'Default', 'autoReset': True, 'precisionMode': 'Double', 'maxFrameCount': 10000, 'overflowMode': 'Stop'})
+    g.create_pass('Ref_AccumulatePass', 'AccumulatePass', {'enabled': True, 'outputSize': 'Default', 'autoReset': True, 'precisionMode': 'Double', 'maxFrameCount': 2048, 'overflowMode': 'Stop'})
     g.create_pass('Ref_ToneMapper', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Linear', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
     g.create_pass('ErrorOverlay', 'ErrorOverlay', {'ImageMode0': 'Image', 'ImageMode1': 'Reference', 'ImageMode2': 'None', 'ImageMode3': 'FLIP', 'LineThickness': 1, 'LineColor': [1.0, 1.0, 1.0]})
     g.add_edge('VBufferRT.vbuffer', 'TestPathSM.vbuffer')
@@ -35,6 +35,9 @@ def render_graph_SMPathTracer_Error():
     g.add_edge('Ref_AccumulatePass', 'ToneMapper')
     g.add_edge('ToneMapper', 'Ref_ToneMapper')
     g.mark_output('ErrorOverlay.output')
+    g.mark_output('AccumulatePass.output')
+    g.mark_output('Ref_AccumulatePass.output')
+    g.mark_output('FLIPPass.errorMapDisplay')
     return g
 
 SMPathTracer_Error = render_graph_SMPathTracer_Error()

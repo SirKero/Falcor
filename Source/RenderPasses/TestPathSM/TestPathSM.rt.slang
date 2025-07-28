@@ -634,7 +634,7 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
 
     if(kEnableDebug){
         if(kDebugMode == (uint)PathSMDebugModes::LeakTracingMask){
-            debug += float3(shadow, useRay ? 1.0 : 0.0, smShadow) * invPdf;
+            debug += float3(shadow, useRay ? 1.0 : 0.0, smShadow);
         }
         else if (kDebugMode == (uint)PathSMDebugModes::LeakTracingMaskPerBounce) {
             if (pathData.pathLength == gSelectedBounce)
@@ -893,6 +893,12 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim ,out float3 debug)
                 pathData.thp /= 1.f - prob;
             }
         }
+
+        if (kEnableDebug) {
+            if (kDebugMode == (uint)PathSMDebugModes::LeakTracingMask) {
+                debug /= min(pathDepth + 1,1);
+            }
+        }
         logPathLength(pathDepth);
         // Store contribution from scatter ray.
         outColor += pathData.radiance;
@@ -903,6 +909,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim ,out float3 debug)
         outColor = kUseEnvBackground ? gScene.envMap.eval(primaryRayDir) : kDefaultBackgroundColor;
         logPathLength(0);
     }
+    
 
     return outColor;
 }
