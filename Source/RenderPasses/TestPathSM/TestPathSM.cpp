@@ -78,6 +78,7 @@ const Gui::DropdownList kShadowMapSizes{
     {1024, "1024x1024"},
     {2048, "2048x2048"},
     {4096, "4096x4096"},
+    {8196, "8196x8196"},
 };
 
 const Gui::DropdownList kSMGenerationRenderer{
@@ -330,8 +331,14 @@ void TestPathSM::renderUI(Gui::Widgets& widget)
         if (mSMGenerationUseRay)
         {
             mRebuildSMBuffers |= group.dropdown("Shadow Map Size", kShadowMapSizes, mShadowMapSize);
-            dirty |= group.dropdown("Filter SM Mode", mFilterSMMode);
+            mRerenderSM |= group.dropdown("Filter SM Mode", mFilterSMMode);
             group.tooltip("Filtered shadow map is always recreated from one depth");
+
+            if (mFilterSMMode == FilterSMMode::None)
+            {
+                mRerenderSM |= group.var("Depth Bias (x100)", mDepthBias, 0.f, FLT_MAX);
+                mRerenderSM |= group.var("Depth Slope Bias Scale (x100)", mSlopeBiasScale, 0.f, FLT_MAX);
+            }
 
             mRerenderSM |= group.checkbox("Use Min/Max SM", mUseMinMaxShadowMap);
             dirty |= group.checkbox("Always Render Shadow Map", mAlwaysRenderSM);
@@ -690,6 +697,9 @@ void TestPathSM::generateShadowMap(RenderContext* pRenderContext, const RenderDa
         var["CB"]["gUseMinMaxSM"] = mUseMinMaxShadowMap;
         var["CB"]["gInvViewProj"] = mShadowMapMVP[i].invViewProjection;
         var["CB"]["gCalcNearFar"] = false;
+        var["CB"]["gDepthBias"] = mDepthBias / 100.f;
+        var["CB"]["gSlopeDepthBiasScale"] = mSlopeBiasScale / 100.f;
+        var["CB"]["gApplyBias"] = mFilterSMMode == FilterSMMode::None;
 
         if(mUseMinMaxShadowMap)
             var["gRayShadowMapMinMax"] = mpRayShadowMapsMinMax[i];
@@ -977,6 +987,7 @@ DefineList TestPathSM::filterSMModesDefines() {
     defines.add("FILTER_SM_VARIANCE", mFilterSMMode == FilterSMMode::Variance ? "1" : "0");
     defines.add("FILTER_SM_ESVM", mFilterSMMode == FilterSMMode::ESVM ? "1" : "0");
     defines.add("FILTER_SM_MSM", mFilterSMMode == FilterSMMode::MSM ? "1" : "0");
+    defines.add("FILTER_SM_NONE", mFilterSMMode == FilterSMMode::None ? "1" : "0");
     return defines;
 }
 

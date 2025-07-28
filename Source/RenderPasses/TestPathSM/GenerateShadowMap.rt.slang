@@ -76,13 +76,21 @@ cbuffer CB
 {
     uint        gFrameCount;   // Frame count since scene was loaded.
     float3      gLightPos;     // Current Light Position
+
     float       gNear;
     float       gFar;
     uint        gSamples;       //Number of samples per shadow map  
     bool        gUseMinMaxSM;      //Use the min max shadow map
+
     float4x4    gViewProj;     // View Projection for current light
     float4x4    gInvViewProj;     // View Projection for current light
-    bool        gCalcNearFar;   //Used for nearFar calculations
+
+   
+    float       gDepthBias;         //depth bias for default shadow maps
+    float       gSlopeDepthBiasScale;
+    bool        gApplyBias;
+    bool        gCalcNearFar; // Used for nearFar calculations
+
 }
 
 RWTexture2D<float2> gRayShadowMapMinMax;
@@ -126,6 +134,20 @@ void closestHit(inout RayData rayData, BuiltInTriangleIntersectionAttributes att
         rayData.depth = posH.w;
     else
         rayData.depth = (posH.w - gNear) / (gFar - gNear);   //Linear depth in [0,1]
+
+    if (gApplyBias) {
+        TriangleHit triangleHit;
+        triangleHit.instanceID = getGeometryInstanceID();
+        triangleHit.primitiveIndex = PrimitiveIndex();
+        triangleHit.barycentrics = attribs.barycentrics;
+        VertexData v = gScene.getVertexData(triangleHit);
+        float NdotL = abs(dot(v.faceNormalW, -WorldRayDirection()));
+        float slopeDepthBias = 0;
+        if (NdotL > 0)
+            slopeDepthBias = sqrt(1 - (NdotL * NdotL)) / NdotL;
+        float bias = gDepthBias + gSlopeDepthBiasScale * slopeDepthBias;
+        rayData.depth += bias;
+    }
 }
 
 //

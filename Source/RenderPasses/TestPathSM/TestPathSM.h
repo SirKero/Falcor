@@ -85,6 +85,7 @@ public:
         Variance = 0,
         ESVM = 1,
         MSM = 2,
+        None = 3,
     };
     FALCOR_ENUM_INFO(
         TestPathSM::FilterSMMode,
@@ -92,6 +93,7 @@ public:
             {FilterSMMode::Variance, "Variance"},
             {FilterSMMode::ESVM, "ESVM"},
             {FilterSMMode::MSM, "MSM"},
+            {FilterSMMode::None, "None(SM)"}
         }
     );
 
@@ -168,6 +170,8 @@ private:
     float mLtBoundsStart = 0.05f;
     float mLtBoundsMaxReduction = 0.2f;
     bool mDistributeRayOutsideOfSM = false;
+    float mDepthBias = 0.01f;
+    float mSlopeBiasScale = 0.05f;
 
     //Debug
     bool mEnableDebug = false;

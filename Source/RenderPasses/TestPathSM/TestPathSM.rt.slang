@@ -106,7 +106,7 @@ cbuffer ShadowVPs
 // Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gViewW; // Optional
-Texture2D<float2> gRayShadowMap[COUNT_SM];
+Texture2D<float> gRayShadowMap[COUNT_SM];
 Texture2D<float2> gRayShadowMapMinMax[COUNT_SM];
 
 // Outputs
@@ -481,6 +481,11 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout PathDat
                 return true;
             }     
         } else {
+        #if FILTER_SM_NONE
+            float depth = gRayShadowMap[lightIdx].SampleLevel(gShadowSamplerPoint, shadowPos.xy, 0);
+            if (depth >= lightDist)
+                shadow = 1.0;
+        #else
             float2 gatherUV;
             float4 w = getGatherWeights(shadowPos.xy, gRayShadowMapRes, gatherUV);
             float4 shadowValues = gRayShadowMap[lightIdx].GatherRed(gShadowSamplerPoint, gatherUV);
@@ -502,7 +507,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout PathDat
                 }
                 float2 shadowEvsm =  exponentialVarianceShadowTest(shadowValueEvsm, lightDist);
                 shadow = min(shadowEvsm.x, shadowEvsm.y);
-            #else // FILTER_SM_MSM
+            #elif FILTER_SM_MSM
                 float4 shadowValueMsm = float4(0);
                 [unroll]
                 for (uint i = 0; i < 4; i++) {
@@ -517,6 +522,7 @@ AnalyticLightSample sampleLightIndex(float3 posW, uint lightCount, inout PathDat
                 shadow = 1.0;
             else
                 return true;
+        #endif
         }
     
         return false;       //No Ray
