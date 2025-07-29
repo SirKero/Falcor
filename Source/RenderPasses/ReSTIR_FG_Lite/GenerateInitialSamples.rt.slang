@@ -134,14 +134,15 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         if (hitIsRough && prevHitIsRough) {
             //Collect photons and fill reservoir
             reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
-            reservoirFG.sampleData.radianceOut += bsdfProperties.emission;
+            if(pathLength > 0) //Path length == 0 is covered by ReSTIR DI
+                reservoirFG.sampleData.radianceOut += bsdfProperties.emission;
             reservoirFG.thp = prevThp;
             reservoirFG.sampleData.posW = sd.posW;
-            reservoirFG.sampleData.normal = bsdfProperties.guideNormal; // Face normal?
+            reservoirFG.sampleData.normal = sd.faceN; // Face normal?
             reservoirFG.wSum = 1.0 / pdf;
             reservoirFG.c = 1;
             float distanceToSample = distance(ray.Origin, sd.posW);
-            reservoirFG.jacobianDeterminant = dot(bsdfProperties.guideNormal, sd.V) / (distanceToSample * distanceToSample);
+            reservoirFG.jacobianDeterminant = dot(reservoirFG.sampleData.normal, sd.V) / (distanceToSample * distanceToSample);
 
             return;
         }

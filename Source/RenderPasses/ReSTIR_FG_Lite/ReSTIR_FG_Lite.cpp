@@ -185,6 +185,11 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
         group.checkbox("Enable Resampling", mUseResampling);
         group.var("Confidence Cap", mConfidenceCap, 1u, UINT_MAX, 1u);
         group.tooltip("Maximum confidence a reservoir can have");
+        group.var("Spatial Samples", mSpatialSamples, 0u, 64u, 1u);
+        group.var("Disocclusion additional spatial samples", mDisocclusionBoostExtraSamples, 0u, 16u, 1u);
+        group.tooltip("Extra spatial samples if temporal resampling fails");
+        group.var("Spatial Sample Radius", mSamplingRadius, 0.f, FLT_MAX, 1.f);
+
         group.var("Normal Rejection Threshold", mNormalThreshold, 0.f, 1.0f, 0.001f);
         group.tooltip("Threshold of dot product between both reservoir face normals");
         group.var("Sample Distance Threshold", mJacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
@@ -657,6 +662,8 @@ void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gFrameDim"] = mScreenRes;
     var["CB"]["gConfidenceLimit"] = mConfidenceCap;
     var["CB"]["gSpatialRadius"] = mSamplingRadius;
+    var["CB"]["gSpatialSamples"] = mSpatialSamples;
+    var["CB"]["gDisocclusionBoostSpatialSamples"] = mDisocclusionBoostExtraSamples;
     var["CB"]["gNormalThreshold"] = mNormalThreshold;
     var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
 

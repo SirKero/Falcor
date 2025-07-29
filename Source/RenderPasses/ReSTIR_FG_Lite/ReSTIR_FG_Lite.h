@@ -118,7 +118,7 @@ private:
     bool mCanResample = false;          //Resampling is only allowed if last iterations reservoir was created
     uint mConfidenceCap = 20;            //Maximum confidence allowed
     uint mSpatialSamples = 1;            // Number of spatial samples
-    uint mDisocclusionBoostSamples = 2;  // Number of spatial samples if no temporal surface was found
+    uint mDisocclusionBoostExtraSamples = 1;  // Number of spatial samples if no temporal surface was found
     float mSamplingRadius = 20.f;        // Sampling radius in pixel
     float mRelativeDepthThreshold = 0.15f; // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;        // Cosine of maximum angle between both normals allowed

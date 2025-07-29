@@ -118,9 +118,9 @@ float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstanc
     float3 toLight = r.sampleData.posW - sd.posW;
     float dist = length(toLight);
     toLight /= dist;
-    float jacobianDeterminant = dot(r.sampleData.normal, -toLight) / (dist * dist);
-    jacobianDeterminant /= r.jacobianDeterminant;
-    Li = r.sampleData.radianceOut * jacobianDeterminant;
+    //float jacobianDeterminant = dot(r.sampleData.normal, -toLight) / (dist * dist);
+    //jacobianDeterminant /= r.jacobianDeterminant;
+    Li = r.sampleData.radianceOut;
     if (dispatchShadowRay(sd, toLight, dist)) {
         Li *= mi.eval(sd, toLight, sg);
     } else
@@ -151,8 +151,11 @@ float evalApproximateBRDF(ShadingData sd, BSDFProperties bsdfProperties, float3 
     float specularBRDF = D * G * F / (4.f * NdotV);
 
     // Mix diffuse and specular BRDF
-    float diffuseProb = diffuse / (diffuse + specular);
+    float diffuseProb = 0;
+    if(diffuse > 0 || specular > 0)
+        diffuseProb = diffuse / (diffuse + specular);
     float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, diffuseProb));
+
     return max(0.f, brdf);
 }
 
@@ -165,6 +168,10 @@ float evaluateFinalGatherSampleApproximateUnbiased(ReservoirFG r, ShadingData sd
     toSurface /= dist;
     float jacobianDeterminant = dot(r.sampleData.normal, toSurface) / (dist * dist);
     jacobianDeterminant /= r.jacobianDeterminant;
+
+    if (jacobianDeterminant < 0 || isnan(jacobianDeterminant) || isinf(jacobianDeterminant))
+        return 0.0;
+
     Li = luminance(r.sampleData.radianceOut) * jacobianDeterminant;
     if (!dispatchShadowRay(sd, -toSurface, dist))
         return 0.0;
