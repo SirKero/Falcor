@@ -20,7 +20,8 @@ cbuffer CB
     float gNormalThreshold; // Normal Threshold
 
     float gJacobianDistanceThreshold; // Jacobian distance threshold
-    uint3 _pad;
+    bool gUsePathThreshold; //Enables and disables path threshold
+    uint2 _pad;
 }
 
 Texture2D<float2> gMVec;
@@ -31,7 +32,7 @@ RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
 float generalizedBalanceHeuristic(ReservoirFG reservoir0, ShadingData sd0, BSDFProperties bsdf0, ShadingData sd1, BSDFProperties bsdf1, uint otherC) {
-    float p0 = evaluateFinalGatherSampleApproximateUnbiased(reservoir0, sd0, bsdf0) * reservoir0.c;
+    float p0 = reservoir0.targetFunction * reservoir0.c;
     float p1 = evaluateFinalGatherSampleApproximateUnbiased(reservoir0, sd1, bsdf1) * otherC;
 
     float sum = (p0 + p1);
@@ -42,57 +43,65 @@ float generalizedBalanceHeuristic(ReservoirFG reservoir0, ShadingData sd0, BSDFP
         return 0;
 }
 
-ReservoirFG combineReservoirsFG(ReservoirFG current, ShadingData currentSD, BSDFProperties currentProps,
+bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFProperties currentProps,
                                 ReservoirFG other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg)
 {
-    ReservoirFG r = current;
-    // Balance heuristic current
-    float m_0, m_1 = 0;
+    //Check if surfaces are similar
+    float3 toSurfaceOther = currentSD.posW - other.sampleData.posW;
+    float distToSurfaceOther = length(toSurfaceOther);
+    toSurfaceOther /= distToSurfaceOther; //Normalize
+    bool jacobianThreshold = distToSurfaceOther <= gJacobianDistanceThreshold;
+    bool normalThreshold = dot(otherSD.faceN, currentSD.faceN) < gNormalThreshold;
+    bool pathThreshold = gUsePathThreshold ? (other.pathLength != current.pathLength) : false;
+    if (normalThreshold || pathThreshold || jacobianThreshold)
+        return false;
+
+    //Needed reservoir variables
     float w_0, w_1 = 0;
+    float wSum = 0;
 
     if (current.isValid()) {
-        m_0 = generalizedBalanceHeuristic(current, currentSD, currentProps, otherSD, otherProps, other.c);
-        w_0 = m_0 * evaluateFinalGatherSampleApproximateUnbiased(current, currentSD, currentProps) * current.wSum;
+        float mis = generalizedBalanceHeuristic(current, currentSD, currentProps, otherSD, otherProps, other.c);
+        w_0 = mis * current.targetFunction * current.wSum;
+        wSum += w_0;
+    }
+           
+    bool otherReservoirValid = other.isValid();
+    float targetFunctionOther = 0.0;
+    if (otherReservoirValid) {
+        float mis = generalizedBalanceHeuristic(other, otherSD, otherProps, currentSD, currentProps, current.c);
+        //Check if sample can be shifted
+        if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) {
+            targetFunctionOther = evalApproximateBRDF(currentSD, currentProps, -toSurfaceOther) * luminance(other.sampleData.radianceOut);
+            float jacobianDeterminant = dot(other.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
+            jacobianDeterminant /= other.jacobianDeterminant;
+            w_1 = mis * targetFunctionOther * jacobianDeterminant * other.wSum;
+        }
+        wSum += w_1;
     }
     
-    r.wSum = w_0;
-
-    float3 toSurfaceR1 = currentSD.posW - other.sampleData.posW;
-    float distToSurfaceR1 = length(toSurfaceR1);
-    bool jacobianThreshold = distToSurfaceR1 > gJacobianDistanceThreshold;
-    bool otherReservoirValid = other.isValid() && jacobianThreshold;
-    if (otherReservoirValid) {
-        m_1 = generalizedBalanceHeuristic(other, otherSD, otherProps, currentSD, currentProps, current.c);
-        w_1 = m_1 * evaluateFinalGatherSampleApproximateUnbiased(other, currentSD, currentProps) * other.wSum;
-    }
-
-    // Increase confidence weight only if jacobian threshold was fulfilled or if the sample is not valid
-    if (jacobianThreshold || !other.isValid())
-        r.c += other.c;
-
-    r.wSum += w_1;
-
-    bool selectOtherSample = (sampleNext1D(sg) * r.wSum) < w_1 && otherReservoirValid;
+    bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && otherReservoirValid;
     if (selectOtherSample) {
-        r.sampleData.posW = other.sampleData.posW;
-        r.sampleData.normal = other.sampleData.normal;
-        r.sampleData.radianceOut = other.sampleData.radianceOut;
-        toSurfaceR1 /= distToSurfaceR1;
-        r.jacobianDeterminant = dot(r.sampleData.normal, toSurfaceR1) / (distToSurfaceR1 * distToSurfaceR1);
+        current.sampleData.posW = other.sampleData.posW;
+        current.sampleData.normal = other.sampleData.normal;
+        current.sampleData.radianceOut = other.sampleData.radianceOut;
+        current.targetFunction = targetFunctionOther;
+        current.jacobianDeterminant = dot(current.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
     }
 
-    float pHat = evaluateFinalGatherSampleApproximateUnbiased(r, currentSD, currentProps);
-    if(pHat > 0)
-        r.wSum /= pHat;
+    //Increase confidence weights
+    current.c += other.c;
+    current.c = min(current.c, gConfidenceLimit);
+
+    if (current.targetFunction > 0)
+        current.wSum = wSum / current.targetFunction;
     else
-        r.wSum = 0;
+        current.wSum = 0;
 
-    //TODO this should not happen
-    if (isnan(r.wSum) | isinf(r.wSum))
-        return ReservoirFG();
+    if (isnan(current.wSum) || isinf(current.wSum))
+        current.wSum = 0;
 
-    r.c = min(r.c, gConfidenceLimit);
-    return r;
+    return true;
 }
 
 bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg , int2 resamplePixel) {
@@ -113,15 +122,9 @@ bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFPro
     let temporalBsdfProperties = temporalMi.getProperties(temporalSD);
 
     // Check if surfaces are similar
-    bool combine = true;
-    if ((dot(temporalSD.faceN, currentSD.faceN) < gNormalThreshold) || (temporal.pathLength != current.pathLength))
-        combine = false;
+    bool valid = combineReservoirsFG(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg);
 
-    // Reservoirs are valid, resample
-    if (combine)
-        current = combineReservoirsFG(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg);
-
-    return combine;
+    return valid;
 }
 
 [numthreads(16, 16, 1)]
@@ -140,6 +143,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
     ShadingData currentSD = loadShadingData(currentHit, -current.sampleData.sampleView, lod);
     let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
     let currentBsdfProperties = currentMi.getProperties(currentSD);
+
+    // Precalculate the targetFunction
+    float3 toLight = normalize(current.sampleData.posW - currentSD.posW);
+    current.targetFunction = evalApproximateBRDF(currentSD, currentBsdfProperties, toLight) * luminance(current.sampleData.radianceOut);
 
     // Temporal Resampling
 

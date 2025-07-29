@@ -123,6 +123,7 @@ private:
     float mRelativeDepthThreshold = 0.15f; // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;        // Cosine of maximum angle between both normals allowed
     float mJacobianDistanceThreshold = 0.001f;  //Threshold for jacobian distances
+    bool mUsePathThreshold = false;       //Enable resampling only if path lenght are the same
 
     //Photon Distribution
     uint mPhotonMaxBounces = 10;  // Number of Photon bounces

@@ -193,6 +193,8 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
         group.var("Normal Rejection Threshold", mNormalThreshold, 0.f, 1.0f, 0.001f);
         group.tooltip("Threshold of dot product between both reservoir face normals");
         group.var("Sample Distance Threshold", mJacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
+        group.checkbox("Use Path Threshold", mUsePathThreshold);
+        group.tooltip("Only resamples if the surfaces used for generating the Final Gather samples have the same path length.");
     }
 
     if (auto group = widget.group("Material Options"))
@@ -666,6 +668,7 @@ void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gDisocclusionBoostSpatialSamples"] = mDisocclusionBoostExtraSamples;
     var["CB"]["gNormalThreshold"] = mNormalThreshold;
     var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
+    var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
 
     // Input
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
