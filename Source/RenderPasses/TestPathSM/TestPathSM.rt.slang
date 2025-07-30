@@ -618,13 +618,13 @@ float3 evalDirectAnalytic(const ShadingData sd, const IMaterialInstance mi, inou
         #if USE_ORACLE_FUNCTION
             #if !SMORACLE_USE_LEAK_TRACING
                 useRay = false;
-                shadow = shadow < 0.5 ? 0.0 : 1.0;
+                //shadow = shadow < 0.5 ? 0.0 : 1.0;
             #endif //!SMORACLE_USE_LEAK_TRACING
         #endif //USE_ORACLE_FUNCTION
     }
 
     float smShadow = shadow;
-    if(useRay && kEnableShadowRay){
+    if (useRay && (kEnableShadowRay || (gUseRayForDirect && pathData.pathLength == 0))){
         // Get origin with offset applied in direction of the geometry normal to avoid self-intersection.
         const float3 origin = computeRayOrigin(sd.posW, dot(sd.faceN, ls.dir) >= 0.f ? sd.faceN : -sd.faceN);
         // Test visibility by tracing a shadow ray.
@@ -896,7 +896,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim ,out float3 debug)
 
         if (kEnableDebug) {
             if (kDebugMode == (uint)PathSMDebugModes::LeakTracingMask) {
-                debug /= min(pathDepth + 1,1);
+                debug /= pathDepth + 1;
             }
         }
         logPathLength(pathDepth);

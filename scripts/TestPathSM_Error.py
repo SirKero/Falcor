@@ -3,7 +3,7 @@ from falcor import *
 
 def render_graph_SMPathTracer_Error():
     g = RenderGraph('SMPathTracer_Error')
-    g.create_pass('FLIPPass', 'FLIPPass', {'enabled': True, 'useMagma': True, 'clampInput': False, 'isHDR': False, 'toneMapper': 'ACES', 'useCustomExposureParameters': False, 'startExposure': 0.0, 'stopExposure': 0.0, 'numExposures': 2, 'monitorWidthPixels': 3840, 'monitorWidthMeters': 0.699999988079071, 'monitorDistanceMeters': 0.699999988079071, 'computePooledFLIPValues': False, 'useRealMonitorInfo': False})
+    g.create_pass('FLIPPass', 'FLIPPass', {'enabled': True, 'useMagma': True, 'clampInput': False, 'isHDR': False, 'toneMapper': 'ACES', 'useCustomExposureParameters': False, 'startExposure': 0.0, 'stopExposure': 0.0, 'numExposures': 2, 'monitorWidthPixels': 1920, 'monitorWidthMeters': 0.3, 'monitorDistanceMeters': 0.4, 'computePooledFLIPValues': False, 'useRealMonitorInfo': True})
     g.create_pass('ToneMapper', 'ToneMapper', {'outputSize': 'Default', 'useSceneMetadata': True, 'exposureCompensation': 0.0, 'autoExposure': False, 'filmSpeed': 100.0, 'whiteBalance': False, 'whitePoint': 6500.0, 'operator': 'Linear', 'clamp': True, 'whiteMaxLuminance': 1.0, 'whiteScale': 11.199999809265137, 'fNumber': 1.0, 'shutter': 1.0, 'exposureMode': 'AperturePriority'})
     g.create_pass('VBufferRT', 'VBufferRT', {'outputSize': 'Default', 'samplePattern': 'Stratified', 'sampleCount': 32, 'useAlphaTest': True, 'adjustShadingNormals': True, 'forceCullMode': False, 'cull': 'Back', 'useTraceRayInline': False, 'useDOF': True})
     g.create_pass('TestPathSM', 'TestPathSM', {'maxBounces': 10, 'computeDirect': True, 'useImportanceSampling': True, 'shadowTracingMode': 'LeakTracing'})

@@ -1980,25 +1980,37 @@ bool ShadowMap::renderUILeakTracing(Gui::Widgets& widget, bool leakTracingEnable
         }
     }
 
-    if (mUseGaussianBlur && mpBlurCascaded)
+    if (mUseGaussianBlur)
     {
         bool blurSettingsChanged = false;
         if (auto group = widget.group("Gaussian Blur Options"))
         {
-            group.separator();
-            
-            blurSettingsChanged |= mpBlurCascaded->renderUI(group);
-            if (auto group3 = group.group("Enable Blur per Cascaded Level", true))
+            if (mpBlurShadowMap)
             {
-                for (uint level = 0; level < mBlurForCascaded.size(); level++)
+                if (auto group2 = group.group("ShadowMap"))
+                    blurSettingsChanged |= mpBlurShadowMap->renderUI(group2);
+            }
+
+            group.separator();
+            if (mpBlurCascaded)
+            {
+                if (auto group2 = group.group("Cascaded"))
                 {
-                    // Bool vectors are very lovely, therefore this solution :)
-                    bool currentLevel = mBlurForCascaded[level];
-                    std::string blurLevelName = "Level " + std::to_string(level) + ":";
-                    dirty |= group3.checkbox(blurLevelName.c_str(), currentLevel);
-                    mBlurForCascaded[level] = currentLevel;
+                    blurSettingsChanged |= mpBlurCascaded->renderUI(group2);
+                    if (auto group3 = group2.group("Enable Blur per Cascaded Level", true))
+                    {
+                        for (uint level = 0; level < mBlurForCascaded.size(); level++)
+                        {
+                            // Bool vectors are very lovely, therefore this solution :)
+                            bool currentLevel = mBlurForCascaded[level];
+                            std::string blurLevelName = "Level " + std::to_string(level) + ":";
+                            dirty |= group3.checkbox(blurLevelName.c_str(), currentLevel);
+                            mBlurForCascaded[level] = currentLevel;
+                        }
+                    }
                 }
             }
+           
             group.separator();
         }
 
