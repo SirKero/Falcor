@@ -238,6 +238,14 @@ void ReSTIR_FG_Lite::setScene(RenderContext* pRenderContext, const ref<Scene>& p
     mpPhotonAS.reset();
     mpEmissiveLightSampler.reset();
     mpRTXDI.reset();
+    mResetScreenTex = true;
+    mChangePhotonLightBufferSize = true;
+
+    mTracePhotonPass = RayTraceProgramHelper::create();
+    mGenerateInitialSamplesPass = RayTraceProgramHelper::create();
+    mpResampleReservoirFGPass.reset();
+    mpResampleReservoirCausticPass.reset();
+    mpEvaluateReservoirsPass.reset();
 
     if (mpScene)
     {
