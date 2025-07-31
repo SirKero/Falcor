@@ -10,7 +10,7 @@ static const float kShadowRayEpsilon = 0.98f;
 
 struct PhotonData {
     float3 flux;
-    uint _pad1;
+    uint pathLenght;
     float3 dir;
     uint _pad2;
     float3 normalW;
@@ -20,7 +20,7 @@ struct PhotonData {
         this.dir = float3(0);
         this.normalW = float3(0,1,0);
         this.flux = float3(0);
-        this._pad1 = 0;
+        this.pathLenght = 0;
         this._pad2 = 0;
         this._pad3 = 0;
     }
@@ -89,6 +89,54 @@ struct ReservoirFG {
     }
 }
 
+// Reservoir for a CausticSample 112B
+struct ReservoirCaustic {
+    PackedHitInfo sampleSurface;    // HitSample 16B
+    float3 thp;                     // Throughput used at the end
+    float targetFunction;           // Store target function
+    float3 sampleSurfaceView;       // Incoming View
+    float photonDirX;
+    float3 photonPosW;              // Position
+    float photonDirY;
+    float3 photonRadiance;          // Radiance
+    float photonDirZ;      
+    float wSum;                     // W and wSum
+    uint c;                         // Confidence weight
+    uint pathLength;                // Path Length
+    uint _pad;
+
+    __init() {
+        sampleSurface = {};
+        thp = float3(1);
+        targetFunction = 0;
+        sampleSurfaceView = float3(0);
+        photonDirX = 0;
+        photonPosW = float3(0); 
+        photonDirY = 0;
+        photonRadiance = float3(0);
+        photonDirZ = 0;
+        wSum = 0;
+        c = 0;
+        pathLength = 0;
+        _pad = 0;
+    }
+
+    // Photon dir helper
+    property float3 photonDir {
+        get { return float3(photonDirX, photonDirY, photonDirZ); }
+        set {
+            photonDirX = newValue.x;
+            photonDirY = newValue.y;
+            photonDirZ = newValue.z;
+        }
+    }
+
+    // Valid check
+    bool isValid() {
+        return any(photonRadiance > 0);
+    }
+}
+
 //Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
@@ -121,10 +169,10 @@ float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstanc
     //float jacobianDeterminant = dot(r.sampleData.normal, -toLight) / (dist * dist);
     //jacobianDeterminant /= r.jacobianDeterminant;
     Li = r.sampleData.radianceOut;
-    if (dispatchShadowRay(sd, toLight, dist)) {
+    //if (dispatchShadowRay(sd, toLight, dist)) {
         Li *= mi.eval(sd, toLight, sg);
-    } else
-        Li = float3(0);
+    //} else
+    //    Li = float3(0);
 
     return Li;
 }
@@ -153,6 +201,39 @@ float evalApproximateBRDF(ShadingData sd, BSDFProperties bsdfProperties, float3 
     // Mix diffuse and specular BRDF
     float diffuseProb = 0;
     if(diffuse > 0 || specular > 0)
+        diffuseProb = diffuse / (diffuse + specular);
+    float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, diffuseProb));
+
+    return max(0.f, brdf);
+}
+
+float evalApproximateBRDFPhoton(ShadingData sd, BSDFProperties bsdfProperties, float3 toLight) {
+    const float3 N = bsdfProperties.guideNormal;
+    const float3 H = normalize(sd.V + toLight);
+    const float NdotV = saturate(dot(N, sd.V));
+    const float NdotL = saturate(dot(N, toLight));
+    const float NdotH = saturate(dot(N, H));
+    const float LdotH = saturate(dot(toLight, H));
+    const float diffuse = luminance(bsdfProperties.diffuseReflectionAlbedo);
+    const float specular = luminance(bsdfProperties.specularReflectionAlbedo);
+
+    if (NdotL < 0)
+        return 0;
+
+    // BRDF terms for target function (DGF Microfaset BRDF)
+    float D = evalNdfGGX(bsdfProperties.roughness * bsdfProperties.roughness, NdotH);
+    float G = evalMaskingSmithGGXSeparable(bsdfProperties.roughness, NdotL, NdotV);
+
+    // float F = specular < 1e-8f ? 0.f :  evalFresnelSchlick(specular, 1.f, LdotH);     //Right way
+    float F = specular < 1e-8f ? 0.f : evalFresnelSchlick(specular, 1.f, LdotH) / specular; // Not "right" but less noisier
+
+    // eval brdf terms
+    float diffuseBRDF = M_1_PI;
+    float specularBRDF = D * G * F / (4.f * NdotV * NdotL);
+
+    // Mix diffuse and specular BRDF
+    float diffuseProb = 0;
+    if (diffuse > 0 || specular > 0)
         diffuseProb = diffuse / (diffuse + specular);
     float brdf = max(0.f, lerp(specularBRDF, diffuseBRDF, diffuseProb));
 

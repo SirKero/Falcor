@@ -8,6 +8,7 @@ import StructsAndHelpers;
 
 Texture2D<PackedHitInfo> gVBuffer;
 StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
+StructuredBuffer<ReservoirCaustic> gCausticReservoir;
 
 RWTexture2D<float4> gOutColor;
 
@@ -18,6 +19,7 @@ cbuffer CB
 }
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
+static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
@@ -25,16 +27,37 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     if (!fgReservoir.isValid())
         return outColor;
 
-    // Get surface
+    // Get surface and shading data
     HitInfo hitInfo = HitInfo(fgReservoir.sampleSurface);
-
     let lod = ExplicitLodTextureSampler(0.f);
-    uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
     ShadingData sd = loadShadingData(hitInfo, -fgReservoir.sampleData.sampleView, lod);
-    let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+    let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
 
     outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
     outColor *= fgReservoir.thp * fgReservoir.wSum;
+
+    return outColor;
+}
+
+float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
+    float3 outColor = float3(0);
+    ReservoirCaustic causticReservoir = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
+    if (!causticReservoir.isValid())
+        return outColor;
+
+    // Get surface and shading data
+    HitInfo hitInfo = HitInfo(causticReservoir.sampleSurface);
+    let lod = ExplicitLodTextureSampler(0.f);
+    ShadingData sd = loadShadingData(hitInfo, causticReservoir.sampleSurfaceView, lod);
+    let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
+    let bsdfProperties = mi.getProperties(sd);
+
+    float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
+    if (NdotL > 0) {
+        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
+        outColor /= NdotL;
+        outColor *= causticReservoir.thp;
+    }
 
     return outColor;
 }
@@ -50,13 +73,12 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     float3 outColor = float3(0);
     if(hitInfo.isValid()){
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 4 + 3);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 4);
         let lod = ExplicitLodTextureSampler(0.f);
 
         // Get Material properties
-        uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
-        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
 
         // Add Emissive
@@ -79,10 +101,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
 
         outColor += evaluateFinalGatherReservoir(pixel, sg);
-
+        outColor += evaluateCausticReservoir(pixel, sg);
     }else{
         outColor = gScene.envMap.eval(viewDir);
     }
 
-    gOutColor[pixel] += float4(outColor, 1.0);
+    gOutColor[pixel] = float4(outColor, 1.0);
 }

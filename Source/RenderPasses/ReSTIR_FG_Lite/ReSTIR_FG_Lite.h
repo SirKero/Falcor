@@ -54,6 +54,15 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
+    struct ResamplingSettings
+    {
+        bool enable = true;
+        uint confidenceCap = 20;                // Maximum confidence allowed
+        uint spatialSamples = 1;                // Number of spatial samples
+        uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found
+        float samplingRadius = 20.f;            // Sampling radius in pixel
+    };
+
     //Initializes the emissive sampler used to sample photons
     void prepareLightingStructure(RenderContext* pRenderContext);
 
@@ -72,8 +81,11 @@ private:
     //Generates the initial Samples for the reservoirs (FG) and initializes RTXDI surfaces
     void generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Reservoir Resampling
-    void resamplingPass(RenderContext* pRenderContext, const RenderData& renderData);
+    //Reservoir Resampling for Final Gather Samples
+    void resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Reservoir Resampling for Caustic Samples
+    void resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Evaluate Reservoirs
     void evaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -96,7 +108,6 @@ private:
     // Parameters
     //
     uint mFrameCount = 0;
-    bool mReservoirValid = false;
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
@@ -111,19 +122,18 @@ private:
     bool mMixedLights = false;         // True if analytic and emissive lights are in the scene
 
     //ReSTIR-FG Reservoirs
-    bool mUseResampling = true;           // If false, resampling is disabled
+    ResamplingSettings mResampleSettingsFG = {};
+    ResamplingSettings mResampleSettingsCaustic = {};
+
     uint mFGRayMaxPathLength = 10;        //Max path length for the final gather ray
     bool mRebuildReservoirBuffer = false; // Rebuild the reservoir buffer
     bool mClearReservoir = true;          // Clears both reservoirs
     bool mCanResample = false;          //Resampling is only allowed if last iterations reservoir was created
-    uint mConfidenceCap = 20;            //Maximum confidence allowed
-    uint mSpatialSamples = 1;            // Number of spatial samples
-    uint mDisocclusionBoostExtraSamples = 1;  // Number of spatial samples if no temporal surface was found
-    float mSamplingRadius = 20.f;        // Sampling radius in pixel
     float mRelativeDepthThreshold = 0.15f; // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
-    float mNormalThreshold = 0.6f;        // Cosine of maximum angle between both normals allowed
-    float mJacobianDistanceThreshold = 0.001f;  //Threshold for jacobian distances
-    bool mUsePathThreshold = false;       //Enable resampling only if path lenght are the same
+    float mNormalThreshold = 0.6f;        // Cosine of maximum angle between both Normals allowed
+    float mJacobianDistanceThreshold = 0.001f;  //Threshold for Jacobian distances
+    bool mUsePathThreshold = false;       //Enable resampling only if path length are the same
+    bool mUsePhotonsForDirectLightInReflections = true; //Uses photons for direct light in reflections, else the final gather sample is used
 
     //Photon Distribution
     uint mPhotonMaxBounces = 10;  // Number of Photon bounces
@@ -150,6 +160,7 @@ private:
     ref<Buffer> mpPhotonCounter; // Photon Counter
     ref<Buffer> mpPhotonCounterCPU; // CPU copy of counter for readback
     ref<Buffer> mpFinalGatherReservoir[2];  //Reservoir for the Final Gather sample
+    ref<Buffer> mpCausticReservoir[2];  //Reservoir for the Caustic sample
 
     //
     // Render Passes/Programms
@@ -175,7 +186,8 @@ private:
     RayTraceProgramHelper mTracePhotonPass;                     //Trace Photons and build AS
     RayTraceProgramHelper mGenerateInitialSamplesPass;   //Trace Final Gather rays and collect photons
 
-    ref<ComputePass> mpReservoirResamplingPass;        // Resampling Pass for ReSTIR FG
+    ref<ComputePass> mpResampleReservoirFGPass;        // Resampling Pass for Final Gather Reservoirs
+    ref<ComputePass> mpResampleReservoirCausticPass;        // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;         //Evaluates ReSTIR DI and FG reservoirs
 };
 

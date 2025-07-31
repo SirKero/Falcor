@@ -32,9 +32,9 @@ RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
 //Generalized Balance Heuristic with two samples
-float generalizedBalanceHeuristic(ReservoirFG reservoir0, ShadingData sd0, BSDFProperties bsdf0, ShadingData sd1, BSDFProperties bsdf1, uint otherC) {
-    float p0 = reservoir0.targetFunction * reservoir0.c; // No visibility or Jacobian Determinant needed for this sample
-    loat p1 = evaluateFinalGatherSampleApproximateUnbiased(reservoir0, sd1, bsdf1) * otherC;  // targetFunction + vis  + Jacobian Determinant
+float generalizedBalanceHeuristic(ReservoirFG r, ShadingData otherSD, BSDFProperties otherProps, uint otherC) {
+    float p0 = r.targetFunction * r.c; // No visibility or Jacobian Determinant needed for this sample
+    float p1 = evaluateFinalGatherSampleApproximateUnbiased(r, otherSD, otherProps) * otherC;  // targetFunction + vis  + Jacobian Determinant
 
     float sum = (p0 + p1);
     if(sum > 0)
@@ -63,7 +63,7 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
 
     //Get ReSTIR weight of current reservoir
     if (current.isValid()) {
-        float mis = generalizedBalanceHeuristic(current, currentSD, currentProps, otherSD, otherProps, other.c);
+        float mis = generalizedBalanceHeuristic(current, otherSD, otherProps, other.c);
         w_0 = mis * current.targetFunction * current.wSum;
         wSum += w_0;
     }
@@ -72,7 +72,7 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     bool otherReservoirValid = other.isValid();
     float targetFunctionOther = 0.0;
     if (otherReservoirValid) {
-        float mis = generalizedBalanceHeuristic(other, otherSD, otherProps, currentSD, currentProps, current.c);
+        float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c);
         //Check if sample can be shifted
         if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) {
             targetFunctionOther = evalApproximateBRDF(currentSD, currentProps, -toSurfaceOther) * luminance(other.sampleData.radianceOut);
@@ -139,7 +139,7 @@ bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFPro
 void main(uint2 pixel: SV_DispatchThreadID)
 {
     let lod = ExplicitLodTextureSampler(0.f);
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 4 + 2);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 2);
 
     ReservoirFG current = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
     HitInfo currentHit = HitInfo(current.sampleSurface);

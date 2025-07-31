@@ -40,7 +40,8 @@ namespace
     const std::string kShaderFolder = "RenderPasses/ReSTIR_FG_Lite/";
     const std::string kShaderTracePhotons = kShaderFolder + "TracePhotons.rt.slang";
     const std::string kShaderGenInitialSamples = kShaderFolder + "GenerateInitialSamples.rt.slang";
-    const std::string kShaderReservoirResamplingPass = kShaderFolder + "ReservoirResampling.cs.slang";
+    const std::string kShaderResamplingReservoirFG = kShaderFolder + "ResampleReservoirFG.cs.slang";
+    const std::string kShaderResamplingReservoirCaustic = kShaderFolder + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderEvaluateReservoirs = kShaderFolder + "EvaluateReservoirs.cs.slang";
 
     const std::string kShaderModel = "6_5";
@@ -80,6 +81,11 @@ ReSTIR_FG_Lite::ReSTIR_FG_Lite(ref<Device> pDevice, const Properties& props)
     {
         throw RuntimeError("ReSTIR_FG: Raytracing Tier 1.1 is not supported by the current device");
     }
+
+    //Caustic Reservoir default values
+    mResampleSettingsCaustic.spatialSamples = 0;
+    mResampleSettingsCaustic.disocclusionBoostExtraSamples = 1;
+    mResampleSettingsCaustic.samplingRadius = 4.f;
 
     // Create sample generator.
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
@@ -182,19 +188,33 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
             "Path length for a final gather sample. A final gather sample stops when it encounters a rough enough surface (see Material "
             "Options)"
         );
-        group.checkbox("Enable Resampling", mUseResampling);
-        group.var("Confidence Cap", mConfidenceCap, 1u, UINT_MAX, 1u);
-        group.tooltip("Maximum confidence a reservoir can have");
-        group.var("Spatial Samples", mSpatialSamples, 0u, 64u, 1u);
-        group.var("Disocclusion additional spatial samples", mDisocclusionBoostExtraSamples, 0u, 16u, 1u);
-        group.tooltip("Extra spatial samples if temporal resampling fails");
-        group.var("Spatial Sample Radius", mSamplingRadius, 0.f, FLT_MAX, 1.f);
 
+        auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget) {
+            widget.checkbox("Enable Resampling", settings.enable);
+            widget.var("Confidence Cap", settings.confidenceCap, 1u, UINT_MAX, 1u);
+            widget.tooltip("Maximum confidence a reservoir can have");
+            widget.var("Spatial Samples", settings.spatialSamples, 0u, 64u, 1u);
+            widget.var("Disocclusion additional spatial samples", settings.disocclusionBoostExtraSamples, 0u, 16u, 1u);
+            widget.tooltip("Extra spatial samples if temporal resampling fails");
+            widget.var("Spatial Sample Radius", settings.samplingRadius, 0.f, FLT_MAX, 1.f);
+        };
+
+        if (auto group2 = group.group("Resampling FG options"))
+        {
+            resampleUI(mResampleSettingsFG, group2);
+        }
+        if (auto group2 = group.group("Resampling Caustic options"))
+        {
+            resampleUI(mResampleSettingsCaustic, group2);
+        }
+
+        group.separator();
+        group.text("Surface Rejection Options:");
         group.var("Normal Rejection Threshold", mNormalThreshold, 0.f, 1.0f, 0.001f);
         group.tooltip("Threshold of dot product between both reservoir face normals");
         group.var("Sample Distance Threshold", mJacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
         group.checkbox("Use Path Threshold", mUsePathThreshold);
-        group.tooltip("Only resamples if the surfaces used for generating the Final Gather samples have the same path length.");
+        group.tooltip("Only resamples if the surfaces used for generating the Final Gather samples have the same path length. Always enabled for caustic collection");
     }
 
     if (auto group = widget.group("Material Options"))
@@ -218,7 +238,6 @@ void ReSTIR_FG_Lite::setScene(RenderContext* pRenderContext, const ref<Scene>& p
     mpPhotonAS.reset();
     mpEmissiveLightSampler.reset();
     mpRTXDI.reset();
-
 
     if (mpScene)
     {
@@ -274,7 +293,9 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
     //Spatiotemporal resampling
-    resamplingPass(pRenderContext, renderData);
+    resampleReservoirFGPass(pRenderContext, renderData);
+
+    resampleReservoirCausticPass(pRenderContext, renderData);
 
     //Finalize Reservoirs
     evaluateReservoirsPass(pRenderContext, renderData);
@@ -283,6 +304,7 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     mpRTXDI->endFrame(pRenderContext);
 
     mFrameCount++;
+    mCanResample = true;
 }
 
 void ReSTIR_FG_Lite::prepareLightingStructure(RenderContext* pRenderContext)
@@ -358,12 +380,21 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
         }
         if (!mpFinalGatherReservoir[i] || mResetScreenTex)
         {
-            mReservoirValid = false;
+            mCanResample = false;
             mpFinalGatherReservoir[i] = Buffer::createStructured(
                 mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
-            mpFinalGatherReservoir[i]->setName("FinalGatherReservoir");
+            mpFinalGatherReservoir[i]->setName("FinalGatherReservoir" + std::to_string(i));
+        }
+        if (!mpCausticReservoir[i] || mResetScreenTex)
+        {
+            mCanResample = false;
+            mpCausticReservoir[i] = Buffer::createStructured(
+                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
         }
     }
 
@@ -605,34 +636,30 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     mpPhotonAS->bindTlas(var, "gPhotonAS");
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     for (uint32_t i = 0; i < 2; i++)
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
     }
-
-    //Output
-    var["gOutColor"] = renderData[kOutputColor]->asTexture();
-    
+        
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
 
-    // TODO remove when photons are properly handled by reservoirs
-    pRenderContext->uavBarrier(renderData[kOutputColor]->asTexture().get());
-
     //Reservoir barrier
     pRenderContext->uavBarrier(mpFinalGatherReservoir[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpCausticReservoir[mFrameCount % 2].get());
 }
 
-void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData)
+void ReSTIR_FG_Lite::resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "Resampling");
+    FALCOR_PROFILE(pRenderContext, "Resampling Final Gather");
     // Create pass
-    if (!mpReservoirResamplingPass)
+    if (!mpResampleReservoirFGPass)
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderReservoirResamplingPass).csEntry("main").setShaderModel(kShaderModel);
+        desc.addShaderLibrary(kShaderResamplingReservoirFG).csEntry("main").setShaderModel(kShaderModel);
         desc.addTypeConformances(mpScene->getTypeConformances());
 
         DefineList defines;
@@ -642,30 +669,29 @@ void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderD
         defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
 
-        mpReservoirResamplingPass = ComputePass::create(mpDevice, desc, defines, true);
+        mpResampleReservoirFGPass = ComputePass::create(mpDevice, desc, defines, true);
     }
-    FALCOR_ASSERT(mpReservoirResamplingPass);
-    mpReservoirResamplingPass->getProgram()->addDefines(getMaterialDefines());
+    FALCOR_ASSERT(mpResampleReservoirFGPass);
+    mpResampleReservoirFGPass->getProgram()->addDefines(getMaterialDefines());
 
     //Return early if there is no previous reservoir
-    if ((!mCanResample) || !mUseResampling)
+    if ((!mCanResample) || !mResampleSettingsFG.enable)
     {
-        mCanResample = mUseResampling;
         return;
     }
 
     // Set variables
-    auto var = mpReservoirResamplingPass->getRootVar();
+    auto var = mpResampleReservoirFGPass->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
     mpSampleGenerator->setShaderData(var);                 // Sample generator
 
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
-    var["CB"]["gConfidenceLimit"] = mConfidenceCap;
-    var["CB"]["gSpatialRadius"] = mSamplingRadius;
-    var["CB"]["gSpatialSamples"] = mSpatialSamples;
-    var["CB"]["gDisocclusionBoostSpatialSamples"] = mDisocclusionBoostExtraSamples;
+    var["CB"]["gConfidenceLimit"] = mResampleSettingsFG.confidenceCap;
+    var["CB"]["gSpatialRadius"] = mResampleSettingsFG.samplingRadius;
+    var["CB"]["gSpatialSamples"] = mResampleSettingsFG.spatialSamples;
+    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsFG.disocclusionBoostExtraSamples;
     var["CB"]["gNormalThreshold"] = mNormalThreshold;
     var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
     var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
@@ -678,7 +704,61 @@ void ReSTIR_FG_Lite::resamplingPass(RenderContext* pRenderContext, const RenderD
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-    mpReservoirResamplingPass->execute(pRenderContext, uint3(targetDim, 1));
+    mpResampleReservoirFGPass->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void ReSTIR_FG_Lite::resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Resampling Caustics");
+    // Create pass
+    if (!mpResampleReservoirCausticPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderResamplingReservoirCaustic).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(mpRTXDI->getDefines());
+        defines.add(getMaterialDefines());
+
+        mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpResampleReservoirCausticPass);
+    mpResampleReservoirCausticPass->getProgram()->addDefines(getMaterialDefines());
+
+    // Return early if there is no previous reservoir
+    if ((!mCanResample) || !mResampleSettingsCaustic.enable)
+    {
+        return;
+    }
+
+    // Set variables
+    auto var = mpResampleReservoirCausticPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gConfidenceLimit"] = mResampleSettingsCaustic.confidenceCap;
+    var["CB"]["gSpatialRadius"] = mResampleSettingsCaustic.samplingRadius;
+    var["CB"]["gSpatialSamples"] = mResampleSettingsCaustic.spatialSamples;
+    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsCaustic.disocclusionBoostExtraSamples;
+    var["CB"]["gNormalThreshold"] = mNormalThreshold;
+    var["CB"]["gPhotonRadius"] = mPhotonRadius;
+
+    // Input
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+    var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
+    var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+
+    // Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpResampleReservoirCausticPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
 void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -724,6 +804,7 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
 
     //Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();

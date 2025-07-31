@@ -189,7 +189,7 @@ void rayGen()
 
     const float invRejection = 1.f / gGlobalRejectionProb;
 
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 4);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5);
     RayDesc ray;
     PhotonLightSample pls;
 
@@ -235,7 +235,7 @@ void rayGen()
 
     PhotonData photon = PhotonData();
     photon.flux = photonStartFlux;
-    photon.dir = ray.Direction;
+    photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
 
     // Main Loop
@@ -303,7 +303,8 @@ void rayGen()
 
         // Update Photon
         storeAsCaustic = !reflectedDiffuse;
-        photon.dir = ray.Direction;
+        photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
+        photon.pathLenght++;
     }
 }
