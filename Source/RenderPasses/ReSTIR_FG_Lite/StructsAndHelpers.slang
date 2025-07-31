@@ -64,10 +64,10 @@ struct FGSampleData {
 //Reservoir for a Final Gather Sample 112B
 struct ReservoirFG {
     PackedHitInfo sampleSurface; // HitSample 16B
-    float3 thp;                     //Throughput
+    float3 thp;                     // Throughput used at the end
     float targetFunction;           // Store target function
     FGSampleData sampleData;        // Data of the sample
-    float wSum;                     // W and wsum
+    float wSum;                     // W and wSum
     uint c;                         // Confidence weight
     float jacobianDeterminant;      // Jacobian determinant to the current sample
     uint pathLength;                // Path Length

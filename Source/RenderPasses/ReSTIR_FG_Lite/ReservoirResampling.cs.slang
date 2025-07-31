@@ -31,22 +31,23 @@ RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
+//Generalized Balance Heuristic with two samples
 float generalizedBalanceHeuristic(ReservoirFG reservoir0, ShadingData sd0, BSDFProperties bsdf0, ShadingData sd1, BSDFProperties bsdf1, uint otherC) {
-    float p0 = reservoir0.targetFunction * reservoir0.c;
-    float p1 = evaluateFinalGatherSampleApproximateUnbiased(reservoir0, sd1, bsdf1) * otherC;
+    float p0 = reservoir0.targetFunction * reservoir0.c; // No visibility or Jacobian Determinant needed for this sample
+    loat p1 = evaluateFinalGatherSampleApproximateUnbiased(reservoir0, sd1, bsdf1) * otherC;  // targetFunction + vis  + Jacobian Determinant
 
     float sum = (p0 + p1);
-
     if(sum > 0)
         return p0 / sum;
     else
         return 0;
 }
 
+//Resampling with 2 reservoirs. Finalizes the reservoir afterwards.
 bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFProperties currentProps,
                                 ReservoirFG other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg)
 {
-    //Check if surfaces are similar
+    //Check if surfaces are similar and resampling can be performed
     float3 toSurfaceOther = currentSD.posW - other.sampleData.posW;
     float distToSurfaceOther = length(toSurfaceOther);
     toSurfaceOther /= distToSurfaceOther; //Normalize
@@ -60,12 +61,14 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     float w_0, w_1 = 0;
     float wSum = 0;
 
+    //Get ReSTIR weight of current reservoir
     if (current.isValid()) {
         float mis = generalizedBalanceHeuristic(current, currentSD, currentProps, otherSD, otherProps, other.c);
         w_0 = mis * current.targetFunction * current.wSum;
         wSum += w_0;
     }
-           
+
+    //Calculate ReSTIR weight for other reservoir sample
     bool otherReservoirValid = other.isValid();
     float targetFunctionOther = 0.0;
     if (otherReservoirValid) {
@@ -79,7 +82,8 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
         }
         wSum += w_1;
     }
-    
+
+    //Check if other sample is selected and replace in reservoir if it was selected
     bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && otherReservoirValid;
     if (selectOtherSample) {
         current.sampleData.posW = other.sampleData.posW;
@@ -93,11 +97,13 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     current.c += other.c;
     current.c = min(current.c, gConfidenceLimit);
 
+    //Finalize reservoir (wSum -> W)
     if (current.targetFunction > 0)
         current.wSum = wSum / current.targetFunction;
     else
         current.wSum = 0;
 
+    //If something went wrong, set reservoir to 0
     if (isnan(current.wSum) || isinf(current.wSum))
         current.wSum = 0;
 
@@ -106,22 +112,24 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
 
 bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg , int2 resamplePixel) {
 
-    // Fetch temporal reservoir
+    //Check if reservoir is inside the screen. 
     if (any(resamplePixel < 0) || any(resamplePixel >= gFrameDim))
         return false;
 
+    //Fetch the (spatio)temporal reservoir
     ReservoirFG temporal = gFinalGatherReservoirPrev[index2Dto1D(resamplePixel, gFrameDim.x)];
     HitInfo temporalHit = HitInfo(temporal.sampleSurface);
     if (!temporalHit.isValid()) {
         return false;
     }
-    
+
+    //Get shading datas
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData temporalSD = loadShadingData(temporalHit, -temporal.sampleData.sampleView, lod);
     let temporalMi = gScene.materials.getMaterialInstance(temporalSD, lod, kMIHints);
     let temporalBsdfProperties = temporalMi.getProperties(temporalSD);
 
-    // Check if surfaces are similar
+    //Combine both reservoirs
     bool valid = combineReservoirsFG(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg);
 
     return valid;
@@ -148,28 +156,32 @@ void main(uint2 pixel: SV_DispatchThreadID)
     float3 toLight = normalize(current.sampleData.posW - currentSD.posW);
     current.targetFunction = evalApproximateBRDF(currentSD, currentBsdfProperties, toLight) * luminance(current.sampleData.radianceOut);
 
+    //
     // Temporal Resampling
+    //
 
     // Reproject to the previous pixel using the motion vectors
     float2 motionOffset = gMVec[pixel] * float2(gFrameDim);
     float2 prevPixelF = motionOffset + float2(pixel) + float2(0.5);
     float2 rndOffset = sampleNext2D(sg) - 0.5;
     prevPixelF += rndOffset;
-
     int2 prevPixel = int2(prevPixelF);
 
     bool resamplingSuccesfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel);
 
+    //
     // Spatiotemporal Resampling
+    //
     uint spatialSamples = resamplingSuccesfull ? gSpatialSamples : gSpatialSamples + gDisocclusionBoostSpatialSamples;
     for (uint i = 0; i < spatialSamples; i++) {
-        // Sample in a sperical radius around the reprojected sample
+        // Sample in a disc radius around the reprojected sample
         float2 spatialOffset = gSpatialRadius * sample_disk_concentric(sampleNext2D(sg));
         float2 spatialPixelF = prevPixelF + spatialOffset;
-
         int2 spatialPixel = int2(spatialPixelF);
+
         resampleReservoir(current, currentSD, currentBsdfProperties, sg, spatialPixel);
     }
 
+    //Store final reservoir
     gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)] = current;
 }
