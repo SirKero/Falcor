@@ -136,6 +136,7 @@ private:
     ref<Sampler> mpShadowSamplerPoint;
     ref<Sampler> mpShadowSamplerLinear;
 
+   
     // Configuration Path Tracer
     uint mMaxBounces = 10;               ///< Max number of indirect bounces (0 = none).
     uint mMaxDiffuseBounces = 5;        ///< Max number of diffuse bounces
@@ -148,6 +149,8 @@ private:
     bool mUseSeperateLightSampler = false;
     uint mSeperateLightSamplerBlockSize = 32;
     PathSMLightSampleMode mPathLightSampleMode = PathSMLightSampleMode::RIS;    //Mode for sampling the analytic lights 
+    uint mSampleGenSeed = 0;                                                    // Starting seed for the sample generator
+
 
     //Config Shadow Map
     ShadowMode mShadowMode = ShadowMode::LeakTracing;

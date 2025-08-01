@@ -85,7 +85,7 @@ import Rendering.ShadowMaps.Oracle.ShadowMapOracle;
 cbuffer CB
 {
     uint        gFrameCount;        // Frame count since scene was loaded.
-    uint        gPRNGDimension;     // First available PRNG dimension.
+    uint        gSampleGenStartSeed;    
     bool        gUseShadowMap;
     uint        gRayShadowMapRes;
     float       gLtBoundsMaxReduction;  //Max reduction per hit
@@ -813,20 +813,12 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim ,out float3 debug)
         let mi = gScene.materials.getMaterialInstance(sd, lod);
 
         // Create sample generator.
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
-    #if USE_SEPERATE_LIGHT_SAMPLER 
-        SampleGenerator lightSg = SampleGenerator(pixel / kSeperateLightSamplerBlockSize, gFrameCount + 1 * 32);
+        SampleGenerator sg = SampleGenerator(pixel, gSampleGenStartSeed + gFrameCount);
+#if USE_SEPERATE_LIGHT_SAMPLER
+        SampleGenerator lightSg = SampleGenerator(pixel / kSeperateLightSamplerBlockSize, gSampleGenStartSeed + gFrameCount + 1 * 32);
     #endif //USE_SEPERATE_LIGHT_SAMPLER
 
-        // Advance the generator to the first available dimension.
-        // TODO: This is potentially expensive. We may want to store/restore the state from memory if it becomes a problem.
-        for (uint i = 0; i < gPRNGDimension; i++){
-            sampleNext1D(sg);
-        #if USE_SEPERATE_LIGHT_SAMPLER 
-            sampleNext1D(lightSg);
-        #endif
-        }
-
+        
         // Compute ray origin for new rays spawned from the G-buffer.
         float3 rayOrigin;
         if (isCurveHit)

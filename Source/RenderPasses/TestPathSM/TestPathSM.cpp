@@ -86,6 +86,8 @@ const Gui::DropdownList kSMGenerationRenderer{
     {1, "RayTracing"},
 };
 
+const std::string kRandomSeedDictName = "RenderPassDictRandomSeed";
+
 } // namespace
 
 TestPathSM::TestPathSM(ref<Device> pDevice, const Properties& props) : RenderPass(pDevice)
@@ -157,6 +159,7 @@ void TestPathSM::execute(RenderContext* pRenderContext, const RenderData& render
     {
         auto flags = dict.getValue(kRenderPassRefreshFlags, RenderPassRefreshFlags::None);
         dict[Falcor::kRenderPassRefreshFlags] = flags | Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
+        dict[kRandomSeedDictName] = mSampleGenSeed; 
         mOptionsChanged = false;
     }
 
@@ -199,8 +202,16 @@ void TestPathSM::execute(RenderContext* pRenderContext, const RenderData& render
     auto cameraChanges = mpScene->getCamera()->getChanges();
     auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
     refresh |= (cameraChanges & ~excluded) != Camera::Changes::None;
+    auto newSeed = dict.getValue(kRandomSeedDictName, mSampleGenSeed);
+    if (newSeed != mSampleGenSeed)
+    {
+        mSampleGenSeed = newSeed;
+        refresh = true;
+    }
+
     if ((refresh || mResetDebugAccumulate) || !mAccumulateDebug)
     {
+        mFrameCount = 0;
         mIterationCount = 0;
         mResetDebugAccumulate = false;
         mClearDebugAccessTex = true;
@@ -314,13 +325,16 @@ void TestPathSM::renderUI(Gui::Widgets& widget)
     dirty |= widget.dropdown("Analytic Light Sample Mode", mPathLightSampleMode);
     widget.tooltip("Select the mode for sampling the analytic lights");
 
-    dirty |= widget.checkbox("Use Seperate Light Sampler", mUseSeperateLightSampler);
-    widget.tooltip("Seperate Light sampler that allows block sampling", true);
+    dirty |= widget.checkbox("Use Separate Light Sampler", mUseSeperateLightSampler);
+    widget.tooltip("Separate Light sampler that allows block sampling", true);
 
     if (mUseSeperateLightSampler)
     {
         dirty |= widget.dropdown("Light Sampler Block Sizes", kBlockSizes, mSeperateLightSamplerBlockSize);
     }
+
+    dirty |= widget.var("Sample Generator Starting Seed", mSampleGenSeed, 0u, UINT_MAX, 1u);
+    widget.tooltip("Starting seed for the sample generator. Frame count is resets to 0 each time something changes.");
 
     dirty |= widget.dropdown("Shadow Render Mode", mShadowMode);
     widget.dropdown("SM Renderer", kSMGenerationRenderer, mSMGenerationUseRay);
@@ -768,7 +782,7 @@ void TestPathSM::traceScene(RenderContext* pRenderContext, const RenderData& ren
     auto var = mTracer.pVars->getRootVar();
     // Set constants.
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gPRNGDimension"] = dict.keyExists(kRenderPassPRNGDimension) ? dict[kRenderPassPRNGDimension] : 0u;
+    var["CB"]["gSampleGenStartSeed"] = mSampleGenSeed;
     var["CB"]["gUseShadowMap"] = mShadowMode != ShadowMode::RayShadows;
     var["CB"]["gRayShadowMapRes"] = mShadowMapSize;
     var["CB"]["gLtBoundsMaxReduction"] = mLtBoundsMaxReduction;
