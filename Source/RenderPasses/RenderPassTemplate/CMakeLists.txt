@@ -5,4 +5,5 @@ target_sources(RenderPassTemplate PRIVATE
     RenderPassTemplate.h
 )
 
+target_copy_shaders(RenderPassTemplate RenderPasses/RenderPassTemplate)
 target_source_group(RenderPassTemplate "RenderPasses")
