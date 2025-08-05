@@ -137,7 +137,7 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
 
         float NdotL = dot(photonData.dir, bsdfProperties.guideNormal);
         // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
+        if ((dot(photonData.normalW, sd.getOrientedFaceNormal()) < 0.6) || (NdotL <= 0))
             continue;
 
         float targetFunction = 0;

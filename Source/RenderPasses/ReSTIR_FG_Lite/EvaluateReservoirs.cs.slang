@@ -58,6 +58,8 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
         outColor /= NdotL;
         outColor *= causticReservoir.thp;
     }
+    if (causticReservoir.pathLength > 0)
+        outColor += bsdfProperties.emission;
 
     return outColor;
 }

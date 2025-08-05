@@ -256,7 +256,7 @@ void rayGen()
         let bsdfProperties = mi.getProperties(sd);
 
         // Store Photon
-        photon.normalW = sd.faceN;
+        photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
         if (reflectedDiffuse) {
             PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
