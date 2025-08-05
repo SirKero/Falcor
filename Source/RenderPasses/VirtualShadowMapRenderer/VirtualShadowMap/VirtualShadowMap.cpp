@@ -353,6 +353,9 @@ void VirtualShadowMap::sampleViewFrustum(RenderContext* pRenderContext, const Re
     FALCOR_PROFILE(pRenderContext, "SampleViewFrustum");
     uint2 dispatchResolution = renderData.getDefaultTextureDims();
     auto prepareCmpVar = mpSampleViewFrustumPass->getRootVar();
+
+    prepareCmpVar["CB"]["gFrameDim"] = renderData.getDefaultTextureDims();
+
     prepareCmpVar["gVBuffer"] = renderData[mVBufferName]->asTexture();
     setShadowData(prepareCmpVar, false);
     mpScene->setRaytracingShaderData(pRenderContext,prepareCmpVar, 1); // Set scene data
@@ -439,6 +442,9 @@ void VirtualShadowMap::generate(RenderContext* pRenderContext, const RenderData&
     // Spawn the rays.
     mpScene->raytrace(pRenderContext, mGenVirtualShadowMapPip.pProgram.get(), mGenVirtualShadowMapPip.pVars, uint3(targetDim, 1));
     mFrameCount++;
+
+    mResetRequired = false;
+    mRenderBudgetChanged = false;
 }
 
 bool VirtualShadowMap::requireReset()
@@ -504,15 +510,13 @@ void VirtualShadowMap::setShaderData(const ShaderVar& var)
 
 bool VirtualShadowMap::renderUI(Gui::Widgets& widget)
 {
-    mResetRequired = false;
-    mRenderBudgetChanged = false;
     bool dirty = false;
     if (auto group = widget.group("Virtual Shadow Map Settings")) {
         //dirty |= TransparencyShadowMethod::renderUI(widget);
         group.text("Clipmap Size: " + std::to_string(mClipMapSize.x) + "^2");
         group.text("Page size: " + std::to_string(mPageSize.x) + "^2");
 
-        mResetRequired |= group.var("Clip Map 0 Extention", mClipMap0Extention, 1.f, 500.f, 0.5f);
+        mResetRequired |= group.var("Clip Map 0 Extention", mClipMap0Extention, 0.125f, 500.f, 0.125f);
         group.tooltip("Extention of the smallest clip map around the camera position.");
         mResetRequired |= group.var("Number Of Clipmaps", mNumClipMaps, 1u, 32u);
         mRenderBudgetChanged |= group.var("Render Budget", mRenderBudget, 1u, 8192u);

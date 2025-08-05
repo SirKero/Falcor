@@ -71,6 +71,8 @@ public:
 
     bool debugIsEnabled() { return mShowMemoryDebugView; }
 
+    bool resetIsRequired() { return mResetRequired; }
+
 private:
     struct LightVP
     {
@@ -96,11 +98,11 @@ private:
     //Runtime
     uint mFrameCount = 0;
     // Shader Resources
-    uint mRenderBudget = 512; //Render Budget in terms of how many pages are rendered at most every frame
+    uint mRenderBudget = 16; //Render Budget in terms of how many pages are rendered at most every frame
     uint2 mClipMapSize = uint2(4096);
     uint2 mPageSize = uint2(128); //page size * virtual clip map size has to be clip map size
     uint2 mVirtualClipMapSize = uint2(32);
-    uint mNumClipMaps = 16; 
+    uint mNumClipMaps = 8; 
     std::vector<ref<Texture>> mpPhysicalClipMaps; //Vector of mClipMapSize x mClipMapSize resolution Textures containing the actual Shadow data for each clipmap
     std::vector<ref<Texture>> mpVirtualClipMaps; //Vector of mVirtualClipMapSize x mVirtualClipMapSize resolution Textures containing the information about the required pages, the state of each page and the physical address of the shadow data 
     uint mDirectionalLightSourceIndex = 0;

@@ -89,8 +89,7 @@ void VirtualShadowMapRenderer::execute(RenderContext* pRenderContext, const Rend
     }
 
     //Generate virtual shadow map for the frame
-    if (mUseVirtualShadowMap)
-        mpVirtualShadowMap->generate(pRenderContext, renderData);
+    mpVirtualShadowMap->generate(pRenderContext, renderData);
 
     if (mpVirtualShadowMap->debugIsEnabled())
     {
@@ -116,6 +115,11 @@ void VirtualShadowMapRenderer::renderUI(Gui::Widgets& widget)
     if (mUseVirtualShadowMap && mpVirtualShadowMap)
     {
         mpVirtualShadowMap->renderUI(widget);
+    }
+
+    if (mpVirtualShadowMap->resetIsRequired())
+    {
+        mpShadeSurfacePass.reset();
     }
 }
 
@@ -145,7 +149,7 @@ void VirtualShadowMapRenderer::setScene(RenderContext* pRenderContext, const ref
 void VirtualShadowMapRenderer::shadeSurfacePass(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "Shader Surface");
 
-    if (!mpShadeSurfacePass)
+    if (!mpShadeSurfacePass )
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
