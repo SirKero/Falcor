@@ -78,7 +78,7 @@ const Gui::DropdownList kShadowMapSizes{
     {1024, "1024x1024"},
     {2048, "2048x2048"},
     {4096, "4096x4096"},
-    {8196, "8196x8196"},
+    {8192, "8192x8192"},
 };
 
 const Gui::DropdownList kSMGenerationRenderer{
