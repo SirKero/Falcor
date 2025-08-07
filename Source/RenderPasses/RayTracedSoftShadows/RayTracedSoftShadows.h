@@ -74,10 +74,10 @@ private:
     LightBVHSampler::Options mLightBVHOptions;
 
     // Configuration
+    uint mRenderMode = 0;
     bool mOptionsChanged = false;        //<True if settings changed
     bool mUseAlphaTest = true; //< Alpha Test for ray tracing
     uint mSPP = 1;             //<Shadow Samples per pixel
-    bool mEnableNRD = true; //<Demodulate colors
     bool mClearDemodulationTextures = false; //< Clear textures when demodulation is turned on/off
     float mNRDLightSize = 1.0f; //Approximated light size
 

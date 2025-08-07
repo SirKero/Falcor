@@ -75,6 +75,7 @@ cbuffer CB
     float gEmissiveFactor;
     float gEnvMapFactor;
     float gNRDLightSize;    //Approximated light size
+    uint gMode;             // 0 - Standard, 1 - NRD Full, 2- NRD Sigma
 }
 
 // Static configuration based on defines set from the host.
@@ -215,6 +216,201 @@ bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out Lig
     return valid;
 }
 
+void StandardPass(uint2 pixel, uint2 frameDim) {
+    HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
+    const float3 view = -gView[pixel].xyz;
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
+
+    float3 outColor = float3(0);
+
+    if (hitInfo.isValid())
+    {
+        let lod = ExplicitLodTextureSampler(0.f);
+        ShadingData sd = loadShadingData(hitInfo, view, lod);
+
+        // uint hints = (uint) MaterialInstanceHints::AdjustShadingNormal;
+        let bsdf = gScene.materials.getMaterialInstance(sd, lod, 0u);
+        let bsdfProperties = bsdf.getProperties(sd);
+
+        // Emissive
+        outColor += bsdfProperties.emission * gEmissiveFactor;
+        // Ambient
+        outColor += bsdfProperties.diffuseReflectionAlbedo * gAmbientFactor;
+
+        const float weight = 1.0 / gSPP;
+        // Sample Lights
+        for (uint i = 0; i < gSPP; i++) {
+            LightSample ls = {};
+            if (generateLightSample(sd, sg, ls)) {
+                // Shadow test
+                if (any(ls.Li > 0.0))
+                {
+                    ShadowRayData shadowData;
+                    shadowData.distance = -1.f;
+                    RayDesc shadowRay = ls.getVisibilityRay();
+                    uint flags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
+                    TraceRay(gScene.rtAccel, flags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, shadowRay, shadowData);
+
+                    if (shadowData.distance < 0) {
+                        outColor += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
+                    }
+                }
+            }
+        }
+    }
+    else {
+        // Sample Env Map
+        outColor = kUseEnvBackground ? gScene.envMap.eval(view) * gEnvMapFactor : kDefaultBackgroundColor;
+    }
+
+    gOutColor[pixel] = float4(outColor, 1.0);
+}
+
+// Uses full NRD with demodulated diffuse and specular
+void NRDFullPass(uint2 pixel, uint2 frameDim) {
+    HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
+    const float3 view = -gView[pixel].xyz;
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
+
+    float3 ambient = float3(0); // If demodulated, ambient is added
+    float3 emission = float3(0);
+    float3 diffuse = float3(0);
+    float3 specular = float3(0);
+
+    // Demodulation variables
+    float3 diffuseReflectance = {};
+    float3 specularReflectance = {};
+    float hitT = 0.0;
+
+    if (hitInfo.isValid())
+    {
+        let lod = ExplicitLodTextureSampler(0.f);
+        ShadingData sd = loadShadingData(hitInfo, view, lod);
+
+        // uint hints = (uint) MaterialInstanceHints::AdjustShadingNormal;
+        let bsdf = gScene.materials.getMaterialInstance(sd, lod, 0u);
+        let bsdfProperties = bsdf.getProperties(sd);
+
+        // Emissive
+        emission = bsdfProperties.emission * gEmissiveFactor;
+        // Ambient
+        ambient += bsdfProperties.diffuseReflectionAlbedo * gAmbientFactor;
+
+        const float weight = 1.0 / gSPP;
+        // Sample Lights
+        for (uint i = 0; i < gSPP; i++) {
+            LightSample ls = {};
+            if (generateLightSample(sd, sg, ls)) {
+                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
+                float3 LrDiffuse = bsdf.eval(sd, ls.dir, sg) * ls.Li;
+                sd.mtl.setActiveLobes((uint)LobeType::Specular);
+                float3 LrSpecular = bsdf.eval(sd, ls.dir, sg) * ls.Li;
+
+                // Shadow test
+                if (any(ls.Li > 0.0))
+                {
+                    ShadowRayData shadowData;
+                    shadowData.distance = -1.f;
+                    RayDesc shadowRay = ls.getVisibilityRay();
+                    // uint flags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
+                    uint flags = 0;
+                    TraceRay(gScene.rtAccel, flags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, shadowRay, shadowData);
+
+                    if (shadowData.distance < 0) {
+                        diffuse += LrDiffuse * weight;
+                        specular += LrSpecular * weight;
+                        hitT = ls.distance;
+                    }
+                    else {
+                        hitT = shadowData.distance;
+                    }
+                }
+            }
+        }
+
+        // Create NRD Guide Buffers
+        // For diffuse use the sum of the Reflection and Transmission albedo
+        diffuseReflectance = max(kNRDMinReflectance, bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo);
+        // For specular an approximate shading model with a single specular lobe is used
+        const float NdotV = saturate(dot(bsdfProperties.guideNormal, sd.V));
+        const float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
+        specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectionAlbedo, ggxAlpha, NdotV);
+        specularReflectance = max(kNRDMinReflectance, specularReflectance);
+
+        // Demodulate specular and diffuse
+        diffuse = diffuse / diffuseReflectance;
+        specular = specular / specularReflectance;
+    }
+    else {
+        // Sample Env Map
+        ambient = kUseEnvBackground ? gScene.envMap.eval(view) * gEnvMapFactor : kDefaultBackgroundColor;
+    }
+
+    gOutColor[pixel] = float4(ambient, 1.0);
+    if (is_valid(gOutEmission)) gOutEmission[pixel] = float4(emission, 1.0);
+    if (is_valid(gOutDiffuseRadiance)) gOutDiffuseRadiance[pixel] = float4(diffuse, hitT);
+    if (is_valid(gOutSpecularRadiance)) gOutSpecularRadiance[pixel] = float4(specular, hitT);
+    if (is_valid(gOutDiffuseReflectance)) gOutDiffuseReflectance[pixel] = float4(diffuseReflectance, 1.0);
+    if (is_valid(gOutSpecularReflectance)) gOutSpecularReflectance[pixel] = float4(specularReflectance, 1.0);
+}
+
+//Minimal sigma pass
+void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
+    HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
+    const float3 view = -gView[pixel].xyz;
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
+
+    float penumbra = 0;
+    float3 unshadowedColor = float3(0);
+
+    if (hitInfo.isValid())
+    {
+        let lod = ExplicitLodTextureSampler(0.f);
+        ShadingData sd = loadShadingData(hitInfo, view, lod);
+
+        // uint hints = (uint) MaterialInstanceHints::AdjustShadingNormal;
+        let bsdf = gScene.materials.getMaterialInstance(sd, lod, 0u);
+        let bsdfProperties = bsdf.getProperties(sd);
+
+        // Emissive
+        unshadowedColor += bsdfProperties.emission * gEmissiveFactor;
+        // Ambient
+        unshadowedColor += bsdfProperties.diffuseReflectionAlbedo * gAmbientFactor;
+
+        const float weight = 1.0 / gSPP;
+        // Sample Lights
+        for (uint i = 0; i < gSPP; i++) {
+            LightSample ls = {};
+            if (generateLightSample(sd, sg, ls)) {
+                //Shadow test and BSDF
+                if (any(ls.Li > 0.0))
+                {
+                    ShadowRayData shadowData;
+                    shadowData.distance = -1.f;
+                    RayDesc shadowRay = ls.getVisibilityRay();
+                    uint flags = 0;
+                    TraceRay(gScene.rtAccel, flags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, shadowRay, shadowData);
+
+                    if (shadowData.distance < 0) {
+                        penumbra = kFP16Max;
+                        unshadowedColor += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
+                    }
+                    else {
+                        penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, gNRDLightSize);
+                    }
+                }
+            }
+        }
+    }
+    else {
+        // Sample Env Map
+        unshadowedColor += kUseEnvBackground ? gScene.envMap.eval(view) * gEnvMapFactor : kDefaultBackgroundColor;
+    }
+
+    if (is_valid(gOutUnshadowed)) gOutUnshadowed[pixel] = float4(unshadowedColor, 1.0);
+    if (is_valid(gOutPenumbra)) gOutPenumbra[pixel] = penumbra;
+}
+
 [shader("miss")]
 void miss(inout ShadowRayData rayData)
 {
@@ -246,115 +442,11 @@ void rayGen()
     const uint2 pixel = DispatchRaysIndex().xy;
     const uint2 frameDim = DispatchRaysDimensions().xy;
 
-    HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
-    const float3 view = -gView[pixel].xyz;
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
-
-    float3 outColor = float3(0); //If demodulated, ambient is added
-    float3 emission = float3(0);
-    float3 diffuse = float3(0);
-    float3 specular = float3(0);
-
-    //Demodulation variables
-    #if NRD_DEMODULATION
-        float3 diffuseReflectance = {};
-        float3 specularReflectance = {};
-        float hitT = 0.0;
-        float penumbra = 0;
-        float3 unshadowedColor = {};
-    #endif
-
-    if (hitInfo.isValid())
-    {
-        let lod = ExplicitLodTextureSampler(0.f);
-        ShadingData sd = loadShadingData(hitInfo, view, lod);
-
-        //uint hints = (uint) MaterialInstanceHints::AdjustShadingNormal;
-        let bsdf = gScene.materials.getMaterialInstance(sd, lod, 0u);
-        let bsdfProperties = bsdf.getProperties(sd);
-
-        //Emissive
-        emission = bsdfProperties.emission * gEmissiveFactor;
-        //Ambient
-        outColor += bsdfProperties.diffuseReflectionAlbedo * gAmbientFactor;
-
-        const float weight = 1.0/gSPP;
-        //Sample Lights
-        for(uint i=0; i<gSPP; i++){
-            LightSample ls = {};
-            if (generateLightSample(sd ,sg, ls)){
-                sd.mtl.setActiveLobes((uint) LobeType::Diffuse);
-                float3 LrDiffuse = bsdf.eval(sd, ls.dir, sg) * ls.Li;
-                sd.mtl.setActiveLobes((uint) LobeType::Specular);
-                float3 LrSpecular = bsdf.eval(sd, ls.dir, sg) * ls.Li;
-                #if NRD_DEMODULATION
-                    unshadowedColor = LrDiffuse + LrSpecular;
-                #endif
-                //Shadow test
-                if (any(ls.Li > 0.0))
-                {
-                    ShadowRayData shadowData;
-                    shadowData.distance = -1.f;
-                    RayDesc shadowRay = ls.getVisibilityRay();
-                    //uint flags = RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH;
-                    uint flags = 0;
-                    TraceRay(gScene.rtAccel, flags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, shadowRay, shadowData);
-
-                    if(shadowData.distance < 0){
-                        diffuse += LrDiffuse * weight;
-                        specular += LrSpecular * weight;
-                        #if NRD_DEMODULATION
-                            hitT = distance(ls.origin, sd.posW);
-                            penumbra = kFP16Max;
-                        #endif
-                    }
-                    #if NRD_DEMODULATION
-                    else {
-                        hitT = shadowData.distance;
-                        penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, gNRDLightSize);
-                    }
-                    #endif
-                }
-            }
-            #if NRD_DEMODULATION
-                else {
-                    penumbra = 0.0;
-                }
-            #endif
-        }
-
-        #if NRD_DEMODULATION
-            //Create NRD Guide Buffers
-            //For diffuse use the sum of the Reflection and Transmission albedo
-            diffuseReflectance = max(kNRDMinReflectance, bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo);
-            //For specular an approximate shading model with a single specular lobe is used
-            const float NdotV = saturate(dot(bsdfProperties.guideNormal, sd.V));
-            const float ggxAlpha = bsdfProperties.roughness * bsdfProperties.roughness;
-            specularReflectance = approxSpecularIntegralGGX(bsdfProperties.specularReflectionAlbedo, ggxAlpha, NdotV);
-            specularReflectance = max(kNRDMinReflectance, specularReflectance);
-
-            //Demodulate specular and diffuse
-            diffuse = diffuse / diffuseReflectance;
-            specular = specular / specularReflectance;
-            
-        #else //Add everything to color
-            outColor += emission + diffuse + specular;
-        #endif
+    if (gMode == 1) {
+        NRDFullPass(pixel, frameDim);
+    } else if (gMode == 2) {
+        NRDSigmaPass(pixel, frameDim);
+    } else{
+        StandardPass(pixel, frameDim);
     }
-    else{
-        //Sample Env Map
-        outColor = kUseEnvBackground ? gScene.envMap.eval(view) * gEnvMapFactor : kDefaultBackgroundColor;
-    }
-
-    gOutColor[pixel] = float4(outColor, 1.0);
-    //Output all demodulated textures
-    #if NRD_DEMODULATION
-        if(is_valid(gOutEmission)) gOutEmission[pixel] = float4(emission,1.0);
-        if(is_valid(gOutDiffuseRadiance)) gOutDiffuseRadiance[pixel] = float4(diffuse,hitT);
-        if(is_valid(gOutSpecularRadiance)) gOutSpecularRadiance[pixel] = float4(specular,hitT);
-        if(is_valid(gOutDiffuseReflectance)) gOutDiffuseReflectance[pixel] = float4(diffuseReflectance,1.0);
-        if (is_valid(gOutSpecularReflectance)) gOutSpecularReflectance[pixel] = float4(specularReflectance, 1.0);
-        if (is_valid(gOutUnshadowed)) gOutUnshadowed[pixel] = float4(unshadowedColor, 1.0);
-        if (is_valid(gOutPenumbra)) gOutPenumbra[pixel] = penumbra;
-    #endif
 }

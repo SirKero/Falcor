@@ -64,6 +64,12 @@ namespace
         {kOutputUnshadowed, "gOutUnshadowed", "Unshadowed output", true /*optional*/, ResourceFormat::RGBA16Float},
     };
 
+     const Gui::DropdownList kRenderModeList{
+        {0, "No Denoise"},
+        {1, "NRD Full"},
+        {2, "NRD Sigma"},
+    };
+
 } //Namespace
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
@@ -105,7 +111,6 @@ void RayTracedSoftShadows::execute(RenderContext* pRenderContext, const RenderDa
     {
         auto flags = dict.getValue(kRenderPassRefreshFlags, RenderPassRefreshFlags::None);
         dict[Falcor::kRenderPassRefreshFlags] = flags | Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
-        dict[Falcor::kRenderPassEnableNRD] = mEnableNRD ? NRDEnableFlags::NRDEnabled : NRDEnableFlags::NRDDisabled;
         mOptionsChanged = false;
     }
     else
@@ -202,7 +207,6 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
     //SetDefines
     mSoftShadowPip.pProgram->addDefine("ALPHA_TEST", mUseAlphaTest ? "1" : "0");
     mSoftShadowPip.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
-    mSoftShadowPip.pProgram->addDefine("NRD_DEMODULATION", mEnableNRD ? "1" : "0");
     mSoftShadowPip.pProgram->addDefine("HAS_ANALYTIC_LIGHTS", mpScene->useAnalyticLights() ? "1" : "0");
     mSoftShadowPip.pProgram->addDefine("HAS_EMISSIVE_LIGHTS", mpScene->useEmissiveLights() ? "1" : "0");
 
@@ -235,6 +239,7 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
     var["CB"]["gEmissiveFactor"] = mEmissiveFactor;
     var["CB"]["gEnvMapFactor"] = mEnvMapFactor;
     var["CB"]["gNRDLightSize"] = mNRDLightSize;
+    var["CB"]["gMode"] = mRenderMode;
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -258,6 +263,7 @@ void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
 
+    widget.dropdown("RenderMode", kRenderModeList, mRenderMode);
     dirty |= widget.slider("SPP", mSPP,1u,32u);
     widget.tooltip("Number of light samples");
     dirty |= widget.checkbox("Alpha Test", mUseAlphaTest);
@@ -271,7 +277,8 @@ void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
     dirty |= widget.var("NRD Sigma Light Size", mNRDLightSize, 0.f, FLT_MAX, 0.001f);
     widget.tooltip("Light size input parameter for NRD. Not available in Falcor so it needs to be approximated by hand");
 
-    mClearDemodulationTextures |= widget.checkbox("Enable NRD", mEnableNRD);
+    
+
     dirty |= mClearDemodulationTextures;
 
     if (mpScene && mpScene->useEmissiveLights())
