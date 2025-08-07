@@ -81,6 +81,8 @@ cbuffer CB
 #define is_valid(name) (is_valid_##name != 0)
 static const bool kRayAlphaTest = ALPHA_TEST;
 static const bool kUseEnvBackground = USE_ENV_MAP;
+static const bool kHasAnalytic = HAS_ANALYTIC_LIGHTS;
+static const bool kHasEmissive = HAS_EMISSIVE_LIGHTS;
 static const float3 kDefaultBackgroundColor = float3(0.01);
 
 static const float kFP16Max = 65504.0; //NRD FP16 max
@@ -122,17 +124,16 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 
 /** Generates a light sample on the emissive geometry.
         \param[in] shading data.
-        \param[in] upperHemisphere True if only upper hemisphere should be considered.
         \param[in,out] sg Sample generator.
         \param[out] ls Struct describing valid samples.
         \return True if the sample is valid and has nonzero contribution, false otherwise.
     */
-bool generateEmissiveSample(const in ShadingData sd, const bool upperHemisphere, inout SampleGenerator sg, out LightSample ls)
+bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, out LightSample ls)
 {
     ls = { }; // Default initialization to avoid divergence at returns.
 
     TriangleLightSample tls;
-    if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, upperHemisphere, sg, tls))
+    if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
         return false;
 
         // Setup returned sample.
@@ -147,6 +148,67 @@ bool generateEmissiveSample(const in ShadingData sd, const bool upperHemisphere,
     ls.lightType = 1;
 
     return any(ls.Li > 0.f);
+}
+
+/** Generates a light sample on the analytic lights.
+       \param[in] vertex Path vertex.
+       \param[in,out] sg Sample generator.
+       \param[out] ls Struct describing valid samples.
+       \return True if the sample is valid and has nonzero contribution, false otherwise.
+   */
+bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg, out LightSample ls)
+{
+    ls = {}; // Default initialization to avoid divergence at returns.
+
+    uint lightCount = gScene.getLightCount();
+    if (!kHasAnalytic || lightCount == 0) return false;
+
+    // Sample analytic light source selected uniformly from the light list.
+    // TODO: Sample based on estimated contributions as pdf.
+    uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
+
+    // Sample local light source.
+    AnalyticLightSample lightSample;
+    if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, lightSample)) return false;
+
+    // Random offset
+    if (lightSample.distance < kMaxLightDistance) {
+        float3 randomSphereOffset = sample_sphere(sampleNext2D(sg)) * gNRDLightSize;
+        lightSample.posW += randomSphereOffset;
+        lightSample.dir = lightSample.posW - sd.posW;
+        lightSample.distance = length(lightSample.dir);
+        lightSample.dir /= lightSample.distance;
+    }
+   
+    // Setup returned sample.
+    ls.pdf = lightSample.pdf / lightCount;
+    ls.Li = lightSample.Li * lightCount;
+    // Offset shading position to avoid self-intersection.
+    ls.origin = computeRayOrigin(sd.posW, dot(sd.faceN, lightSample.dir) >= 0 ? sd.faceN : -sd.faceN);
+    // Analytic lights do not currently have a geometric representation in the scene.
+    // Do not worry about adjusting the ray length to avoid self-intersections at the light.
+    ls.distance = lightSample.distance;
+    ls.dir = lightSample.dir;
+
+    return any(ls.Li > 0.f);
+}
+
+bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out LightSample ls) {
+    ls = {};
+    if (!kHasAnalytic && !kHasEmissive)
+        return false;
+
+    float analyticProb = kHasAnalytic ? 1.0 : 0.0;
+    float emissiveProb = kHasEmissive ? 1.0 : 0.0;
+    float selectAnalyticProb = analyticProb / (analyticProb + emissiveProb);
+
+    bool valid = false;
+    if (sampleNext1D(sg) < selectAnalyticProb) {
+        valid = generateAnalyticLightSample(sd, sg, ls);
+    } else {
+        valid = generateEmissiveSample(sd, sg, ls);
+    }
+    return valid;
 }
 
 [shader("miss")]
@@ -194,7 +256,7 @@ void rayGen()
         float3 diffuseReflectance = {};
         float3 specularReflectance = {};
         float hitT = 0.0;
-        float penumbra = kFP16Max;
+        float penumbra = 0;
         float3 unshadowedColor = {};
     #endif
 
@@ -215,8 +277,8 @@ void rayGen()
         const float weight = 1.0/gSPP;
         //Sample Lights
         for(uint i=0; i<gSPP; i++){
-            LightSample ls = { };
-            if(generateEmissiveSample(sd,true ,sg, ls)){
+            LightSample ls = {};
+            if (generateLightSample(sd ,sg, ls)){
                 sd.mtl.setActiveLobes((uint) LobeType::Diffuse);
                 float3 LrDiffuse = bsdf.eval(sd, ls.dir, sg) * ls.Li;
                 sd.mtl.setActiveLobes((uint) LobeType::Specular);
@@ -239,12 +301,13 @@ void rayGen()
                         specular += LrSpecular * weight;
                         #if NRD_DEMODULATION
                             hitT = distance(ls.origin, sd.posW);
+                            penumbra = kFP16Max;
                         #endif
                     }
                     #if NRD_DEMODULATION
                     else {
                         hitT = shadowData.distance;
-                        penumbra = SIGMA_FrontEnd_PackPenumbra(hitT, distance(ls.origin, sd.posW), gNRDLightSize);
+                        penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, gNRDLightSize);
                     }
                     #endif
                 }

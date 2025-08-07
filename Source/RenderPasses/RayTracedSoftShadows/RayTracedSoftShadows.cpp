@@ -132,11 +132,6 @@ void RayTracedSoftShadows::execute(RenderContext* pRenderContext, const RenderDa
     }
     //Check if emissive lights are enabled
     auto& pLights = mpScene->getLightCollection(pRenderContext);
-    if (!mpScene->useEmissiveLights())
-    {
-        clearOutputs();
-        return;
-    }
 
     if (mClearDemodulationTextures) {
         clearOutputs(); // lazily clear all textures
@@ -208,6 +203,8 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
     mSoftShadowPip.pProgram->addDefine("ALPHA_TEST", mUseAlphaTest ? "1" : "0");
     mSoftShadowPip.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
     mSoftShadowPip.pProgram->addDefine("NRD_DEMODULATION", mEnableNRD ? "1" : "0");
+    mSoftShadowPip.pProgram->addDefine("HAS_ANALYTIC_LIGHTS", mpScene->useAnalyticLights() ? "1" : "0");
+    mSoftShadowPip.pProgram->addDefine("HAS_EMISSIVE_LIGHTS", mpScene->useEmissiveLights() ? "1" : "0");
 
     if (mpEmissiveLightSampler)
         mSoftShadowPip.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
