@@ -201,13 +201,17 @@ bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out Lig
     float analyticProb = kHasAnalytic ? 1.0 : 0.0;
     float emissiveProb = kHasEmissive ? 1.0 : 0.0;
     float selectAnalyticProb = analyticProb / (analyticProb + emissiveProb);
-
+    float selectPdf = selectAnalyticProb;
     bool valid = false;
     if (sampleNext1D(sg) < selectAnalyticProb) {
         valid = generateAnalyticLightSample(sd, sg, ls);
     } else {
         valid = generateEmissiveSample(sd, sg, ls);
+        selectPdf = 1.0 - selectAnalyticProb;
     }
+    ls.pdf *= selectPdf;
+    ls.Li /= selectPdf;
+
     return valid;
 }
 
