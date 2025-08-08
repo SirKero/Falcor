@@ -265,7 +265,7 @@ void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
     bool dirty = false;
 
     dirty |= widget.dropdown("RenderMode", kRenderModeList, mRenderMode);
-    dirty |= widget.slider("SPP", mSPP,1u,32u);
+    dirty |= widget.slider("SPP", mSPP,1u,256u);
     widget.tooltip("Number of light samples");
     dirty |= widget.checkbox("Alpha Test", mUseAlphaTest);
     widget.tooltip("Enable Alpha test");

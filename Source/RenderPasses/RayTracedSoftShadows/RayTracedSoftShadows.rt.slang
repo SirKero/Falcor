@@ -392,7 +392,8 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
             LightSample ls = {};
             float lightArea = 0;
             if (generateLightSample(sd, sg, ls, lightArea)) {
-                //Shadow test and BSDF
+                // Shadow test and BSDF
+                unshadowedColor += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
                 if (any(ls.Li > 0.0))
                 {
                     ShadowRayData shadowData;
@@ -403,7 +404,6 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
 
                     if (shadowData.distance < 0) {
                         penumbra = kFP16Max;
-                        unshadowedColor += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
                     }
                     else {
                         penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, lightArea);

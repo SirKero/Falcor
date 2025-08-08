@@ -69,10 +69,13 @@ namespace
     const std::string kPropsRelaxDiffuseMaxAccumulatedFrameNum = "RelaxDiffuseMaxAccumulatedFrameNum";
     const std::string kPropsRelaxSpecularMaxAccumulatedFrameNum = "RelaxSpecularMaxAccumulatedFrameNum";
     const std::string kPropsRelaxEnableAntiFirefly = "RelaxEnableAntiFirefly";
+    
 
     //Reblur settings TODO add
 
-    //Sigma settings TODO
+    //Sigma settings
+    const std::string kPropsSigmaStabilization = "SigmaStabilization";
+
 
     const Gui::DropdownList kDropdownNormal = {
         {(uint)NRDPassBase::DenoisingMethod::RelaxDiffuseSpecular, "RelaxDiffuseSpecular"},
@@ -116,6 +119,8 @@ NRDPassBase::NRDPassBase(ref<Device> pDevice, const Properties& props)
     mRelaxSettings.specularMaxAccumulatedFrameNum = 40;
 
     mRelaxSettings.enableAntiFirefly = true;
+
+    mSigmaSettings.stabilizationStrength = 1.0;
     
     // Deserialize pass from dictionary.
     for (const auto& [key, value] : props)
@@ -156,6 +161,8 @@ NRDPassBase::NRDPassBase(ref<Device> pDevice, const Properties& props)
             mRelaxSettings.specularMaxAccumulatedFrameNum = value;
         else if (key == kPropsRelaxEnableAntiFirefly)
             mRelaxSettings.enableAntiFirefly = value;
+        else if (key == kPropsSigmaStabilization)
+            mSigmaSettings.stabilizationStrength = value;
 
         //Reblur settings TODO
 
@@ -192,6 +199,7 @@ Properties NRDPassBase::getProperties() const
     props[kPropsRelaxDiffuseMaxAccumulatedFrameNum] = mRelaxSettings.diffuseMaxAccumulatedFrameNum;
     props[kPropsRelaxSpecularMaxAccumulatedFrameNum] = mRelaxSettings.specularMaxAccumulatedFrameNum;
     props[kPropsRelaxEnableAntiFirefly] = mRelaxSettings.enableAntiFirefly;
+    props[kPropsSigmaStabilization] = mSigmaSettings.stabilizationStrength;
 
     return props;
 }
