@@ -73,8 +73,14 @@ cbuffer CB
     uint gSPP;
     float gAmbientFactor;  //Tells if the LTT mask is valid
     float gEmissiveFactor;
+
     float gEnvMapFactor;
-    float gNRDLightSize;    //Approximated light size
+    float3 gDirLightT; // Tangent for directional light
+
+    float3 gDirLightB; // Bitangent for directional light
+    float gTanSunAngularRadius; //Tangenens of the suns angular radius for directional lights
+
+    float gNRDLightSize; // Approximated light size
     uint gMode;             // 0 - Standard, 1 - NRD Full, 2- NRD Sigma
 }
 
@@ -93,11 +99,11 @@ static const float kFP16Max = 65504.0; //NRD FP16 max
 struct LightSample
 {
     float3 Li; ///< Incident radiance at the shading point (unshadowed). This is already divided by the pdf.
-    float pdf; ///< Pdf with respect to solid angle at the shading point.
+    float lightArea;    ///<Area of the light
     float3 origin; ///< Ray origin for visibility evaluation (offseted to avoid self-intersection).
     float distance; ///< Ray distance for visibility evaluation (shortened to avoid self-intersection).
     float3 dir; ///< Ray direction for visibility evaluation (normalized).
-    uint lightType; ///< Light type this sample comes from (0 -> analytic; 1 -> emissive).
+    uint lightType; ///< Light type this sample comes from (0 -> analytic spot/point; 1-> analytic directional 2 -> emissive).
 
     RayDesc getVisibilityRay()
     {
@@ -129,17 +135,15 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
         \param[out] ls Struct describing valid samples.
         \return True if the sample is valid and has nonzero contribution, false otherwise.
     */
-bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, out LightSample ls, out float lightArea)
+bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, out LightSample ls)
 {
     ls = {}; // Default initialization to avoid divergence at returns.
-    lightArea = 1;
     TriangleLightSample tls;
     if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
         return false;
 
         // Setup returned sample.
     ls.Li = tls.pdf > 0.f ? (tls.Le * gEmissiveFactor) / tls.pdf : float3(0);
-    ls.pdf = tls.pdf;
         // Offset shading and light position to avoid self-intersection.
     float3 lightPos = computeRayOrigin(tls.posW, tls.normalW);
     ls.origin = computeRayOrigin(sd.posW, dot(sd.faceN, lightPos - sd.posW) >= 0 ? sd.faceN : -sd.faceN);
@@ -150,7 +154,7 @@ bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, o
 
     //Get (triangle)light area
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(tls.triangleIndex);
-    lightArea = tri.area;
+    ls.lightArea = tri.area;
 
     return any(ls.Li > 0.f);
 }
@@ -177,16 +181,22 @@ bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg,
     if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, lightSample)) return false;
 
     // Random offset
+    float2 rnd = sampleNext2D(sg);
     if (lightSample.distance < kMaxLightDistance) {
-        float3 randomSphereOffset = sample_sphere(sampleNext2D(sg)) * gNRDLightSize;
+        float3 randomSphereOffset = sample_sphere(rnd) * gNRDLightSize;
         lightSample.posW += randomSphereOffset;
         lightSample.dir = lightSample.posW - sd.posW;
         lightSample.distance = length(lightSample.dir);
         lightSample.dir /= lightSample.distance;
+        ls.lightType = 0; //Point spot
+    } else {
+        float2 cosRnd = sample_cosine_hemisphere_polar(rnd).xy * gTanSunAngularRadius;
+        lightSample.dir = normalize(gDirLightT * cosRnd.x + gDirLightB * cosRnd.y + lightSample.dir);
+
+        ls.lightType = 1; //Directional
     }
    
     // Setup returned sample.
-    ls.pdf = lightSample.pdf / lightCount;
     ls.Li = lightSample.Li * lightCount;
     // Offset shading position to avoid self-intersection.
     ls.origin = computeRayOrigin(sd.posW, dot(sd.faceN, lightSample.dir) >= 0 ? sd.faceN : -sd.faceN);
@@ -194,13 +204,13 @@ bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg,
     // Do not worry about adjusting the ray length to avoid self-intersections at the light.
     ls.distance = lightSample.distance;
     ls.dir = lightSample.dir;
+    ls.lightType = 1;
 
     return any(ls.Li > 0.f);
 }
 
-bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out LightSample ls, out float lightArea) {
+bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out LightSample ls) {
     ls = {};
-    lightArea = 1;
     if (!kHasAnalytic && !kHasEmissive)
         return false;
 
@@ -211,12 +221,11 @@ bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out Lig
     bool valid = false;
     if (sampleNext1D(sg) < selectAnalyticProb) {
         valid = generateAnalyticLightSample(sd, sg, ls);
-        lightArea = M_PI * gNRDLightSize * gNRDLightSize;
+        ls.lightArea = M_PI * gNRDLightSize * gNRDLightSize;
     } else {
-        valid = generateEmissiveSample(sd, sg, ls, lightArea);
+        valid = generateEmissiveSample(sd, sg, ls);
         selectPdf = 1.0 - selectAnalyticProb;
     }
-    ls.pdf *= selectPdf;
     ls.Li /= selectPdf;
 
     return valid;
@@ -247,8 +256,7 @@ void StandardPass(uint2 pixel, uint2 frameDim) {
         // Sample Lights
         for (uint i = 0; i < gSPP; i++) {
             LightSample ls = {};
-            float lightArea = 0;
-            if (generateLightSample(sd, sg, ls, lightArea)) {
+            if (generateLightSample(sd, sg, ls)) {
                 // Shadow test
                 if (any(ls.Li > 0.0))
                 {
@@ -307,8 +315,7 @@ void NRDFullPass(uint2 pixel, uint2 frameDim) {
         // Sample Lights
         for (uint i = 0; i < gSPP; i++) {
             LightSample ls = {};
-            float lightArea = 0;
-            if (generateLightSample(sd, sg, ls, lightArea)) {
+            if (generateLightSample(sd, sg, ls)) {
                 sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
                 float3 LrDiffuse = bsdf.eval(sd, ls.dir, sg) * ls.Li;
                 sd.mtl.setActiveLobes((uint)LobeType::Specular);
@@ -390,8 +397,7 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
         // Sample Lights
         for (uint i = 0; i < gSPP && !isEmissive; i++) {
             LightSample ls = {};
-            float lightArea = 0;
-            if (generateLightSample(sd, sg, ls, lightArea)) {
+            if (generateLightSample(sd, sg, ls)) {
                 // Shadow test and BSDF
                 unshadowedColor += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
                 if (any(ls.Li > 0.0))
@@ -406,7 +412,10 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
                         penumbra = kFP16Max;
                     }
                     else {
-                        penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, lightArea);
+                        if (ls.lightType == 1) //Directional
+                            penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, gTanSunAngularRadius);
+                        else
+                            penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, ls.lightArea);
                     }
                 }
             } else {

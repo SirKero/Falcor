@@ -85,6 +85,12 @@ private:
     float mEnvMapFactor = 0.3f;  //< Env Map factor
     float mEmissiveFactor = 2.f; //< Emissive Factor
 
+    //Directional Soft Light
+    float mSunAnglularDiameter = 0.553f;
+    float3 mSunDir = float3(0, -1, 0);  //Stored sun direction
+    float3 mSunDirT = mSunDir;          //Tangent for sun direction
+    float3 mSunDirB = mSunDir;          //Bitangent for sun direction
+
     // Ray tracing program.
     struct
     {
