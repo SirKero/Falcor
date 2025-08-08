@@ -111,6 +111,7 @@ void RayTracedSoftShadows::execute(RenderContext* pRenderContext, const RenderDa
     {
         auto flags = dict.getValue(kRenderPassRefreshFlags, RenderPassRefreshFlags::None);
         dict[Falcor::kRenderPassRefreshFlags] = flags | Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
+        dict[kRenderPassSwitchOutputIndex] = mRenderMode;
         mOptionsChanged = false;
     }
     else
@@ -263,7 +264,7 @@ void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
 {
     bool dirty = false;
 
-    widget.dropdown("RenderMode", kRenderModeList, mRenderMode);
+    dirty |= widget.dropdown("RenderMode", kRenderModeList, mRenderMode);
     dirty |= widget.slider("SPP", mSPP,1u,32u);
     widget.tooltip("Number of light samples");
     dirty |= widget.checkbox("Alpha Test", mUseAlphaTest);

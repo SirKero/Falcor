@@ -26,6 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "SwitchPass.h"
+#include "RenderGraph/RenderPassStandardFlags.h"
 
 namespace
 {
@@ -113,6 +114,15 @@ void SwitchPass::compile(RenderContext* pRenderContext, const CompileData& compi
 
 void SwitchPass::execute(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    //Get dict and check if index should change
+    //  Update refresh flag if options that affect the output have changed.
+    auto& dict = renderData.getDictionary();
+    auto newSelectIndex = dict.getValue(kRenderPassSwitchOutputIndex, mSelectedIndex);
+    if (newSelectIndex < mNames.size())
+    {
+        mSelectedIndex = newSelectIndex;
+    }
+
     auto inputName = getInputName(mSelectedIndex);
     if (!renderData[inputName])
         return;

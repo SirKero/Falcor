@@ -66,6 +66,9 @@ static const char kRenderPassEnableNRD[] = "_enableNRD";
 static const char kRenderPassUseNRDDebugLayer[] = "_useNRDDebugLayer";
 static const char kRenderPassNRDOutputInYCoCg[] = "_useNRDOutputInYCoCg";
 
+//Switch Pass flags
+static const char kRenderPassSwitchOutputIndex[] = "_switchPassOutputIndex";
+
 /**
  * First available preudorandom number generator dimension.
  */

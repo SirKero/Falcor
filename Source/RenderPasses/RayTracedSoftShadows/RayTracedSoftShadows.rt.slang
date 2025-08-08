@@ -129,10 +129,10 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
         \param[out] ls Struct describing valid samples.
         \return True if the sample is valid and has nonzero contribution, false otherwise.
     */
-bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, out LightSample ls)
+bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, out LightSample ls, out float lightArea)
 {
-    ls = { }; // Default initialization to avoid divergence at returns.
-
+    ls = {}; // Default initialization to avoid divergence at returns.
+    lightArea = 1;
     TriangleLightSample tls;
     if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
         return false;
@@ -147,6 +147,10 @@ bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, o
     ls.distance = length(toLight);
     ls.dir = normalize(toLight);
     ls.lightType = 1;
+
+    //Get (triangle)light area
+    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(tls.triangleIndex);
+    lightArea = tri.area;
 
     return any(ls.Li > 0.f);
 }
@@ -194,8 +198,9 @@ bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg,
     return any(ls.Li > 0.f);
 }
 
-bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out LightSample ls) {
+bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out LightSample ls, out float lightArea) {
     ls = {};
+    lightArea = 1;
     if (!kHasAnalytic && !kHasEmissive)
         return false;
 
@@ -206,8 +211,9 @@ bool generateLightSample(const ShadingData sd, inout SampleGenerator sg, out Lig
     bool valid = false;
     if (sampleNext1D(sg) < selectAnalyticProb) {
         valid = generateAnalyticLightSample(sd, sg, ls);
+        lightArea = M_PI * gNRDLightSize * gNRDLightSize;
     } else {
-        valid = generateEmissiveSample(sd, sg, ls);
+        valid = generateEmissiveSample(sd, sg, ls, lightArea);
         selectPdf = 1.0 - selectAnalyticProb;
     }
     ls.pdf *= selectPdf;
@@ -241,7 +247,8 @@ void StandardPass(uint2 pixel, uint2 frameDim) {
         // Sample Lights
         for (uint i = 0; i < gSPP; i++) {
             LightSample ls = {};
-            if (generateLightSample(sd, sg, ls)) {
+            float lightArea = 0;
+            if (generateLightSample(sd, sg, ls, lightArea)) {
                 // Shadow test
                 if (any(ls.Li > 0.0))
                 {
@@ -300,7 +307,8 @@ void NRDFullPass(uint2 pixel, uint2 frameDim) {
         // Sample Lights
         for (uint i = 0; i < gSPP; i++) {
             LightSample ls = {};
-            if (generateLightSample(sd, sg, ls)) {
+            float lightArea = 0;
+            if (generateLightSample(sd, sg, ls, lightArea)) {
                 sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
                 float3 LrDiffuse = bsdf.eval(sd, ls.dir, sg) * ls.Li;
                 sd.mtl.setActiveLobes((uint)LobeType::Specular);
@@ -360,7 +368,7 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
     const float3 view = -gView[pixel].xyz;
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
 
-    float penumbra = 0;
+    float penumbra = kFP16Max;
     float3 unshadowedColor = float3(0);
 
     if (hitInfo.isValid())
@@ -374,14 +382,16 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
 
         // Emissive
         unshadowedColor += bsdfProperties.emission * gEmissiveFactor;
+        bool isEmissive = any(unshadowedColor > 0);
         // Ambient
         unshadowedColor += bsdfProperties.diffuseReflectionAlbedo * gAmbientFactor;
 
         const float weight = 1.0 / gSPP;
         // Sample Lights
-        for (uint i = 0; i < gSPP; i++) {
+        for (uint i = 0; i < gSPP && !isEmissive; i++) {
             LightSample ls = {};
-            if (generateLightSample(sd, sg, ls)) {
+            float lightArea = 0;
+            if (generateLightSample(sd, sg, ls, lightArea)) {
                 //Shadow test and BSDF
                 if (any(ls.Li > 0.0))
                 {
@@ -396,9 +406,11 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
                         unshadowedColor += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
                     }
                     else {
-                        penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, gNRDLightSize);
+                        penumbra = SIGMA_FrontEnd_PackPenumbra(shadowData.distance, ls.distance, lightArea);
                     }
                 }
+            } else {
+                penumbra = 0;
             }
         }
     }
