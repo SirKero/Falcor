@@ -256,7 +256,7 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
     var["CB"]["gEnvMapFactor"] = mEnvMapFactor;
     var["CB"]["gNRDLightSize"] = mNRDLightSize;
     var["CB"]["gMode"] = mRenderMode;
-    var["CB"]["gTanSunAngularRadius"] = math::tan(math::radians(mSunAnglularDiameter * 0.5f));
+    var["CB"]["gTanSunAngularRadius"] = math::tan(math::radians(mSunAngularDiameter * 0.5f));
     var["CB"]["gDirLightT"] = mSunDirT;
     var["CB"]["gDirLightB"] = mSunDirB;
 
@@ -295,7 +295,7 @@ void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
     widget.tooltip("Factor for the env map sample");
     dirty |= widget.var("NRD Sigma Light Size", mNRDLightSize, 0.f, FLT_MAX, 0.001f);
     widget.tooltip("Light size input parameter for NRD. Not available in Falcor so it needs to be approximated by hand");
-    dirty |= widget.var("Sun size (deg)", mSunAnglularDiameter, 0.f, 3.f, 0.001f);
+    dirty |= widget.var("Sun size (deg)", mSunAngularDiameter, 0.f, 3.f, 0.001f);
     
 
     dirty |= mClearDemodulationTextures;
