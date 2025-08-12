@@ -58,6 +58,9 @@ private:
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
     //Renders all shadow maps
     void generateShadowMaps(RenderContext* pRenderContext, const RenderData& renderData);
+    //Creates the Summed Area Table for the Shadow Map
+    void createShadowMapSAT(RenderContext* pRenderContext, const RenderData& renderData);
+
     //Shades the surface using the VBuffer hit
     void shadeSurfacePass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -78,7 +81,7 @@ private:
     //Shadow Maps settings
     bool mRebuildShadowMaps = true;
     uint mShadowMapResolution = 2048;
-    float2 mNearFar = float2(1.f, 40.f);
+    float2 mNearFar = float2(5.f, 60.f);
     uint mCascadedLevels = 4; //Number of cascaded levels
     uint mNumberShadowMaps = 1; //Number of shadow map textures
     bool mSceneHasDirectionalLight = false; //

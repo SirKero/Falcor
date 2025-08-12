@@ -4,6 +4,7 @@
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Rendering.Lights.LightHelpers;
+import Rendering.ShadowMaps.ShadowTestFunctions;
 
 #ifndef NUM_SM
 #define NUM_SM 1
@@ -17,7 +18,8 @@ cbuffer CB
     float gEnvMapFac;       //Env map strength
     float gEmissiveFac;     // Emissive stength
     float gSMNear;          //Shadow Map Near Palne
-    float gSMFar;           //Shadow Map Far Plane
+    float gSMFar;           // Shadow Map Far Plane
+    uint gSMSize;           //Size of the SM
 }
 
 cbuffer CB_SMVMP {
@@ -25,6 +27,7 @@ cbuffer CB_SMVMP {
 }
 
 Texture2D<float> gSM[NUM_SM];
+Texture2D<uint2> gSAT[NUM_SM];
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
@@ -36,6 +39,7 @@ SamplerState gSMSampler;
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
 static const float3 kDefaultBackgroundColor = float3(0.01);
+static const float kMantissaMax = 8388608.0; // 2^23
 
 // Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
@@ -68,6 +72,42 @@ float evalShadowMap(const ShadingData sd, uint lightIdx) {
     float vis = 0;
     if (sv + 0.0001 > lightDist)
         vis = 1;
+
+    return vis;
+}
+
+float evalSATShadowMap(const ShadingData sd, uint lightIdx) {
+
+    float4x4 viewProjectMat = gSMViewProjection[lightIdx];
+    float4 projPos = mul(viewProjectMat, float4(sd.posW, 1.f));
+    projPos.xyz = (projPos.xyz / projPos.w);
+
+    float lightDist = (projPos.w - gSMNear) / (gSMFar - gSMNear);
+
+    float2 shadowUV = projPos.xy;
+    shadowUV.y *= -1;                // Flip
+    shadowUV = shadowUV * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+
+    if (any(shadowUV.xy < 0.f) || any(shadowUV.xy > 1.f)) // Return if outside of the shadow map
+        return 0.0;
+
+    // Get the SAT corners
+    int2 pixel = shadowUV * gSMSize;
+    int searchRadius = 12;
+    int2 satPixel = clamp(pixel + int2(-searchRadius), 0, gSMSize - 1);
+    uint2 sat0 = gSAT[lightIdx][satPixel];
+    satPixel = clamp(pixel + int2(searchRadius, -searchRadius), 0, gSMSize - 1);
+    uint2 sat1 = gSAT[lightIdx][satPixel];
+    satPixel = clamp(pixel + int2(-searchRadius, searchRadius), 0, gSMSize - 1);
+    uint2 sat2 = gSAT[lightIdx][satPixel];
+    satPixel = clamp(pixel + int2(searchRadius), 0, gSMSize - 1);
+    uint2 sat3 = gSAT[lightIdx][satPixel];
+
+    uint2 s = sat3 - sat1 - sat2 + sat0;
+    s /= 576;
+    float2 moments = float2(s) / kMantissaMax;
+
+    float vis = ChebyshevUpperBound(moments, lightDist, 1e-5);
 
     return vis;
 }
@@ -106,7 +146,8 @@ float3 evalAnalyticLight(const ShadingData sd, const IMaterialInstance mi, inout
         if (rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             visibility = 1.0;
         */
-        visibility = evalShadowMap(sd, lightIdx);
+        //visibility = evalShadowMap(sd, lightIdx);
+        visibility = evalSATShadowMap(sd, lightIdx);
 
         Li += bsdf * visibility * ls.Li;
     }
