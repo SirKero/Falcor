@@ -292,7 +292,7 @@ void rayGen()
 
         bool hitIsRough = bsdfProperties.roughness > kRoughnessThreshold;
 
-        //Init Cauastic reservoir if photons can be collected at the current surface
+        //Init Caustic reservoir if photons can be collected at the current surface
         if (hitIsRough) {
             causticReservoir.sampleSurface = hitInfo.getData();
             causticReservoir.sampleSurfaceView = -viewDir;
