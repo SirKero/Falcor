@@ -194,6 +194,14 @@ void NGXWrapper::shutdownNGX()
     {
         mpDevice->flushAndSync();
 
+        // When multiple DLSS instances are open. Was already released
+        if (mpFeature->Id > 1)
+        {
+            mpFeature = nullptr;
+            mpParameters = nullptr;
+            return;
+        }
+
         if (mpFeature != nullptr)
             releaseDLSS();
 
