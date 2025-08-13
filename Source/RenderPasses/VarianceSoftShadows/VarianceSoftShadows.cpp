@@ -72,7 +72,7 @@ VarianceSoftShadows::VarianceSoftShadows(ref<Device> pDevice, const Properties& 
     // Create samplers.
     Sampler::Desc samplerDesc;
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     mpShadowSampler = Sampler::create(mpDevice, samplerDesc);
 }
 
@@ -140,6 +140,9 @@ void VarianceSoftShadows::renderUI(Gui::Widgets& widget)
             resetRenderPasses();
         }
     }
+    if (widget.var("SAT Uint convert bits", mSATMantissaBits, 16u, 23u, 1u))
+        resetRenderPasses();
+    widget.var("SAT max search radius (pixel)", mSATMaxSearchRadius, 1u, mShadowMapResolution / 4, 1u);
 }
 
 void VarianceSoftShadows::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene)
@@ -207,6 +210,7 @@ void VarianceSoftShadows::prepareResources(RenderContext* pRenderContext, const 
 {
     if (mRebuildShadowMaps)
     {
+        mShadowMapRasterDepth.reset();
         mShadowMaps.clear();
         mSATVarianceShadowMaps.clear();
         mHierarchicalShadowMaps.clear();
@@ -214,13 +218,22 @@ void VarianceSoftShadows::prepareResources(RenderContext* pRenderContext, const 
         mShadowMVP.clear();
     }
 
+    if (!mShadowMapRasterDepth)
+    {
+        mShadowMapRasterDepth = Texture::create2D(
+            mpDevice, mShadowMapResolution, mShadowMapResolution, ResourceFormat::D32Float, 1u, 1u, nullptr,
+            ResourceBindFlags::DepthStencil | ResourceBindFlags::ShaderResource
+        );
+        mShadowMapRasterDepth->setName("ShadowMapRasterDepth");
+    }
+
     if (mShadowMaps.empty())
     {
         for (uint i = 0; i < mNumberShadowMaps; i++)
         {
             ref<Texture> shadowMap = Texture::create2D(
-                mpDevice, mShadowMapResolution, mShadowMapResolution, ResourceFormat::D32Float, 1u, 1u, nullptr,
-                ResourceBindFlags::DepthStencil | ResourceBindFlags::ShaderResource
+                mpDevice, mShadowMapResolution, mShadowMapResolution, ResourceFormat::R32Float, 1u, 1u, nullptr,
+                ResourceBindFlags::RenderTarget | ResourceBindFlags::ShaderResource
             );
             shadowMap->setName("ShadowMap" + std::to_string(i));
             mShadowMaps.push_back(shadowMap);
@@ -290,9 +303,9 @@ void VarianceSoftShadows::generateShadowMaps(RenderContext* pRenderContext, cons
         {
             float3 lightTarget = lightData.posW + lightData.dirW;
             const float3 up = abs(lightData.dirW.y) == 1 ? float3(0, 0, 1) : float3(0, 1, 0);
-            float4x4 viewMat = math::matrixFromLookAt(lightData.posW, lightTarget, up);
-            float4x4 projMat = math::perspective(lightData.openingAngle * 2, 1.f, mNearFar.x, mNearFar.y); // TODO directional
-            mShadowMVP[i] = math::mul(projMat, viewMat);
+            mShadowMVP[i].view = math::matrixFromLookAt(lightData.posW, lightTarget, up);
+            mShadowMVP[i].projection = math::perspective(lightData.openingAngle * 2, 1.f, mNearFar.x, mNearFar.y); // TODO directional
+            mShadowMVP[i].viewProjection = math::mul(mShadowMVP[i].projection, mShadowMVP[i].view);
 
             // if (mUseFrustumCulling)
             //     mFrustumCulling[index]->updateFrustum(lightData.posW, lightTarget, up, 1.f, lightData.openingAngle * 2, mNear, mFar);
@@ -304,11 +317,13 @@ void VarianceSoftShadows::generateShadowMaps(RenderContext* pRenderContext, cons
         }
 
         auto var = mGenerateShadowMapPass.pVars->getRootVar();
-        mGenerateShadowMapPass.pFbo->attachDepthStencilTarget(mShadowMaps[i]);
-        mGenerateShadowMapPass.pState->setFbo(mGenerateShadowMapPass.pFbo);
-        pRenderContext->clearFbo(mGenerateShadowMapPass.pFbo.get(), float4(0), 1.f, 0);
+        mGenerateShadowMapPass.pFbo->attachDepthStencilTarget(mShadowMapRasterDepth);
+        mGenerateShadowMapPass.pFbo->attachColorTarget(mShadowMaps[i], 0);
 
-        var["CB"]["gViewProjection"] = mShadowMVP[i];
+        mGenerateShadowMapPass.pState->setFbo(mGenerateShadowMapPass.pFbo);
+        pRenderContext->clearFbo(mGenerateShadowMapPass.pFbo.get(), float4(1.f), 1.f, 0);
+
+        var["CB"]["gViewProjection"] = mShadowMVP[i].viewProjection;
         var["CB"]["gNear"] = mNearFar.x;
         var["CB"]["gFar"] = mNearFar.y;
 
@@ -349,6 +364,7 @@ void VarianceSoftShadows::createShadowMapSAT(RenderContext* pRenderContext, cons
             DefineList defines;
             defines.add("HORIZONTAL", "1");
             defines.add("NUM_SM", std::to_string(mNumberShadowMaps));
+            defines.add("MAX_MANTISSA", std::to_string(math::pow(2.f, float(mSATMantissaBits))));
             mpCreateSATPass[0] = ComputePass::create(mpDevice, desc, defines, true);      
         }
         //Vertical
@@ -356,6 +372,7 @@ void VarianceSoftShadows::createShadowMapSAT(RenderContext* pRenderContext, cons
             DefineList defines;
             defines.add("HORIZONTAL", "0");
             defines.add("NUM_SM", std::to_string(mNumberShadowMaps));
+            defines.add("MAX_MANTISSA", std::to_string(math::pow(2.f, float(mSATMantissaBits))));
             mpCreateSATPass[1] = ComputePass::create(mpDevice, desc, defines, true);
         }
     }
@@ -408,6 +425,7 @@ void VarianceSoftShadows::shadeSurfacePass(RenderContext* pRenderContext, const 
         defines.add("NUM_SM", std::to_string(mNumberShadowMaps));
         defines.add("CASCADED_OFFSET", std::to_string(mNumSpotLights));
         defines.add("CASCADED_LEVEL", std::to_string(mCascadedLevels));
+        defines.add("MAX_MANTISSA", std::to_string(math::pow(2.f, float(mSATMantissaBits))));
 
         mpShadePass = ComputePass::create(mpDevice, desc, defines, true);        
     }
@@ -429,11 +447,14 @@ void VarianceSoftShadows::shadeSurfacePass(RenderContext* pRenderContext, const 
     var["CB"]["gSMNear"] = mNearFar.x;
     var["CB"]["gSMFar"] = mNearFar.y;
     var["CB"]["gSMSize"] = mShadowMapResolution;
+    var["CB"]["gSATMaxSearchRadius"] = mSATMaxSearchRadius;
+    var["CB"]["gSpotLightSize"] = mSpotLightSize;
 
     //Bind Shadow Maps
     for (uint i = 0; i < mNumberShadowMaps; i++)
     {
-        var["CB_SMVMP"]["gSMViewProjection"] = mShadowMVP[i];
+        var["CB_SMVMP"]["gSMView"][i] = mShadowMVP[i].view;
+        var["CB_SMVMP"]["gSMProjection"][i] = mShadowMVP[i].projection;
         var["gSM"][i] = mShadowMaps[i];
         var["gSAT"][i] = mSATVarianceShadowMaps[i];
     }

@@ -65,7 +65,7 @@ bool shadowAlphaTest(ShadowVsOut vsOut, uint triangleIndex)
     return gScene.materials.alphaTest(v, vsOut.materialID, lod);
 }
 
-float psMain(ShadowVsOut vsOut, uint triangleIndex: SV_PrimitiveID) : SV_DEPTH
+float psMain(ShadowVsOut vsOut, uint triangleIndex: SV_PrimitiveID) : SV_Target
 {
     if (shadowAlphaTest(vsOut, triangleIndex)) discard;
 

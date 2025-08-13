@@ -10,7 +10,7 @@ cbuffer CB {
 Texture2D<float> gShadowMap[NUM_SM];
 RWTexture2D<uint2> gSAT[NUM_SM];
 
-static const float kMantissaMax = 8388608.0; //2^23
+static const float kMantissaMax = MAX_MANTISSA;
 
 [numthreads(128, 1, 1)]
 void main(uint2 thID: SV_DispatchThreadID)
@@ -25,12 +25,11 @@ void main(uint2 thID: SV_DispatchThreadID)
     uint y = thID.x;
     for (uint x = 0; x < gShadowMapRes; x++) {
         uint2 pixel = uint2(x, y);
-        float depth = gShadowMap[texID][pixel];
-        float dSq = depth * depth;
-        // To uint
-        uint depthU = uint(depth * kMantissaMax);
-        uint dSqU = uint(dSq * kMantissaMax);
-        satSum += uint2(depthU, dSqU);
+        float2 varianceSM = float2(0);
+        varianceSM.x = gShadowMap[texID][pixel];
+        varianceSM.y = varianceSM.x * varianceSM.x;
+        uint2 convertedVarianceSM = varianceSM * kMantissaMax;
+        satSum += convertedVarianceSM;
         gSAT[texID][pixel] = satSum;
     }
 #else // VERTICAL

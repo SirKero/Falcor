@@ -50,6 +50,13 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
+    struct ShadowMVP
+    {
+        float4x4 view;
+        float4x4 projection;
+        float4x4 viewProjection;
+    };
+
     //Resets all render passes
     void resetRenderPasses();
     //Updates light count
@@ -86,11 +93,14 @@ private:
     uint mNumberShadowMaps = 1; //Number of shadow map textures
     bool mSceneHasDirectionalLight = false; //
     uint mNumSpotLights = 0;    //Number of spotlights
+    uint mSATMantissaBits = 23; //Mantissa Bits for the SAT
+    uint mSATMaxSearchRadius = 12; //Max Search radius
 
     //Shadow Map internal
-    std::vector<float4x4> mShadowMVP;
+    std::vector<ShadowMVP> mShadowMVP;
 
     //Textures
+    ref<Texture> mShadowMapRasterDepth;     //Depth texture for the raster pass
     std::vector<ref<Texture>> mShadowMaps;  //Includes all shadow maps (Spot -> Cascaded)
 
     std::vector<ref<Texture>> mSATVarianceShadowMaps;   //Summed Area Table Variance Shadow Maps
