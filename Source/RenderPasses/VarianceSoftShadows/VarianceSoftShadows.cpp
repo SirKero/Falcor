@@ -72,7 +72,7 @@ VarianceSoftShadows::VarianceSoftShadows(ref<Device> pDevice, const Properties& 
     // Create samplers.
     Sampler::Desc samplerDesc;
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
-    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
+    samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     mpShadowSampler = Sampler::create(mpDevice, samplerDesc);
 }
 
@@ -103,8 +103,13 @@ void VarianceSoftShadows::execute(RenderContext* pRenderContext, const RenderDat
     prepareResources(pRenderContext, renderData);
 
     //Generate Shadow Map and needed resources
-    generateShadowMaps(pRenderContext, renderData);
-    createShadowMapSAT(pRenderContext, renderData);
+    {
+        FALCOR_PROFILE(pRenderContext, "PrepareShadowMap");
+        generateShadowMaps(pRenderContext, renderData);
+        createShadowMapSAT(pRenderContext, renderData);
+        createHierarchicalShadowMaps(pRenderContext, renderData);
+    }
+    
 
     //Shade
     shadeSurfacePass(pRenderContext, renderData);
@@ -258,7 +263,7 @@ void VarianceSoftShadows::prepareResources(RenderContext* pRenderContext, const 
         for (uint i = 0; i < mNumberShadowMaps; i++)
         {
             ref<Texture> shadowMap = Texture::create2D(
-                mpDevice, mShadowMapResolution / 2, mShadowMapResolution / 2, ResourceFormat::RG32Float, 1u, 1u, nullptr,
+                mpDevice, mShadowMapResolution / 2, mShadowMapResolution / 2, ResourceFormat::RG32Float, 1u, Texture::kMaxPossible , nullptr,
                 ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
             );
             shadowMap->setName("HierarchicalShadowMap" + std::to_string(i));
@@ -407,6 +412,50 @@ void VarianceSoftShadows::createShadowMapSAT(RenderContext* pRenderContext, cons
     }
 }
 
+void VarianceSoftShadows::createHierarchicalShadowMaps(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "CreateHSM");
+
+    if (!mpCreateHierarchicalShadowMapPass)
+    {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderCreateHierarchicalShadowMap).csEntry("main").setShaderModel("6_5");
+        DefineList defines;
+        defines.add("NUM_SM", std::to_string(mNumberShadowMaps));
+        mpCreateHierarchicalShadowMapPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+
+    auto var = mpCreateHierarchicalShadowMapPass->getRootVar();
+
+    //First Pass, copy values from the shadow map
+    uint dispatchSize = mShadowMapResolution / 2;
+    var["CB"]["gFirstPass"] = true;
+    var["CB"]["gDispatchSize"] = dispatchSize;
+    //Bind all resources
+    for (uint i = 0; i < mNumberShadowMaps; i++)
+    {
+        var["gShadowMap"][i] = mShadowMaps[i];
+        var["gDst"][i].setUav(mHierarchicalShadowMaps[i]->getUAV(0));
+    }
+    mpCreateHierarchicalShadowMapPass->execute(pRenderContext, uint3(dispatchSize, dispatchSize, mNumberShadowMaps));
+
+    //Loop over all mip levels
+    var["CB"]["gFirstPass"] = false;
+    uint mipLevels = mHierarchicalShadowMaps[0]->getMipCount();
+    for (uint m = 1; m < mipLevels; m++)
+    {
+        dispatchSize /= 2;
+        var["CB"]["gDispatchSize"] = dispatchSize;
+        for (uint i = 0; i < mNumberShadowMaps; i++)
+        {
+            var["gSrc"][i].setSrv(mHierarchicalShadowMaps[i]->getSRV(m - 1, 1));
+            var["gDst"][i].setUav(mHierarchicalShadowMaps[i]->getUAV(m));
+        }
+
+        mpCreateHierarchicalShadowMapPass->execute(pRenderContext, uint3(dispatchSize, dispatchSize, mNumberShadowMaps));
+    }
+}
+
 void VarianceSoftShadows::shadeSurfacePass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "ShadeSurface");
@@ -457,6 +506,7 @@ void VarianceSoftShadows::shadeSurfacePass(RenderContext* pRenderContext, const 
         var["CB_SMVMP"]["gSMProjection"][i] = mShadowMVP[i].projection;
         var["gSM"][i] = mShadowMaps[i];
         var["gSAT"][i] = mSATVarianceShadowMaps[i];
+        var["gHSM"][i] = mHierarchicalShadowMaps[i];
     }
 
     var["gSMSampler"] = mpShadowSampler;

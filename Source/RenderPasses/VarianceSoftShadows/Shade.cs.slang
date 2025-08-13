@@ -32,14 +32,15 @@ cbuffer CB_SMVMP {
 }
 
 Texture2D<float> gSM[NUM_SM];
-Texture2D<uint2> gSAT[NUM_SM];
+Texture2D<uint2> gSAT[NUM_SM];  //SummedAreaTable Variance Shadow Map
+Texture2D<float2> gHSM[NUM_SM];  //Hierarchical Min-Max Shadow Map
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
 RWTexture2D<float4> gColorOut;
 
-SamplerState gSMSampler;
+SamplerState gSMSampler; //Point Sampler
 
 static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
@@ -76,7 +77,7 @@ float evalShadowMap(const ShadingData sd, uint lightIdx) {
     float depth = gSM[lightIdx].SampleLevel(gSMSampler, shadowUV, 0);
 
     float vis = 1.0;
-    if (depth < lightDist + 1e-4)
+    if (depth + 1e-3 < lightDist)
         return 0.0;
 
     return vis;
@@ -110,6 +111,41 @@ int2 getSATPixel(float3 viewPos, float2 viewPosOffset, float4x4 projMatrix, int2
     int2 satPixel = int2(round(satUV * gSMSize));
     satPixel = clamp(satPixel + pixelOffset, 0, gSMSize - 1);
     return satPixel;
+}
+
+//Returns true if the hierarchical shadow map has a definite result
+bool evalHierarchicalShadowMap(float2 uv, uint boxSize, uint lightIdx, float lightDist, inout float visibility) {
+    // Get best mip level for the current box size
+    float mipLevel = floor(log2(float(boxSize))) - 1;
+    // Get uv coordinates for the other samples
+    uint smSize = gSMSize / 2; // Size at mip0
+    smSize /= 1 << uint(mipLevel);
+    float2 pixelCoord = uv * smSize;
+    float2 offsets = 1.0 / smSize; //Pixel Size
+    if (pixelCoord.x < 0.5)
+        offsets.x *= -1;
+    if (pixelCoord.y < 0.5)
+        offsets.y *= -1;
+
+    // Get 4 samples in the mip level
+    float2 minMax0 = gHSM[lightIdx].SampleLevel(gSMSampler, uv, mipLevel);
+    float2 minMax1 = gHSM[lightIdx].SampleLevel(gSMSampler, uv + float2(offsets.x, 0), mipLevel);
+    float2 minMax2 = gHSM[lightIdx].SampleLevel(gSMSampler, uv + float2(0, offsets.y), mipLevel);
+    float2 minMax3 = gHSM[lightIdx].SampleLevel(gSMSampler, uv + offsets, mipLevel);
+
+    float minDepth = min(min(min(minMax0.x, minMax1.x), minMax2.x), minMax3.x);
+    float maxDepth = max(max(max(minMax0.y, minMax1.y), minMax2.y), minMax3.y);
+
+    bool needsSAT = true;
+    if (maxDepth + 1e-3 < lightDist) {
+        visibility = 0;
+        needsSAT = false;
+    } else if (minDepth - 1e-3 > lightDist) {
+        visibility = 1;
+        needsSAT = false;
+    }
+
+    return needsSAT;
 }
 
 float evalSoftShadows(const ShadingData sd, uint lightIdx) {
@@ -156,7 +192,15 @@ float evalSoftShadows(const ShadingData sd, uint lightIdx) {
     //+x , +y
     satPixel = getSATPixel(viewPos.xyz, float2(lightWidthW, -lightWidthW), projMatrix, int2(-1));
     usedRadiis.zw = satPixel - centerPixel;
-    return evalSATVarianceShadows(centerPixel, usedRadiis, lightDist, lightIdx, avrgDepth);
+
+    uint sampleBoxSize = (usedRadiis.x + usedRadiis.z) * (usedRadiis.y + usedRadiis.w);
+    float visibility = 0.5;
+    bool needsSAT = evalHierarchicalShadowMap(shadowUV, sampleBoxSize, lightIdx, lightDist, visibility);
+    
+    if (needsSAT)
+        visibility = evalSATVarianceShadows(centerPixel, usedRadiis, lightDist, lightIdx, avrgDepth);
+
+    return visibility;
 }
 
 float3 evalAnalyticLight(const ShadingData sd, const IMaterialInstance mi, inout SampleGenerator sg)
@@ -193,7 +237,7 @@ float3 evalAnalyticLight(const ShadingData sd, const IMaterialInstance mi, inout
         if (rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             visibility = 1.0;
         */
-        //visibility = evalVarianceShadowMap(sd, lightIdx);
+        //visibility = evalShadowMap(sd, lightIdx);
         visibility = evalSoftShadows(sd, lightIdx);
 
         Li += bsdf * visibility * ls.Li;

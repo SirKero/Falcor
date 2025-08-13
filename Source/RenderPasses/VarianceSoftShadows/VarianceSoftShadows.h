@@ -67,7 +67,8 @@ private:
     void generateShadowMaps(RenderContext* pRenderContext, const RenderData& renderData);
     //Creates the Summed Area Table for the Shadow Map
     void createShadowMapSAT(RenderContext* pRenderContext, const RenderData& renderData);
-
+    //Generates the hierarchical shadow maps
+    void createHierarchicalShadowMaps(RenderContext* pRenderContext, const RenderData& renderData);
     //Shades the surface using the VBuffer hit
     void shadeSurfacePass(RenderContext* pRenderContext, const RenderData& renderData);
 
