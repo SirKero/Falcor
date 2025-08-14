@@ -12,6 +12,7 @@ cbuffer CB
     float4x4 gViewProjection; // View Projection
     float gNear;
     float gFar;
+    bool gIsDirectional;
 };
 
 struct ShadowVsOut
@@ -69,6 +70,10 @@ float psMain(ShadowVsOut vsOut, uint triangleIndex: SV_PrimitiveID) : SV_Target
 {
     if (shadowAlphaTest(vsOut, triangleIndex)) discard;
 
-    float depth = (vsOut.posH.w - gNear) / (gFar - gNear); // Linear depth from [0,1]
+    float depth = 0;
+    if (gIsDirectional)
+        depth = vsOut.posH.z; //Directional is already linear
+    else
+        depth = (vsOut.posH.w - gNear) / (gFar - gNear); // Linear depth from [0,1]
     return depth;
 }

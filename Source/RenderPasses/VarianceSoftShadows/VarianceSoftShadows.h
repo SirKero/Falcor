@@ -63,6 +63,8 @@ private:
     void updateLightCount(const std::vector<ref<Light>>& pLights);
     //Prepares textures and buffers needed for this render pass
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
+    //Cascaded MVP
+    void calcCascadedMVP();
     //Renders all shadow maps
     void generateShadowMaps(RenderContext* pRenderContext, const RenderData& renderData);
     //Creates the Summed Area Table for the Shadow Map
@@ -90,12 +92,21 @@ private:
     bool mRebuildShadowMaps = true;
     uint mShadowMapResolution = 2048;
     float2 mNearFar = float2(5.f, 60.f);
-    uint mCascadedLevels = 4; //Number of cascaded levels
     uint mNumberShadowMaps = 1; //Number of shadow map textures
-    bool mSceneHasDirectionalLight = false; //
+    int mDirectionalIndex = -1;    //Index for the directional light
     uint mNumSpotLights = 0;    //Number of spotlights
     uint mSATMantissaBits = 23; //Mantissa Bits for the SAT
     uint mSATMaxSearchRadius = 12; //Max Search radius
+
+    //Cascaded
+    uint mCascadedLevels = 4; // Number of cascaded levels
+    float mCascadedCameraMaxFar = 100000000.f;
+    std::vector<float> mCascadedDepthRanges;
+    std::vector<float> mCascadedZSlices;
+    std::vector<float> mCascadedLevelRanges;
+    bool mCascadedUseCustomDepthRange = false;
+    float2 mCascadedReduceMinMax = float2(0);
+    float mMinVariance = 1e-2f;
 
     //Shadow Map internal
     std::vector<ShadowMVP> mShadowMVP;

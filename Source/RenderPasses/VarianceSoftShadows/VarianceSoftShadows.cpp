@@ -137,13 +137,30 @@ void VarianceSoftShadows::renderUI(Gui::Widgets& widget)
     widget.text("Shadow Map Settings");
     mRebuildShadowMaps |= widget.dropdown("Shadow Map Resolution", kSMResolutionDropdown, mShadowMapResolution);
     dirty |= widget.var("Near,Far", mNearFar, 0.f, FLT_MAX, 0.001f);
-    if (mSceneHasDirectionalLight)
+    dirty |= widget.var("Min Variance x1000", mMinVariance, 0.f, FLT_MAX, 0.000000001f, false, "%.7f");
+    if (mDirectionalIndex >= 0)
     {
         if (widget.slider("Cascaded Level", mCascadedLevels, 1u, 8u))
         {
             updateLightCount(mpScene->getLights());
             resetRenderPasses();
         }
+
+        widget.checkbox("Cascaded Reduce depth range", mCascadedUseCustomDepthRange);
+        if (mCascadedUseCustomDepthRange)
+            widget.var("Reduce Min/Max", mCascadedReduceMinMax);
+
+
+        if (auto group = widget.group("Cascaded Levels Size"))
+        {
+            group.text("Normalized Size visible Camera range (-z)");
+            for (uint i = 0; i < mCascadedLevelRanges.size(); i++)
+            {
+                std::string levelName = "Level" + std::to_string(i);
+            }
+
+        }
+
     }
     if (widget.var("SAT Uint convert bits", mSATMantissaBits, 16u, 23u, 1u))
         resetRenderPasses();
@@ -176,9 +193,10 @@ void VarianceSoftShadows::resetRenderPasses()
 //TODO Currently this is lazily handled. We reserve 1 additional shadow map for directional lights, as we dont know at which index the directional light is
 void VarianceSoftShadows::updateLightCount(const std::vector<ref<Light>>& pLights)
 {
-    mSceneHasDirectionalLight = false;
+    mDirectionalIndex = -1;
     mNumberShadowMaps = 0;
     mNumSpotLights = 0;
+    mRebuildShadowMaps = true;
 
     //Update light count.
     for (uint i=0; i<pLights.size(); i++)
@@ -186,14 +204,14 @@ void VarianceSoftShadows::updateLightCount(const std::vector<ref<Light>>& pLight
         auto& light = pLights[i];
         if (light->getType() == LightType::Directional)
         {
-            if (mSceneHasDirectionalLight)
+            if (mDirectionalIndex >= 0)
             {
                 throw RuntimeError(
                     "VarianceSoftShadow: Encountered more than 1 directional light. Please make sure only 1 directional light is in the "
                     "scene!"
                 );
             }
-            mSceneHasDirectionalLight = true;
+            mDirectionalIndex = i;
             mNumberShadowMaps += mCascadedLevels + 1; 
         }
         else
@@ -277,6 +295,125 @@ void VarianceSoftShadows::prepareResources(RenderContext* pRenderContext, const 
     }
 }
 
+void VarianceSoftShadows::calcCascadedMVP() {
+    //If there is no directional light, return
+    if (mDirectionalIndex < 0 || !mpScene)
+        return;
+
+    const auto& sceneBounds = mpScene->getSceneBounds();
+    auto camera = mpScene->getCamera();
+    const auto& cameraData = mpScene->getCamera()->getData();
+    const auto& dirLight = mpScene->getLight(mDirectionalIndex);
+    const auto& lightData = dirLight->getData();
+
+    //Calc cascaded levels
+    mCascadedCameraMaxFar = std::min(sceneBounds.radius() * 2, camera->getFarPlane()); // Clamp Far to scene bounds
+    bool setInitialValues = false;
+    if (mCascadedZSlices.size() != mCascadedLevels || mCascadedLevelRanges.size() != mCascadedLevels)
+    {
+        mCascadedZSlices.resize(mCascadedLevels);
+        mCascadedLevelRanges.resize(mCascadedLevels);
+        mCascadedDepthRanges.resize(mCascadedLevels);
+        setInitialValues = true;
+    }
+
+    float cameraNear = camera->getNearPlane();
+    float fullCascadedRange = mCascadedCameraMaxFar - cameraNear;
+    if (setInitialValues)
+    {
+        // Set automatic z slices using the following paper:
+        // https://developer.download.nvidia.com/SDK/10.5/opengl/src/cascaded_shadow_maps/doc/cascaded_shadow_maps.pdf
+        const uint N = mCascadedLevels;
+        for (uint i = 1; i <= N; i++)
+        {
+            const float cascadedFrustumFix = 0.4f;
+            mCascadedLevelRanges[i - 1] = cascadedFrustumFix * (cameraNear * pow((mCascadedCameraMaxFar / cameraNear), float(i) / N));
+            mCascadedLevelRanges[i - 1] +=
+                (1.f - cascadedFrustumFix) * (cameraNear + (float(i) / N) * (mCascadedCameraMaxFar - cameraNear));
+        }
+        // Normalize to [0,1]
+        for (auto& range : mCascadedLevelRanges)
+            range = (range / fullCascadedRange) - cameraNear;
+    }
+    // Update all zSlices
+    for (uint i = 0; i < mCascadedLevels; i++)
+    {
+        mCascadedZSlices[i] = cameraNear + fullCascadedRange * mCascadedLevelRanges[i];
+    }
+
+    // Create all cascaded MVPs
+    const float camFovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
+    for (uint cascLevel = 0; cascLevel < mCascadedLevels; cascLevel++)
+    {
+        // Get the 8 corners of the frustum Part
+        const float4x4 proj = math::perspective(camFovY, cameraData.aspectRatio, cameraNear, mCascadedZSlices[cascLevel]);
+        const float4x4 inv = math::inverse(math::mul(proj, cameraData.viewMat));
+        std::vector<float4> frustumCorners;
+        for (uint x = 0; x <= 1; x++)
+        {
+            for (uint y = 0; y <= 1; y++)
+            {
+                for (uint z = 0; z <= 1; z++)
+                {
+                    const float4 pt = math::mul(inv, float4(2.f * x - 1.f, 2.f * y - 1.f, z, 1.f));
+                    frustumCorners.push_back(pt / pt.w);
+                }
+            }
+        }
+
+        // Get Centerpoint for view
+        float3 center = float3(0);
+        const float3 upVec = float3(0, 1, 0);
+        for (const auto& p : frustumCorners)
+            center += p.xyz();
+        center /= 8.f;
+        const float4x4 casView = math::matrixFromLookAt(center, center + lightData.dirW, upVec);
+
+        // Create a view space AABB to clamp cascaded values
+        AABB smViewAABB = sceneBounds.transform(casView);
+
+        // Get Box for Orto
+        float minX = std::numeric_limits<float>::max();
+        float maxX = std::numeric_limits<float>::lowest();
+        float minY = std::numeric_limits<float>::max();
+        float maxY = std::numeric_limits<float>::lowest();
+        float minZ = std::numeric_limits<float>::max();
+        float maxZ = std::numeric_limits<float>::lowest();
+        for (const float4& p : frustumCorners)
+        {
+            float3 vp = math::mul(casView, p).xyz();
+            vp = math::clamp(vp, smViewAABB.minPoint, smViewAABB.maxPoint); // Clamp to scene extends
+            minX = std::min(minX, vp.x);
+            maxX = std::max(maxX, vp.x);
+            minY = std::min(minY, vp.y);
+            maxY = std::max(maxY, vp.y);
+            minZ = std::min(minZ, vp.z);
+            maxZ = std::max(maxZ, vp.z);
+        }
+
+        // Set the Z values to min and max for the scene so that all geometry in the way is rendered
+        maxZ = std::max(maxZ, smViewAABB.maxPoint.z);
+        minZ = std::min(minZ, smViewAABB.minPoint.z);
+        maxZ *= -1.f;
+        minZ *= -1.f;
+
+        if (mCascadedUseCustomDepthRange)
+        {
+            maxZ += mCascadedReduceMinMax.x;
+            minZ -= mCascadedReduceMinMax.y;
+        }
+
+        mCascadedDepthRanges[cascLevel] = minZ - maxZ;
+        cameraNear = mCascadedZSlices[cascLevel]; // Update near for next iteration
+        
+        uint mvpIndex = mNumSpotLights + cascLevel;
+        mShadowMVP[mvpIndex].view = casView;
+        mShadowMVP[mvpIndex].projection = math::ortho(minX, maxX, minY, maxY, maxZ, minZ);
+        mShadowMVP[mvpIndex].viewProjection = math::mul(mShadowMVP[mvpIndex].projection, mShadowMVP[mvpIndex].view);
+
+    }
+}
+
 void VarianceSoftShadows::generateShadowMaps(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "UpdateShadowMap");
@@ -298,9 +435,10 @@ void VarianceSoftShadows::generateShadowMaps(RenderContext* pRenderContext, cons
 
     //Render Spotlights
     auto& lights = mpScene->getLights();
-    int directionalIndex = -1;
+    
     for (uint i = 0; i < lights.size(); i++)
     {
+        bool isDirectional = false;
         auto& light = lights[i];
         auto& lightData = light->getData();
         // Update Light View for Spot
@@ -317,36 +455,44 @@ void VarianceSoftShadows::generateShadowMaps(RenderContext* pRenderContext, cons
         }
         else if (light->getType() == LightType::Directional)
         {
-            directionalIndex = i;
-            continue;
+            calcCascadedMVP();
+            isDirectional = true;
         }
 
-        auto var = mGenerateShadowMapPass.pVars->getRootVar();
-        mGenerateShadowMapPass.pFbo->attachDepthStencilTarget(mShadowMapRasterDepth);
-        mGenerateShadowMapPass.pFbo->attachColorTarget(mShadowMaps[i], 0);
+        uint loopSize = isDirectional ? mCascadedLevels : 1;
 
-        mGenerateShadowMapPass.pState->setFbo(mGenerateShadowMapPass.pFbo);
-        pRenderContext->clearFbo(mGenerateShadowMapPass.pFbo.get(), float4(1.f), 1.f, 0);
-
-        var["CB"]["gViewProjection"] = mShadowMVP[i].viewProjection;
-        var["CB"]["gNear"] = mNearFar.x;
-        var["CB"]["gFar"] = mNearFar.y;
-
-        /*
-        if (mUseFrustumCulling)
+        for (uint j = 0; j < loopSize; j++)
         {
-            mpScene->rasterizeFrustumCulling(
-                pRenderContext, mShadowMapRasterPass.pState.get(), mShadowMapRasterPass.pVars.get(), mFrontClockwiseRS[mCullMode],
-                mFrontCounterClockwiseRS[mCullMode], mFrontCounterClockwiseRS[RasterizerState::CullMode::None], renderMode, false,
-                mFrustumCulling[index]
-            );
-        }
-        else
-        */
-        {
-            mpScene->rasterize(
-                pRenderContext, mGenerateShadowMapPass.pState.get(), mGenerateShadowMapPass.pVars.get(), RasterizerState::CullMode::None
-            );
+            uint shadowMapIdx = isDirectional ? mNumSpotLights + j : i;
+            auto var = mGenerateShadowMapPass.pVars->getRootVar();
+            mGenerateShadowMapPass.pFbo->attachDepthStencilTarget(mShadowMapRasterDepth);
+            mGenerateShadowMapPass.pFbo->attachColorTarget(mShadowMaps[shadowMapIdx], 0);
+
+            mGenerateShadowMapPass.pState->setFbo(mGenerateShadowMapPass.pFbo);
+            pRenderContext->clearFbo(mGenerateShadowMapPass.pFbo.get(), float4(1.f), 1.f, 0);
+
+            
+            var["CB"]["gViewProjection"] = mShadowMVP[shadowMapIdx].viewProjection;
+            var["CB"]["gNear"] = mNearFar.x;
+            var["CB"]["gFar"] = mNearFar.y;
+            var["CB"]["gIsDirectional"] = isDirectional;
+
+            /*
+            if (mUseFrustumCulling)
+            {
+                mpScene->rasterizeFrustumCulling(
+                    pRenderContext, mShadowMapRasterPass.pState.get(), mShadowMapRasterPass.pVars.get(), mFrontClockwiseRS[mCullMode],
+                    mFrontCounterClockwiseRS[mCullMode], mFrontCounterClockwiseRS[RasterizerState::CullMode::None], renderMode, false,
+                    mFrustumCulling[index]
+                );
+            }
+            else
+            */
+            {
+                mpScene->rasterize(
+                    pRenderContext, mGenerateShadowMapPass.pState.get(), mGenerateShadowMapPass.pVars.get(), RasterizerState::CullMode::None
+                );
+            }
         }
     }
 
@@ -472,8 +618,8 @@ void VarianceSoftShadows::shadeSurfacePass(RenderContext* pRenderContext, const 
         defines.add(mpSampleGenerator->getDefines());
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add("NUM_SM", std::to_string(mNumberShadowMaps));
-        defines.add("CASCADED_OFFSET", std::to_string(mNumSpotLights));
-        defines.add("CASCADED_LEVEL", std::to_string(mCascadedLevels));
+        defines.add("CASCADED_START_INDEX", std::to_string(mNumSpotLights));
+        defines.add("CASCADED_LEVELS", std::to_string(mCascadedLevels));
         defines.add("MAX_MANTISSA", std::to_string(math::pow(2.f, float(mSATMantissaBits))));
 
         mpShadePass = ComputePass::create(mpDevice, desc, defines, true);        
@@ -498,6 +644,8 @@ void VarianceSoftShadows::shadeSurfacePass(RenderContext* pRenderContext, const 
     var["CB"]["gSMSize"] = mShadowMapResolution;
     var["CB"]["gSATMaxSearchRadius"] = mSATMaxSearchRadius;
     var["CB"]["gSpotLightSize"] = mSpotLightSize;
+    var["CB"]["gSunSize"] = mSunAngularDiameter; //math::tan(math::radians(mSunAngularDiameter * 0.5f));
+    var["CB"]["gMinVariance"] = mMinVariance / 1000.f; //math::tan(math::radians(mSunAngularDiameter * 0.5f));
 
     //Bind Shadow Maps
     for (uint i = 0; i < mNumberShadowMaps; i++)
@@ -507,6 +655,20 @@ void VarianceSoftShadows::shadeSurfacePass(RenderContext* pRenderContext, const 
         var["gSM"][i] = mShadowMaps[i];
         var["gSAT"][i] = mSATVarianceShadowMaps[i];
         var["gHSM"][i] = mHierarchicalShadowMaps[i];
+    }
+
+    for (uint i = 0; i < mCascadedLevels; i++)
+    {
+        float zSlize = 1.f;
+        float depthRange = 1.f;
+        if (mDirectionalIndex >= 0)
+        {
+            zSlize = mCascadedZSlices[i];
+            depthRange = mCascadedDepthRanges[i];
+        }
+            
+        var["CB_CascadedSlices"]["gCascadedZSlices"][i] = zSlize;
+        var["CB_CascadedSlices"]["gCascadedDepthRange"][i] = zSlize;
     }
 
     var["gSMSampler"] = mpShadowSampler;

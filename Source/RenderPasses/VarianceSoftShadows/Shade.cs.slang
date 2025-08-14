@@ -10,6 +10,10 @@ import Rendering.ShadowMaps.ShadowTestFunctions;
 #define NUM_SM 1
 #endif
 
+#ifndef CASCADED_LEVELS
+#define CASCADED_LEVELS 1
+#endif
+
 cbuffer CB
 {
     uint gFrameCount;       //Frame count for sample gen
@@ -23,12 +27,21 @@ cbuffer CB
 
     uint gSMSize;           // Size of the SM
     uint gSATMaxSearchRadius; // Max Search radius for SAT
-    float gSpotLightSize;   
+    float gSpotLightSize;
+    float gSunSize;    //For directional soft shadows
+
+    float gMinVariance;
 }
 
 cbuffer CB_SMVMP {
     float4x4 gSMView[NUM_SM];
     float4x4 gSMProjection[NUM_SM];
+}
+
+cbuffer CB_CascadedSlices
+{
+    float gCascadedZSlices[CASCADED_LEVELS];
+    float gCascadedDepthRange[CASCADED_LEVELS]; // Depth range for cascaded
 }
 
 Texture2D<float> gSM[NUM_SM];
@@ -46,7 +59,8 @@ static const float kMinIncidentAngle = 1e-3; // Min Incident angle for light
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
 static const float3 kDefaultBackgroundColor = float3(0.01);
 static const float kMantissaMax = MAX_MANTISSA;
-static const float kMinVariance = 1e-4;
+static const uint kCascadedStartIndex = CASCADED_START_INDEX;
+static const uint kCascadedLevelCount = CASCADED_LEVELS;
 
 // Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
@@ -59,13 +73,32 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-float evalShadowMap(const ShadingData sd, uint lightIdx) {
+/** Gets the current cascaded level from the world position
+    \param[in] world position.
+    \return cascaded level between 0 and kCascadedLevels.
+    */
+uint getCascadedLevel(float3 posW)
+{
+    float linearZ = abs(mul(gScene.camera.data.viewMat, float4(posW, 1.f)).z);
+    uint level = 0;
+    for (uint i = 0; i < kCascadedLevelCount - 1; i++)
+    {
+        if (linearZ < gCascadedZSlices[i])
+            break;
+        level++;
+    }
+    return clamp(level, 0, kCascadedLevelCount);
+}
+
+float evalShadowMap(const ShadingData sd, uint lightIdx, bool isDirectional) {
+    if (isDirectional)
+        lightIdx += getCascadedLevel(sd.posW);
 
     float4x4 viewProjectMat = mul(gSMProjection[lightIdx] , gSMView[lightIdx]);
     float4 projPos = mul(viewProjectMat, float4(sd.posW, 1.f));
     projPos.xyz = (projPos.xyz / projPos.w);
 
-    float lightDist = (projPos.w - gSMNear) / (gSMFar - gSMNear);
+    float lightDist = isDirectional ? projPos.z : (projPos.w - gSMNear) / (gSMFar - gSMNear);
 
     float2 shadowUV = projPos.xy;
     shadowUV.y *= -1;                // Flip
@@ -98,7 +131,7 @@ float evalSATVarianceShadows(int2 centerPixel, int4 offsets, float lightDist, ui
     varianceEstimation /= float((offsets.x + offsets.z) * (offsets.y + offsets.w)); // Average
     avrgDepth = varianceEstimation.x;
 
-    return ChebyshevUpperBound(varianceEstimation, lightDist, kMinVariance);
+    return ChebyshevUpperBound(varianceEstimation, lightDist, gMinVariance);
 }
 
 int2 getSATPixel(float3 viewPos, float2 viewPosOffset, float4x4 projMatrix, int2 pixelOffset = int2(0)) {
@@ -148,12 +181,18 @@ bool evalHierarchicalShadowMap(float2 uv, uint boxSize, uint lightIdx, float lig
     return needsSAT;
 }
 
-float evalSoftShadows(const ShadingData sd, uint lightIdx) {
+float evalSoftShadows(const ShadingData sd, uint lightIdx, bool isDirectional) {
+    uint cascadedLevel = 0;
+    if (isDirectional) {
+        cascadedLevel = getCascadedLevel(sd.posW);
+        lightIdx += cascadedLevel;
+    }
+        
     float4x4 projMatrix = gSMProjection[lightIdx];
     float4 viewPos = mul(gSMView[lightIdx], float4(sd.posW, 1.0));
     float4 projPos = mul(projMatrix, viewPos);
     projPos.xyz = (projPos.xyz / projPos.w);
-    float lightDist = (projPos.w - gSMNear) / (gSMFar - gSMNear);
+    float lightDist = isDirectional ? projPos.z : (projPos.w - gSMNear) / (gSMFar - gSMNear);
 
     float2 shadowUV = projPos.xy;
     shadowUV.y *= -1;                // Flip
@@ -174,14 +213,18 @@ float evalSoftShadows(const ShadingData sd, uint lightIdx) {
 
     float percentVisible = evalSATVarianceShadows(centerPixel, usedRadiis, lightDist, lightIdx, avrgDepth);
 
-    //TODO Hierarchie Shadow Maps for this test
+    //Return if sample is visible
     if (percentVisible > 0.99)
         return 1.0;
 
     // Estimate average depth of occluder (see Variance Soft Shadow Mapping by Yang et al.,  Eq.4)
     float zOcc = abs(avrgDepth - (percentVisible * lightDist)) / ((1.0 - percentVisible));
 
-    float lightWidthW = abs(lightDist - zOcc) * (gSpotLightSize / (zOcc)); // World filter width
+    float lightWidthW = 0;
+    if (isDirectional)
+        lightWidthW = abs(lightDist - zOcc) * gCascadedDepthRange[cascadedLevel] * gSunSize;
+    else
+        lightWidthW = abs(lightDist - zOcc) * (gSpotLightSize / (zOcc)); // World filter width
 
     //Get the 4 SAT corners (info: y is flipped compared to uv's)
     //Get the pixel offset in pixel
@@ -229,6 +272,9 @@ float3 evalAnalyticLight(const ShadingData sd, const IMaterialInstance mi, inout
             continue;
 
         float visibility = 0;
+        bool isDirectional = lightData.type == (uint)LightType::Directional;
+        if (isDirectional)
+            lightIdx = kCascadedStartIndex;
 
         // Shadow Ray for now
         /*
@@ -237,8 +283,8 @@ float3 evalAnalyticLight(const ShadingData sd, const IMaterialInstance mi, inout
         if (rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             visibility = 1.0;
         */
-        //visibility = evalShadowMap(sd, lightIdx);
-        visibility = evalSoftShadows(sd, lightIdx);
+        //visibility = evalShadowMap(sd, lightIdx, isDirectional);
+        visibility = evalSoftShadows(sd, lightIdx, isDirectional);
 
         Li += bsdf * visibility * ls.Li;
     }
