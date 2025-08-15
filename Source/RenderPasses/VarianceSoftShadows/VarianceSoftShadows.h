@@ -108,6 +108,10 @@ private:
     float2 mCascadedReduceMinMax = float2(0);
     float mMinVariance = 1e-2f;
 
+    //Frustum Culling
+    bool mUseFrustumCulling = true;
+    std::vector<ref<FrustumCulling>> mFrustumCulling;
+
     //Shadow Map internal
     std::vector<ShadowMVP> mShadowMVP;
 

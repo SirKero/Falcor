@@ -138,6 +138,7 @@ void VarianceSoftShadows::renderUI(Gui::Widgets& widget)
     mRebuildShadowMaps |= widget.dropdown("Shadow Map Resolution", kSMResolutionDropdown, mShadowMapResolution);
     dirty |= widget.var("Near,Far", mNearFar, 0.f, FLT_MAX, 0.001f);
     dirty |= widget.var("Min Variance x1000", mMinVariance, 0.f, FLT_MAX, 0.000000001f, false, "%.7f");
+    widget.checkbox("Enable Frustum Culling", mUseFrustumCulling);
     if (mDirectionalIndex >= 0)
     {
         if (widget.slider("Cascaded Level", mCascadedLevels, 1u, 8u))
@@ -157,6 +158,7 @@ void VarianceSoftShadows::renderUI(Gui::Widgets& widget)
             for (uint i = 0; i < mCascadedLevelRanges.size(); i++)
             {
                 std::string levelName = "Level" + std::to_string(i);
+                group.var(levelName.c_str(), mCascadedLevelRanges[i], 0.f, 1.f, 0.001f);
             }
 
         }
@@ -237,6 +239,7 @@ void VarianceSoftShadows::prepareResources(RenderContext* pRenderContext, const 
         mShadowMaps.clear();
         mSATVarianceShadowMaps.clear();
         mHierarchicalShadowMaps.clear();
+        mFrustumCulling.clear();
         mRebuildShadowMaps = false;
         mShadowMVP.clear();
     }
@@ -292,6 +295,13 @@ void VarianceSoftShadows::prepareResources(RenderContext* pRenderContext, const 
     if (mShadowMVP.empty())
     {
         mShadowMVP.resize(mNumberShadowMaps);
+    }
+
+    if (mFrustumCulling.empty())
+    {
+        mFrustumCulling.resize(mNumberShadowMaps);
+        for (size_t i = 0; i < mNumberShadowMaps; i++)
+            mFrustumCulling[i] = make_ref<FrustumCulling>();
     }
 }
 
@@ -410,7 +420,8 @@ void VarianceSoftShadows::calcCascadedMVP() {
         mShadowMVP[mvpIndex].view = casView;
         mShadowMVP[mvpIndex].projection = math::ortho(minX, maxX, minY, maxY, maxZ, minZ);
         mShadowMVP[mvpIndex].viewProjection = math::mul(mShadowMVP[mvpIndex].projection, mShadowMVP[mvpIndex].view);
-
+        if (mUseFrustumCulling)
+            mFrustumCulling[mvpIndex]->updateFrustum(center, center + lightData.dirW, upVec, minX, maxX, minY, maxY, maxZ, minZ);
     }
 }
 
@@ -450,8 +461,8 @@ void VarianceSoftShadows::generateShadowMaps(RenderContext* pRenderContext, cons
             mShadowMVP[i].projection = math::perspective(lightData.openingAngle * 2, 1.f, mNearFar.x, mNearFar.y); // TODO directional
             mShadowMVP[i].viewProjection = math::mul(mShadowMVP[i].projection, mShadowMVP[i].view);
 
-            // if (mUseFrustumCulling)
-            //     mFrustumCulling[index]->updateFrustum(lightData.posW, lightTarget, up, 1.f, lightData.openingAngle * 2, mNear, mFar);
+            if (mUseFrustumCulling)
+                 mFrustumCulling[i]->updateFrustum(lightData.posW, lightTarget, up, 1.f, lightData.openingAngle * 2.f, mNearFar.x, mNearFar.y);
         }
         else if (light->getType() == LightType::Directional)
         {
@@ -477,28 +488,22 @@ void VarianceSoftShadows::generateShadowMaps(RenderContext* pRenderContext, cons
             var["CB"]["gFar"] = mNearFar.y;
             var["CB"]["gIsDirectional"] = isDirectional;
 
-            /*
+            
             if (mUseFrustumCulling)
             {
                 mpScene->rasterizeFrustumCulling(
-                    pRenderContext, mShadowMapRasterPass.pState.get(), mShadowMapRasterPass.pVars.get(), mFrontClockwiseRS[mCullMode],
-                    mFrontCounterClockwiseRS[mCullMode], mFrontCounterClockwiseRS[RasterizerState::CullMode::None], renderMode, false,
-                    mFrustumCulling[index]
+                    pRenderContext, mGenerateShadowMapPass.pState.get(), mGenerateShadowMapPass.pVars.get(),
+                    RasterizerState::CullMode::None, RasterizerState::MeshRenderMode::All, true, mFrustumCulling[shadowMapIdx]
                 );
             }
             else
-            */
             {
                 mpScene->rasterize(
                     pRenderContext, mGenerateShadowMapPass.pState.get(), mGenerateShadowMapPass.pVars.get(), RasterizerState::CullMode::None
                 );
             }
         }
-    }
-
-    //Render Cascaded
-    //TODO
-    
+    }    
 }
 
 void VarianceSoftShadows::createShadowMapSAT(RenderContext* pRenderContext, const RenderData& renderData) {
