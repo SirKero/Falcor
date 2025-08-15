@@ -94,6 +94,11 @@ private:
     float3 mSunDirT = mSunDir;          //Tangent for sun direction
     float3 mSunDirB = mSunDir;          //Bitangent for sun direction
 
+    //Spot Lights (only used when there is 1 spotlight present)
+    float3 mSpotDir = float3(0, -1, 0); // Stored spot direction
+    float3 mSpotDirT = mSpotDir;        // Tangent for spot direction
+    float3 mSpotDirB = mSpotDir;        // Bitangent for spot direction
+
     //Textures and Buffers
     std::vector < ref<Texture>> mBlueNoiseTextures; //Blue noise for random light direction
 

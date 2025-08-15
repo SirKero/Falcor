@@ -196,6 +196,12 @@ bool RayTracedSoftShadows::prepareLighting(RenderContext* pRenderContext) {
             mSunDirB = math::cross(mSunDir, mSunDirT);
             break;
         }
+        if (i == 0)
+        {
+            mSpotDir = light->getData().dirW;
+            mSpotDirT = perp_stark(mSpotDir);
+            mSpotDirB = math::cross(mSpotDir, mSpotDirT);
+        }
     }
 
     return lightingChanged;
@@ -260,6 +266,8 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
     var["CB"]["gDirLightT"] = mSunDirT;
     var["CB"]["gDirLightB"] = mSunDirB;
     var["CB"]["gUseSpatioTemporalBlueNoise"] = mUseSpatioTemporalBlueNoise;
+    var["CB"]["gSpotLightB"] = mSpotDirB;
+    var["CB"]["gSpotLightT"] = mSpotDirT;
 
     var["gBlueNoise"] = mBlueNoiseTextures[mFrameCount % 64];
 

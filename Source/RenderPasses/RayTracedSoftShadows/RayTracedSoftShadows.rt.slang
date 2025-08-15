@@ -76,12 +76,15 @@ cbuffer CB
     float gEmissiveFactor;
 
     float gEnvMapFactor;
-    float3 gDirLightT; // Tangent for directional light
+    float3 gDirLightT; // Tangent for light
 
-    float3 gDirLightB; // Bitangent for directional light
+    float3 gDirLightB; // Bitangent for light
     float gTanSunAngularRadius; //Tangenens of the suns angular radius for directional lights
 
     float gNRDLightSize; // Approximated light size
+    float3 gSpotLightT;  // Tangent for spotlight 0
+
+    float3 gSpotLightB;  // Bitangent for spotlight 1
     uint gMode;          // 0 - Standard, 1 - NRD Full, 2- NRD Sigma
     bool gUseSpatioTemporalBlueNoise;   //Enables STBN
 }
@@ -188,10 +191,11 @@ bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg,
     // Sample analytic light source selected uniformly from the light list.
     // TODO: Sample based on estimated contributions as pdf.
     uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
+    const LightData lightData = gScene.getLight(lightIndex);
 
     // Sample local light source.
     AnalyticLightSample lightSample;
-    if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, lightSample)) return false;
+    if (!sampleLight(sd.posW, lightData , sg, lightSample)) return false;
 
     // Random offset
     float2 rnd = float2(0);
@@ -200,14 +204,21 @@ bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg,
     else
         rnd = sampleNext2D(sg);
 
+    //Check if point or spotlight
     if (lightSample.distance < kMaxLightDistance) {
-        float3 randomSphereOffset = sample_sphere(rnd) * gNRDLightSize;
-        lightSample.posW += randomSphereOffset;
+        if (lightIndex == 0 && lightData.openingAngle < M_PI_2)
+        {
+            float2 discOffset = sample_disk(rnd) * gNRDLightSize;
+            lightSample.posW += gSpotLightT * discOffset.x + gSpotLightB * discOffset.y;
+        }else{
+            float3 randomSphereOffset = sample_sphere(rnd) * gNRDLightSize;
+            lightSample.posW += randomSphereOffset;
+        }
         lightSample.dir = lightSample.posW - sd.posW;
         lightSample.distance = length(lightSample.dir);
         lightSample.dir /= lightSample.distance;
-        ls.lightType = 0; //Point spot
-    } else {
+        ls.lightType = 0; // Point spot
+    } else { 
         float2 cosRnd = sample_cosine_hemisphere_polar(rnd).xy * gTanSunAngularRadius;
         lightSample.dir = normalize(gDirLightT * cosRnd.x + gDirLightB * cosRnd.y + lightSample.dir);
 
