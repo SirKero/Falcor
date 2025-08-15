@@ -54,6 +54,7 @@ import RenderPasses.Shared.Denoising.NRDConstants;
 //Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
+Texture2D<float> gBlueNoise;
 
 //Outputs
 RWTexture2D<float4> gOutColor;
@@ -81,7 +82,8 @@ cbuffer CB
     float gTanSunAngularRadius; //Tangenens of the suns angular radius for directional lights
 
     float gNRDLightSize; // Approximated light size
-    uint gMode;             // 0 - Standard, 1 - NRD Full, 2- NRD Sigma
+    uint gMode;          // 0 - Standard, 1 - NRD Full, 2- NRD Sigma
+    bool gUseSpatioTemporalBlueNoise;   //Enables STBN
 }
 
 // Static configuration based on defines set from the host.
@@ -91,6 +93,8 @@ static const bool kUseEnvBackground = USE_ENV_MAP;
 static const bool kHasAnalytic = HAS_ANALYTIC_LIGHTS;
 static const bool kHasEmissive = HAS_EMISSIVE_LIGHTS;
 static const float3 kDefaultBackgroundColor = float3(0.01);
+static const uint kBlueNoiseDims = 64;
+static const uint2 kBlueNoiseOffset = uint2(7, 5); //Blue noise offset for the 2nd sample
 
 static const float kFP16Max = 65504.0; //NRD FP16 max
 
@@ -159,6 +163,15 @@ bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, o
     return any(ls.Li > 0.f);
 }
 
+float2 getSTBNSample() {
+    const uint2 pixel = DispatchRaysIndex().xy;
+    uint2 samplePixel = pixel % kBlueNoiseDims;
+    float stbn0 = gBlueNoise[samplePixel];
+    samplePixel = (pixel + kBlueNoiseOffset) % kBlueNoiseDims;
+    float stbn1 = gBlueNoise[samplePixel];
+    return float2(stbn0, stbn1);
+}
+
 /** Generates a light sample on the analytic lights.
        \param[in] vertex Path vertex.
        \param[in,out] sg Sample generator.
@@ -181,7 +194,12 @@ bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg,
     if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, lightSample)) return false;
 
     // Random offset
-    float2 rnd = sampleNext2D(sg);
+    float2 rnd = float2(0);
+    if (gUseSpatioTemporalBlueNoise)
+        rnd = getSTBNSample();
+    else
+        rnd = sampleNext2D(sg);
+
     if (lightSample.distance < kMaxLightDistance) {
         float3 randomSphereOffset = sample_sphere(rnd) * gNRDLightSize;
         lightSample.posW += randomSphereOffset;
@@ -376,7 +394,8 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
 
     float penumbra = kFP16Max;
-    float3 unshadowedColor = float3(0);
+    float3 unshadowedLight = float3(0);
+    float3 ambientColor = float3(0);
 
     if (hitInfo.isValid())
     {
@@ -388,18 +407,17 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
         let bsdfProperties = bsdf.getProperties(sd);
 
         // Emissive
-        unshadowedColor += bsdfProperties.emission * gEmissiveFactor;
-        bool isEmissive = any(unshadowedColor > 0);
+        ambientColor += bsdfProperties.emission * gEmissiveFactor;
         // Ambient
-        unshadowedColor += bsdfProperties.diffuseReflectionAlbedo * gAmbientFactor;
+        ambientColor += bsdfProperties.diffuseReflectionAlbedo * gAmbientFactor;
 
         const float weight = 1.0 / gSPP;
         // Sample Lights
-        for (uint i = 0; i < gSPP && !isEmissive; i++) {
+        for (uint i = 0; i < gSPP; i++) {
             LightSample ls = {};
             if (generateLightSample(sd, sg, ls)) {
                 // Shadow test and BSDF
-                unshadowedColor += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
+                unshadowedLight += bsdf.eval(sd, ls.dir, sg) * ls.Li * weight;
                 if (any(ls.Li > 0.0))
                 {
                     ShadowRayData shadowData;
@@ -425,10 +443,11 @@ void NRDSigmaPass(uint2 pixel, uint2 frameDim) {
     }
     else {
         // Sample Env Map
-        unshadowedColor += kUseEnvBackground ? gScene.envMap.eval(view) * gEnvMapFactor : kDefaultBackgroundColor;
+        ambientColor += kUseEnvBackground ? gScene.envMap.eval(view) * gEnvMapFactor : kDefaultBackgroundColor;
     }
 
-    if (is_valid(gOutUnshadowed)) gOutUnshadowed[pixel] = float4(unshadowedColor, 1.0);
+    if (is_valid(gOutColor)) gOutColor[pixel] = float4(ambientColor, 1.0);
+    if (is_valid(gOutUnshadowed)) gOutUnshadowed[pixel] = float4(unshadowedLight, 1.0);
     if (is_valid(gOutPenumbra)) gOutPenumbra[pixel] = penumbra;
 }
 

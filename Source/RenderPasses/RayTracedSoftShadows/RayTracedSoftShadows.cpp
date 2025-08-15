@@ -259,6 +259,9 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
     var["CB"]["gTanSunAngularRadius"] = math::tan(math::radians(mSunAngularDiameter * 0.5f));
     var["CB"]["gDirLightT"] = mSunDirT;
     var["CB"]["gDirLightB"] = mSunDirB;
+    var["CB"]["gUseSpatioTemporalBlueNoise"] = mUseSpatioTemporalBlueNoise;
+
+    var["gBlueNoise"] = mBlueNoiseTextures[mFrameCount % 64];
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -276,6 +279,25 @@ void RayTracedSoftShadows::shade(RenderContext* pRenderContext, const RenderData
 
     // Execute shader
     mpScene->raytrace(pRenderContext, mSoftShadowPip.pProgram.get(), mSoftShadowPip.pVars, uint3(targetDim, 1));
+}
+
+void RayTracedSoftShadows::initBlueNoiseTextures()
+{
+    //Already initialized
+    if (!mBlueNoiseTextures.empty())
+        return;
+
+    const std::string blueNoiseFolder = "bluenoise/2Dx1D/"; //data/bluenoise/
+    const std::string filePrefix = "bn_2Dx1D_"; //alternative "bn_2Dx1D_128x128x64_" for 128 instead of 64^3
+    //Load the 64 Spatio temporal blue noise slices
+    for (uint i = 0; i < 64; i++)
+    {
+        const std::string filename = blueNoiseFolder + filePrefix + std::to_string(i) + ".png";
+        ref<Texture> stbn = Texture::createFromFile(mpDevice, filename, false, false);
+        stbn->setName("STBN" + std::to_string(i));
+        mBlueNoiseTextures.push_back(stbn);
+    }
+
 }
 
 void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
@@ -296,7 +318,8 @@ void RayTracedSoftShadows::renderUI(Gui::Widgets& widget)
     dirty |= widget.var("NRD Sigma Light Size", mNRDLightSize, 0.f, FLT_MAX, 0.001f);
     widget.tooltip("Light size input parameter for NRD. Not available in Falcor so it needs to be approximated by hand");
     dirty |= widget.var("Sun size (deg)", mSunAngularDiameter, 0.f, 3.f, 0.001f);
-    
+    dirty |= widget.checkbox("Use ST Blue Noise", mUseSpatioTemporalBlueNoise);
+    widget.tooltip("Enables spatio temporal blue noise to sample the light directions");
 
     dirty |= mClearDemodulationTextures;
 
@@ -336,6 +359,8 @@ void RayTracedSoftShadows::setScene(RenderContext* pRenderContext, const ref<Sce
     // Create Ray Tracing pass
     if (mpScene)
     {
+        initBlueNoiseTextures();
+
         auto globalTypeConformances = mpScene->getMaterialSystem().getTypeConformances();
         // Create ray tracing program.
         RtProgram::Desc desc;
