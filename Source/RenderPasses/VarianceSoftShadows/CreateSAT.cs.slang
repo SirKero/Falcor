@@ -12,7 +12,7 @@ RWTexture2D<uint2> gSAT[NUM_SM];
 
 static const float kMantissaMax = MAX_MANTISSA;
 
-[numthreads(128, 1, 1)]
+[numthreads(16, 1, 1)]
 void main(uint2 thID: SV_DispatchThreadID)
 {
     if (thID.x > gShadowMapRes || thID.y > NUM_SM)

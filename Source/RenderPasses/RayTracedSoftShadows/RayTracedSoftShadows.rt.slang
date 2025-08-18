@@ -157,7 +157,7 @@ bool generateEmissiveSample(const in ShadingData sd, inout SampleGenerator sg, o
     float3 toLight = lightPos - ls.origin;
     ls.distance = length(toLight);
     ls.dir = normalize(toLight);
-    ls.lightType = 1;
+    ls.lightType = 2;
 
     //Get (triangle)light area
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(tls.triangleIndex);
@@ -233,7 +233,7 @@ bool generateAnalyticLightSample(const ShadingData sd, inout SampleGenerator sg,
     // Do not worry about adjusting the ray length to avoid self-intersections at the light.
     ls.distance = lightSample.distance;
     ls.dir = lightSample.dir;
-    ls.lightType = 1;
+    //sls.lightType = 1;
 
     return any(ls.Li > 0.f);
 }
