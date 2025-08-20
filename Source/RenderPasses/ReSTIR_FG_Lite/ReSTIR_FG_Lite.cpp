@@ -593,9 +593,6 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 {
     FALCOR_PROFILE(pRenderContext, "InitialSamples");
 
-    //TODO remove when photons are properly handled by reservoirs
-    pRenderContext->clearUAV(renderData[kOutputColor]->asTexture()->getUAV().get(), float4(0));
-
     //Init Shader
     if (!mGenerateInitialSamplesPass.pProgram)
     {

@@ -22,7 +22,6 @@ cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
     uint gFGRayMaxPathLength; //Max path length for a Final Gather sample
-    bool gUsePhotonForDirectLightAfterSpecular; //Direct light after specular reflections is either handled by photons or by including the emissive light into the fg sample
 }
 
 static const bool kAlphaTest = true;
