@@ -26,6 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "PhotonGuiding.h"
+#include "Utils/Math/FalcorMath.h"
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
 
@@ -254,7 +255,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         if (!mpPhotonData[i])
         {
             mpPhotonData[i] = Buffer::createStructured(
-                mpDevice, sizeof(float) * 12, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(float) * 16, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
@@ -365,6 +366,8 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1)
     );
 
+    mNumberLightPaths = shaderDispatchDim + shaderDispatchDim;
+
     // Clear values after the counter
     std::vector<ref<Buffer>> aabbs = {mpPhotonAABB[0], mpPhotonAABB[1]};
     mpPhotonAS->clearAABBBuffers(pRenderContext, aabbs, true, mpPhotonCounter);
@@ -420,9 +423,19 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     FALCOR_ASSERT(mTraceCameraPass.pVars);
     auto var = mTraceCameraPass.pVars->getRootVar();
 
+    auto& cameraData = mpScene->getCamera()->getData();
+    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
+    float camTanHalfAngle = math::tan(fovY * M_PI / 360.f);
+    float imagePlaneDist = mScreenRes.y / (2.f * camTanHalfAngle);
+
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gMaxBounces"] = mPTMaxBounces;
+    var["CB"]["gNumLightPaths"] = mNumberLightPaths;
+    var["CB"]["gImagePlaneDist"] = imagePlaneDist;
+    var["CB"]["gPhotonRadius"] = mPhotonRadius.y; //TODO remove
+
+
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();

@@ -52,8 +52,11 @@ struct RayPayload
 //Helper struct to generate a photon form the lightSources
 struct PhotonLightSample {
     float3 posW;
+    float emissionPDF;
     float3 normal;
+    float directPDF;
     float3 flux;
+    float cosTheta;
 };
 
 // transforms direction from local to world space
@@ -90,6 +93,9 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
 
     pls.posW = computeRayOrigin(pls.posW, pls.normal); //Offset as this light is real geometry
     pls.flux /= triangleSelectionPdf;
+
+    pls.emissionPDF = 1.0 / (tri.area * triangleCount);
+    pls.directPDF = pls.emissionPDF;
 
     return true;
 }
@@ -208,11 +214,18 @@ void rayGen()
 
         ray.Direction = fromLocalToWorld(pls.normal, woLocal);
         pls.flux *= M_PI; // Lambert Emitter
+        pls.cosTheta = woLocal.z;
+        pls.emissionPDF *= lightDirPDF;
     }
 #endif
+    uint lightCount = dispatchDims.x * dispatchDims.y;
+    pls.flux /= float3(lightCount); // Division through all dipatched photons
 
-    pls.flux /= dispatchDims.x * dispatchDims.y; // Division through all dipatched photons
-    
+    // MIS constants
+    const float etaVCM = (M_PI * gPhotonRadius.x * gPhotonRadius.x) * lightCount;
+    float mMisVmWeightFactor = etaVCM;
+    float mMisVcWeightFactor = 0.0; //(1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
+
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
     ray.TMin = 0.0f;
@@ -228,6 +241,9 @@ void rayGen()
     photon.flux = photonStartFlux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
+    photon.dVCM = pls.directPDF / pls.emissionPDF;
+    photon.dVC = pls.cosTheta / pls.emissionPDF;
+    photon.dVM = photon.dVC * mMisVcWeightFactor;
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {
@@ -245,6 +261,19 @@ void rayGen()
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
+
+        // Update MIS helpers
+
+        if (i > 0) {
+            float dist = distance(sd.posW, ray.Origin);
+            photon.dVCM *= dist * dist;
+        }
+            
+        float cosTheta = abs(dot(sd.faceN, sd.V));
+        photon.dVCM /= cosTheta;
+        photon.dVM /= cosTheta;
+        photon.dVC /= cosTheta;
+        photon.continationProb = getContinuationProbablity(bsdfProperties);
 
         // Store Photon
         photon.normalW = sd.getOrientedFaceNormal();
@@ -281,21 +310,34 @@ void rayGen()
         thp *= bsdfSample.weight;
 
         // RussianRoulette
-        const float rrVal = (thp.x + thp.y + thp.z) / 3.0;
-        const float prob = max(0.f, 1.f - rrVal);
-        if (sampleNext1D(sg) < prob)
+        if (sampleNext1D(sg) > photon.continationProb)
         {
             return; // Photon is absorbed
         }
-        else
-        {
-            thp /= (1.f - prob);
-        }
+
+        thp /= photon.continationProb;
 
         // Update Photon
         storeAsCaustic = !reflectedDiffuse;
         photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
         photon.pathLenght++;
+
+        // Partially update MIS weights
+        float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
+        float bsdfPdf = bsdfSample.pdf * photon.continationProb;
+        float bsdfReversePDF = bsdfPdf; // For now we assume reverse is the same as normal BSDF TODO check
+
+        if (reflectedDiffuse)
+        {
+            photon.dVC = (cosThetaOut / bsdfPdf) * (photon.dVC * bsdfReversePDF) + (photon.dVCM + mMisVmWeightFactor);
+            photon.dVM = (cosThetaOut / bsdfPdf) * (photon.dVM * bsdfReversePDF) + (photon.dVCM * mMisVcWeightFactor + 1.0);
+            photon.dVCM = 1.0 / bsdfPdf;
+        } else // Specular
+        {
+            photon.dVCM = 0;
+            photon.dVM *= cosThetaOut;
+            photon.dVC *= cosThetaOut;
+        }
     }
 }

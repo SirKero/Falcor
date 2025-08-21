@@ -89,10 +89,11 @@ private:
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
+    uint mNumberLightPaths = 0;
 
     // Material Settings
     bool mUseLambertianDiffuse = true;         // Enable Lambert Diffuse BRDF instead of Frostbyte
-    float mSpecularRoughnessThreshold = 0.04f; // Any material below this is considered specular (currently set to delta)
+    float mSpecularRoughnessThreshold = 0.08f; // Any material below this is considered specular (currently set to delta)
 
     //
     // Path Tracer

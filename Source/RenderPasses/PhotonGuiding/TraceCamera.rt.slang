@@ -21,7 +21,10 @@ static const float kPhotonCollectTMax = 1e-7;
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
-    uint gMaxBounces; //Max path length for a Final Gather sample
+    uint gMaxBounces; // Max path length for a Final Gather sample
+    uint gNumLightPaths; // Number of light paths for MIS
+    float gImagePlaneDist; //Camera image plane distance
+    float gPhotonRadius;    //TODO remove temporary for MIS
 }
 
 static const bool kUseEnvMap = USE_ENV_MAP;
@@ -41,6 +44,25 @@ struct RayPayload
     }
 }
 
+//Helper struct for MIS
+struct CameraState {
+    uint pathLength;
+    float dVCM;
+    float dVM;
+    float dVC;
+    float misVcWeightFactor;
+    float misVmWeightFactor;
+
+    __init() {
+        pathLength = 0;
+        dVCM = 0.0;
+        dVC = 0.0;
+        dVM = 0.0;
+        misVcWeightFactor = 0.0;
+        misVmWeightFactor = 0.0;
+    }
+}
+
 // Checks if the ray start point is inside the sphere.
 bool hitSphere(const float3 center, const float radius, const float3 p)
 {
@@ -52,7 +74,7 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
     return false;
 }
 
-float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
+float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraState camState, float continuationProb, uint instanceMask, inout SampleGenerator sg) {
     float3 collectedRadiance = float3(0);
     // Prepare ray
     RayDesc ray;
@@ -83,32 +105,67 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
             continue;
 
-        float3 bsdf = mi.eval(sd, photonData.dir, sg); //;
-        collectedRadiance += max(0, (photonData.flux * bsdf) / (M_PI * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        float pdf = mi.evalPdf(sd, photonData.dir, false);
+        float reversePDF = pdf;
+        pdf *= continuationProb;
+        reversePDF *= photonData.continationProb; // For the reverse pdf
+        const float wLight = photonData.dVCM * camState.misVcWeightFactor + photonData.dVM * pdf;
+        const float wCamera = camState.dVCM * camState.misVcWeightFactor + camState.dVM * reversePDF;
+        const float misWeight = 1.0 / (wLight + 1.0 + wCamera);
+
+        float3 bsdf = mi.eval(sd, photonData.dir, sg);
+        collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / (M_PI * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
     }
+    if (camState.pathLength != 1)
+        return float3(0);
     return collectedRadiance;
 }
 
-bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout float3 thp, inout float pdf, inout RayDesc ray)
+bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float continuationProbability, inout SampleGenerator sg, inout float3 thp, inout CameraState camState, inout RayDesc ray)
 {
     // Photon Bounce for next iteration
     BSDFSample bsdfSample;
-    bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+    if (!mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/))
+        return false;
+
     bool transmission = bsdfSample.isLobe(LobeType::Transmission);
     ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
     ray.Direction = bsdfSample.wo;
     thp *= bsdfSample.weight;
-    pdf = bsdfSample.pdf;
 
-    return validSample;
+    float pdf = bsdfSample.pdf;
+    float reversePdf = pdf;
+
+    //Russian Roulette
+    if (sampleNext1D(sg) > continuationProbability)
+        return false;
+
+    thp /= continuationProbability;
+    pdf *= continuationProbability;
+    reversePdf *= continuationProbability;
+    float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
+    //Specular
+    if (roughness < kRoughnessThreshold) {
+        camState.dVCM = 0;
+        camState.dVC *= cosThetaOut;
+        camState.dVM *= cosThetaOut;
+    } else {
+        camState.dVC = (cosThetaOut / pdf) * (camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor);
+        camState.dVM = (cosThetaOut / pdf) * (camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0);
+        camState.dVCM = 1.0 / pdf;
+    }
+    camState.pathLength++;
+
+    return true;
 }
 
-float3 tracePath(RayDesc ray, inout SampleGenerator sg , inout float3 thp)
+float3 tracePath(RayDesc ray, inout CameraState camState,  inout SampleGenerator sg , inout float3 thp)
 {
     float3 outColor = float3(0);
     RayPayload rayPayload = RayPayload();
+    bool validRay = true;
 
-    for (uint i = 0; i < gMaxBounces; i++)
+    for (uint i = 0; i < gMaxBounces && validRay; i++)
     {
         // Trace new ray
         TraceRay(gScene.rtAccel, 0 , 0xff , 0, rayTypeCount, 0 , ray, rayPayload);
@@ -126,17 +183,28 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg , inout float3 thp)
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
+        float continuationProb = getContinuationProbablity(bsdfProperties);
 
+        // Update Mis
+        float dist = distance(ray.Origin, sd.posW);
+        float cosTheta = abs(dot(sd.faceN, sd.V));
+        camState.dVCM *= dist  * dist;
+        camState.dVCM /= cosTheta;
+        camState.dVC /= cosTheta;
+        camState.dVM /= cosTheta;
+
+        bool hitEmissive = any(bsdfProperties.emission > 0);
+        if (hitEmissive) {
+
+            //outColor += bsdfProperties.emission * thp;
+            break;
+        }
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
-            outColor  += bsdfProperties.emission * thp;
-            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg) * thp;
-            break; // Stop for now
-        } else {
-            float pdf = 1.0;
-            if (!sampleNewRay(sd, mi, sg, thp, pdf, ray))
-                break;
+            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
         }
+
+        validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray);
     }
    
     return outColor;
@@ -186,6 +254,18 @@ void rayGen()
     float3 outColor = float3(0);
 
     if (hitInfo.isValid()) {
+        // Init camera state for MIS
+        CameraState camState = CameraState();
+        const float3 camForward = normalize(gScene.camera.data.cameraW);
+        const float cosAtCamera = dot(-viewDir, camForward);
+        const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
+        const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
+        camState.dVCM = gNumLightPaths / imageToSolidAngleFactor;
+        const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * gNumLightPaths;
+        camState.misVmWeightFactor = etaVCM;
+        camState.misVcWeightFactor = 0.0; //(1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
+
+        //Get Material Properties
         let lod = ExplicitLodTextureSampler(0);
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 2 + 1);
 
@@ -193,23 +273,33 @@ void rayGen()
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
-        outColor += bsdfProperties.emission;
 
-        // Evaluate Photons
-        if (bsdfProperties.roughness > kRoughnessThreshold)
-        {
-            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
-        } else {
+        // Finalize MIS factors (dVM and dVC are 0 for the first hit)
+        float cosTheta = abs(dot(sd.faceN, viewDir));
+        float dist = distance(gScene.camera.getPosition(), sd.posW);
+        camState.dVCM *= dist * dist;
+        camState.dVCM /= cosTheta;
+
+        outColor += bsdfProperties.emission; //On first hit, no MIS is necessary if emissive is hit
+        bool hitEmissive = any(bsdfProperties.emission > 0);
+
+        if (!hitEmissive) {
+
+            // Evaluate Photons
+            float continationProb = getContinuationProbablity(bsdfProperties);
+            if (bsdfProperties.roughness > kRoughnessThreshold)
+            {
+                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continationProb,  0xFF, sg);
+            }
+
             // Calculate next ray
             float3 thp = float3(1.0);
-            float pdf = 1;
             RayDesc ray;
             ray.TMin = 0.0;
             ray.TMax = FLT_MAX;
-            if (sampleNewRay(sd, mi, sg, thp, pdf, ray))
-                outColor += tracePath(ray, sg, thp);
+            if (sampleNewRay(sd, mi, bsdfProperties.roughness, continationProb , sg, thp, camState, ray))
+                outColor += tracePath(ray, camState, sg, thp);
         }
-
     } else {
         outColor = kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;
     }
