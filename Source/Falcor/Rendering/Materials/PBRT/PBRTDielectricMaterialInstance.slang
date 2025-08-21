@@ -185,6 +185,16 @@ struct PBRTDielectricMaterialInstance : IMaterialInstance
         return bsdf.evalPdf(wiLocal, woLocal);
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi, const float3 wo, bool useImportanceSampling = true)
+    {
+        float3 wiLocal = sf.toLocal(wi);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflectionOrTransmission(sd, sf, wiLocal, woLocal, wo, true)) return 0.f;
+
+        return bsdf.evalPdf(wiLocal, woLocal);
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};

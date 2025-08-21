@@ -167,6 +167,14 @@ interface IMaterialInstance
     */
     float evalPdf(const ShadingData sd, const float3 wo, bool useImportanceSampling = true);
 
+    /** Evaluates the directional pdf for sampling the given direction.
+        \param[in] sd Shading data.
+        \param[in] wo Outgoing direction.
+        \param[in] useImportanceSampling Hint to use importance sampling, else default to reference implementation if available.
+        \return PDF with respect to solid angle for sampling direction wo (0 for delta events).
+    */
+    float evalPdf(const ShadingData sd, const float3 wi, const float3 wo, bool useImportanceSampling = true);
+
     /** Return BSDF properties.
         \param[in] sd Shading data.
         \return A struct with properties.

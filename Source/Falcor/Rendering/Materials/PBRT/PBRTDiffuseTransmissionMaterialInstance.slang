@@ -96,6 +96,21 @@ struct PBRTDiffuseTransmissionMaterialInstance : IMaterialInstance
         return P * abs(woLocal.z) * M_1_PI;
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi, const float3 wo, bool useImportanceSampling = true)
+    {
+        float3 wiLocal = sf.toLocal(wi);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflectionOrTransmission(sd, sf, wiLocal, woLocal, wo, true)) return 0.f;
+
+        float PR = luminance(albedoR);
+        float PT = luminance(albedoT);
+        if (PR + PT == 0.0f) return 0.0f;
+        float P = (wiLocal.z * woLocal.z > 0.0f) ? PR / (PR + PT) : PT / (PR + PT);
+
+        return P * abs(woLocal.z) * M_1_PI;
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};

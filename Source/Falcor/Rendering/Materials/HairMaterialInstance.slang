@@ -103,6 +103,21 @@ struct HairMaterialInstance : IMaterialInstance
 #endif
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi, const float3 wo, bool useImportanceSampling = true)
+    {
+#if BCSDF == HairChiang
+        float3 wiLocal = sf.toLocal(wi);
+        float3 woLocal = sf.toLocal(wo);
+
+        HairChiang16 bcsdf = HairChiang16(sd, data);
+
+        return bcsdf.evalPdf(wiLocal, woLocal);
+#else
+        // Diffuse BRDF
+        return saturate(dot(sf.N, wo));
+#endif
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};

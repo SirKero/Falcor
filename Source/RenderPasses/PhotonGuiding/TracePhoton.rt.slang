@@ -224,7 +224,7 @@ void rayGen()
     // MIS constants
     const float etaVCM = (M_PI * gPhotonRadius.x * gPhotonRadius.x) * lightCount;
     float mMisVmWeightFactor = etaVCM;
-    float mMisVcWeightFactor = 0.0; //(1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
+    float mMisVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
 
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
@@ -326,7 +326,7 @@ void rayGen()
         // Partially update MIS weights
         float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
         float bsdfPdf = bsdfSample.pdf * photon.continationProb;
-        float bsdfReversePDF = bsdfPdf; // For now we assume reverse is the same as normal BSDF TODO check
+        float bsdfReversePDF = mi.evalPdf(sd, ray.Direction, sd.V) * photon.continationProb; 
 
         if (reflectedDiffuse)
         {

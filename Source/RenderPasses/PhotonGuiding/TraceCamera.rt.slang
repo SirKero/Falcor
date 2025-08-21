@@ -105,8 +105,8 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
             continue;
 
-        float pdf = mi.evalPdf(sd, photonData.dir, false);
-        float reversePDF = pdf;
+        float pdf = mi.evalPdf(sd, photonData.dir);
+        float reversePDF = mi.evalPdf(sd, photonData.dir, sd.V);
         pdf *= continuationProb;
         reversePDF *= photonData.continationProb; // For the reverse pdf
         const float wLight = photonData.dVCM * camState.misVcWeightFactor + photonData.dVM * pdf;
@@ -116,8 +116,8 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / (M_PI * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
     }
-    if (camState.pathLength != 1)
-        return float3(0);
+    //if (camState.pathLength != 1)
+    //    return float3(0);
     return collectedRadiance;
 }
 
@@ -134,7 +134,7 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
     thp *= bsdfSample.weight;
 
     float pdf = bsdfSample.pdf;
-    float reversePdf = pdf;
+    float reversePdf = mi.evalPdf(sd, ray.Direction, sd.V);
 
     //Russian Roulette
     if (sampleNext1D(sg) > continuationProbability)
@@ -188,7 +188,7 @@ float3 tracePath(RayDesc ray, inout CameraState camState,  inout SampleGenerator
         // Update Mis
         float dist = distance(ray.Origin, sd.posW);
         float cosTheta = abs(dot(sd.faceN, sd.V));
-        camState.dVCM *= dist  * dist;
+        camState.dVCM *= dist * dist;
         camState.dVCM /= cosTheta;
         camState.dVC /= cosTheta;
         camState.dVM /= cosTheta;
@@ -263,7 +263,7 @@ void rayGen()
         camState.dVCM = gNumLightPaths / imageToSolidAngleFactor;
         const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * gNumLightPaths;
         camState.misVmWeightFactor = etaVCM;
-        camState.misVcWeightFactor = 0.0; //(1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
+        camState.misVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
 
         //Get Material Properties
         let lod = ExplicitLodTextureSampler(0);
@@ -297,7 +297,7 @@ void rayGen()
             RayDesc ray;
             ray.TMin = 0.0;
             ray.TMax = FLT_MAX;
-            if (sampleNewRay(sd, mi, bsdfProperties.roughness, continationProb , sg, thp, camState, ray))
+            if (sampleNewRay(sd, mi, bsdfProperties.roughness, continationProb, sg, thp, camState, ray))
                 outColor += tracePath(ray, camState, sg, thp);
         }
     } else {

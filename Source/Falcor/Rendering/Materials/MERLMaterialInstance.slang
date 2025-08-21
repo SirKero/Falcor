@@ -121,6 +121,20 @@ struct MERLMaterialInstance : IMaterialInstance
 #endif
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi ,const float3 wo, bool useImportanceSampling = true)
+    {
+        float3 wiLocal = sf.toLocal(wi);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
+
+#if SAMPLE_FITTED_BRDF
+        return fittedBrdf.evalPdf(wiLocal, woLocal);
+#else
+        return woLocal.z * M_1_PI; // pdf = cos(theta) / pi
+#endif
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};

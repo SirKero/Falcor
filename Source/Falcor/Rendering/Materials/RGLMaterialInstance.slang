@@ -191,6 +191,44 @@ struct RGLMaterialInstance : IMaterialInstance
         return pdf;
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi, const float3 wo, bool useImportanceSampling = true)
+    {
+        float3 wiLocal = sf.toLocal(wi);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
+
+        uint4 ndfsSize = unpackSize(ndfVndfSize);
+        uint4 lumiSize = unpackSize(this.lumiSize);
+        uint4 vndfSize = uint4(lumiSize.xy, ndfsSize.zw);
+        let vndf = InterpolatedDistribution2D.fromManagedBuffers(vndfSize, vndfMarginalBufID, vndfConditionalBufID, vndfBufID);
+        let lumi = InterpolatedDistribution2D.fromManagedBuffers(lumiSize, lumiMarginalBufID, lumiConditionalBufID, lumiBufID);
+
+        float3 h = normalize(wiLocal + woLocal);
+        float2 sphericalI = toSpherical(wiLocal);
+        float2 sphericalH = toSpherical(h);
+        if (lumiSize.x == 1) // Isotropic case
+        {
+            sphericalH.y -= sphericalI.y;
+        }
+        float2 unitI = sphericalToUnit(sphericalI);
+        float2 unitH = sphericalToUnit(sphericalH);
+
+        unitH.y = unitH.y - floor(unitH.y);
+
+        float3 unwarpedPdf = vndf.invert(slice, unitH);
+        float2 unwarped = unwarpedPdf.xy;
+
+        float vndfPdf = unwarpedPdf.z;
+        float lumiPdf = lumi.evalPdf(slice, unwarped);
+        float jacobian = max(2.0f * M_PI * M_PI * unitH.x * length(h.xy), 1e-6f) * 4.0f * dot(wiLocal, h);
+        float pdf = vndfPdf * lumiPdf / jacobian;
+
+        if (jacobian == 0.0f) return 0.0f;
+
+        return pdf;
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};

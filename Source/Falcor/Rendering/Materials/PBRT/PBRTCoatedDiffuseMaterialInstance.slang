@@ -81,6 +81,19 @@ struct PBRTCoatedDiffuseMaterialInstance : IMaterialInstance
         return LayeredBSDF(top, bottom).evalPdf(wiLocal, woLocal);
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi, const float3 wo, bool useImportanceSampling = true)
+    {
+        float3 wiLocal = sf.toLocal(wi);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflection(sd, sf, wiLocal, woLocal, wo)) return 0.f;
+
+        PBRTDielectricBSDF top = { interfaceD, interfaceEta };
+        PBRTDiffuseBSDF bottom = { diffuseAlbedo };
+
+        return LayeredBSDF(top, bottom).evalPdf(wiLocal, woLocal);
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};

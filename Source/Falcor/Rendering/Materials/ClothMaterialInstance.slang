@@ -64,6 +64,11 @@ struct ClothMaterialInstance : IMaterialInstance
         return evalPdfReference(sd, wo);
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi, const float3 wo, bool useImportanceSampling = true)
+    {
+        return evalPdfReference(sd, wo);
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};

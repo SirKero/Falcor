@@ -109,6 +109,24 @@ struct StandardMaterialInstance : IMaterialInstance
         }
     }
 
+    float evalPdf(const ShadingData sd, const float3 wi , const float3 wo, bool useImportanceSampling = true)
+    {
+        float3 wiLocal = sf.toLocal(wi);
+        float3 woLocal = sf.toLocal(wo);
+
+        if (!isValidHemisphereReflectionOrTransmission(sd, sf, wiLocal, woLocal, wo)) return 0.f;
+
+        if (!useImportanceSampling)
+        {
+            return evalPdfReference(sd, wiLocal, woLocal);
+        }
+        else
+        {
+            StandardBSDF bsdf = StandardBSDF(wiLocal, sd.mtl, data);
+            return bsdf.evalPdf(wiLocal, woLocal);
+        }
+    }
+
     BSDFProperties getProperties(const ShadingData sd)
     {
         BSDFProperties p = {};
