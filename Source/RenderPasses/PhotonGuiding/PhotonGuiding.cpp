@@ -113,6 +113,8 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     //Prepare Textures and Buffers
     prepareResources(pRenderContext, renderData);
 
+    prepareCameraData();
+
     tracePhotonPass(pRenderContext, renderData);
 
     traceCameraPass(pRenderContext, renderData);
@@ -227,6 +229,9 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (any(mScreenRes != renderData.getDefaultTextureDims()))
     {
         mScreenRes = renderData.getDefaultTextureDims();
+        mpLightTraceColorSpinlock[0].reset();
+        mpLightTraceColorSpinlock[1].reset();
+        mpLightTraceColorSpinlock[2].reset();
     }
 
 
@@ -283,6 +288,37 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             CustomAccelerationStructure::UpdateMode::TLASOnly
         );
     }
+
+    //Light Trace Spinlock textures
+    for (uint i = 0; i < 3; i++)
+    {
+        if (!mpLightTraceColorSpinlock[i])
+        {
+            mpLightTraceColorSpinlock[i] = Texture::create2D(
+                mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::R32Uint, 1u, 1u, nullptr,
+                ResourceBindFlags::UnorderedAccess
+            );
+            std::string colorChannel = i == 0 ? "Red" : (i == 1 ? "Green" : "Blue");
+            mpLightTraceColorSpinlock[i]->setName("LightTraceSpinlock_" + colorChannel);
+        }
+    }
+}
+
+void PhotonGuiding::prepareCameraData()
+{
+    // Update Image plane distance
+    auto& cameraData = mpScene->getCamera()->getData();
+    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
+    float camTanHalfAngle = math::tan(fovY);
+    mImagePlaneDist = mScreenRes.y / (2.f * camTanHalfAngle);
+
+    //Get normalized pixel area
+    float h = tan(fovY / 2.f) * 2.f;
+    float w = h * cameraData.aspectRatio;
+    float wPix = w / mScreenRes.x;
+    float hPix = h / mScreenRes.y;
+
+    mNormalizedPixelArea = wPix * hPix;
 }
 
 void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -349,6 +385,9 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gDispatchDimension"] = shaderDispatchDim;
+    var["CB"]["gScreenRes"] = mScreenRes;
+    var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     // Structures
     if (mpEmissiveLightSampler)
@@ -360,11 +399,23 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
     }
+    for (uint32_t i = 0; i < 3; i++)
+    {
+        var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
+    }
+
     var["gPhotonCounter"] = mpPhotonCounter;
 
     mpScene->raytrace(
         pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1)
     );
+
+    //Light Trace UAV barrier
+    for (uint32_t i = 0; i < 3; i++)
+    {
+        pRenderContext->uavBarrier(mpLightTraceColorSpinlock[i].get());
+    }
+
 
     mNumberLightPaths = shaderDispatchDim + shaderDispatchDim;
 
@@ -430,17 +481,12 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
-
-    auto& cameraData = mpScene->getCamera()->getData();
-    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
-    float camTanHalfAngle = math::tan(fovY * M_PI / 360.f);
-    float imagePlaneDist = mScreenRes.y / (2.f * camTanHalfAngle);
-
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gMaxBounces"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
-    var["CB"]["gImagePlaneDist"] = imagePlaneDist;
+    var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
     var["CB"]["gPhotonRadius"] = mPhotonRadius.y; //TODO remove
 
 
@@ -454,6 +500,10 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
+    }
+    for (uint32_t i = 0; i < 3; i++)
+    {
+        var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
     }
 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();

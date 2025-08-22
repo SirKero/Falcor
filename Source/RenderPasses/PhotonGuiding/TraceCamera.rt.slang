@@ -17,6 +17,8 @@ StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
 RaytracingAccelerationStructure gPhotonAS;
 
+RWTexture2D<uint> gLightTraceColor[3]; // Uint spinlock color texture for every channel
+
 RWTexture2D<float4> gOutColor;
 
 cbuffer Light {
@@ -29,7 +31,8 @@ cbuffer CB
     uint gMaxBounces; // Max path length for a Final Gather sample
     uint gNumLightPaths; // Number of light paths for MIS
     float gImagePlaneDist; //Camera image plane distance
-    float gPhotonRadius;    //TODO remove temporary for MIS
+    float gPhotonRadius;   // TODO remove temporary for MIS
+    float gNormalizedPixelArea;   
 }
 
 static const float kPhotonCollectTMax = 1e-7;
@@ -276,6 +279,21 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
     return outColor;
 }
 
+float3 getLightTraceColor(const uint2 pixel)
+{
+    //Get color
+    float red = asfloat(gLightTraceColor[0][pixel]);
+    float green = asfloat(gLightTraceColor[1][pixel]);
+    float blue = asfloat(gLightTraceColor[2][pixel]);
+
+    // Reset texture
+    gLightTraceColor[0][pixel] = 0;
+    gLightTraceColor[1][pixel] = 0;
+    gLightTraceColor[2][pixel] = 0;
+
+    return float3(red, green, blue);
+}
+
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
 {
@@ -318,15 +336,19 @@ void rayGen()
     float3 viewDir = gView[pixel].xyz;
 
     float3 outColor = float3(0);
+    outColor += getLightTraceColor(pixel);
 
     if (hitInfo.isValid()) {
         // Init camera state for MIS
         CameraState camState = CameraState();
         const float3 camForward = normalize(gScene.camera.data.cameraW);
         const float cosAtCamera = dot(-viewDir, camForward);
-        const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
-        const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
-        camState.dVCM = gNumLightPaths / imageToSolidAngleFactor;
+        //const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
+        //const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
+        //Camera pdf at distance 1
+        const float surfaceToImageFactor = gNormalizedPixelArea * pow(cosAtCamera, 3);
+        const float cameraPdf = 1.0 / surfaceToImageFactor; //techniqcally 1/pdf
+        camState.dVCM = float(gNumLightPaths) / cameraPdf;
         const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * gNumLightPaths;
         camState.misVmWeightFactor = etaVCM;
         camState.misVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
@@ -368,7 +390,7 @@ void rayGen()
                 outColor += tracePath(ray, sd, camState, sg, thp);
         }
     } else {
-        outColor = kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;
+        outColor += kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;
     }
 
     gOutColor[pixel] = float4(outColor, 1);

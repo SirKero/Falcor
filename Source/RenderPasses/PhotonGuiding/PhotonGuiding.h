@@ -62,6 +62,9 @@ private:
     //Prepares needed Buffers and Textures and Acceleration Structures
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Prepare some camera data needed for reprojection
+    void prepareCameraData();
+
     //Traces the photons and stores them in the scene
     void tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -90,6 +93,8 @@ private:
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
     uint mNumberLightPaths = 0;
+    float mImagePlaneDist = 1.0;
+    float mNormalizedPixelArea = 1.0;
 
     // Material Settings
     bool mUseLambertianDiffuse = true;         // Enable Lambert Diffuse BRDF instead of Frostbyte
@@ -126,6 +131,7 @@ private:
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
+    ref<Texture> mpLightTraceColorSpinlock[3]; //Uint texture for each color used in the spinlock
 
      //
     // Render Passes/Programms
