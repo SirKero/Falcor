@@ -2,9 +2,12 @@
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.Raytracing;
+import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
-import Rendering.RTXDI.RTXDI;
+import Rendering.Lights.LightHelpers;
+import Rendering.Lights.EmissiveLightSampler;
+import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -16,7 +19,9 @@ RaytracingAccelerationStructure gPhotonAS;
 
 RWTexture2D<float4> gOutColor;
 
-static const float kPhotonCollectTMax = 1e-7;
+cbuffer Light {
+    EmissiveLightSampler gEmissiveSampler;
+}
 
 cbuffer CB
 {
@@ -27,6 +32,7 @@ cbuffer CB
     float gPhotonRadius;    //TODO remove temporary for MIS
 }
 
+static const float kPhotonCollectTMax = 1e-7;
 static const bool kUseEnvMap = USE_ENV_MAP;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
@@ -159,11 +165,69 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
     return true;
 }
 
-float3 tracePath(RayDesc ray, inout CameraState camState,  inout SampleGenerator sg , inout float3 thp)
+float3 handleEmissiveHit(ShadingData sd, float3 prevPos, float3 prevNormal,CameraState camState, TriangleHit triangleHit, float3 emission, float3 incomingDir)
+{
+    uint lightPickProb = 1.0 / gScene.lightCollection.getActiveTriangleCount();
+    uint lightTriIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+    const EmissiveTriangle emissiveTri = gScene.lightCollection.getTriangle(lightTriIndex);
+
+    TriangleLightHit hit;
+    hit.triangleIndex = lightTriIndex;
+    hit.posW = sd.posW;
+    hit.normalW = sd.getOrientedFaceNormal();
+
+    float directPdf = gEmissiveSampler.evalPdf(prevPos, prevNormal, true, hit);
+
+    float emissionPdf = abs(dot(emissiveTri.normal, -incomingDir)) * M_1_PI;
+    emissionPdf *= directPdf;
+
+    const float wCamera = directPdf * camState.dVCM + emissionPdf * camState.dVC;
+    const float misWeight = 1.0 / (1.0 + wCamera);
+    return emission * misWeight;
+}
+
+float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState camState, float continuationProb , inout SampleGenerator sg)
+{
+    TriangleLightSample tls = {};
+    if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
+        return float3(0);
+
+    // Get emission pdf
+    const EmissiveTriangle emissiveTri = gScene.lightCollection.getTriangle(tls.triangleIndex);
+    float cosAtLight = dot(emissiveTri.normal, sd.V);
+    const float emissionPdf = (cosAtLight * M_1_PI) / (emissiveTri.area * gScene.lightCollection.getActiveTriangleCount());
+    const float directPdf = tls.pdf; //Multiplied with activeTriangle count 
+
+    float3 bsdf = mi.eval(sd, tls.dir, sg);
+
+    if (all(bsdf <= 0) || directPdf <= 0)
+        return float3(0);
+
+    SceneRayQuery<1> rayQuery;
+    const Ray ray = Ray(sd.computeNewRayOrigin(), tls.dir, 0.f, tls.distance * 0.98);
+    if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+        return float3(0);
+
+    float cosToLight = dot(sd.faceN, tls.dir);
+    float pdf = mi.evalPdf(sd, tls.dir) * continuationProb;
+    float reversePDF = mi.evalPdf(sd, tls.dir, sd.V) * continuationProb;
+
+    const float wLight = pdf / directPdf;
+    const float wCamera = ((emissionPdf * cosToLight) / (directPdf * cosAtLight)) * (camState.misVmWeightFactor + camState.dVCM + camState.dVC * reversePDF);
+
+    const float misWeight = 1.0 / (wLight + 1.0 + wCamera);
+
+    float3 radiance = misWeight * bsdf * tls.Le / directPdf;
+    return radiance;
+}
+
+float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout SampleGenerator sg , inout float3 thp)
 {
     float3 outColor = float3(0);
     RayPayload rayPayload = RayPayload();
     bool validRay = true;
+    float3 prevPos = sd.posW;
+    float3 prevFaceN = sd.faceN;
 
     for (uint i = 0; i < gMaxBounces && validRay; i++)
     {
@@ -188,23 +252,25 @@ float3 tracePath(RayDesc ray, inout CameraState camState,  inout SampleGenerator
         // Update Mis
         float dist = distance(ray.Origin, sd.posW);
         float cosTheta = abs(dot(sd.faceN, sd.V));
-        camState.dVCM *= dist * dist;
+        camState.dVCM *= dist*dist;
         camState.dVCM /= cosTheta;
         camState.dVC /= cosTheta;
         camState.dVM /= cosTheta;
 
         bool hitEmissive = any(bsdfProperties.emission > 0);
         if (hitEmissive) {
-
-            //outColor += bsdfProperties.emission * thp;
+            outColor += handleEmissiveHit(sd, prevPos, prevFaceN, camState, hit.getTriangleHit(), bsdfProperties.emission, sd.V) * thp;
             break;
         }
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
+            outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
             outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
         }
 
         validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray);
+        prevPos = sd.posW;
+        prevFaceN = sd.faceN;
     }
    
     return outColor;
@@ -286,10 +352,11 @@ void rayGen()
         if (!hitEmissive) {
 
             // Evaluate Photons
-            float continationProb = getContinuationProbablity(bsdfProperties);
+            float continuationProb = getContinuationProbablity(bsdfProperties);
             if (bsdfProperties.roughness > kRoughnessThreshold)
             {
-                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continationProb,  0xFF, sg);
+                outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg);
+                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb,  0xFF, sg);
             }
 
             // Calculate next ray
@@ -297,8 +364,8 @@ void rayGen()
             RayDesc ray;
             ray.TMin = 0.0;
             ray.TMax = FLT_MAX;
-            if (sampleNewRay(sd, mi, bsdfProperties.roughness, continationProb, sg, thp, camState, ray))
-                outColor += tracePath(ray, camState, sg, thp);
+            if (sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray))
+                outColor += tracePath(ray, sd, camState, sg, thp);
         }
     } else {
         outColor = kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;

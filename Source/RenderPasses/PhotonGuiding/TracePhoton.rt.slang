@@ -308,9 +308,10 @@ void rayGen()
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
         thp *= bsdfSample.weight;
+        bool isEmissive = any(bsdfProperties.emission > 0);
 
         // RussianRoulette
-        if (sampleNext1D(sg) > photon.continationProb)
+        if (sampleNext1D(sg) > photon.continationProb || isEmissive)
         {
             return; // Photon is absorbed
         }

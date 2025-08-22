@@ -412,9 +412,12 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     }
 
     // Defines
+    mTraceCameraPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTraceCameraPass.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
     mTraceCameraPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTraceCameraPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    if (mpEmissiveLightSampler)
+        mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
       // Program Vars
     if (!mTraceCameraPass.pVars)
@@ -422,6 +425,11 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
 
     FALCOR_ASSERT(mTraceCameraPass.pVars);
     auto var = mTraceCameraPass.pVars->getRootVar();
+
+    // Structures
+    if (mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+
 
     auto& cameraData = mpScene->getCamera()->getData();
     float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
@@ -434,7 +442,6 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gImagePlaneDist"] = imagePlaneDist;
     var["CB"]["gPhotonRadius"] = mPhotonRadius.y; //TODO remove
-
 
 
     // Input
