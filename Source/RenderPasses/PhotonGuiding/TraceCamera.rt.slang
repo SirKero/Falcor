@@ -111,15 +111,18 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         PhotonData photonData = gPhotonData[instanceIdx][primIdx];
         float NdotL = dot(photonData.dir, N);
         // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
+        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0) || (camState.pathLength + photonData.pathLenght) > (gMaxBounces + 1))
             continue;
 
         float pdf = mi.evalPdf(sd, photonData.dir);
         float reversePDF = mi.evalPdf(sd, photonData.dir, sd.V);
         pdf *= continuationProb;
         reversePDF *= photonData.continationProb; // For the reverse pdf
-        const float wLight = photonData.dVCM * camState.misVcWeightFactor + photonData.dVM * pdf;
-        const float wCamera = camState.dVCM * camState.misVcWeightFactor + camState.dVM * reversePDF;
+        const float misVcWeightFactorCamera = camState.pathLength >= 1 ? 0 : camState.misVcWeightFactor;
+        const float misVcWeightFactorLight = photonData.pathLenght >= 1 ? 0 : camState.misVcWeightFactor;
+
+        const float wLight = photonData.dVCM * misVcWeightFactorLight + photonData.dVM * pdf;
+        const float wCamera = camState.dVCM * misVcWeightFactorCamera + camState.dVM * reversePDF;
         const float misWeight = 1.0 / (wLight + 1.0 + wCamera);
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
