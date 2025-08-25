@@ -341,7 +341,7 @@ void rayGen()
     float3 outColor = float3(0);
     outColor += getLightTraceColor(pixel);
 
-    if (false) {
+    if (hitInfo.isValid()) {
         // Init camera state for MIS
         CameraState camState = CameraState();
         const float3 camForward = normalize(gScene.camera.data.cameraW);

@@ -51,6 +51,19 @@ public:
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
+    // GUI Structs and enum
+    enum class RenderMode : uint
+    {
+        VCM = 0u,
+        Grittmann = 1u
+    };
+    FALCOR_ENUM_INFO(
+        RenderMode,
+        {{RenderMode::VCM, "VCM"},
+        {RenderMode::Grittmann, "Grittmann"}
+        }
+    );
+
 private:
     //
     // Functions
@@ -65,11 +78,17 @@ private:
     //Prepare some camera data needed for reprojection
     void prepareCameraData();
 
-    //Traces the photons and stores them in the scene
+    // Traces the photons and stores them in the scene
     void tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Traces the camera and collects the photons
+    // Traces the camera and collects the photons
     void traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Traces the photons and stores them in the scene. Uses VCM MIS weights
+    void tracePhotonVCMPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Traces the camera and collects the photons. Uses VCM MIS weights
+    void traceCameraVCMPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     // Handles readback of the photon counter
     void handlePhotonCounter(RenderContext* pRenderContext);
@@ -95,6 +114,8 @@ private:
     uint mNumberLightPaths = 0;
     float mImagePlaneDist = 1.0;
     float mNormalizedPixelArea = 1.0;
+
+    RenderMode mRenderMode = RenderMode::VCM;
 
     // Material Settings
     bool mUseLambertianDiffuse = true;         // Enable Lambert Diffuse BRDF instead of Frostbyte
@@ -128,6 +149,7 @@ private:
     // Resources
     //
     ref<Buffer> mpPhotonAABB[2];    // Photon AABBs for Acceleration Structure building
+    ref<Buffer> mpPhotonDataVCM[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
@@ -154,6 +176,10 @@ private:
         void initProgramVars(ref<Device> pDevice, ref<Scene> pScene, ref<SampleGenerator> pSampleGenerator);
     };
 
-    RayTraceProgramHelper mTracePhotonPass;         // Trace Photons
-    RayTraceProgramHelper mTraceCameraPass;         // Trace Camera
+    RayTraceProgramHelper mTracePhotonPass;           // Trace Photons
+    RayTraceProgramHelper mTraceCameraPass;              // Trace Camera
+    RayTraceProgramHelper mTracePhotonVCMPass;         // Trace Photons
+    RayTraceProgramHelper mTraceCameraVCMPass;         // Trace Camera
 };
+
+FALCOR_ENUM_REGISTER(PhotonGuiding::RenderMode);

@@ -14,7 +14,7 @@ dVCM - MIS Quanitiy (small VCM)
 normalW - world face normal for the photon, used for surface rejections
 dVM - MIS Quanitiy for merging (small VCM)
 */
-struct PhotonData {
+struct PhotonDataVCM {
     float3 flux;
     uint pathLenght;
 

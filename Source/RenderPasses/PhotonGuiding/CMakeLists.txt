@@ -4,7 +4,9 @@ target_sources(PhotonGuiding PRIVATE
     PhotonGuiding.cpp
     PhotonGuiding.h
     TracePhoton.rt.slang
+    TracePhotonVCM.rt.slang
     TraceCamera.rt.slang
+    TraceCameraVCM.rt.slang
     StructsAndHelpers.slang
 )
 
