@@ -200,7 +200,7 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonDataV
 
     // Contribution on image
     //float3 contribution = photon.flux * bsdf * cameraPdf;
-    float3 contribution =misWeight * photon.flux * bsdf * cameraPdf;
+    float3 contribution = misWeight * photon.flux * bsdf * cameraPdf / lightCount;
     
     if(any(contribution > 0))
     {
@@ -293,7 +293,7 @@ void rayGen()
     }
 #endif
     const uint lightCount = dispatchDims.x * dispatchDims.y;
-    pls.flux /= float3(lightCount); // Division through all dipatched photons
+    //pls.flux /= float3(lightCount); // Division through all dipatched photons
 
     // MIS constants
     const float etaVCM = (M_PI * gPhotonRadius.x * gPhotonRadius.x) * lightCount;
@@ -315,7 +315,7 @@ void rayGen()
     photon.flux = photonStartFlux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
-    photon.dVCM = pls.directPDF / pls.emissionPDF;
+    photon.dVCM = pls.directPDF / pls.emissionPDF; //TODO fix direct? 
     photon.dVC = pls.cosTheta / pls.emissionPDF;
     photon.dVM = photon.dVC * mMisVcWeightFactor;
 
@@ -337,7 +337,8 @@ void rayGen()
         let bsdfProperties = mi.getProperties(sd);
 
         // Update MIS helpers
-        if (i > 0) {
+        if (i > 0)
+        {
             float dist = distance(sd.posW, ray.Origin);
             photon.dVCM *= dist * dist;
         }
@@ -346,8 +347,7 @@ void rayGen()
         photon.dVM /= cosTheta;
         photon.dVC /= cosTheta;
         photon.continationProb = getContinuationProbablity(bsdfProperties);
-
-        
+                
         photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
 

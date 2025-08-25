@@ -118,16 +118,18 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         float reversePDF = mi.evalPdf(sd, photonData.dir, sd.V);
         pdf *= continuationProb;
         reversePDF *= photonData.continationProb; // For the reverse pdf
-        const float misVcWeightFactorCamera = camState.pathLength >= 1 ? 0 : camState.misVcWeightFactor;
-        const float misVcWeightFactorLight = photonData.pathLenght >= 1 ? 0 : camState.misVcWeightFactor;
+        const float misVcWeightFactorCamera = camState.misVcWeightFactor; // camState.pathLength >= 1 ? 0 : camState.misVcWeightFactor;
+        const float misVcWeightFactorLight = camState.misVcWeightFactor; //photonData.pathLenght >= 1 ? 0 : camState.misVcWeightFactor;
 
         const float wLight = photonData.dVCM * misVcWeightFactorLight + photonData.dVM * pdf;
         const float wCamera = camState.dVCM * misVcWeightFactorCamera + camState.dVM * reversePDF;
         const float misWeight = 1.0 / (wLight + 1.0 + wCamera);
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / (M_PI * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / NdotL); // NdotL needs to be taken out of the bsdf for Photon Mapping
     }
+    const float photonWeight = 1.0 / (gPhotonRadius.x * gPhotonRadius.x * M_PI * gNumLightPaths);
+    collectedRadiance *= photonWeight;
     //if (camState.pathLength != 1)
     //    return float3(0);
     return collectedRadiance;

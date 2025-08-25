@@ -439,7 +439,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         pRenderContext->uavBarrier(mpLightTraceColorSpinlock[i].get());
     }
 
-    mNumberLightPaths = shaderDispatchDim + shaderDispatchDim;
+    mNumberLightPaths = shaderDispatchDim * shaderDispatchDim;
 
     // Clear values after the counter
     std::vector<ref<Buffer>> aabbs = {mpPhotonAABB[0], mpPhotonAABB[1]};
@@ -630,7 +630,7 @@ void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const Rend
     }
 
 
-    mNumberLightPaths = shaderDispatchDim + shaderDispatchDim;
+    mNumberLightPaths = shaderDispatchDim * shaderDispatchDim;
 
     // Clear values after the counter
     std::vector<ref<Buffer>> aabbs = {mpPhotonAABB[0], mpPhotonAABB[1]};
