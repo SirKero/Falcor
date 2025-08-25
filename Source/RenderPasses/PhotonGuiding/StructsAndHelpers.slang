@@ -14,6 +14,39 @@ dVCM - MIS Quanitiy (small VCM)
 normalW - world face normal for the photon, used for surface rejections
 dVM - MIS Quanitiy for merging (small VCM)
 */
+struct PhotonData {
+    float3 flux;
+    uint pathLenght;
+
+    float3 dir;
+    float pdf;
+
+    float3 normalW;
+    float reversePdf;
+
+    float neePdf; 
+    uint3 _pad;
+
+    __init() {
+        this.dir = float3(0);
+        this.normalW = float3(0, 1, 0);
+        this.flux = float3(0);
+        this.pathLenght = 0;
+        this.pdf = 1.0;
+        this.reversePdf = 1.0;
+        this.neePdf = 1.0;
+        this._pad = uint3(0);
+    }
+}
+
+/* Struct describing a Photon used with VCM MIS
+flux - the energy of the photon
+pathLength - Which bounce the photon is on the light path. 0 is the first surface hit (direct light from camera)
+dir - incoming direction
+dVCM - MIS Quanitiy (small VCM)
+normalW - world face normal for the photon, used for surface rejections
+dVM - MIS Quanitiy for merging (small VCM)
+*/
 struct PhotonDataVCM {
     float3 flux;
     uint pathLenght;
