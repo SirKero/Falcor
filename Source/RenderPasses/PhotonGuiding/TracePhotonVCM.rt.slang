@@ -15,14 +15,14 @@ cbuffer CB
 {
     uint gMaxBounces;   // Max number of bounces allowed
     uint gFrameCount;   // Frame count since scene was loaded.
-    float2 gPhotonRadius;//Global/Caustic radius
+    float gPhotonRadius;// Photon radius
+    uint gDispatchDimension;    //Dispatch dims (x,y identical)
 
-    uint gDispatchDimension;    //Dispatch dims (x,y identical) 
     float gGlobalRejectionProb; //Rejection Probability for global photons
-    uint2 gScreenRes;   //For back projection
+    uint2 gScreenRes;           // For back projection
+    float gNormalizedPixelArea;
 
     float gImagePlaneDist;
-    float gNormalizedPixelArea;
 }
 
 #if USE_EMISSIVE_LIGHT // Buffer is only valid if emissive light is enabled
@@ -31,13 +31,13 @@ cbuffer Light {
 }
 #endif
 
-RWStructuredBuffer<AABB> gPhotonAABB[2];
-RWStructuredBuffer<PhotonDataVCM> gPhotonData[2];
+RWStructuredBuffer<AABB> gPhotonAABB;
+RWStructuredBuffer<PhotonDataVCM> gPhotonData;
 RWBuffer<uint> gPhotonCounter;
 RWTexture2D<uint> gLightTraceColor[3]; //Uint spinlock color texture for every channel 
 
 static const bool kAlphaTest = true;
-static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
+static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE_GLOBAL;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = true;  //TODO as option
 
@@ -288,15 +288,17 @@ void rayGen()
 
         ray.Direction = fromLocalToWorld(pls.normal, woLocal);
         pls.flux *= M_PI; // Lambert Emitter
+        //pls.flux /= lightDirPDF; // Lambert Emitter
         pls.cosTheta = woLocal.z;
         pls.emissionPDF *= lightDirPDF;
+        //pls.emissionPDF /= M_PI;
     }
 #endif
     const uint lightCount = dispatchDims.x * dispatchDims.y;
     //pls.flux /= float3(lightCount); // Division through all dipatched photons
 
     // MIS constants
-    const float etaVCM = (M_PI * gPhotonRadius.x * gPhotonRadius.x) * lightCount;
+    const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * lightCount;
     float mMisVmWeightFactor = etaVCM;
     float mMisVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
 
@@ -336,12 +338,12 @@ void rayGen()
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
 
+        if (any(bsdfProperties.emission > 0))
+            break;
+
         // Update MIS helpers
-        if (i > 0)
-        {
-            float dist = distance(sd.posW, ray.Origin);
-            photon.dVCM *= dist * dist;
-        }
+        float dist = distance(sd.posW, ray.Origin);
+        photon.dVCM *= dist * dist;
         float cosTheta = abs(dot(sd.faceN, sd.V));
         photon.dVCM /= cosTheta;
         photon.dVM /= cosTheta;
@@ -359,23 +361,14 @@ void rayGen()
 
         // Store Photon
         if (reflectedDiffuse) {
-            PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
-            bool storePhoton = true;
-            if (photonType == PhotonType::Global) {
-                storePhoton = sampleNext1D(sg) <= gGlobalRejectionProb;
-                photon.flux *= invRejection;
-            }
-            if (storePhoton) {
-                uint photonTypeIdx = (uint)photonType;
-                uint photonInsertIndex = 0;
-                InterlockedAdd(gPhotonCounter[photonTypeIdx], 1u, photonInsertIndex);
-                if (photonInsertIndex <= kPhotonBufferSize[photonTypeIdx])
-                {
-                    // photon.flux = float3(1, 0, 0);
-                    AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
-                    gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
-                    gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
-                }
+            uint photonInsertIndex = 0;
+            InterlockedAdd(gPhotonCounter[0], 1u, photonInsertIndex);
+            if (photonInsertIndex <= kPhotonBufferSize)
+            {
+                // photon.flux = float3(1, 0, 0);
+                AABB photonAABB = AABB(sd.posW - gPhotonRadius, sd.posW + gPhotonRadius);
+                gPhotonAABB[photonInsertIndex] = photonAABB;
+                gPhotonData[photonInsertIndex] = photon;
             }
         }
              

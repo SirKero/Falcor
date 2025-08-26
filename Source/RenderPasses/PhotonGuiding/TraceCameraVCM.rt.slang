@@ -13,8 +13,8 @@ import StructsAndHelpers;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
-StructuredBuffer<PhotonDataVCM> gPhotonData[2];
-StructuredBuffer<AABB> gPhotonAABB[2];
+StructuredBuffer<PhotonDataVCM> gPhotonData;
+StructuredBuffer<AABB> gPhotonAABB;
 RaytracingAccelerationStructure gPhotonAS;
 
 RWTexture2D<uint> gLightTraceColor[3]; // Uint spinlock color texture for every channel
@@ -99,16 +99,15 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
 
         if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
             continue;
-        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
         const uint primIdx = rayQuery.CandidatePrimitiveIndex();
 
         // Check if ray is inside photon radius
-        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
-        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
-        if (!hitSphere(photonAABB.center(), radius, sd.posW))
+        AABB photonAABB = gPhotonAABB[primIdx];
+
+        if (!hitSphere(photonAABB.center(), gPhotonRadius, sd.posW))
             continue;
 
-        PhotonDataVCM photonData = gPhotonData[instanceIdx][primIdx];
+        PhotonDataVCM photonData = gPhotonData[primIdx];
         float NdotL = dot(photonData.dir, N);
         // Check for diffent surfaces (e.g. corners)
         if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0) || (camState.pathLength + photonData.pathLenght) > (gMaxBounces + 1))
@@ -128,7 +127,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / NdotL); // NdotL needs to be taken out of the bsdf for Photon Mapping
     }
-    const float photonWeight = 1.0 / (gPhotonRadius.x * gPhotonRadius.x * M_PI * gNumLightPaths);
+    const float photonWeight = 1.0 / (gPhotonRadius * gPhotonRadius * M_PI * gNumLightPaths);
     collectedRadiance *= photonWeight;
     //if (camState.pathLength != 1)
     //    return float3(0);
@@ -348,12 +347,15 @@ void rayGen()
         CameraState camState = CameraState();
         const float3 camForward = normalize(gScene.camera.data.cameraW);
         const float cosAtCamera = dot(-viewDir, camForward);
-        //const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
+        const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
         //const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
+        //const float cameraPdf = imageToSolidAngleFactor;
         //Camera pdf at distance 1
         const float surfaceToImageFactor = gNormalizedPixelArea * pow(cosAtCamera, 3);
         const float cameraPdf = 1.0 / surfaceToImageFactor; //techniqcally 1/pdf
         camState.dVCM = float(gNumLightPaths) / cameraPdf;
+        camState.dVC = 0;
+        camState.dVM = 0;
         const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * gNumLightPaths;
         camState.misVmWeightFactor = etaVCM;
         camState.misVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
@@ -372,6 +374,8 @@ void rayGen()
         float dist = distance(gScene.camera.getPosition(), sd.posW);
         camState.dVCM *= dist * dist;
         camState.dVCM /= cosTheta;
+        //camState.dVM /= cosTheta; //Are 0
+        //camState.dVC /= cosTheta; //Are 0
 
         outColor += bsdfProperties.emission; //On first hit, no MIS is necessary if emissive is hit
         bool hitEmissive = any(bsdfProperties.emission > 0);

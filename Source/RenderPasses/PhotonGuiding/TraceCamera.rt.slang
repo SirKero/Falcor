@@ -380,8 +380,8 @@ void rayGen()
             RayDesc ray;
             ray.TMin = 0.0;
             ray.TMax = FLT_MAX;
-            if (sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray))
-                outColor += tracePath(ray, sd, camState, sg, thp);
+            //if (sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray))
+            //    outColor += tracePath(ray, sd, camState, sg, thp);
         }
     } else {
         outColor += kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;

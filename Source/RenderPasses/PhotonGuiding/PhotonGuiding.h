@@ -103,6 +103,7 @@ private:
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
+    std::unique_ptr<CustomAccelerationStructure> mpPhotonASVCM;      // Accel Pointer
 
     //
     // Parameters
@@ -118,7 +119,7 @@ private:
     RenderMode mRenderMode = RenderMode::VCM;
 
     // Material Settings
-    bool mUseLambertianDiffuse = true;         // Enable Lambert Diffuse BRDF instead of Frostbyte
+    bool mUseLambertianDiffuse = false;         // Enable Lambert Diffuse BRDF instead of Frostbyte
     float mSpecularRoughnessThreshold = 0.08f; // Any material below this is considered specular (currently set to delta)
 
     //
@@ -137,6 +138,7 @@ private:
     bool mChangePhotonLightBufferSize = true;       // If buffer size has changed
     float mASBuildBufferPhotonOverestimate = 1.15f; // Guard percentage for AS building
     uint2 mCurrentPhotonCount = mNumMaxPhotons;
+    float mPhotonRadiusVCM = 0.005f;
     float2 mPhotonRadius = float2(0.020f, 0.005f); // Global/Caustic Radius.
 
     
@@ -149,7 +151,7 @@ private:
     // Resources
     //
     ref<Buffer> mpPhotonAABB[2];    // Photon AABBs for Acceleration Structure building
-    ref<Buffer> mpPhotonDataVCM[2];    // Additional Photon data (flux, dir)
+    ref<Buffer> mpPhotonDataVCM;    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
