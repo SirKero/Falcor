@@ -138,6 +138,19 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     bool changed = false;
     changed |= widget.dropdown("RenderMode", mRenderMode);
 
+    if (mRenderMode == RenderMode::VCM)
+    {
+        changed |= widget.checkbox("UseVC", mUseVC);
+        changed |= widget.checkbox("UseVM", mUseVM);
+        changed |= widget.checkbox("LightTraceOnly", mLightTraceOnly);
+
+        if (mLightTraceOnly)
+        {
+            mUseVM = false;
+            mUseVC = true;
+        }
+    }
+
     if (auto group = widget.group("Photon Options"))
     {
         if (mUseDynamicPhotonDispatchCount)
@@ -588,6 +601,9 @@ void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const Rend
     // Defines
     mTracePhotonVCMPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
     mTracePhotonVCMPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mTracePhotonVCMPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
+    mTracePhotonVCMPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
+    mTracePhotonVCMPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
     mTracePhotonVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
     if (mpEmissiveLightSampler)
@@ -691,6 +707,9 @@ void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const Rend
     mTraceCameraVCMPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTraceCameraVCMPass.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
     mTraceCameraVCMPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mTraceCameraVCMPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
+    mTraceCameraVCMPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
+    mTraceCameraVCMPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
     mTraceCameraVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     if (mpEmissiveLightSampler)
         mTraceCameraVCMPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());

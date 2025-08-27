@@ -116,6 +116,10 @@ private:
     float mImagePlaneDist = 1.0;
     float mNormalizedPixelArea = 1.0;
 
+    bool mUseVC = true;
+    bool mUseVM = true;
+    bool mLightTraceOnly = false;
+
     RenderMode mRenderMode = RenderMode::VCM;
 
     // Material Settings

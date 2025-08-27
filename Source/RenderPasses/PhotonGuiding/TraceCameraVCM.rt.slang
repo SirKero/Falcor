@@ -41,6 +41,10 @@ static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const float3 kDefaultBackgroundColor = float3(0.01);
 
+static const bool kUseVC = USE_VC;
+static const bool kUseVM = USE_VM;
+static const bool kLightTraceOnly = USE_LIGHT_TRACE_ONLY;
+
 struct RayPayload
 {
     PackedHitInfo packedHitInfo; //< Hit Info
@@ -61,6 +65,7 @@ struct CameraState {
     float dVC;
     float misVcWeightFactor;
     float misVmWeightFactor;
+    bool isSpecularPath;
 
     __init() {
         pathLength = 0;
@@ -69,6 +74,7 @@ struct CameraState {
         dVM = 0.0;
         misVcWeightFactor = 0.0;
         misVmWeightFactor = 0.0;
+        isSpecularPath = true;
     }
 }
 
@@ -166,6 +172,7 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
         camState.dVC = (cosThetaOut / pdf) * (camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor);
         camState.dVM = (cosThetaOut / pdf) * (camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0);
         camState.dVCM = 1.0 / pdf;
+        camState.isSpecularPath = false;
     }
     camState.pathLength++;
 
@@ -174,6 +181,9 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
 
 float3 handleEmissiveHit(ShadingData sd, float3 prevPos, float3 prevNormal,CameraState camState, TriangleHit triangleHit, float3 emission, float3 incomingDir)
 {
+    if (!kUseVC && kUseVM)
+        return emission;
+
     uint lightPickProb = 1.0 / gScene.lightCollection.getActiveTriangleCount();
     uint lightTriIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
     const EmissiveTriangle emissiveTri = gScene.lightCollection.getTriangle(lightTriIndex);
@@ -266,13 +276,16 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
 
         bool hitEmissive = any(bsdfProperties.emission > 0);
         if (hitEmissive) {
-            outColor += handleEmissiveHit(sd, prevPos, prevFaceN, camState, hit.getTriangleHit(), bsdfProperties.emission, sd.V) * thp;
+            if(kUseVC || (kUseVM && camState.isSpecularPath)) //TODO add emissive after specular hit for VM
+                outColor += handleEmissiveHit(sd, prevPos, prevFaceN, camState, hit.getTriangleHit(), bsdfProperties.emission, sd.V) * thp;
             break;
         }
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
-            outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
-            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
+            if(kUseVC)
+                outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
+            if(kUseVM)
+                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
         }
 
         validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray);
@@ -352,13 +365,13 @@ void rayGen()
         //const float cameraPdf = imageToSolidAngleFactor;
         //Camera pdf at distance 1
         const float surfaceToImageFactor = gNormalizedPixelArea * pow(cosAtCamera, 3);
-        const float cameraPdf = 1.0 / surfaceToImageFactor; //techniqcally 1/pdf
+        const float cameraPdf = 1.0 / surfaceToImageFactor; //technically 1/pdf
         camState.dVCM = float(gNumLightPaths) / cameraPdf;
         camState.dVC = 0;
         camState.dVM = 0;
         const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * gNumLightPaths;
-        camState.misVmWeightFactor = etaVCM;
-        camState.misVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
+        camState.misVmWeightFactor = kUseVM ?  etaVCM : 0.0;
+        camState.misVcWeightFactor = kUseVC ? (1.0 / etaVCM) : 0.0; //Maybe this needs to be 0 if no light tracing is used
 
         //Get Material Properties
         let lod = ExplicitLodTextureSampler(0);
@@ -380,14 +393,16 @@ void rayGen()
         outColor += bsdfProperties.emission; //On first hit, no MIS is necessary if emissive is hit
         bool hitEmissive = any(bsdfProperties.emission > 0);
 
-        if (!hitEmissive) {
+        if (!hitEmissive && !kLightTraceOnly) {
 
             // Evaluate Photons
             float continuationProb = getContinuationProbablity(bsdfProperties);
             if (bsdfProperties.roughness > kRoughnessThreshold)
             {
-                outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg);
-                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb,  0xFF, sg);
+                if(kUseVC)
+                    outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg);
+                if(kUseVM)
+                    outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb,  0xFF, sg);
             }
 
             // Calculate next ray
@@ -398,7 +413,8 @@ void rayGen()
             if (sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray))
                 outColor += tracePath(ray, sd, camState, sg, thp);
         }
-    } else {
+    } else
+    {
         outColor += kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;
     }
 

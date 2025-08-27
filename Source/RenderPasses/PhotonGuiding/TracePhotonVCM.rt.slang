@@ -41,6 +41,10 @@ static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE_GLOBAL;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = true;  //TODO as option
 
+static const bool kUseVC = USE_VC;
+static const bool kUseVM = USE_VM;
+static const bool kLightTraceOnly = USE_LIGHT_TRACE_ONLY;
+
 struct RayPayload
 {
     PackedHitInfo packedHitInfo; //< Hit Info
@@ -199,8 +203,11 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonDataV
     const float misWeight = 1.0 / (1.0 + wLight);
 
     // Contribution on image
-    //float3 contribution = photon.flux * bsdf * cameraPdf;
-    float3 contribution = misWeight * photon.flux * bsdf * cameraPdf / lightCount;
+    float3 contribution = float3(0);
+    if(kLightTraceOnly)
+        contribution = photon.flux * bsdf * cameraPdf / lightCount;
+    else
+        contribution = misWeight * photon.flux * bsdf * cameraPdf / lightCount;
     
     if(any(contribution > 0))
     {
@@ -299,8 +306,8 @@ void rayGen()
 
     // MIS constants
     const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * lightCount;
-    float mMisVmWeightFactor = etaVCM;
-    float mMisVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
+    float mMisVmWeightFactor = kUseVM ? etaVCM : 0.0;
+    float mMisVcWeightFactor = kUseVC ? (1.0 / etaVCM) : 0.0; //Maybe this needs to be 0 if no light tracing is used
 
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
@@ -354,13 +361,13 @@ void rayGen()
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
 
         // Backprojection to camera
-        if (reflectedDiffuse)
+        if (reflectedDiffuse && (kUseVC || kLightTraceOnly))
         {
             backprojectPhotonToCamera(sd, mi, photon, lightCount, mMisVmWeightFactor, sg);
         }
 
         // Store Photon
-        if (reflectedDiffuse) {
+        if (reflectedDiffuse && kUseVM) {
             uint photonInsertIndex = 0;
             InterlockedAdd(gPhotonCounter[0], 1u, photonInsertIndex);
             if (photonInsertIndex <= kPhotonBufferSize)
