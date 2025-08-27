@@ -169,8 +169,8 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
         camState.dVC *= cosThetaOut;
         camState.dVM *= cosThetaOut;
     } else {
-        camState.dVC = (cosThetaOut / pdf) * (camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor);
-        camState.dVM = (cosThetaOut / pdf) * (camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0);
+        camState.dVC = (cosThetaOut / pdf) * ((camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor));
+        camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0));
         camState.dVCM = 1.0 / pdf;
         camState.isSpecularPath = false;
     }
@@ -211,13 +211,13 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
 
     // Get emission pdf
     const EmissiveTriangle emissiveTri = gScene.lightCollection.getTriangle(tls.triangleIndex);
-    float cosAtLight = dot(emissiveTri.normal, sd.V);
+    float cosAtLight = abs(dot(emissiveTri.normal, sd.V));
     const float emissionPdf = (cosAtLight * M_1_PI) / (emissiveTri.area * gScene.lightCollection.getActiveTriangleCount());
     const float directPdf = tls.pdf; //Multiplied with activeTriangle count 
 
     float3 bsdf = mi.eval(sd, tls.dir, sg);
 
-    if (all(bsdf <= 0) || directPdf <= 0)
+    if (all(bsdf <= 0) || directPdf <= 0 || cosAtLight <= 0)
         return float3(0);
 
     SceneRayQuery<1> rayQuery;
@@ -225,7 +225,7 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
     if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
         return float3(0);
 
-    float cosToLight = dot(sd.faceN, tls.dir);
+    float cosToLight = abs(dot(sd.faceN, tls.dir));
     float pdf = mi.evalPdf(sd, tls.dir) * continuationProb;
     float reversePDF = mi.evalPdf(sd, tls.dir, sd.V) * continuationProb;
 

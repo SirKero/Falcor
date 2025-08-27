@@ -411,8 +411,8 @@ void rayGen()
 
         if (reflectedDiffuse)
         {
-            photon.dVC = (cosThetaOut / bsdfPdf) * (photon.dVC * bsdfReversePDF) + (photon.dVCM + mMisVmWeightFactor);
-            photon.dVM = (cosThetaOut / bsdfPdf) * (photon.dVM * bsdfReversePDF) + (photon.dVCM * mMisVcWeightFactor + 1.0);
+            photon.dVC = (cosThetaOut / bsdfPdf) * ((photon.dVC * bsdfReversePDF) + (photon.dVCM + mMisVmWeightFactor));
+            photon.dVM = (cosThetaOut / bsdfPdf) * ((photon.dVM * bsdfReversePDF) + (photon.dVCM * mMisVcWeightFactor + 1.0));
             photon.dVCM = 1.0 / bsdfPdf;
         } else // Specular
         {
