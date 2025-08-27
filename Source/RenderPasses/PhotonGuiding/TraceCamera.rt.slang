@@ -61,6 +61,8 @@ struct CameraState {
     float dVC;
     float misVcWeightFactor;
     float misVmWeightFactor;
+    float pdf;
+    float reversePDF;
 
     __init() {
         pathLength = 0;
@@ -69,6 +71,8 @@ struct CameraState {
         dVM = 0.0;
         misVcWeightFactor = 0.0;
         misVmWeightFactor = 0.0;
+        pdf = 1.0;
+        reversePDF = 1.0;
     }
 }
 
@@ -162,10 +166,14 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
         camState.dVCM = 0;
         camState.dVC *= cosThetaOut;
         camState.dVM *= cosThetaOut;
+        camState.pdf *= 1.0;
+        camState.reversePDF *= 0.0;
     } else {
         camState.dVC = (cosThetaOut / pdf) * (camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor);
         camState.dVM = (cosThetaOut / pdf) * (camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0);
         camState.dVCM = 1.0 / pdf;
+        camState.pdf *= pdf;
+        camState.reversePDF *= reversePdf;
     }
     camState.pathLength++;
 
@@ -185,12 +193,14 @@ float3 handleEmissiveHit(ShadingData sd, float3 prevPos, float3 prevNormal,Camer
 
     float directPdf = gEmissiveSampler.evalPdf(prevPos, prevNormal, true, hit);
 
-    float emissionPdf = abs(dot(emissiveTri.normal, -incomingDir)) * M_1_PI;
+    float emissionPdf = M_1_PI;
     emissionPdf *= directPdf;
 
-    const float wCamera = directPdf * camState.dVCM + emissionPdf * camState.dVC;
-    const float misWeight = 1.0 / (1.0 + wCamera);
-    return emission * misWeight;
+    const float reversePDF = camState.reversePDF * emissionPdf;
+    // const float wCamera = directPdf * camState.dVCM + emissionPdf * camState.dVC;
+    // const float misWeight = 1.0 / (1.0 + wCamera);
+    const float misWeight = camState.pdf / (camState.pdf + reversePDF);
+    return misWeight * emission;
 }
 
 float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState camState, float continuationProb, inout float pdf , inout SampleGenerator sg)
@@ -262,7 +272,7 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
             //outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
-            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
+            //outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
         }
 
         validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray);
@@ -337,16 +347,18 @@ void rayGen()
         CameraState camState = CameraState();
         const float3 camForward = normalize(gScene.camera.data.cameraW);
         const float cosAtCamera = dot(-viewDir, camForward);
-        //const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
-        //const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
-        //Camera pdf at distance 1
-        const float surfaceToImageFactor = gNormalizedPixelArea * pow(cosAtCamera, 3);
-        const float cameraPdf = 1.0 / surfaceToImageFactor; //techniqcally 1/pdf
-        camState.dVCM = float(gNumLightPaths) / cameraPdf;
+        // const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
+        // const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
+        // Camera pdf at distance 1
+        // const float surfaceToImageFactor = gNormalizedPixelArea * pow(cosAtCamera, 3);
+        // const float cameraPdf = 1.0 / surfaceToImageFactor; //technically 1/pdf
+       
+
+        //camState.dVCM = float(gNumLightPaths) / cameraPdf;
         const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * gNumLightPaths;
         camState.misVmWeightFactor = etaVCM;
-        camState.misVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
-
+        camState.misVcWeightFactor = (1.0 / etaVCM); // Maybe this needs to be 0 if no light tracing is used
+       
         //Get Material Properties
         let lod = ExplicitLodTextureSampler(0);
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 2 + 1);
@@ -355,6 +367,13 @@ void rayGen()
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
+
+        //Reverse pdf 
+        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+        float distanceToCamera = length(directionToCamera);
+        directionToCamera /= distanceToCamera;
+        const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3); // Surface to image factor
+        camState.reversePDF *= cameraPdf;                                          // Camera pdf
 
         // Finalize MIS factors (dVM and dVC are 0 for the first hit)
         float cosTheta = abs(dot(sd.faceN, viewDir));
@@ -380,8 +399,8 @@ void rayGen()
             RayDesc ray;
             ray.TMin = 0.0;
             ray.TMax = FLT_MAX;
-            //if (sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray))
-            //    outColor += tracePath(ray, sd, camState, sg, thp);
+            if (sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray))
+                outColor += tracePath(ray, sd, camState, sg, thp);
         }
     } else {
         outColor += kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;

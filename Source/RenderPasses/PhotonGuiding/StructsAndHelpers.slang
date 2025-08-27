@@ -24,8 +24,9 @@ struct PhotonData {
     float3 normalW;
     float reversePdf;
 
-    float neePdf; 
-    uint3 _pad;
+    float neeReversePdf;
+    float photonReversePdf;
+    uint2 _pad;
 
     __init() {
         this.dir = float3(0);
@@ -34,8 +35,9 @@ struct PhotonData {
         this.pathLenght = 0;
         this.pdf = 1.0;
         this.reversePdf = 1.0;
-        this.neePdf = 1.0;
-        this._pad = uint3(0);
+        this.neeReversePdf = 1.0;
+        this.photonReversePdf = 1.0;
+        this._pad = uint2(0);
     }
 }
 

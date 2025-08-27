@@ -193,7 +193,7 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
     float misWeight = pathPDF / (pathPDF + reversePathPDF);
 
     // Contribution on image (no MIS needed, as this is the only technique that can contribute)
-    float3 contribution = (photon.flux * bsdf) / (lightCount * cameraPdf);
+    float3 contribution = (misWeight * photon.flux * bsdf) / (lightCount * cameraPdf);
     
     if(any(contribution > 0))
     {

@@ -391,7 +391,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         DefineList defines;
         defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
         defines.add(mpScene->getSceneDefines());
-        //defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -399,7 +399,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    //mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
     if (mpEmissiveLightSampler)
         mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
@@ -505,7 +505,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     mTraceCameraPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTraceCameraPass.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
     mTraceCameraPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    //mTraceCameraPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    mTraceCameraPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -581,14 +581,14 @@ void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const Rend
         DefineList defines;
         defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
         defines.add(mpScene->getSceneDefines());
-        //defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
         mTracePhotonVCMPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
     // Defines
     mTracePhotonVCMPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
     mTracePhotonVCMPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    //mTracePhotonVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    mTracePhotonVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
     if (mpEmissiveLightSampler)
         mTracePhotonVCMPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
@@ -691,7 +691,7 @@ void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const Rend
     mTraceCameraVCMPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTraceCameraVCMPass.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
     mTraceCameraVCMPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    //mTraceCameraVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    mTraceCameraVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     if (mpEmissiveLightSampler)
         mTraceCameraVCMPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
