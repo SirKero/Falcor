@@ -20,6 +20,7 @@ RaytracingAccelerationStructure gPhotonAS;
 RWTexture2D<uint> gLightTraceColor[3]; // Uint spinlock color texture for every channel
 
 RWTexture2D<float4> gOutColor;
+RWTexture2D<float4> gDebug[4];
 
 cbuffer Light {
     EmissiveLightSampler gEmissiveSampler;
@@ -32,7 +33,8 @@ cbuffer CB
     uint gNumLightPaths; // Number of light paths for MIS
     float gImagePlaneDist; //Camera image plane distance
     float gPhotonRadius;   // TODO remove temporary for MIS
-    float gNormalizedPixelArea;   
+    float gNormalizedPixelArea;
+    int gDebugBounce; //Bounce for debug
 }
 
 static const float kPhotonCollectTMax = 1e-7;
@@ -276,16 +278,33 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
 
         bool hitEmissive = any(bsdfProperties.emission > 0);
         if (hitEmissive) {
-            if(kUseVC || (kUseVM && camState.isSpecularPath)) //TODO add emissive after specular hit for VM
-                outColor += handleEmissiveHit(sd, prevPos, prevFaceN, camState, hit.getTriangleHit(), bsdfProperties.emission, sd.V) * thp;
+            float3 emissive = float3(0);
+            if (kUseVC || (kUseVM && camState.isSpecularPath)) // TODO add emissive after specular hit for VM
+                emissive += handleEmissiveHit(sd, prevPos, prevFaceN, camState, hit.getTriangleHit(), bsdfProperties.emission, sd.V) * thp;
+            outColor += emissive;
+            #if ENABLE_DEBUG
+                if (gDebugBounce < 0 || gDebugBounce == i)
+                    gDebug[2][DispatchRaysIndex().xy] += float4(emissive,1);
+            #endif
             break;
         }
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
-            if(kUseVC)
-                outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
-            if(kUseVM)
-                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
+            float3 nee = float3(0);
+            float3 pm = float3(0);
+            if (kUseVC)
+                nee += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
+            if (kUseVM)
+                pm += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
+
+            outColor += nee + pm;
+            #if ENABLE_DEBUG
+                if (gDebugBounce < 0 || gDebugBounce == i)
+                {
+                    gDebug[1][DispatchRaysIndex().xy] += float4(nee, 1);
+                    gDebug[3][DispatchRaysIndex().xy] += float4(pm, 1);
+                }
+            #endif
         }
 
         validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, continuationProb, sg, thp, camState, ray);
@@ -354,6 +373,12 @@ void rayGen()
 
     float3 outColor = float3(0);
     outColor += getLightTraceColor(pixel);
+#if ENABLE_DEBUG
+    gDebug[0][pixel] = float4(outColor,1);
+    gDebug[1][pixel] = float4(0);
+    gDebug[2][pixel] = float4(0);
+    gDebug[3][pixel] = float4(0);
+#endif
 
     if (hitInfo.isValid()) {
         // Init camera state for MIS
@@ -390,7 +415,11 @@ void rayGen()
         //camState.dVM /= cosTheta; //Are 0
         //camState.dVC /= cosTheta; //Are 0
 
-        outColor += bsdfProperties.emission; //On first hit, no MIS is necessary if emissive is hit
+        outColor += bsdfProperties.emission; // On first hit, no MIS is necessary if emissive is hit
+        #if ENABLE_DEBUG
+            if (gDebugBounce < 0 || gDebugBounce == 0)
+                gDebug[2][pixel] = float4(bsdfProperties.emission, 1);
+        #endif
         bool hitEmissive = any(bsdfProperties.emission > 0);
 
         if (!hitEmissive && !kLightTraceOnly) {
@@ -399,10 +428,21 @@ void rayGen()
             float continuationProb = getContinuationProbablity(bsdfProperties);
             if (bsdfProperties.roughness > kRoughnessThreshold)
             {
-                if(kUseVC)
-                    outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg);
-                if(kUseVM)
-                    outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb,  0xFF, sg);
+                float3 nee = float3(0);
+                float3 pm = float3(0);
+                if (kUseVC)
+                    nee += NextEventEstimation(sd, mi, camState, continuationProb, sg);
+                if (kUseVM)
+                    pm += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb,  0xFF, sg);
+
+                outColor += nee + pm;
+                #if ENABLE_DEBUG
+                    if (gDebugBounce < 0 || gDebugBounce == 0)
+                    {
+                        gDebug[1][pixel] += float4(nee, 1);
+                        gDebug[3][pixel] += float4(pm, 1);
+                    }
+                #endif
             }
 
             // Calculate next ray

@@ -223,6 +223,16 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.tooltip("Enables Lambertian Diffuse BRDS. If disabled the Frostbyte diffuse BRDF (Falcor default) is used");
     }
 
+    if (auto group = widget.group("Debug"))
+    {
+        changed |= group.checkbox("Enable", mDebugEnable);
+        if (mDebugEnable)
+        {
+            changed |= group.dropdown("Technique", mDebugTechnique);
+            changed |= group.slider("Bounce", mDebugTechniqueBounce, -1, int(mPTMaxBounces) + 1);
+        }
+    }
+
     mOptionsChanged = changed;
 }
 
@@ -263,11 +273,11 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (any(mScreenRes != renderData.getDefaultTextureDims()))
     {
         mScreenRes = renderData.getDefaultTextureDims();
-        mpLightTraceColorSpinlock[0].reset();
-        mpLightTraceColorSpinlock[1].reset();
-        mpLightTraceColorSpinlock[2].reset();
+        for (uint i = 0; i < 3; i++)
+            mpLightTraceColorSpinlock[i].reset();
+        for (uint i = 0; i < 4; i++)
+            mpDebugTextures[i].reset();
     }
-
 
     if (mChangePhotonLightBufferSize)
     {
@@ -352,6 +362,20 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             );
             std::string colorChannel = i == 0 ? "Red" : (i == 1 ? "Green" : "Blue");
             mpLightTraceColorSpinlock[i]->setName("LightTraceSpinlock_" + colorChannel);
+        }
+    }
+
+    //debug textures
+    for (uint i = 0; i < 4; i++)
+    {
+        ResourceFormat format = renderData[kOutputColor]->asTexture()->getFormat();
+        if (!mpDebugTextures[i])
+        {
+            mpDebugTextures[i] = Texture::create2D(
+                mpDevice, mScreenRes.x, mScreenRes.y, format, 1u, 1u, nullptr,
+                ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+            );
+            mpDebugTextures[i]->setName("Debug" + std::to_string(i));
         }
     }
 }
@@ -713,6 +737,7 @@ void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const Rend
     mTraceCameraVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     if (mpEmissiveLightSampler)
         mTraceCameraVCMPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+    mTraceCameraVCMPass.pProgram->addDefine("ENABLE_DEBUG", mDebugEnable ? "1" : "0");
 
       // Program Vars
     if (!mTraceCameraVCMPass.pVars)
@@ -731,13 +756,13 @@ void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const Rend
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
-    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM; 
-
+    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM;
+    var["CB"]["gDebugBounce"] = mDebugTechniqueBounce;
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gView"] = renderData[kInputView]->asTexture();
-
+    
     //Photon Data
     mpPhotonASVCM->bindTlas(var, "gPhotonAS");
 
@@ -751,8 +776,20 @@ void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const Rend
 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
 
+    //Debug
+    if (mDebugEnable)
+        for (uint i = 0; i < 4; i++)
+            var["gDebug"][i] = mpDebugTextures[i];
+
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mTraceCameraVCMPass.pProgram.get(), mTraceCameraVCMPass.pVars, uint3(mScreenRes, 1));
+
+    //Copy Debug to color out
+    if (mDebugEnable)
+    {
+        ref<Texture> debugTex = mpDebugTextures[uint(mDebugTechnique)];
+        pRenderContext->copyResource(renderData[kOutputColor]->asTexture().get(), debugTex.get());
+    }
 }
 
 void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)

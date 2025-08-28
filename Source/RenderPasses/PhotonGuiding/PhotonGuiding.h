@@ -64,6 +64,21 @@ public:
         }
     );
 
+    enum class DebugTechnique : uint
+    {
+        LightTrace = 0u,
+        NEE = 1u,
+        EmissiveHit = 2u,
+        PhotonMapper = 3u
+    };
+    FALCOR_ENUM_INFO(
+        DebugTechnique,
+        {{DebugTechnique::LightTrace, "LightTrace"},
+         {DebugTechnique::NEE, "NEE"},
+         {DebugTechnique::EmissiveHit, "EmissiveHit"},
+         {DebugTechnique::PhotonMapper, "PhotonMapper"}
+    });
+
 private:
     //
     // Functions
@@ -152,6 +167,14 @@ private:
     float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
 
     //
+    // Debug
+    //
+
+    bool mDebugEnable = false;
+    DebugTechnique mDebugTechnique = DebugTechnique::LightTrace;
+    int mDebugTechniqueBounce = -1;
+
+    //
     // Resources
     //
     ref<Buffer> mpPhotonAABB[2];    // Photon AABBs for Acceleration Structure building
@@ -160,7 +183,7 @@ private:
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     ref<Texture> mpLightTraceColorSpinlock[3]; //Uint texture for each color used in the spinlock
-
+    ref<Texture> mpDebugTextures[4]; //A debug textures for each bounce
      //
     // Render Passes/Programms
     //
@@ -189,3 +212,4 @@ private:
 };
 
 FALCOR_ENUM_REGISTER(PhotonGuiding::RenderMode);
+FALCOR_ENUM_REGISTER(PhotonGuiding::DebugTechnique);
