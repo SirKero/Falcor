@@ -188,9 +188,12 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
     const float cosAtCamera = dot(-directionToCamera, camForward);
     const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3); //Surface to image factor
 
-    const float pathPDF = photon.pdf  * cameraPdf;
-    const float reversePathPDF = photon.reversePdf * reversePDF; // Path tracing probability
-    float misWeight = pathPDF / (pathPDF + reversePathPDF);
+    const float cosToCamera = dot(directionToCamera, sd.faceN);
+
+    const float pathPDF = photon.pdf * cameraPdf;
+    const float reversePathPDF = photon.reversePdf * reversePDF * cosToCamera / (distanceToCamera * distanceToCamera); // Path tracing probability
+    const float neePDF = photon.reversePdf * reversePathPDF;
+    float misWeight = pathPDF / (pathPDF + reversePathPDF + neePDF);
 
     // Contribution on image (no MIS needed, as this is the only technique that can contribute)
     float3 contribution = (misWeight * photon.flux * bsdf) / (lightCount * cameraPdf);
@@ -309,6 +312,8 @@ void rayGen()
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
     photon.pdf = pls.emissionPDF;
+    photon.neeReversePdf = pls.directPDF;
+    //photon.reversePdf = pls.cosTheta / pls.emissionPDF;
     //photon.dVCM = pls.directPDF / pls.emissionPDF;
     //photon.dVC = pls.cosTheta / pls.emissionPDF;
     //photon.dVM = photon.dVC * mMisVcWeightFactor;
@@ -329,6 +334,12 @@ void rayGen()
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
+
+        // Add geometry term to MIS pdfs
+        float dist = distance(sd.posW, ray.Origin);
+        float cosTheta = abs(dot(sd.faceN, sd.V));
+        float G = cosTheta / (dist * dist);         photon.pdf *= G;
+        photon.reversePdf *= G;
 
         // Update MIS helpers
         /*
@@ -401,14 +412,16 @@ void rayGen()
         photon.flux = photonStartFlux * thp;
         photon.pathLenght++;
 
+        float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
         // Update MIS weight
         if (reflectedDiffuse)
         {
-            photon.pdf *= bsdfSample.pdf * continuationProb;
-            photon.reversePdf *= mi.evalPdf(sd, ray.Direction, sd.V); // Continuation prob was handled above
+            photon.pdf *= bsdfSample.pdf * continuationProb * cosThetaOut;
+            photon.reversePdf *= mi.evalPdf(sd, ray.Direction, sd.V) * cosThetaOut; // Continuation prob was handled above
         } else {
-            photon.pdf *= 1;
-            photon.reversePdf *= mi.evalPdf(sd, ray.Direction, sd.V);
+            photon.pdf *= cosThetaOut;
+            photon.reversePdf *= mi.evalPdf(sd, ray.Direction, sd.V) * cosThetaOut;
+            //photon.reversePdf = 0;
         }
 
         // Partially update MIS weights

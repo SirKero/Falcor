@@ -63,6 +63,9 @@ struct CameraState {
     float misVmWeightFactor;
     float pdf;
     float reversePDF;
+    bool lastHitWasDelta;
+    bool isDeltaPath;
+    bool firstHitDiffuse;
 
     __init() {
         pathLength = 0;
@@ -73,6 +76,9 @@ struct CameraState {
         misVmWeightFactor = 0.0;
         pdf = 1.0;
         reversePDF = 1.0;
+        lastHitWasDelta = false;
+        isDeltaPath = true;
+        firstHitDiffuse = false;
     }
 }
 
@@ -158,24 +164,25 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
         return false;
 
     thp /= continuationProbability;
-    pdf *= continuationProbability;
-    reversePdf *= continuationProbability;
     float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
-    //Specular
-    if (roughness < kRoughnessThreshold) {
+    // Specular
+    bool isDeltaHit = roughness <= kRoughnessThreshold;
+    if (isDeltaHit) {
         camState.dVCM = 0;
         camState.dVC *= cosThetaOut;
         camState.dVM *= cosThetaOut;
-        camState.pdf *= 1.0;
-        camState.reversePDF *= 0.0;
+        camState.pdf *= cosThetaOut;
+        camState.reversePDF *= cosThetaOut;
     } else {
         camState.dVC = (cosThetaOut / pdf) * (camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor);
         camState.dVM = (cosThetaOut / pdf) * (camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0);
         camState.dVCM = 1.0 / pdf;
-        camState.pdf *= pdf;
-        camState.reversePDF *= reversePdf;
+        camState.pdf *= pdf * cosThetaOut * continuationProbability;
+        camState.reversePDF *= reversePdf * cosThetaOut * continuationProbability;
+        camState.isDeltaPath = false;
     }
     camState.pathLength++;
+    camState.lastHitWasDelta = isDeltaHit;
 
     return true;
 }
@@ -193,26 +200,35 @@ float3 handleEmissiveHit(ShadingData sd, float3 prevPos, float3 prevNormal,Camer
 
     float directPdf = gEmissiveSampler.evalPdf(prevPos, prevNormal, true, hit);
 
-    float emissionPdf = M_1_PI;
+    float emissionPdf = abs(dot(emissiveTri.normal, -incomingDir)) * M_1_PI;
     emissionPdf *= directPdf;
 
-    const float reversePDF = camState.reversePDF * emissionPdf;
+    directPdf = camState.lastHitWasDelta ? 0.0 : directPdf;
+    const float reversePDF = camState.firstHitDiffuse ? camState.reversePDF * emissionPdf * gNumLightPaths : 0; //Light Trace
     // const float wCamera = directPdf * camState.dVCM + emissionPdf * camState.dVC;
     // const float misWeight = 1.0 / (1.0 + wCamera);
-    const float misWeight = camState.pdf / (camState.pdf + reversePDF);
+    const float misWeight = camState.pdf / (camState.pdf + reversePDF + directPdf);
     return misWeight * emission;
 }
 
-float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState camState, float continuationProb, inout float pdf , inout SampleGenerator sg)
+float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState camState, float continuationProb, inout SampleGenerator sg)
 {
-    pdf = 0;
+   
     TriangleLightSample tls = {};
     if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
         return float3(0);
 
     // Get emission pdf
-    pdf = tls.pdf;
 
+    float pdf = tls.pdf;
+    float scatterPdf = mi.evalPdf(sd, tls.dir, true) * continuationProb;
+    float reversePDF = 0.0;
+    if (camState.pathLength > 0 && camState.firstHitDiffuse) {
+        float emissionPdf = abs(dot(tls.normalW, -tls.dir)) * M_1_PI;
+        emissionPdf *= pdf;
+        reversePDF = camState.reversePDF * emissionPdf * gNumLightPaths; // Light Trace
+    }
+   
     float3 bsdf = mi.eval(sd, tls.dir, sg);
 
     if (all(bsdf <= 0) || pdf <= 0)
@@ -223,8 +239,9 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
     if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
         return float3(0);
 
+    float misWeight = pdf / (pdf + scatterPdf + reversePDF);
 
-    float3 radiance = bsdf * tls.Le / pdf;
+    float3 radiance = misWeight * bsdf * tls.Le / pdf;
     return radiance;
 }
 
@@ -259,6 +276,9 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         // Update Mis
         float dist = distance(ray.Origin, sd.posW);
         float cosTheta = abs(dot(sd.faceN, sd.V));
+        camState.pdf *= cosTheta / (dist * dist);
+        camState.reversePDF *= cosTheta / (dist * dist);
+
         camState.dVCM *= dist*dist;
         camState.dVCM /= cosTheta;
         camState.dVC /= cosTheta;
@@ -271,7 +291,7 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         }
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
-            //outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
+            outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
             //outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
         }
 
@@ -378,6 +398,7 @@ void rayGen()
         // Finalize MIS factors (dVM and dVC are 0 for the first hit)
         float cosTheta = abs(dot(sd.faceN, viewDir));
         float dist = distance(gScene.camera.getPosition(), sd.posW);
+        camState.pdf *= cosTheta / (dist * dist);
         camState.dVCM *= dist * dist;
         camState.dVCM /= cosTheta;
 
@@ -388,12 +409,12 @@ void rayGen()
 
             // Evaluate Photons
             float continuationProb = getContinuationProbablity(bsdfProperties);
-            if (bsdfProperties.roughness > kRoughnessThreshold)
+            bool isDelta = bsdfProperties.roughness <= kRoughnessThreshold;
+            camState.firstHitDiffuse = !isDelta;
+            if (!isDelta)
             {
-                float lightPdf = 0;
-                outColor += NextEventEstimation(sd, mi, camState, continuationProb, lightPdf, sg);
+                outColor += NextEventEstimation(sd, mi, camState, continuationProb, sg);
             }
-            
             // Calculate next ray
             float3 thp = float3(1.0);
             RayDesc ray;
