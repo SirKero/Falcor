@@ -53,6 +53,20 @@ struct RayPayload
     }
 }
 
+struct PhotonPath {
+    uint pathLength;
+    float weightLight;
+    float weightCamera;
+    float weightNEE;
+
+    __init() {
+        pathLength = 0;
+        weightLight = 1;
+        weightCamera = 1;
+        weightNEE = 1;
+    }
+}
+
 //Helper struct to generate a photon form the lightSources
 struct PhotonLightSample {
     float3 posW;
@@ -163,7 +177,7 @@ void spinlockToImage(RWTexture2D<uint> colorTex, uint2 pixel, float value)
     } while (originalValue != currentColor);
 }
 
-bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData photon, uint lightCount, inout SampleGenerator sg)
+bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData photon, uint lightCount, PhotonPath path, inout SampleGenerator sg)
 {
     float4 screenPos = mul(gScene.camera.getViewProj(), float4(sd.posW, 1));
     screenPos /= screenPos.w;
@@ -178,7 +192,6 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
     
     // Bsdf and pdf to camera
     float3 bsdf = mi.eval(sd, directionToCamera, sg);
-    float reversePDF = mi.evalPdf(sd, directionToCamera, sd.V);
 
     if (all(bsdf <= 0))
         return false;
@@ -188,12 +201,7 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
     const float cosAtCamera = dot(-directionToCamera, camForward);
     const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3); //Surface to image factor
 
-    const float cosToCamera = dot(directionToCamera, sd.faceN);
-
-    const float pathPDF = photon.pdf * cameraPdf;
-    const float reversePathPDF = photon.reversePdf * reversePDF * cosToCamera / (distanceToCamera * distanceToCamera); // Path tracing probability
-    const float neePDF = photon.reversePdf * reversePathPDF;
-    float misWeight = pathPDF / (pathPDF + reversePathPDF + neePDF);
+    float misWeight = path.weightLight / (path.weightLight + path.weightCamera + path.weightNEE);
 
     // Contribution on image (no MIS needed, as this is the only technique that can contribute)
     float3 contribution = (misWeight * photon.flux * bsdf) / (lightCount * cameraPdf);
@@ -289,12 +297,6 @@ void rayGen()
     }
 #endif
     const uint lightCount = dispatchDims.x * dispatchDims.y;
-    //pls.flux /= float3(lightCount); // Division through all dipatched photons
-
-    // MIS constants
-    //const float etaVCM = (M_PI * gPhotonRadius.x * gPhotonRadius.x) * lightCount;
-    //float mMisVmWeightFactor = etaVCM;
-    //float mMisVcWeightFactor = (1.0 / etaVCM); //Maybe this needs to be 0 if no light tracing is used
 
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
@@ -311,12 +313,8 @@ void rayGen()
     photon.flux = photonStartFlux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
-    photon.pdf = pls.emissionPDF;
-    photon.neeReversePdf = pls.directPDF;
-    //photon.reversePdf = pls.cosTheta / pls.emissionPDF;
-    //photon.dVCM = pls.directPDF / pls.emissionPDF;
-    //photon.dVC = pls.cosTheta / pls.emissionPDF;
-    //photon.dVM = photon.dVC * mMisVcWeightFactor;
+
+    PhotonPath path = PhotonPath();
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {
@@ -335,34 +333,16 @@ void rayGen()
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
 
-        // Add geometry term to MIS pdfs
-        float dist = distance(sd.posW, ray.Origin);
-        float cosTheta = abs(dot(sd.faceN, sd.V));
-        float G = cosTheta / (dist * dist);         photon.pdf *= G;
-        photon.reversePdf *= G;
-
-        // Update MIS helpers
-        /*
-        if (i > 0) {
-            float dist = distance(sd.posW, ray.Origin);
-            photon.dVCM *= dist * dist;
-        }
-        float cosTheta = abs(dot(sd.faceN, sd.V));
-        photon.dVCM /= cosTheta;
-        photon.dVM /= cosTheta;
-        photon.dVC /= cosTheta;
-        photon.continationProb = getContinuationProbablity(bsdfProperties);
-        */
-
         photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        float continuationProb = getContinuationProbablity(bsdfProperties);
-        photon.reversePdf *= continuationProb;
+
+        if (!reflectedDiffuse && i == 0)
+            path.weightNEE = 0;
 
         // Backprojection to camera
         if (reflectedDiffuse && i>0)
         {
-            backprojectPhotonToCamera(sd, mi, photon, lightCount, sg);
+            backprojectPhotonToCamera(sd, mi, photon, lightCount, path, sg);
         }
 
         // Store Photon
@@ -397,6 +377,7 @@ void rayGen()
         ray.Direction = bsdfSample.wo;
         thp *= bsdfSample.weight;
         bool isEmissive = any(bsdfProperties.emission > 0);
+        float continuationProb = getContinuationProbablity(bsdfProperties);
 
         // RussianRoulette
         if (sampleNext1D(sg) > continuationProb || isEmissive)
@@ -411,36 +392,6 @@ void rayGen()
         photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
         photon.pathLenght++;
-
-        float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
-        // Update MIS weight
-        if (reflectedDiffuse)
-        {
-            photon.pdf *= bsdfSample.pdf * continuationProb * cosThetaOut;
-            photon.reversePdf *= mi.evalPdf(sd, ray.Direction, sd.V) * cosThetaOut; // Continuation prob was handled above
-        } else {
-            photon.pdf *= cosThetaOut;
-            photon.reversePdf *= mi.evalPdf(sd, ray.Direction, sd.V) * cosThetaOut;
-            //photon.reversePdf = 0;
-        }
-
-        // Partially update MIS weights
-        /*
-        float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
-        float bsdfPdf = bsdfSample.pdf * photon.continationProb;
-        float bsdfReversePDF = mi.evalPdf(sd, ray.Direction, sd.V) * photon.continationProb; 
-
-        if (reflectedDiffuse)
-        {
-            photon.dVC = (cosThetaOut / bsdfPdf) * (photon.dVC * bsdfReversePDF) + (photon.dVCM + mMisVmWeightFactor);
-            photon.dVM = (cosThetaOut / bsdfPdf) * (photon.dVM * bsdfReversePDF) + (photon.dVCM * mMisVcWeightFactor + 1.0);
-            photon.dVCM = 1.0 / bsdfPdf;
-        } else // Specular
-        {
-            photon.dVCM = 0;
-            photon.dVM *= cosThetaOut;
-            photon.dVC *= cosThetaOut;
-        }
-        */
+        path.pathLength++;
     }
 }
