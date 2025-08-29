@@ -129,7 +129,9 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         const float misVcWeightFactorLight = camState.misVcWeightFactor; //photonData.pathLenght >= 1 ? 0 : camState.misVcWeightFactor;
 
         const float wLight = photonData.dVCM * misVcWeightFactorLight + photonData.dVM * pdf;
-        const float wCamera = camState.dVCM * misVcWeightFactorCamera + camState.dVM * reversePDF;
+        //const float wCamera = camState.dVCM * misVcWeightFactorCamera + camState.dVM * reversePDF;
+        const float wCamera = 1.0 * misVcWeightFactorCamera + camState.dVM * reversePDF;
+
         const float misWeight = 1.0 / (wLight + 1.0 + wCamera);
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
@@ -172,8 +174,10 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
         camState.dVM *= cosThetaOut;
     } else {
         camState.dVC = (cosThetaOut / pdf) * ((camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor));
-        camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0));
-        camState.dVCM = 1.0 / pdf;
+        // camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0));
+        camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (1.0 * camState.misVcWeightFactor + 1.0));
+        //camState.dVCM = 1.0 / pdf;
+        camState.dVCM = 0.0;
         camState.isSpecularPath = false;
     }
     camState.pathLength++;
