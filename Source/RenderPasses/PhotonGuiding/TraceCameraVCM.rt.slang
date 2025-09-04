@@ -41,7 +41,7 @@ static const float kPhotonCollectTMax = 1e-7;
 static const bool kUseEnvMap = USE_ENV_MAP;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-static const float3 kDefaultBackgroundColor = float3(0.01);
+static const float3 kDefaultBackgroundColor = float3(0.0);
 
 static const bool kUseVC = USE_VC;
 static const bool kUseVM = USE_VM;
@@ -174,10 +174,10 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
         camState.dVM *= cosThetaOut;
     } else {
         camState.dVC = (cosThetaOut / pdf) * ((camState.dVC * reversePdf) + (camState.dVCM + camState.misVmWeightFactor));
-        // camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0));
-        camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (1.0 * camState.misVcWeightFactor + 1.0));
-        //camState.dVCM = 1.0 / pdf;
-        camState.dVCM = 0.0;
+        //  camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (camState.dVCM * camState.misVcWeightFactor + 1.0));
+        camState.dVM = (cosThetaOut / pdf) * ((camState.dVM * reversePdf) + (0.0 * camState.misVcWeightFactor + 1.0));
+        camState.dVCM = 1.0 / pdf;
+        //camState.dVCM = 0.0;
         camState.isSpecularPath = false;
     }
     camState.pathLength++;
@@ -387,17 +387,7 @@ void rayGen()
     if (hitInfo.isValid()) {
         // Init camera state for MIS
         CameraState camState = CameraState();
-        const float3 camForward = normalize(gScene.camera.data.cameraW);
-        const float cosAtCamera = dot(-viewDir, camForward);
-        const float imagePointToCameraDist = gImagePlaneDist / cosAtCamera;
-        //const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
-        //const float cameraPdf = imageToSolidAngleFactor;
-        //Camera pdf at distance 1
-        const float surfaceToImageFactor = gNormalizedPixelArea * pow(cosAtCamera, 3);
-        const float cameraPdf = 1.0 / surfaceToImageFactor; //technically 1/pdf
-        camState.dVCM = float(gNumLightPaths) / cameraPdf;
-        camState.dVC = 0;
-        camState.dVM = 0;
+        //MIS factors
         const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * gNumLightPaths;
         camState.misVmWeightFactor = kUseVM ?  etaVCM : 0.0;
         camState.misVcWeightFactor = kUseVC ? (1.0 / etaVCM) : 0.0; //Maybe this needs to be 0 if no light tracing is used
@@ -411,13 +401,17 @@ void rayGen()
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
 
-        // Finalize MIS factors (dVM and dVC are 0 for the first hit)
-        float cosTheta = abs(dot(sd.faceN, viewDir));
-        float dist = distance(gScene.camera.getPosition(), sd.posW);
-        camState.dVCM *= dist * dist;
-        camState.dVCM /= cosTheta;
-        //camState.dVM /= cosTheta; //Are 0
-        //camState.dVC /= cosTheta; //Are 0
+        // Init MIS
+        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+        float distanceToCamera = length(directionToCamera);
+        directionToCamera /= distanceToCamera;
+        const float3 camForward = normalize(gScene.camera.data.cameraW);
+        const float cosAtCamera = dot(-directionToCamera, camForward);
+        const float surfaceToImageFactor = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3);
+        const float cameraPdf = 1.0 / surfaceToImageFactor; // technically 1/pdf
+        camState.dVCM = float(gNumLightPaths) / cameraPdf;
+        // camState.dVC = 0;
+        // camState.dVM = 0;
 
         outColor += bsdfProperties.emission; // On first hit, no MIS is necessary if emissive is hit
         #if ENABLE_DEBUG

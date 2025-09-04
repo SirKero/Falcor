@@ -162,8 +162,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             group.var("Dispatched Photons", mNumDispatchedPhotons, 1024u, 67108864u, 1u); // Max is 8192^2
         }
 
-        group.text("Global Photons: " + std::to_string(mCurrentPhotonCount[0]) + " / " + std::to_string(mNumMaxPhotons[0]));
-        group.text("Caustic photons: " + std::to_string(mCurrentPhotonCount[1]) + " / " + std::to_string(mNumMaxPhotons[1]));
+        group.text("Global Photons: " + std::to_string(mCurrentPhotonCount) + " / " + std::to_string(mNumMaxPhotons));
 
         group.text("Photon Buffer Size:");
         group.indent(10.f);
@@ -187,7 +186,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 changed |= groupDynChange.var("Percentage Change", mPhotonDynamicChangePercentage, 0.01f, 10.f, 0.01f);
                 groupDynChange.tooltip(
                     "Increase/Decrease percentage from the Buffer Size. With current value a increase/decrease of :" +
-                    std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons[0]) + "is expected"
+                    std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons) + "is expected"
                 );
             }
         }
@@ -196,17 +195,9 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.tooltip("Probability a photon light is stored on diffuse hit. Flux is scaled up appropriately");
         changed |= group.var("Max Bounces", mPhotonMaxBounces, 0u, 256u);
 
-        if (mRenderMode == RenderMode::VCM)
-        {
-            changed |= group.var("Photon Radius", mPhotonRadiusVCM, 0.f, FLT_MAX, 1e-7f, false, "%.7f");
-        }
-        else
-        {
-            group.text("Photon Radius(Global / Caustic):");
-            group.indent(10.f);
-            changed |= group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
-            group.indent(-10.f);
-        }
+   
+        changed |= group.var("Photon Radius", mPhotonRadiusVCM, 0.f, FLT_MAX, 1e-7f, false, "%.7f");
+
       
     }
 
@@ -282,40 +273,26 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (mChangePhotonLightBufferSize)
     {
         mNumMaxPhotons = mNumMaxPhotonsUI;
-        mpPhotonAABB[0].reset();
-        mpPhotonAABB[1].reset();
-        mpPhotonData[0].reset();
-        mpPhotonData[1].reset();
+        mpPhotonAABB.reset();
         mpPhotonDataVCM.reset();
         mpPhotonAS.reset();
         mChangePhotonLightBufferSize = false;
     }
 
-    // Buffers that exist two times
-    for (uint i = 0; i < 2; i++)
+    //Photon Buffers
+    if (!mpPhotonAABB)
     {
-        if (!mpPhotonAABB[i])
-        {
-            mpPhotonAABB[i] = Buffer::createStructured(
-                mpDevice, sizeof(AABB), mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                Buffer::CpuAccess::None, nullptr, false
-            );
-            mpPhotonAABB[i]->setName("PhotonAABB" + std::to_string(i));
-        }
-        if (!mpPhotonData[i])
-        {
-            mpPhotonData[i] = Buffer::createStructured(
-                mpDevice, sizeof(float) * 16, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                Buffer::CpuAccess::None, nullptr, false
-            );
-            mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
-        }
+        mpPhotonAABB = Buffer::createStructured(
+            mpDevice, sizeof(AABB), mNumMaxPhotons, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpPhotonAABB->setName("PhotonAABB");
     }
 
     if (!mpPhotonDataVCM)
     {
         mpPhotonDataVCM = Buffer::createStructured(
-            mpDevice, sizeof(float) * 16, mNumMaxPhotons[0], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            mpDevice, sizeof(float) * 16, mNumMaxPhotons, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
             Buffer::CpuAccess::None, nullptr, false
         );
         mpPhotonDataVCM->setName("PhotonDataVCM");
@@ -324,30 +301,22 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (!mpPhotonCounter)
     {
         mpPhotonCounter = Buffer::create(
-            mpDevice, sizeof(uint2), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None
+            mpDevice, sizeof(uint), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None
         );
         mpPhotonCounter->setName("PhotonCounter");
 
-        mpPhotonCounterCPU = Buffer::create(mpDevice, sizeof(uint2), ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonCounterCPU = Buffer::create(mpDevice, sizeof(uint), ResourceBindFlags::None, Buffer::CpuAccess::Read);
         mpPhotonCounterCPU->setName("PhotonCounterCPU");
     }
 
     //Acceleration Structure for Photon Collection
     if (!mpPhotonAS)
     {
-        std::vector<uint64_t> aabbCount = {mNumMaxPhotons[0], mNumMaxPhotons[1]};
-        std::vector<uint64_t> aabbGPUAddress = {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()};
+        std::vector<uint64_t> aabbCount = {mNumMaxPhotons};
+        std::vector<uint64_t> aabbGPUAddress = {mpPhotonAABB->getGpuAddress()};
         mpPhotonAS = std::make_unique<CustomAccelerationStructure>(
             mpDevice, aabbCount, aabbGPUAddress, CustomAccelerationStructure::BuildMode::FastBuild,
             CustomAccelerationStructure::UpdateMode::TLASOnly
-        );
-    }
-
-    if (!mpPhotonASVCM)
-    {
-        mpPhotonASVCM = std::make_unique<CustomAccelerationStructure>(
-            mpDevice, mNumMaxPhotons[0], mpPhotonAABB[0]->getGpuAddress(), CustomAccelerationStructure::BuildMode::FastBuild,
-            CustomAccelerationStructure::UpdateMode::None
         );
     }
 
@@ -433,8 +402,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
     // Defines
-    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
-    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
+    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
@@ -457,7 +425,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
 
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gPhotonRadius"] = float2(mPhotonRadius.y); // TODO temporally until MIS weights are radius independet mPhotonRadius;
+    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM; 
     var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gDispatchDimension"] = shaderDispatchDim;
@@ -470,11 +438,9 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
     // Output
-    for (uint32_t i = 0; i < 2; i++)
-    {
-        var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPhotonData"][i] = mpPhotonData[i];
-    }
+    var["gPhotonAABB"] = mpPhotonAABB;
+    var["gPhotonData"] = mpPhotonDataVCM;
+
     for (uint32_t i = 0; i < 3; i++)
     {
         var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
@@ -495,17 +461,15 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mNumberLightPaths = shaderDispatchDim * shaderDispatchDim;
 
     // Clear values after the counter
-    std::vector<ref<Buffer>> aabbs = {mpPhotonAABB[0], mpPhotonAABB[1]};
-    mpPhotonAS->clearAABBBuffers(pRenderContext, aabbs, true, mpPhotonCounter);
+    mpPhotonAS->clearAABBBuffers(pRenderContext, mpPhotonAABB, true, mpPhotonCounter);
 
     // Copy counter to CPU
     handlePhotonCounter(pRenderContext);
 
     // Build acceleration structure
-    uint2 currentPhotons = mFrameCount > 0 ? uint2(float2(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
-    std::vector<uint64_t> photonBuildSize = {
-        std::min(mNumMaxPhotons[0], currentPhotons[0]), std::min(mNumMaxPhotons[1], currentPhotons[1])
-    };
+    uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
+    uint64_t photonBuildSize = std::min(mNumMaxPhotons, currentPhotons);
+
     mpPhotonAS->update(pRenderContext, photonBuildSize);
 }
 
@@ -563,7 +527,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
-    var["CB"]["gPhotonRadius"] = mPhotonRadius.y; // TODO remove
+    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM;
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -571,11 +535,10 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
 
     // Photon Data
     mpPhotonAS->bindTlas(var, "gPhotonAS");
-    for (uint32_t i = 0; i < 2; i++)
-    {
-        var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPhotonData"][i] = mpPhotonData[i];
-    }
+
+    var["gPhotonAABB"]= mpPhotonAABB;
+    var["gPhotonData"] = mpPhotonDataVCM;
+
     for (uint32_t i = 0; i < 3; i++)
     {
         var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
@@ -623,7 +586,7 @@ void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const Rend
         mTracePhotonVCMPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
     // Defines
-    mTracePhotonVCMPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
+    mTracePhotonVCMPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons));
     mTracePhotonVCMPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonVCMPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
     mTracePhotonVCMPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
@@ -662,7 +625,7 @@ void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const Rend
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
     // Output
-    var["gPhotonAABB"] = mpPhotonAABB[0];
+    var["gPhotonAABB"] = mpPhotonAABB;
     var["gPhotonData"] = mpPhotonDataVCM;
 
     for (uint32_t i = 0; i < 3; i++)
@@ -686,17 +649,16 @@ void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const Rend
     mNumberLightPaths = shaderDispatchDim * shaderDispatchDim;
 
     // Clear values after the counter
-    std::vector<ref<Buffer>> aabbs = {mpPhotonAABB[0], mpPhotonAABB[1]};
-    mpPhotonASVCM->clearAABBBuffers(pRenderContext, aabbs, true, mpPhotonCounter);
+    mpPhotonAS->clearAABBBuffers(pRenderContext, mpPhotonAABB, true, mpPhotonCounter);
 
     // Copy counter to CPU
     handlePhotonCounter(pRenderContext);
 
     // Build acceleration structure
-    uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount.x) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons[0];
-    uint64_t photonBuildSize = std::min(mNumMaxPhotons[0], currentPhotons);
+    uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
+    uint64_t photonBuildSize = std::min(mNumMaxPhotons, currentPhotons);
     
-    mpPhotonASVCM->update(pRenderContext, photonBuildSize);
+    mpPhotonAS->update(pRenderContext, photonBuildSize);
 }
 
 void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const RenderData& renderData) {
@@ -764,9 +726,9 @@ void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const Rend
     var["gView"] = renderData[kInputView]->asTexture();
     
     //Photon Data
-    mpPhotonASVCM->bindTlas(var, "gPhotonAS");
+    mpPhotonAS->bindTlas(var, "gPhotonAS");
 
-    var["gPhotonAABB"] = mpPhotonAABB[0];
+    var["gPhotonAABB"] = mpPhotonAABB;
     var["gPhotonData"] = mpPhotonDataVCM;
 
     for (uint32_t i = 0; i < 3; i++)
@@ -795,10 +757,10 @@ void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const Rend
 void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
 {
     // Copy the photonCounter to a CPU Buffer
-    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint2));
+    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint));
 
     void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
-    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint2));
+    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint));
     mpPhotonCounterCPU->unmap();
 
     // Change Photon dispatch count dynamically.
@@ -806,10 +768,8 @@ void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
     if (mUseDynamicPhotonDispatchCount)
     {
         // Only use global photons for the dynamic dispatch count
-        uint globalPhotonCount = mCurrentPhotonCount[0];
-        uint globalMaxPhotons = mNumMaxPhotons[0];
-        uint causticPhotonCount = mCurrentPhotonCount[1];
-        uint causticMaxPhotons = mNumMaxPhotons[1];
+        uint globalPhotonCount = mCurrentPhotonCount;
+        uint globalMaxPhotons = mNumMaxPhotons;
         // If counter is invalid, reset
         if (globalPhotonCount == 0)
         {
@@ -817,24 +777,20 @@ void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
         }
         uint globBufferSizeCompValue = (uint)(globalMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
         uint globChangeSize = (uint)(globalMaxPhotons * mPhotonDynamicChangePercentage);
-        uint causticBufferSizeCompValue = (uint)(causticMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
-        uint causticChangeSize = (uint)(causticMaxPhotons * mPhotonDynamicChangePercentage);
-        uint changeSize = std::max(globChangeSize, causticChangeSize);
-
+        
         // If smaller, increase dispatch size
-        if ((globalPhotonCount < globBufferSizeCompValue) && (causticPhotonCount < causticBufferSizeCompValue))
+        if ((globalPhotonCount < globBufferSizeCompValue))
         {
-            uint newDispatched = (uint)(mNumDispatchedPhotons + changeSize);
+            uint newDispatched = (uint)(mNumDispatchedPhotons + globChangeSize);
             mNumDispatchedPhotons = std::min(newDispatched, mPhotonDynamicDispatchMax);
         }
         // Reduce dispatch size
         else
         {
-            uint newDispatched = (uint)(mNumDispatchedPhotons - changeSize);
+            uint newDispatched = (uint)(mNumDispatchedPhotons - globChangeSize);
             mNumDispatchedPhotons = std::max(newDispatched, 1024u);
         }
     }
-    
 }
 
 void PhotonGuiding::resetRenderPasses()

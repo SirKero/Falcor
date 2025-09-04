@@ -118,7 +118,6 @@ private:
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
-    std::unique_ptr<CustomAccelerationStructure> mpPhotonASVCM;      // Accel Pointer
 
     //
     // Parameters
@@ -152,13 +151,12 @@ private:
     uint mPhotonMaxBounces = 10;                    // Number of Photon bounces
     float mGlobalPhotonRejection = 1.0f;            // Probability a global photon is stored
     uint mNumDispatchedPhotons = 2000000;           // Number of Photons dispatched
-    uint2 mNumMaxPhotons = uint2(1000000, 300000);   // Size of the photon buffer
-    uint2 mNumMaxPhotonsUI = mNumMaxPhotons;        // For UI, as changing happens with a button
+    uint mNumMaxPhotons = 1000000;   // Size of the photon buffer
+    uint mNumMaxPhotonsUI = mNumMaxPhotons;        // For UI, as changing happens with a button
     bool mChangePhotonLightBufferSize = true;       // If buffer size has changed
     float mASBuildBufferPhotonOverestimate = 1.15f; // Guard percentage for AS building
-    uint2 mCurrentPhotonCount = mNumMaxPhotons;
+    uint mCurrentPhotonCount = mNumMaxPhotons;
     float mPhotonRadiusVCM = 0.005f;
-    float2 mPhotonRadius = float2(0.020f, 0.005f); // Global/Caustic Radius.
 
     
     bool mUseDynamicPhotonDispatchCount = true;   // Dynamically change the number of photons to fit the max photon number
@@ -177,9 +175,8 @@ private:
     //
     // Resources
     //
-    ref<Buffer> mpPhotonAABB[2];    // Photon AABBs for Acceleration Structure building
+    ref<Buffer> mpPhotonAABB;    // Photon AABBs for Acceleration Structure building
     ref<Buffer> mpPhotonDataVCM;    // Additional Photon data (flux, dir)
-    ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     ref<Texture> mpLightTraceColorSpinlock[3]; //Uint texture for each color used in the spinlock

@@ -295,10 +295,8 @@ void rayGen()
 
         ray.Direction = fromLocalToWorld(pls.normal, woLocal);
         pls.flux *= M_PI; // Lambert Emitter
-        //pls.flux /= lightDirPDF; // Lambert Emitter
         pls.cosTheta = woLocal.z;
         pls.emissionPDF *= lightDirPDF;
-        //pls.emissionPDF /= M_PI;
     }
 #endif
     const uint lightCount = dispatchDims.x * dispatchDims.y;
@@ -412,8 +410,9 @@ void rayGen()
         if (reflectedDiffuse)
         {
             photon.dVC = (cosThetaOut / bsdfPdf) * ((photon.dVC * bsdfReversePDF) + (photon.dVCM + mMisVmWeightFactor));
+            //photon.dVM = (cosThetaOut / bsdfPdf) * ((photon.dVM * bsdfReversePDF) + (0.0 * mMisVcWeightFactor + 1.0));
             photon.dVM = (cosThetaOut / bsdfPdf) * ((photon.dVM * bsdfReversePDF) + (photon.dVCM * mMisVcWeightFactor + 1.0));
-            // photon.dVCM = 1.0 / bsdfPdf;
+            //photon.dVCM = 1.0 / bsdfPdf;
             photon.dVCM = 0.0;
         } else // Specular
         {
