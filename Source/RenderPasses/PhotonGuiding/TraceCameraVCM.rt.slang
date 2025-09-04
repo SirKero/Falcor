@@ -217,7 +217,7 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
 
     // Get emission pdf
     const EmissiveTriangle emissiveTri = gScene.lightCollection.getTriangle(tls.triangleIndex);
-    float cosAtLight = abs(dot(emissiveTri.normal, sd.V));
+    float cosAtLight = abs(dot(emissiveTri.normal, -tls.dir));
     const float emissionPdf = (cosAtLight * M_1_PI) / (emissiveTri.area * gScene.lightCollection.getActiveTriangleCount());
     const float directPdf = tls.pdf; //Multiplied with activeTriangle count 
 
@@ -303,7 +303,7 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
 
             outColor += nee + pm;
             #if ENABLE_DEBUG
-                if (gDebugBounce < 0 || gDebugBounce == i)
+                if (gDebugBounce < 0 || gDebugBounce == (i+1))
                 {
                     gDebug[1][DispatchRaysIndex().xy] += float4(nee, 1);
                     gDebug[3][DispatchRaysIndex().xy] += float4(pm, 1);

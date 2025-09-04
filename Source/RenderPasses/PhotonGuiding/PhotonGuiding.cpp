@@ -138,7 +138,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     bool changed = false;
     changed |= widget.dropdown("RenderMode", mRenderMode);
 
-    if (mRenderMode == RenderMode::VCM)
+    //if (mRenderMode == RenderMode::VCM)
     {
         changed |= widget.checkbox("UseVC", mUseVC);
         changed |= widget.checkbox("UseVM", mUseVM);
@@ -406,6 +406,10 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
+    mTracePhotonPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
+
     if (mpEmissiveLightSampler)
         mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -510,6 +514,12 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
+    mTraceCameraPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
+    mTraceCameraPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
+    mTraceCameraPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
+    mTraceCameraPass.pProgram->addDefine("ENABLE_DEBUG", mDebugEnable ? "1" : "0");
+
+
     // Program Vars
     if (!mTraceCameraPass.pVars)
         mTraceCameraPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
@@ -528,6 +538,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
     var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM;
+    var["CB"]["gDebugBounce"] = mDebugTechniqueBounce;
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -544,10 +555,21 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
         var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
     }
 
+    if (mDebugEnable)
+        for (uint i = 0; i < 4; i++)
+            var["gDebug"][i] = mpDebugTextures[i];
+
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mTraceCameraPass.pProgram.get(), mTraceCameraPass.pVars, uint3(mScreenRes, 1));
+
+     // Copy Debug to color out
+    if (mDebugEnable)
+    {
+        ref<Texture> debugTex = mpDebugTextures[uint(mDebugTechnique)];
+        pRenderContext->copyResource(renderData[kOutputColor]->asTexture().get(), debugTex.get());
+    }
 }
 
 void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -798,7 +820,7 @@ void PhotonGuiding::resetRenderPasses()
     mTraceCameraVCMPass = RayTraceProgramHelper::create();
     mTracePhotonVCMPass = RayTraceProgramHelper::create();
     mTracePhotonPass = RayTraceProgramHelper::create();
-    mTracePhotonPass = RayTraceProgramHelper::create();
+    mTraceCameraPass = RayTraceProgramHelper::create();
 
     mpEmissiveLightSampler.reset();
 }
