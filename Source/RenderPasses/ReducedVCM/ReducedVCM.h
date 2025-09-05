@@ -33,14 +33,14 @@
 
 using namespace Falcor;
 
-class PhotonGuiding : public RenderPass
+class ReducedVCM : public RenderPass
 {
 public:
-    FALCOR_PLUGIN_CLASS(PhotonGuiding, "PhotonGuiding", "Photon Guiding based on Grittmann et al.[2018]");
+    FALCOR_PLUGIN_CLASS(ReducedVCM, "ReducedVCM", "VCM (without bi-directonal connections) and Reduced version by Grittmann et al.[2018]");
 
-    static ref<PhotonGuiding> create(ref<Device> pDevice, const Properties& props) { return make_ref<PhotonGuiding>(pDevice, props); }
+    static ref<ReducedVCM> create(ref<Device> pDevice, const Properties& props) { return make_ref<ReducedVCM>(pDevice, props); }
 
-    PhotonGuiding(ref<Device> pDevice, const Properties& props);
+    ReducedVCM(ref<Device> pDevice, const Properties& props);
 
     virtual Properties getProperties() const override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
@@ -51,34 +51,66 @@ public:
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
+    // GUI Structs and enum
+    enum class RenderMode : uint
+    {
+        VCM = 0u,               //VCM without bi-directional connections
+        Grittmann = 1u          //Grittmann version, where photon mapping is only performed at secound camera bounce
+    };
+    FALCOR_ENUM_INFO(RenderMode, {{RenderMode::VCM, "VCM"}, {RenderMode::Grittmann, "Grittmann"}});
+
+    enum class DebugTechnique : uint
+    {
+        LightTrace = 0u,
+        NEE = 1u,
+        EmissiveHit = 2u,
+        PhotonMapper = 3u
+    };
+    FALCOR_ENUM_INFO(
+        DebugTechnique,
+        {{DebugTechnique::LightTrace, "LightTrace"},
+         {DebugTechnique::NEE, "NEE"},
+         {DebugTechnique::EmissiveHit, "EmissiveHit"},
+         {DebugTechnique::PhotonMapper, "PhotonMapper"}}
+    );
+
 private:
     //
     // Functions
     //
 
-    //Prepares Falcors light samplers
+    // Prepares Falcors light samplers
     void prepareLightingStructure(RenderContext* pRenderContext);
 
-    //Prepares needed Buffers and Textures and Acceleration Structures
+    // Prepares needed Buffers and Textures and Acceleration Structures
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
 
+    // Prepare some camera data needed for reprojection
+    void prepareCameraData();
+
     // Traces the photons and stores them in the scene
-    void tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void tracePhotonGrittmannPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     // Traces the camera and collects the photons
-    void traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void traceCameraGrittmannPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    // Traces the photons and stores them in the scene. Uses VCM MIS weights
+    void tracePhotonVCMPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    // Traces the camera and collects the photons. Uses VCM MIS weights
+    void traceCameraVCMPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     // Handles readback of the photon counter
     void handlePhotonCounter(RenderContext* pRenderContext);
 
-    //Reset Render Passes
+    // Reset Render Passes
     void resetRenderPasses();
 
     //
     // Pointers
     //
-    ref<Scene> mpScene;                     // Scene Pointer
-    ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
+    ref<Scene> mpScene;                                           // Scene Pointer
+    ref<SampleGenerator> mpSampleGenerator;                       // GPU Sample Gen
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
 
@@ -90,9 +122,17 @@ private:
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
     uint mNumberLightPaths = 0;
+    float mImagePlaneDist = 1.0;
+    float mNormalizedPixelArea = 1.0;
+
+    bool mUseVC = true;
+    bool mUseVM = true;
+    bool mLightTraceOnly = false;
+
+    RenderMode mRenderMode = RenderMode::VCM;
 
     // Material Settings
-    bool mUseLambertianDiffuse = false;         // Enable Lambert Diffuse BRDF instead of Frostbyte
+    bool mUseLambertianDiffuse = false;        // Enable Lambert Diffuse BRDF instead of Frostbyte
     float mSpecularRoughnessThreshold = 0.08f; // Any material below this is considered specular (currently set to delta)
 
     //
@@ -104,32 +144,38 @@ private:
     // Photon Distribution
     //
     uint mPhotonMaxBounces = 10;                    // Number of Photon bounces
-    float mGlobalPhotonRejection = 0.3f;            // Probability a global photon is stored
+    float mGlobalPhotonRejection = 1.0f;            // Probability a global photon is stored
     uint mNumDispatchedPhotons = 2000000;           // Number of Photons dispatched
-    uint2 mNumMaxPhotons = uint2(1000000);   // Size of the photon buffer
-    uint2 mNumMaxPhotonsUI = mNumMaxPhotons;        // For UI, as changing happens with a button
+    uint mNumMaxPhotons = 1000000;                  // Size of the photon buffer
+    uint mNumMaxPhotonsUI = mNumMaxPhotons;         // For UI, as changing happens with a button
     bool mChangePhotonLightBufferSize = true;       // If buffer size has changed
     float mASBuildBufferPhotonOverestimate = 1.15f; // Guard percentage for AS building
-    uint2 mCurrentPhotonCount = mNumMaxPhotons;
-    float2 mPhotonRadius = float2(0.008f, 0.002f); //Global / Caustic Radius
+    uint mCurrentPhotonCount = mNumMaxPhotons;
+    float mPhotonRadiusVCM = 0.005f;
 
-    
     bool mUseDynamicPhotonDispatchCount = true;   // Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 4000000;     // Max value for dynamically dispatched photons
     float mPhotonDynamicGuardPercentage = 0.08f;  // Determines how much space of the buffer is used to guard against buffer overflows
     float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
 
+    //
+    // Debug
+    //
+
+    bool mDebugEnable = false;
+    DebugTechnique mDebugTechnique = DebugTechnique::LightTrace;
+    int mDebugTechniqueBounce = -1;
 
     //
     // Resources
     //
-    ref<Buffer> mpPhotonAABB[2];    // Photon AABBs for Acceleration Structure building
-    ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
-    ref<Buffer> mpPhotonCounter;    // Counter
-    ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
-
-
-    //
+    ref<Buffer> mpPhotonAABB;                  // Photon AABBs for Acceleration Structure building
+    ref<Buffer> mpPhotonDataVCM;               // Additional Photon data (flux, dir)
+    ref<Buffer> mpPhotonCounter;               // Counter
+    ref<Buffer> mpPhotonCounterCPU;            // Counter CPU readable
+    ref<Texture> mpLightTraceColorSpinlock[3]; // Uint texture for each color used in the spinlock
+    ref<Texture> mpDebugTextures[4];           // A debug textures for each bounce
+                                     //
     // Render Passes/Programms
     //
     struct RayTraceProgramHelper
@@ -150,7 +196,11 @@ private:
         void initProgramVars(ref<Device> pDevice, ref<Scene> pScene, ref<SampleGenerator> pSampleGenerator);
     };
 
-    RayTraceProgramHelper mTracePhotonPass;           // Trace Photons
-    RayTraceProgramHelper mTraceCameraPass;              // Trace Camera
+    RayTraceProgramHelper mTracePhotonGrittmannPass;    // Trace Photons
+    RayTraceProgramHelper mTraceCameraGrittmannPass;    // Trace Camera
+    RayTraceProgramHelper mTracePhotonVCMPass; // Trace Photons
+    RayTraceProgramHelper mTraceCameraVCMPass; // Trace Camera
 };
 
+FALCOR_ENUM_REGISTER(ReducedVCM::RenderMode);
+FALCOR_ENUM_REGISTER(ReducedVCM::DebugTechnique);

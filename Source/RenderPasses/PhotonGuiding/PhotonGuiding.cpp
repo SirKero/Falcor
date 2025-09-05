@@ -37,9 +37,7 @@ namespace
     //Shader
     const std::string kShaderFolder = "RenderPasses/PhotonGuiding/";
     const std::string kShaderTracePhoton = kShaderFolder + "TracePhoton.rt.slang";
-    const std::string kShaderTracePhotonVCM = kShaderFolder + "TracePhotonVCM.rt.slang";
     const std::string kShaderTraceCamera = kShaderFolder + "TraceCamera.rt.slang";
-    const std::string kShaderTraceCameraVCM = kShaderFolder + "TraceCameraVCM.rt.slang";
 
     //Input Textures
     const std::string kInputVBuffer = "VBuffer";
@@ -117,40 +115,16 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     //Prepare Textures and Buffers
     prepareResources(pRenderContext, renderData);
 
-    prepareCameraData();
-
-    if (mRenderMode == RenderMode::Grittmann)
-    {
-        tracePhotonPass(pRenderContext, renderData);
-        traceCameraPass(pRenderContext, renderData);
-    }
-    else if (mRenderMode == RenderMode::VCM)
-    {
-        tracePhotonVCMPass(pRenderContext, renderData);
-        traceCameraVCMPass(pRenderContext, renderData);
-    }
-
+    tracePhotonPass(pRenderContext, renderData);
+    traceCameraPass(pRenderContext, renderData);
+    
     mFrameCount++;
 }
 
 void PhotonGuiding::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
-    changed |= widget.dropdown("RenderMode", mRenderMode);
-
-    //if (mRenderMode == RenderMode::VCM)
-    {
-        changed |= widget.checkbox("UseVC", mUseVC);
-        changed |= widget.checkbox("UseVM", mUseVM);
-        changed |= widget.checkbox("LightTraceOnly", mLightTraceOnly);
-
-        if (mLightTraceOnly)
-        {
-            mUseVM = false;
-            mUseVC = true;
-        }
-    }
-
+    
     if (auto group = widget.group("Photon Options"))
     {
         if (mUseDynamicPhotonDispatchCount)
@@ -162,7 +136,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             group.var("Dispatched Photons", mNumDispatchedPhotons, 1024u, 67108864u, 1u); // Max is 8192^2
         }
 
-        group.text("Global Photons: " + std::to_string(mCurrentPhotonCount) + " / " + std::to_string(mNumMaxPhotons));
+        group.text("Global Photons: " + std::to_string(mCurrentPhotonCount[0]) + " / " + std::to_string(mNumMaxPhotons[0]));
+        group.text("Caustic Photons: " + std::to_string(mCurrentPhotonCount[1]) + " / " + std::to_string(mNumMaxPhotons[1]));
 
         group.text("Photon Buffer Size:");
         group.indent(10.f);
@@ -186,7 +161,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 changed |= groupDynChange.var("Percentage Change", mPhotonDynamicChangePercentage, 0.01f, 10.f, 0.01f);
                 groupDynChange.tooltip(
                     "Increase/Decrease percentage from the Buffer Size. With current value a increase/decrease of :" +
-                    std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons) + "is expected"
+                    std::to_string(mPhotonDynamicChangePercentage * mNumMaxPhotons.x) + "is expected"
                 );
             }
         }
@@ -196,9 +171,10 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         changed |= group.var("Max Bounces", mPhotonMaxBounces, 0u, 256u);
 
    
-        changed |= group.var("Photon Radius", mPhotonRadiusVCM, 0.f, FLT_MAX, 1e-7f, false, "%.7f");
-
-      
+        group.text("Photon Radius(Global / Caustic):");
+        group.indent(10.f);
+        changed |= group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
+        group.indent(-10.f);      
     }
 
     if (auto group = widget.group("Path Tracer Options"))
@@ -212,16 +188,6 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.tooltip("Threshold when a surface is handled as delta");
         changed |= group.checkbox("Use Diffuse Lambert BRDF", mUseLambertianDiffuse);
         group.tooltip("Enables Lambertian Diffuse BRDS. If disabled the Frostbyte diffuse BRDF (Falcor default) is used");
-    }
-
-    if (auto group = widget.group("Debug"))
-    {
-        changed |= group.checkbox("Enable", mDebugEnable);
-        if (mDebugEnable)
-        {
-            changed |= group.dropdown("Technique", mDebugTechnique);
-            changed |= group.slider("Bounce", mDebugTechniqueBounce, -1, int(mPTMaxBounces) + 1);
-        }
     }
 
     mOptionsChanged = changed;
@@ -252,7 +218,8 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
         if (mpEmissiveLightSampler)
         {
             mpEmissiveLightSampler = nullptr;
-            mTracePhotonVCMPass.pVars.reset();
+            mTracePhotonPass.pVars.reset();
+            mTraceCameraPass.pVars.reset();
         }
     }
 
@@ -264,106 +231,64 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (any(mScreenRes != renderData.getDefaultTextureDims()))
     {
         mScreenRes = renderData.getDefaultTextureDims();
-        for (uint i = 0; i < 3; i++)
-            mpLightTraceColorSpinlock[i].reset();
-        for (uint i = 0; i < 4; i++)
-            mpDebugTextures[i].reset();
+        
     }
 
     if (mChangePhotonLightBufferSize)
     {
         mNumMaxPhotons = mNumMaxPhotonsUI;
-        mpPhotonAABB.reset();
-        mpPhotonDataVCM.reset();
+        mpPhotonAABB[0].reset();
+        mpPhotonAABB[1].reset();
+        mpPhotonData[0].reset();
+        mpPhotonData[1].reset();
         mpPhotonAS.reset();
         mChangePhotonLightBufferSize = false;
     }
 
     //Photon Buffers
-    if (!mpPhotonAABB)
+    for (uint i = 0; i < 2; i++)
     {
-        mpPhotonAABB = Buffer::createStructured(
-            mpDevice, sizeof(AABB), mNumMaxPhotons, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-            Buffer::CpuAccess::None, nullptr, false
-        );
-        mpPhotonAABB->setName("PhotonAABB");
-    }
+        if (!mpPhotonAABB[i])
+        {
+            mpPhotonAABB[i] = Buffer::createStructured(
+                mpDevice, sizeof(AABB), mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPhotonAABB[i]->setName("PhotonAABB" + std::to_string(i));
+        }
 
-    if (!mpPhotonDataVCM)
-    {
-        mpPhotonDataVCM = Buffer::createStructured(
-            mpDevice, sizeof(float) * 16, mNumMaxPhotons, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-            Buffer::CpuAccess::None, nullptr, false
-        );
-        mpPhotonDataVCM->setName("PhotonDataVCM");
+        if (!mpPhotonData[i])
+        {
+            mpPhotonData[i] = Buffer::createStructured(
+                mpDevice, sizeof(float) * 16, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
+        }
     }
+    
 
     if (!mpPhotonCounter)
     {
         mpPhotonCounter = Buffer::create(
-            mpDevice, sizeof(uint), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None
+            mpDevice, sizeof(uint2), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None
         );
         mpPhotonCounter->setName("PhotonCounter");
 
-        mpPhotonCounterCPU = Buffer::create(mpDevice, sizeof(uint), ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonCounterCPU = Buffer::create(mpDevice, sizeof(uint2), ResourceBindFlags::None, Buffer::CpuAccess::Read);
         mpPhotonCounterCPU->setName("PhotonCounterCPU");
     }
 
     //Acceleration Structure for Photon Collection
     if (!mpPhotonAS)
     {
-        std::vector<uint64_t> aabbCount = {mNumMaxPhotons};
-        std::vector<uint64_t> aabbGPUAddress = {mpPhotonAABB->getGpuAddress()};
+        std::vector<uint64_t> aabbCount = {mNumMaxPhotons[0], mNumMaxPhotons[1]};
+        std::vector<uint64_t> aabbGPUAddress = {mpPhotonAABB[0]->getGpuAddress(), mpPhotonAABB[1]->getGpuAddress()};
         mpPhotonAS = std::make_unique<CustomAccelerationStructure>(
             mpDevice, aabbCount, aabbGPUAddress, CustomAccelerationStructure::BuildMode::FastBuild,
             CustomAccelerationStructure::UpdateMode::TLASOnly
         );
     }
-
-    //Light Trace Spinlock textures
-    for (uint i = 0; i < 3; i++)
-    {
-        if (!mpLightTraceColorSpinlock[i])
-        {
-            mpLightTraceColorSpinlock[i] = Texture::create2D(
-                mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::R32Uint, 1u, 1u, nullptr,
-                ResourceBindFlags::UnorderedAccess
-            );
-            std::string colorChannel = i == 0 ? "Red" : (i == 1 ? "Green" : "Blue");
-            mpLightTraceColorSpinlock[i]->setName("LightTraceSpinlock_" + colorChannel);
-        }
-    }
-
-    //debug textures
-    for (uint i = 0; i < 4; i++)
-    {
-        ResourceFormat format = renderData[kOutputColor]->asTexture()->getFormat();
-        if (!mpDebugTextures[i])
-        {
-            mpDebugTextures[i] = Texture::create2D(
-                mpDevice, mScreenRes.x, mScreenRes.y, format, 1u, 1u, nullptr,
-                ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-            );
-            mpDebugTextures[i]->setName("Debug" + std::to_string(i));
-        }
-    }
-}
-
-void PhotonGuiding::prepareCameraData()
-{
-    // Update Image plane distance
-    auto& cameraData = mpScene->getCamera()->getData();
-    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
-    float camTanHalfAngle = math::tan(fovY);
-    mImagePlaneDist = mScreenRes.y / (2.f * camTanHalfAngle);
-
-    //Get normalized pixel area
-    float h = tan(fovY / 2.f) * 2.f;
-    float w = h * cameraData.aspectRatio;
-    float wPix = w / mScreenRes.x;
-    float hPix = h / mScreenRes.y;
-
-    mNormalizedPixelArea = wPix * hPix;
 }
 
 void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -402,13 +327,10 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
     // Defines
-    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons));
+    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
+    mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
-
-    mTracePhotonPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
-    mTracePhotonPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
-    mTracePhotonPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
 
     if (mpEmissiveLightSampler)
         mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
@@ -429,50 +351,43 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
 
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM; 
+    var["CB"]["gPhotonRadius"] = mPhotonRadius; 
     var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gDispatchDimension"] = shaderDispatchDim;
     var["CB"]["gScreenRes"] = mScreenRes;
-    var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     // Structures
     if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
     // Output
-    var["gPhotonAABB"] = mpPhotonAABB;
-    var["gPhotonData"] = mpPhotonDataVCM;
-
-    for (uint32_t i = 0; i < 3; i++)
+    for (uint i = 0; i < 2; i++)
     {
-        var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
     }
-
+   
     var["gPhotonCounter"] = mpPhotonCounter;
 
     mpScene->raytrace(
         pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1)
     );
 
-    // Light Trace UAV barrier
-    for (uint32_t i = 0; i < 3; i++)
-    {
-        pRenderContext->uavBarrier(mpLightTraceColorSpinlock[i].get());
-    }
-
     mNumberLightPaths = shaderDispatchDim * shaderDispatchDim;
 
     // Clear values after the counter
-    mpPhotonAS->clearAABBBuffers(pRenderContext, mpPhotonAABB, true, mpPhotonCounter);
+    std::vector<ref<Buffer>> photonAABBBuffers = {mpPhotonAABB[0], mpPhotonAABB[1]};
+    mpPhotonAS->clearAABBBuffers(pRenderContext, photonAABBBuffers, true, mpPhotonCounter);
 
     // Copy counter to CPU
     handlePhotonCounter(pRenderContext);
 
     // Build acceleration structure
-    uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
-    uint64_t photonBuildSize = std::min(mNumMaxPhotons, currentPhotons);
+    uint2 currentPhotons = mFrameCount > 0 ? uint2(float2(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
+    std::vector<uint64_t> photonBuildSize = {
+        std::min(mNumMaxPhotons[0], currentPhotons[0]), std::min(mNumMaxPhotons[1], currentPhotons[1])
+    };
 
     mpPhotonAS->update(pRenderContext, photonBuildSize);
 }
@@ -514,11 +429,6 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
-    mTraceCameraPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
-    mTraceCameraPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
-    mTraceCameraPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
-    mTraceCameraPass.pProgram->addDefine("ENABLE_DEBUG", mDebugEnable ? "1" : "0");
-
 
     // Program Vars
     if (!mTraceCameraPass.pVars)
@@ -535,10 +445,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gMaxBounces"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
-    var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
-    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM;
-    var["CB"]["gDebugBounce"] = mDebugTechniqueBounce;
+    var["CB"]["gPhotonRadius"] = mPhotonRadius;
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -547,242 +454,26 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     // Photon Data
     mpPhotonAS->bindTlas(var, "gPhotonAS");
 
-    var["gPhotonAABB"]= mpPhotonAABB;
-    var["gPhotonData"] = mpPhotonDataVCM;
-
-    for (uint32_t i = 0; i < 3; i++)
+    for (uint i = 0; i < 2; i++)
     {
-        var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
-    }
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
 
-    if (mDebugEnable)
-        for (uint i = 0; i < 4; i++)
-            var["gDebug"][i] = mpDebugTextures[i];
+    }
 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mTraceCameraPass.pProgram.get(), mTraceCameraPass.pVars, uint3(mScreenRes, 1));
-
-     // Copy Debug to color out
-    if (mDebugEnable)
-    {
-        ref<Texture> debugTex = mpDebugTextures[uint(mDebugTechnique)];
-        pRenderContext->copyResource(renderData[kOutputColor]->asTexture().get(), debugTex.get());
-    }
-}
-
-void PhotonGuiding::tracePhotonVCMPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    FALCOR_PROFILE(pRenderContext, "Trace Photons");
-
-    // Clear Photon Counter
-    pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
-
-    // Init Shader
-    if (!mTracePhotonVCMPass.pProgram)
-    {
-        RtProgram::Desc desc;
-        desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderTracePhotonVCM);
-        desc.setMaxPayloadSize(sizeof(float) * 4);
-        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
-        desc.setMaxTraceRecursionDepth(1);
-        if (!mpScene->hasProceduralGeometry())
-            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
-
-        mTracePhotonVCMPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-        auto& sbt = mTracePhotonVCMPass.pBindingTable;
-        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
-        sbt->setMiss(0, desc.addMiss("miss"));
-
-        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
-        {
-            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
-        }
-        DefineList defines;
-        defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
-        defines.add(mpScene->getSceneDefines());
-        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
-
-        mTracePhotonVCMPass.pProgram = RtProgram::create(mpDevice, desc, defines);
-    }
-    // Defines
-    mTracePhotonVCMPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons));
-    mTracePhotonVCMPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    mTracePhotonVCMPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
-    mTracePhotonVCMPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
-    mTracePhotonVCMPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
-    mTracePhotonVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
-
-    if (mpEmissiveLightSampler)
-        mTracePhotonVCMPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
-
-    // Program Vars
-    if (!mTracePhotonVCMPass.pVars)
-        mTracePhotonVCMPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
-
-    FALCOR_ASSERT(mTracePhotonVCMPass.pVars);
-    auto var = mTracePhotonVCMPass.pVars->getRootVar();
-    mpScene->setRaytracingShaderData(pRenderContext, var);
-
-    // Handle shader dimension
-    uint dispatchedPhotons = mNumDispatchedPhotons;
-
-    uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
-    shaderDispatchDim = std::max(32u, shaderDispatchDim);
-
-    // Constant Buffer
-    var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM; //TODO temporally until MIS weights are radius independet mPhotonRadius;
-    var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
-    var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
-    var["CB"]["gDispatchDimension"] = shaderDispatchDim;
-    var["CB"]["gScreenRes"] = mScreenRes;
-    var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
-
-    // Structures
-    if (mpEmissiveLightSampler)
-        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
-
-    // Output
-    var["gPhotonAABB"] = mpPhotonAABB;
-    var["gPhotonData"] = mpPhotonDataVCM;
-
-    for (uint32_t i = 0; i < 3; i++)
-    {
-        var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
-    }
-
-    var["gPhotonCounter"] = mpPhotonCounter;
-
-    mpScene->raytrace(
-        pRenderContext, mTracePhotonVCMPass.pProgram.get(), mTracePhotonVCMPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1)
-    );
-
-    //Light Trace UAV barrier
-    for (uint32_t i = 0; i < 3; i++)
-    {
-        pRenderContext->uavBarrier(mpLightTraceColorSpinlock[i].get());
-    }
-
-
-    mNumberLightPaths = shaderDispatchDim * shaderDispatchDim;
-
-    // Clear values after the counter
-    mpPhotonAS->clearAABBBuffers(pRenderContext, mpPhotonAABB, true, mpPhotonCounter);
-
-    // Copy counter to CPU
-    handlePhotonCounter(pRenderContext);
-
-    // Build acceleration structure
-    uint currentPhotons = mFrameCount > 0 ? uint(float(mCurrentPhotonCount) * mASBuildBufferPhotonOverestimate) : mNumMaxPhotons;
-    uint64_t photonBuildSize = std::min(mNumMaxPhotons, currentPhotons);
-    
-    mpPhotonAS->update(pRenderContext, photonBuildSize);
-}
-
-void PhotonGuiding::traceCameraVCMPass(RenderContext* pRenderContext, const RenderData& renderData) {
-    FALCOR_PROFILE(pRenderContext, "TraceCamera");
-
-    // Init Shader
-    if (!mTraceCameraVCMPass.pProgram)
-    {
-        RtProgram::Desc desc;
-        desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderTraceCameraVCM);
-        desc.setMaxPayloadSize(sizeof(float) * 4);
-        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
-        desc.setMaxTraceRecursionDepth(1);
-        if (!mpScene->hasProceduralGeometry())
-            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
-
-        mTraceCameraVCMPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-        auto& sbt = mTraceCameraVCMPass.pBindingTable;
-        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
-        sbt->setMiss(0, desc.addMiss("miss"));
-
-        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
-        {
-            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
-        }
-
-        mTraceCameraVCMPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
-    }
-
-    // Defines
-    mTraceCameraVCMPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
-    mTraceCameraVCMPass.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
-    mTraceCameraVCMPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    mTraceCameraVCMPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
-    mTraceCameraVCMPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
-    mTraceCameraVCMPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
-    mTraceCameraVCMPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
-    if (mpEmissiveLightSampler)
-        mTraceCameraVCMPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
-    mTraceCameraVCMPass.pProgram->addDefine("ENABLE_DEBUG", mDebugEnable ? "1" : "0");
-
-      // Program Vars
-    if (!mTraceCameraVCMPass.pVars)
-        mTraceCameraVCMPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
-
-    FALCOR_ASSERT(mTraceCameraVCMPass.pVars);
-    auto var = mTraceCameraVCMPass.pVars->getRootVar();
-
-    // Structures
-    if (mpEmissiveLightSampler)
-        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
-
-    // Constant Buffer
-    var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gMaxBounces"] = mPTMaxBounces;
-    var["CB"]["gNumLightPaths"] = mNumberLightPaths;
-    var["CB"]["gImagePlaneDist"] = mImagePlaneDist;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
-    var["CB"]["gPhotonRadius"] = mPhotonRadiusVCM;
-    var["CB"]["gDebugBounce"] = mDebugTechniqueBounce;
-
-    // Input
-    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
-    var["gView"] = renderData[kInputView]->asTexture();
-    
-    //Photon Data
-    mpPhotonAS->bindTlas(var, "gPhotonAS");
-
-    var["gPhotonAABB"] = mpPhotonAABB;
-    var["gPhotonData"] = mpPhotonDataVCM;
-
-    for (uint32_t i = 0; i < 3; i++)
-    {
-        var["gLightTraceColor"][i] = mpLightTraceColorSpinlock[i];
-    }
-
-    var["gOutColor"] = renderData[kOutputColor]->asTexture();
-
-    //Debug
-    if (mDebugEnable)
-        for (uint i = 0; i < 4; i++)
-            var["gDebug"][i] = mpDebugTextures[i];
-
-    // Dispatch Shader
-    mpScene->raytrace(pRenderContext, mTraceCameraVCMPass.pProgram.get(), mTraceCameraVCMPass.pVars, uint3(mScreenRes, 1));
-
-    //Copy Debug to color out
-    if (mDebugEnable)
-    {
-        ref<Texture> debugTex = mpDebugTextures[uint(mDebugTechnique)];
-        pRenderContext->copyResource(renderData[kOutputColor]->asTexture().get(), debugTex.get());
-    }
 }
 
 void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
 {
     // Copy the photonCounter to a CPU Buffer
-    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint));
+    pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint2));
 
     void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
-    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint));
+    std::memcpy(&mCurrentPhotonCount, data, sizeof(uint2));
     mpPhotonCounterCPU->unmap();
 
     // Change Photon dispatch count dynamically.
@@ -790,8 +481,10 @@ void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
     if (mUseDynamicPhotonDispatchCount)
     {
         // Only use global photons for the dynamic dispatch count
-        uint globalPhotonCount = mCurrentPhotonCount;
-        uint globalMaxPhotons = mNumMaxPhotons;
+        uint globalPhotonCount = mCurrentPhotonCount[0];
+        uint globalMaxPhotons = mNumMaxPhotons[0];
+        uint causticPhotonCount = mCurrentPhotonCount[1];
+        uint causticMaxPhotons = mNumMaxPhotons[1];
         // If counter is invalid, reset
         if (globalPhotonCount == 0)
         {
@@ -799,17 +492,20 @@ void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
         }
         uint globBufferSizeCompValue = (uint)(globalMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
         uint globChangeSize = (uint)(globalMaxPhotons * mPhotonDynamicChangePercentage);
-        
+        uint causticBufferSizeCompValue = (uint)(causticMaxPhotons * (1.f - mPhotonDynamicGuardPercentage));
+        uint causticChangeSize = (uint)(causticMaxPhotons * mPhotonDynamicChangePercentage);
+        uint changeSize = std::max(globChangeSize, causticChangeSize);
+
         // If smaller, increase dispatch size
-        if ((globalPhotonCount < globBufferSizeCompValue))
+        if ((globalPhotonCount < globBufferSizeCompValue) && (causticPhotonCount < causticBufferSizeCompValue))
         {
-            uint newDispatched = (uint)(mNumDispatchedPhotons + globChangeSize);
+            uint newDispatched = (uint)(mNumDispatchedPhotons + changeSize);
             mNumDispatchedPhotons = std::min(newDispatched, mPhotonDynamicDispatchMax);
         }
         // Reduce dispatch size
         else
         {
-            uint newDispatched = (uint)(mNumDispatchedPhotons - globChangeSize);
+            uint newDispatched = (uint)(mNumDispatchedPhotons - changeSize);
             mNumDispatchedPhotons = std::max(newDispatched, 1024u);
         }
     }
@@ -817,8 +513,6 @@ void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
 
 void PhotonGuiding::resetRenderPasses()
 {
-    mTraceCameraVCMPass = RayTraceProgramHelper::create();
-    mTracePhotonVCMPass = RayTraceProgramHelper::create();
     mTracePhotonPass = RayTraceProgramHelper::create();
     mTraceCameraPass = RayTraceProgramHelper::create();
 

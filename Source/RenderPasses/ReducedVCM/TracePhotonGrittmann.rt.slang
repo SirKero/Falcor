@@ -6,7 +6,6 @@ import Scene.RaytracingInline;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Sampling.SampleGenerator;
-import Utils.Color.ColorHelpers;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
@@ -16,11 +15,14 @@ cbuffer CB
 {
     uint gMaxBounces;   // Max number of bounces allowed
     uint gFrameCount;   // Frame count since scene was loaded.
-    float2 gPhotonRadius;//Global/Caustic radius
+    float gPhotonRadius;//Global/Caustic radius
 
     uint gDispatchDimension;    //Dispatch dims (x,y identical) 
     float gGlobalRejectionProb; //Rejection Probability for global photons
     uint2 gScreenRes;   //For back projection
+
+    float gImagePlaneDist;
+    float gNormalizedPixelArea;
 }
 
 #if USE_EMISSIVE_LIGHT // Buffer is only valid if emissive light is enabled
@@ -29,14 +31,19 @@ cbuffer Light {
 }
 #endif
 
-RWStructuredBuffer<AABB> gPhotonAABB[2];
-RWStructuredBuffer<PhotonData> gPhotonData[2];
+RWStructuredBuffer<AABB> gPhotonAABB;
+RWStructuredBuffer<PhotonDataVCM> gPhotonData;
 RWBuffer<uint> gPhotonCounter;
+RWTexture2D<uint> gLightTraceColor[3]; //Uint spinlock color texture for every channel 
 
 static const bool kAlphaTest = true;
-static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL,PHOTON_BUFFER_SIZE_CAUSTIC);
+static const uint kPhotonBufferSize = PHOTON_BUFFER_SIZE_GLOBAL;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = true;  //TODO as option
+
+static const bool kUseVC = USE_VC;
+static const bool kUseVM = USE_VM;
+static const bool kLightTraceOnly = USE_LIGHT_TRACE_ONLY;
 
 struct RayPayload
 {
@@ -147,6 +154,76 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
     return true;
 }
 
+void spinlockToImage(RWTexture2D<uint> colorTex, uint2 pixel, float value)
+{
+    uint currentColor = 0;
+    uint originalValue;
+    [allow_uav_condition]
+    do {
+        InterlockedAdd(colorTex[pixel], 0u, currentColor);
+        float color = asfloat(currentColor);
+        uint updatedColor = asuint(color + value);
+        InterlockedCompareExchange(colorTex[pixel], currentColor, updatedColor, originalValue);
+    } while (originalValue != currentColor);
+}
+
+bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonDataVCM photon, uint lightCount, float misVmWeightFactor, inout SampleGenerator sg)
+{
+    float4 screenPos = mul(gScene.camera.getViewProj(), float4(sd.posW, 1));
+    screenPos /= screenPos.w;
+    screenPos.y *= -1;
+    screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+    if (any(screenPos.xy < 0) || any(screenPos.xy >= 1) || screenPos.z < 0 || screenPos.z > 1)
+        return false;
+
+    float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+    float distanceToCamera = length(directionToCamera);
+    directionToCamera /= distanceToCamera;
+
+    // Bsdf and pdf to camera
+    float3 bsdf = mi.eval(sd, directionToCamera, sg);
+    float cosToCamera = dot(sd.faceN, directionToCamera);
+    float reversePDF = mi.evalPdf(sd, directionToCamera, sd.V) * photon.continationProb;
+
+    if (all(bsdf <= 0))
+        return false;
+
+    // Pdf conversion factor from image plane
+    const float3 camForward = normalize(gScene.camera.data.cameraW);
+    const float cosAtCamera = dot(-directionToCamera, camForward);
+    const float surfaceToImageFactor = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3);
+    const float cameraPdf = 1.0 / surfaceToImageFactor; // technically 1/pdf
+
+    // MIS weights
+    float VmFactor = photon.pathLenght > 0 ? misVmWeightFactor : 0;
+    const float wLight = (cameraPdf / lightCount) * (VmFactor + photon.dVCM + photon.dVC * reversePDF);
+    const float misWeight = 1.0 / (1.0 + wLight);
+
+    // Contribution on image
+    float3 contribution = float3(0);
+    if (kLightTraceOnly)
+        contribution = photon.flux * bsdf * cameraPdf / lightCount;
+    else
+        contribution = misWeight * photon.flux * bsdf * cameraPdf / lightCount;
+
+    if(any(contribution > 0))
+    {
+        //Visibility
+        SceneRayQuery<1> rayQuery;
+        const Ray ray = Ray(sd.computeNewRayOrigin(), directionToCamera , 0.f, distanceToCamera);
+        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+            return false;
+
+        // If backprojection is valid, spinlock the value to the screen buffer
+        const uint2 pixel = uint2(floor((screenPos.xy * gScreenRes) + 0.5));
+        spinlockToImage(gLightTraceColor[0], pixel, contribution.x);
+        spinlockToImage(gLightTraceColor[1], pixel, contribution.y);
+        spinlockToImage(gLightTraceColor[2], pixel, contribution.z);
+    }
+
+    return true;
+}
+
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
 {
@@ -221,6 +298,11 @@ void rayGen()
 #endif
     const uint lightCount = dispatchDims.x * dispatchDims.y;
 
+    // MIS constants
+    const float etaVCM = (M_PI * gPhotonRadius * gPhotonRadius) * lightCount;
+    float mMisVmWeightFactor = kUseVM ? etaVCM : 0.0;
+    float mMisVcWeightFactor = kUseVC ? (1.0 / etaVCM) : 0.0; // Maybe this needs to be 0 if no light tracing is used
+
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
     ray.TMin = 0.0f;
@@ -232,10 +314,14 @@ void rayGen()
     float3 photonStartFlux = pls.flux;
     float3 thp = float3(1.0); //Throughput
 
-    PhotonData photon = PhotonData();
+    PhotonDataVCM photon = PhotonDataVCM();
     photon.flux = photonStartFlux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
+
+    photon.dVCM = pls.directPDF / pls.emissionPDF;
+    photon.dVC = pls.cosTheta / pls.emissionPDF;
+    photon.dVM = photon.dVC * mMisVcWeightFactor;
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {
@@ -256,27 +342,38 @@ void rayGen()
 
         if (any(bsdfProperties.emission > 0))
             break;
-                   
+
+        // Update MIS helpers
+        float dist = distance(sd.posW, ray.Origin);
+        photon.dVCM *= dist * dist;
+        float cosTheta = abs(dot(sd.faceN, sd.V));
+        photon.dVCM /= cosTheta;
+        photon.dVM /= cosTheta;
+        photon.dVC /= cosTheta;
+        photon.continationProb = getContinuationProbablity(bsdfProperties);
+
         photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
 
+        // Backprojection to camera
+        if (reflectedDiffuse)
+        {
+            backprojectPhotonToCamera(sd, mi, photon, lightCount, mMisVcWeightFactor, sg);
+        }
+
         // Store Photon
         if (reflectedDiffuse) {
-            PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
+            //PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
             bool storePhoton = true;
-            if (photonType == PhotonType::Global) {
-                storePhoton = sampleNext1D(sg) <= gGlobalRejectionProb;
-                photon.flux *= invRejection;
-            }
             if (storePhoton) {
-                uint photonTypeIdx = (uint)photonType;
                 uint photonInsertIndex = 0;
-                InterlockedAdd(gPhotonCounter[photonTypeIdx], 1u, photonInsertIndex);
-                if (photonInsertIndex <= kPhotonBufferSize[photonTypeIdx])
+                InterlockedAdd(gPhotonCounter[0], 1u, photonInsertIndex);
+                if (photonInsertIndex <= kPhotonBufferSize)
                 {
-                    AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
-                    gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
-                    gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
+                    // photon.flux = float3(1, 0, 0);
+                    AABB photonAABB = AABB(sd.posW - gPhotonRadius, sd.posW + gPhotonRadius);
+                    gPhotonAABB[photonInsertIndex] = photonAABB;
+                    gPhotonData[photonInsertIndex] = photon;
                 }
             }
         }
@@ -291,21 +388,40 @@ void rayGen()
         ray.Direction = bsdfSample.wo;
         thp *= bsdfSample.weight;
         bool isEmissive = any(bsdfProperties.emission > 0);
-
-        const float rrVal = luminance(thp);
+        float continuationProb = getContinuationProbablity(bsdfProperties);
 
         // RussianRoulette
-        if ((sampleNext1D(sg) > rrVal) || isEmissive)
+        if (sampleNext1D(sg) > continuationProb || isEmissive)
         {
             return; // Photon is absorbed
         }
 
-        thp /= rrVal;
+        thp /= continuationProb;
 
         // Update Photon
         storeAsCaustic = !reflectedDiffuse;
         photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
         photon.pathLenght++;
+
+        // Partially update MIS weights
+        float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
+        float bsdfPdf = bsdfSample.pdf * photon.continationProb;
+        float bsdfReversePDF = mi.evalPdf(sd, ray.Direction, sd.V) * photon.continationProb;
+
+        if (reflectedDiffuse)
+        {
+            //photon.dVC = (cosThetaOut / bsdfPdf) * ((photon.dVC * bsdfReversePDF) + (photon.dVCM + mMisVmWeightFactor));
+            photon.dVC = (cosThetaOut / bsdfPdf) * ((photon.dVC * bsdfReversePDF) + (photon.dVCM + 0));
+            //photon.dVM = (cosThetaOut / bsdfPdf) * ((photon.dVM * bsdfReversePDF) + (0.0 * mMisVcWeightFactor + 1.0));
+            photon.dVM = (cosThetaOut / bsdfPdf) * ((photon.dVM * bsdfReversePDF) + (photon.dVCM * mMisVcWeightFactor + 1.0));
+            photon.dVCM = 1.0 / bsdfPdf;
+            //photon.dVCM = 0.0;
+        } else // Specular
+        {
+            photon.dVCM = 0;
+            photon.dVM *= cosThetaOut;
+            photon.dVC *= cosThetaOut;
+        }
     }
 }
