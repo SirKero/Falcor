@@ -62,6 +62,9 @@ private:
     //Prepares needed Buffers and Textures and Acceleration Structures
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Compute pass to update the guiding texture
+    void updateGuidingTexturePass(RenderContext* pRenderContext, const RenderData& renderData);
+
     // Traces the photons and stores them in the scene
     void tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -119,6 +122,12 @@ private:
     float mPhotonDynamicGuardPercentage = 0.08f;  // Determines how much space of the buffer is used to guard against buffer overflows
     float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
 
+    //
+    //Guiding Infos
+    //
+    bool mEmissiveLightResetTextures = true;
+    uint mEmissiveLightCount = 0;
+    uint mGuidingTextureResolution = 512;
 
     //
     // Resources
@@ -127,6 +136,7 @@ private:
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
+    std::vector<ref<Texture>> mGuidingTextures; //Guiding Textures for Photon Guiding
 
 
     //
@@ -152,5 +162,7 @@ private:
 
     RayTraceProgramHelper mTracePhotonPass;           // Trace Photons
     RayTraceProgramHelper mTraceCameraPass;              // Trace Camera
+
+    ref<ComputePass> mpUpdateGuidingPass; // Generates the mips for the guiding textures
 };
 

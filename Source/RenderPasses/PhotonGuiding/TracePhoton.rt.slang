@@ -12,6 +12,10 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 
+#ifndef NUM_GUIDING_TEXTURES
+#define NUM_GUIDING_TEXTURES 1
+#endif
+
 cbuffer CB
 {
     uint gMaxBounces;   // Max number of bounces allowed
@@ -21,17 +25,16 @@ cbuffer CB
     uint gDispatchDimension;    //Dispatch dims (x,y identical) 
     float gGlobalRejectionProb; //Rejection Probability for global photons
     uint2 gScreenRes;   //For back projection
-}
 
-#if USE_EMISSIVE_LIGHT // Buffer is only valid if emissive light is enabled
-cbuffer Light {
-    EmissiveLightSampler gEmissiveSampler;
+    uint gGuidingTextureResolution; // Resolution of all guiding textures. xy is the same
+    uint gGuidingTextureMaxMip;     // Highest Mip of the guiding texture
 }
-#endif
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<PhotonData> gPhotonData[2];
 RWBuffer<uint> gPhotonCounter;
+
+Texture2D<float> gGuidingTexture[NUM_GUIDING_TEXTURES];
 
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL,PHOTON_BUFFER_SIZE_CAUSTIC);
@@ -53,9 +56,9 @@ struct RayPayload
 //Helper struct to generate a photon form the lightSources
 struct PhotonLightSample {
     float3 posW;
-    float emissionPDF;
+    float rndX;
     float3 normal;
-    float directPDF;
+    float rndY;
     float3 flux;
     float cosTheta;
 };
@@ -70,7 +73,7 @@ float3 fromLocalToWorld(const in float3 normal, float3 w)
     return w.x * tangent + w.y * bitangent + w.z * normal;
 }
 
-#if USE_EMISSIVE_LIGHT // Function is only valid if the emissive sampler is set
+
 bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
     pls = {};
     if (gScene.lightCollection.isEmpty())
@@ -95,55 +98,85 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
     pls.posW = computeRayOrigin(pls.posW, pls.normal); //Offset as this light is real geometry
     pls.flux /= triangleSelectionPdf;
 
-    pls.emissionPDF = 1.0 / (tri.area * triangleCount);
-    pls.directPDF = pls.emissionPDF;
-
     return true;
 }
-#endif
 
-bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample pls, out float3 sampledDir)
+bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
 {
     pls = {};
-    sampledDir = float3(0);
-    const uint lightCount = gScene.getLightCount();
-    if (lightCount == 0)
+    if (gScene.lightCollection.isEmpty())
         return false;
-    // Uniformly sample one of the analytic lights
-    float rndLightIdx = float(lightCount) * sampleNext1D(sg);
-    uint lightIdx = min(uint(floor(rndLightIdx)), lightCount - 1);
-    LightData lightData = gScene.getLight(lightIdx);
 
-    // Only Point(+ Spot) lights are supported (due to RTXDI)
-    if (lightData.type != uint(LightType::Point))
-        return false;
-    float invLightPdf;
-    float3 woLocal;
-    float3 rnd = sampleNext3D(sg);
-    rnd.z = 0;
-    float spotAngle = lightData.cosOpeningAngle;
-    if (lightData.openingAngle < M_2PI) // If the opening angle is smaller than 2PI it is a spotlight
-    {
-        spotAngle = cos(lightData.openingAngle - lightData.penumbraAngle * rnd.z);
-        woLocal = sample_cone(rnd.xy, spotAngle);
+    // Randomly pick a triangle out of the global list with uniform probability
+    const uint triangleCount = gScene.lightCollection.triangleCount;
+    // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
+    uint triIdx = min((uint)(sampleNext1D(sg) * triangleCount), triangleCount - 1);
+    float triangleSelectionPdf = 1.0 / triangleCount;
+
+    // Traverse the mipmap
+    float tw = sampleNext1D(sg); // traverse weight
+    uint2 mipIdx = uint2(0);       // Working index for mip chain traversal. Starts top left (0)
+    int startMip = int(gGuidingTextureMaxMip) - 1;
+    float endWeight = 0;
+
+    // Start traversal from the second highest miplevel to level 0
+    for (int m = startMip; m >= 0; m--) {
+        //Update mip index from last iteration (does not matter for first iteration)
+        mipIdx *= 2;
+        // Fetch samples in 2x2 grid
+        float4 mipSamples;
+        mipSamples[0] = gGuidingTexture[triIdx].Load(uint3(mipIdx.x, mipIdx.y, m));
+        mipSamples[1] = gGuidingTexture[triIdx].Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+        mipSamples[2] = gGuidingTexture[triIdx].Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+        mipSamples[3] = gGuidingTexture[triIdx].Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+
+        // Select a sample using the current traverse weight
+        float totalWeight = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+        float currWeight = 0;      // Total for select in loop
+        uint selectedSubpixel = 0; // Selected subpixel id
+        float selWeight = 0;       //Selected weight
+        for (uint x = 0; x < 4 && totalWeight > 0; x++) {
+            selWeight = mipSamples[x];
+            currWeight += selWeight;
+            selectedSubpixel = x;
+            if (tw < currWeight)
+                break;
+        }
+
+        // Update traversal weight
+        float nonSelectedWeight = currWeight - selWeight;
+        tw -= nonSelectedWeight;
+
+        // Update the index used to fetch the next mip level
+        if (selectedSubpixel == 1 || selectedSubpixel == 3)
+            mipIdx.x += 1;
+        if (selectedSubpixel > 1) // 2 or 3
+            mipIdx.y += 1;
+
+        if (m == 0)
+            endWeight = mipSamples[selectedSubpixel];
     }
-    else // Pointlight
-    {
-        woLocal = sample_sphere(rnd.xy);
-    }
-    invLightPdf = M_2PI * (1.f - spotAngle);
 
-    if (invLightPdf <= 0.f)
-        return false;
+    // Recreate selected random number range from the choosen index
+    float2 relMinWeight = float2(mipIdx) / gGuidingTextureResolution;
+    float2 relMaxWeight = float2(mipIdx + 1) / gGuidingTextureResolution;
+    relMinWeight += (relMaxWeight - relMinWeight) * sampleNext2D(sg);
+    pls.rndX = relMinWeight.x;
+    pls.rndY = relMinWeight.y;
+    float guidingPDF = (gGuidingTextureResolution * gGuidingTextureResolution) * endWeight; //TODO check if correct
 
-    invLightPdf *= lightCount; // Take the select pdf into account
+    // Get emissive triangle data
+    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triIdx);
+    const float3 barycentrics = sample_triangle(sampleNext2D(sg));
+    pls.posW = tri.getPosition(barycentrics);
+    pls.normal = tri.normal;
 
-    // Fill the photon light struct
-    pls.posW = lightData.posW;
-    pls.normal = lightData.dirW;
-    pls.flux = lightData.intensity * invLightPdf;
+    // Get Flux
+    float2 uv = tri.getTexCoord(barycentrics);
+    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
 
-    sampledDir = fromLocalToWorld(pls.normal, woLocal);
+    pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
+    pls.flux /= triangleSelectionPdf * guidingPDF;
     return true;
 }
 
@@ -191,34 +224,22 @@ void rayGen()
     RayDesc ray;
     PhotonLightSample pls;
 
-    //Create a photon by sampling from emissive lights or analytic light sources
-#if USE_EMISSIVE_LIGHT
-    if (false)
-#endif
-    { // Analytic light sample
-        float3 sampleDir;
-        if (!createLightSampleAnalytic(sg, pls, sampleDir))
-            return;
+    // Create a photon by sampling from emissive lights or analytic light sources
+    if (!createGuidingLightSample(sg, pls))
+        return;
 
-        ray.Direction = sampleDir;
-    }
-#if USE_EMISSIVE_LIGHT
-    else { // Emissive light sample
-        if (!createLightSample(sg, pls))
-            return;
+    float lightDirPDF = 1.0;
+    float2 randomValues = float2(pls.rndX, pls.rndY);
+    //float2 randomValues = sampleNext2D(sg);
 
-        float lightDirPDF = 1.0;
-        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), lightDirPDF);
+    float3 woLocal = sample_cosine_hemisphere_concentric(randomValues, lightDirPDF);
 
-        if (lightDirPDF <= 0.f)
-            return;
+    if (lightDirPDF <= 0.)
+        return;
 
-        ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-        pls.flux *= M_PI; // Lambert Emitter
-        pls.cosTheta = woLocal.z;
-        pls.emissionPDF *= lightDirPDF;
-    }
-#endif
+    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+    pls.flux *= M_PI; // Lambert Emitter
+    
     const uint lightCount = dispatchDims.x * dispatchDims.y;
 
     //Prepare the rest of the ray

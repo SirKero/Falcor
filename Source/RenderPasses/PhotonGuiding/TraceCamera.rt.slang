@@ -54,28 +54,11 @@ struct RayPayload
 //Helper struct for MIS
 struct CameraState {
     uint pathLength;
-    float dVCM;
-    float dVM;
-    float dVC;
-    float misVcWeightFactor;
-    float misVmWeightFactor;
-
     bool isSpecularPath;
-    bool lastHitWasDelta;
-    bool isDeltaPath;
-    bool firstHitDiffuse;
 
     __init() {
         pathLength = 0;
-        dVCM = 0.0;
-        dVC = 0.0;
-        dVM = 0.0;
-        misVcWeightFactor = 0.0;
-        misVmWeightFactor = 0.0;
         isSpecularPath = true;
-        lastHitWasDelta = false;
-        isDeltaPath = true;
-        firstHitDiffuse = false;
     }
 }
 
@@ -282,7 +265,6 @@ void rayGen()
         if (!hitEmissive) {
             // Evaluate Photons
             bool isDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-            camState.firstHitDiffuse = isDiffuse;
             if (isDiffuse)
             {
                 outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);

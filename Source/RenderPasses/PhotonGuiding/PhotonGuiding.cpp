@@ -38,6 +38,7 @@ namespace
     const std::string kShaderFolder = "RenderPasses/PhotonGuiding/";
     const std::string kShaderTracePhoton = kShaderFolder + "TracePhoton.rt.slang";
     const std::string kShaderTraceCamera = kShaderFolder + "TraceCamera.rt.slang";
+    const std::string kShaderUpdateGuidingTexture = kShaderFolder + "UpdateGuidingTexture.cs.slang";
 
     //Input Textures
     const std::string kInputVBuffer = "VBuffer";
@@ -112,9 +113,14 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     // Prepare needed Falcor helpers and Buffers/Textures
     prepareLightingStructure(pRenderContext);
 
+    //Return if there is no emissive light
+    if (mEmissiveLightCount == 0)
+        return;
+
     //Prepare Textures and Buffers
     prepareResources(pRenderContext, renderData);
 
+    updateGuidingTexturePass(pRenderContext, renderData);
     tracePhotonPass(pRenderContext, renderData);
     traceCameraPass(pRenderContext, renderData);
     
@@ -205,6 +211,12 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
     //mHasAnalyticLights = analyticUsed;
     //mMixedLights = emissiveUsed && analyticUsed;
 
+    if (pLights->getTotalLightCount() != mEmissiveLightCount)
+    {
+        mEmissiveLightCount = pLights->getTotalLightCount();
+        mEmissiveLightResetTextures = true;
+    }
+
     if (emissiveUsed)
     {
         if (!mpEmissiveLightSampler)
@@ -234,6 +246,13 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         
     }
 
+    if (mEmissiveLightResetTextures)
+    {
+        resetRenderPasses();
+        mGuidingTextures.clear();
+        mEmissiveLightResetTextures = false;
+    }
+
     if (mChangePhotonLightBufferSize)
     {
         mNumMaxPhotons = mNumMaxPhotonsUI;
@@ -260,7 +279,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         if (!mpPhotonData[i])
         {
             mpPhotonData[i] = Buffer::createStructured(
-                mpDevice, sizeof(float) * 16, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(float) * 12, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
@@ -289,6 +308,59 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             CustomAccelerationStructure::UpdateMode::TLASOnly
         );
     }
+
+    //Guiding Textures
+    if (mGuidingTextures.empty())
+    {
+        mGuidingTextures.resize(mEmissiveLightCount);
+
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+        {
+            mGuidingTextures[i] = Texture::create2D(
+                mpDevice, mGuidingTextureResolution, mGuidingTextureResolution, ResourceFormat::R32Float, 1u, Texture::kMaxPossible,
+                nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
+            );
+            mGuidingTextures[i]->setName("GuidingTexture" + std::to_string(i));
+
+            pRenderContext->clearUAV(
+                mGuidingTextures[i]->getUAV(0).get(), float4(1.0 / (mGuidingTextureResolution * mGuidingTextureResolution))
+            );
+            mGuidingTextures[i]->generateMips(pRenderContext);
+        }
+    }
+}
+
+void PhotonGuiding::updateGuidingTexturePass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Update Guiding Texture");
+
+    if (!mpUpdateGuidingPass)
+    {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderUpdateGuidingTexture).csEntry("main").setShaderModel("6_6");
+
+        DefineList defines;
+        defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
+
+        mpUpdateGuidingPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+
+    auto var = mpUpdateGuidingPass->getRootVar();
+    uint resolution = mGuidingTextures[0]->getHeight() / 2;
+    int mipCount = int(mGuidingTextures[0]->getMipCount());
+    for (int m = 1; m < mipCount; m++)
+    {
+        var["CB"]["gRes"] = resolution;
+
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+        {
+            var["gSrc"][i].setSrv(mGuidingTextures[i]->getSRV(m-1, 1u));
+            var["gDst"][i].setUav(mGuidingTextures[i]->getUAV(m));
+        }
+
+        mpUpdateGuidingPass->execute(pRenderContext, uint3(resolution, resolution,mEmissiveLightCount));
+        resolution /= 2;
+    }    
 }
 
 void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -323,6 +395,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
         defines.add(mpScene->getSceneDefines());
         defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -331,9 +404,6 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
-
-    if (mpEmissiveLightSampler)
-        mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -356,10 +426,8 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gDispatchDimension"] = shaderDispatchDim;
     var["CB"]["gScreenRes"] = mScreenRes;
-
-    // Structures
-    if (mpEmissiveLightSampler)
-        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
+    var["CB"]["gGuidingTextureMaxMip"] = mGuidingTextures[0]->getMipCount() - 1u;
 
     // Output
     for (uint i = 0; i < 2; i++)
@@ -367,7 +435,12 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
     }
-   
+
+    for (uint i = 0; i < mGuidingTextures.size(); i++)
+    {
+        var["gGuidingTexture"][i] = mGuidingTextures[i];
+    }
+
     var["gPhotonCounter"] = mpPhotonCounter;
 
     mpScene->raytrace(
@@ -515,6 +588,7 @@ void PhotonGuiding::resetRenderPasses()
 {
     mTracePhotonPass = RayTraceProgramHelper::create();
     mTraceCameraPass = RayTraceProgramHelper::create();
+    mpUpdateGuidingPass.reset();
 
     mpEmissiveLightSampler.reset();
 }

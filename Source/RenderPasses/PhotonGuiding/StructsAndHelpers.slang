@@ -19,25 +19,19 @@ struct PhotonData {
     uint pathLenght;
 
     float3 dir;
-    float dVCM;
+    uint _pad0;
     
     float3 normalW;
-    float dVM;
+    uint _pad1;
 
-    float continationProb;
-    float dVC;
-    uint2 _pad;
 
     __init() {
         this.dir = float3(0);
         this.normalW = float3(0,1,0);
         this.flux = float3(0);
         this.pathLenght = 0;
-        this.dVCM = 0;
-        this.dVM = 0;
-        this.continationProb = 1.0;
-        this.dVC = 0;
-        this._pad = uint2(0);
+        this._pad0 = 0;
+        this._pad1 = 0;
     }
 }
 
