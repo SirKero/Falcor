@@ -51,6 +51,26 @@ public:
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
+    enum class PhotonRenderMode : uint
+    {
+        PhotonMapping = 0u,
+        FinalGathering = 1u
+    };
+    FALCOR_ENUM_INFO(PhotonRenderMode,{
+        {PhotonRenderMode::PhotonMapping, "PhotonMapping"},
+        {PhotonRenderMode::FinalGathering, "FinalGathering"}
+    });
+
+      enum class GuidingMode : uint
+    {
+        Disabled = 0u,
+        Uniform = 1u
+    };
+    FALCOR_ENUM_INFO(GuidingMode, {
+        {GuidingMode::Disabled, "Disabled"},
+        {GuidingMode::Uniform, "Uniform"}
+    });
+
 private:
     //
     // Functions
@@ -91,7 +111,7 @@ private:
     //
     ref<Scene> mpScene;                     // Scene Pointer
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
-    std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
+    std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler for NEE
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
 
     //
@@ -111,7 +131,9 @@ private:
     //
     // Path Tracer
     //
+
     uint mPTMaxBounces = 10;
+    PhotonRenderMode mPhotonRenderMode = PhotonRenderMode::PhotonMapping;
 
     //
     // Photon Distribution
@@ -125,7 +147,7 @@ private:
     float mASBuildBufferPhotonOverestimate = 1.15f; // Guard percentage for AS building
     uint2 mCurrentPhotonCount = mNumMaxPhotons;
     float2 mPhotonRadius = float2(0.008f, 0.002f); //Global / Caustic Radius
-
+    bool mPhotonRussianRoulette = true; //Enables Russian Roulette for the photon pass
     
     bool mUseDynamicPhotonDispatchCount = true;   // Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 4000000;     // Max value for dynamically dispatched photons
@@ -138,6 +160,7 @@ private:
     bool mEmissiveLightResetTextures = true;
     uint mEmissiveLightCount = 0;
     uint mGuidingTextureResolution = 512;
+    GuidingMode mGuidingMode = GuidingMode::Uniform;
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
@@ -145,6 +168,7 @@ private:
     uint mDebugSelectedTriLight = 0;
     float mDebugColorScaleFactor = float(mGuidingTextureResolution * mGuidingTextureResolution);
     float mDebugSizeScaleFactor = 1.f;
+    bool mDebugScaleToDstDim = true;
 
     //
     // Resources
@@ -187,3 +211,5 @@ private:
     ref<ComputePass> mpDebugPass; //For debug
 };
 
+FALCOR_ENUM_REGISTER(PhotonGuiding::PhotonRenderMode);
+FALCOR_ENUM_REGISTER(PhotonGuiding::GuidingMode);

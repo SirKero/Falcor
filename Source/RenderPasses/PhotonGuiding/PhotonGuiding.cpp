@@ -111,20 +111,19 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     if (!mpScene)
         return;
 
+    //Check for changes that need to reset some settings
     // Add refresh flag if options changed
     auto& dict = renderData.getDictionary();
     auto flags = dict.getValue(kRenderPassRefreshFlags, RenderPassRefreshFlags::None);
     if (mOptionsChanged)
-    {
         dict[Falcor::kRenderPassRefreshFlags] = flags | Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
-        mOptionsChanged = false;
-    }
-
     //Check if camera moved to reset guiding count
     auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
     auto cameraChanges = mpScene->getCamera()->getChanges();
-    if ((cameraChanges & ~excluded) != Camera::Changes::None)
+    if (((cameraChanges & ~excluded) != Camera::Changes::None) || mOptionsChanged)
         mGuidingAccumulateCount = 0;
+
+    mOptionsChanged = false;
 
     // Prepare needed Falcor helpers and Buffers/Textures
     prepareLightingStructure(pRenderContext);
@@ -151,7 +150,10 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
 void PhotonGuiding::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
-    
+
+    changed |= widget.dropdown("Render Technique", mPhotonRenderMode);
+    changed |= widget.dropdown("Guiding Mode", mGuidingMode);
+
     if (auto group = widget.group("Photon Options"))
     {
         if (mUseDynamicPhotonDispatchCount)
@@ -201,7 +203,9 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.text("Photon Radius(Global / Caustic):");
         group.indent(10.f);
         changed |= group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
-        group.indent(-10.f);      
+        group.indent(-10.f);
+
+        group.checkbox("Enable Russian Roulette", mPhotonRussianRoulette);
     }
 
     if (auto group = widget.group("Path Tracer Options"))
@@ -225,7 +229,9 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         {
             group.slider("Selected Tri light", mDebugSelectedTriLight, 0u, mEmissiveLightCount - 1);
             group.var("Color Scale", mDebugColorScaleFactor, 0.f, FLT_MAX, 0.1f);
-            group.var("Size Scale", mDebugSizeScaleFactor, 0.f, FLT_MAX, 0.001f);
+            group.checkbox("Scale to DebugTex", mDebugScaleToDstDim);
+            if (!mDebugScaleToDstDim)
+                group.var("Size Scale", mDebugSizeScaleFactor, 0.f, FLT_MAX, 0.001f);     
         }
     }
     mOptionsChanged = changed;
@@ -455,7 +461,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         const uint maxMip = mRecordGuidingTextures[0]->getMipCount() - 1u;
         var["CB"]["gRes"] = mGuidingTextureResolution;
         var["CB"]["gCopyFromCounter"] = true;
-        var["CB"]["gIterationCount"] = mGuidingAccumulateCount;
+        var["CB"]["gIterationCount"] = mGuidingMode == GuidingMode::Disabled ? 0 : mGuidingAccumulateCount;
         for (uint i = 0; i < mEmissiveLightCount; i++)
         {
             var["gSrcCounter"][i].setUav(mRecordGuidingTextures[i]->getUAV(0));
@@ -528,6 +534,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    mTracePhotonPass.pProgram->addDefine("RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -626,6 +633,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     mTraceCameraPass.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
     mTraceCameraPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTraceCameraPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
+    mTraceCameraPass.pProgram->addDefine("RENDER_TECHNIQUE", std::to_string((uint)mPhotonRenderMode));
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -689,11 +697,12 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     auto var = mpDebugPass->getRootVar();
 
     uint3 dispatchDim = uint3(renderData.getDefaultTextureDims().xy(), 1);
+    float scaleToDebugTexFactor = (float(math::min(dispatchDim.x, dispatchDim.y)) / float(mGuidingTextureResolution)) + 0.5f;
 
     var["CB"]["gColorScaleFactor"] = mDebugColorScaleFactor;
     var["CB"]["gTextureSize"] = mGuidingTextureResolution;
     var["CB"]["gDispatchSize"] = dispatchDim.xy();
-    var["CB"]["gSizeScaleFactor"] = mDebugSizeScaleFactor;
+    var["CB"]["gSizeScaleFactor"] = mDebugScaleToDstDim ? scaleToDebugTexFactor : mDebugSizeScaleFactor;
     
     var["gGuidingTexture"] = mGuidingTextures[mDebugSelectedTriLight];
     var["gDebug"] = renderData[kOutputDebug]->asTexture();

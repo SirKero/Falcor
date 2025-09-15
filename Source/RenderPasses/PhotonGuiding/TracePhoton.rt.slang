@@ -39,7 +39,7 @@ Texture2D<float> gGuidingTexture[NUM_GUIDING_TEXTURES];
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL,PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-static const bool kRussianRoulette = true;  //TODO as option
+static const bool kRussianRoulette = RUSSIAN_ROULETTE;
 
 struct RayPayload
 {
@@ -320,16 +320,17 @@ void rayGen()
         thp *= bsdfSample.weight;
         bool isEmissive = any(bsdfProperties.emission > 0);
 
-        const float rrVal = luminance(thp);
-
         // RussianRoulette
-        if ((sampleNext1D(sg) > rrVal) || isEmissive)
+        if (kRussianRoulette)
         {
-            return; // Photon is absorbed
+            const float rrVal = luminance(thp);
+            if ((sampleNext1D(sg) > rrVal) || isEmissive)
+            {
+                return; // Photon is absorbed
+            }
+            thp /= rrVal;
         }
-
-        thp /= rrVal;
-
+       
         // Update Photon
         storeAsCaustic = !reflectedDiffuse;
         photon.dir = -ray.Direction;

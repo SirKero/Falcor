@@ -43,6 +43,10 @@ static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const float3 kDefaultBackgroundColor = float3(0.0);
 
+// Render Mode
+static const uint kRenderMode_PhotonMapping = 0;
+static const uint kRenderMode_FinalGather = 1;
+static const uint kRenderMode = RENDER_TECHNIQUE;
 
 struct RayPayload
 {
@@ -59,11 +63,13 @@ struct RayPayload
 //Helper struct for MIS
 struct CameraState {
     uint pathLength;
+    uint diffuseHitCount;
     bool isSpecularPath;
 
     __init() {
         pathLength = 0;
         isSpecularPath = true;
+        diffuseHitCount = 0;
     }
 }
 
@@ -125,7 +131,13 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout S
 {
     // Abort on diffuse surfaces
     bool isDiffuse = roughness > kRoughnessThreshold;
-    if (isDiffuse)
+    bool abortPath = false;
+    if (kRenderMode == kRenderMode_PhotonMapping)
+        abortPath = isDiffuse;
+    else if (kRenderMode == kRenderMode_FinalGather)
+        abortPath = camState.diffuseHitCount > 0 && isDiffuse;
+
+    if (abortPath)
         return false;
 
     BSDFSample bsdfSample;
@@ -139,11 +151,12 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout S
 
     camState.pathLength++;
     camState.isSpecularPath &= !isDiffuse;
+    camState.diffuseHitCount += isDiffuse ? 1 : 0;
 
     return true;
 }
 
-float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState camState, float continuationProb, inout SampleGenerator sg)
+float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg)
 {
     TriangleLightSample tls = {};
     if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
@@ -192,14 +205,19 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         let bsdfProperties = mi.getProperties(sd);
 
         bool hitEmissive = any(bsdfProperties.emission > 0);
-        if (hitEmissive) {
+        bool finalGatherFirstHit = (kRenderMode == kRenderMode_FinalGather) && (camState.diffuseHitCount == 0);
+        if (hitEmissive && finalGatherFirstHit) {
             outColor += bsdfProperties.emission * thp;
             break;
         }
 
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
-            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg) * thp;
+            
+            uint instanceMask = finalGatherFirstHit ? 2 : 0xFF;
+            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg) * thp;
+            if (finalGatherFirstHit)
+                outColor += nextEventEstimation(sd, mi, sg);
         }
 
         validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, sg, thp, camState, ray);
@@ -275,7 +293,11 @@ void rayGen()
             bool isDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
             if (isDiffuse)
             {
-                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
+                uint instanceMask = kRenderMode == kRenderMode_FinalGather ? 2 : 0xFF; // For final gather collect caustic only
+                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg);
+                if (kRenderMode == kRenderMode_FinalGather) {
+                    outColor += nextEventEstimation(sd, mi, sg);
+                }
             }
             // Calculate next ray
             float3 thp = float3(1.0);
