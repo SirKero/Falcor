@@ -10,6 +10,7 @@ RWTexture2D<float> gDst[COUNT_TEXTURES];
 cbuffer CB {
     uint gRes;
     bool gCopyFromCounter;
+    uint gIterationCount;
 }
 
 /* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
@@ -28,11 +29,17 @@ void main(uint3 thdID: SV_DispatchThreadID)
 
     if (gCopyFromCounter)
     {
-        //Get Weight
-        float total = float(gSrcCounterTotal[texIdx][uint2(0)]);
-        float pixelCounterVal = float(gSrcCounter[texIdx][pixel]);
-        float weight = pixelCounterVal / total;
-
+        // Get Weight
+        float weight = 1.0 / (gRes * gRes); // Uniform
+        if (gIterationCount > 0) {
+            float total = float(gSrcCounterTotal[texIdx][uint2(0)]);
+            float pixelCounterVal = float(gSrcCounter[texIdx][pixel]);
+            weight = pixelCounterVal / total;
+            float oldWeight = gDst[texIdx][pixel];
+            oldWeight *= gIterationCount;
+            weight = (weight + oldWeight) / (gIterationCount + 1);
+        }
+       
         // Write
         gDst[texIdx][pixel] = weight;
         gSrcCounter[texIdx][pixel] = 1; //Clear

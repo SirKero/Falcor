@@ -111,6 +111,12 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
         mOptionsChanged = false;
     }
 
+    //Check if camera moved to reset guiding count
+    auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
+    auto cameraChanges = mpScene->getCamera()->getChanges();
+    if ((cameraChanges & ~excluded) != Camera::Changes::None)
+        mGuidingAccumulateCount = 0;
+
     // Prepare needed Falcor helpers and Buffers/Textures
     prepareLightingStructure(pRenderContext);
 
@@ -127,6 +133,7 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     traceCameraPass(pRenderContext, renderData);
     
     mFrameCount++;
+    mGuidingAccumulateCount++;
 }
 
 void PhotonGuiding::renderUI(Gui::Widgets& widget)
@@ -282,7 +289,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         if (!mpPhotonData[i])
         {
             mpPhotonData[i] = Buffer::createStructured(
-                mpDevice, sizeof(float) * 12, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(float) * 16, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
@@ -416,6 +423,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         const uint maxMip = mRecordGuidingTextures[0]->getMipCount() - 1u;
         var["CB"]["gRes"] = mGuidingTextureResolution;
         var["CB"]["gCopyFromCounter"] = true;
+        var["CB"]["gIterationCount"] = mGuidingAccumulateCount;
         for (uint i = 0; i < mEmissiveLightCount; i++)
         {
             var["gSrcCounter"][i].setUav(mRecordGuidingTextures[i]->getUAV(0));
@@ -574,8 +582,11 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
         {
             sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
         }
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
 
-        mTraceCameraPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+        mTraceCameraPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
 
     // Defines
@@ -615,7 +626,11 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
+    }
 
+    for (uint i = 0; i < mEmissiveLightCount; i++)
+    {
+        var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
     }
 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();

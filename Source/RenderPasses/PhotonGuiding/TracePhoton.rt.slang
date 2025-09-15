@@ -60,7 +60,9 @@ struct PhotonLightSample {
     float3 normal;
     float rndY;
     float3 flux;
-    float cosTheta;
+    uint lightIdx;
+    uint2 guidingPixels;
+    uint2 _pad;
 };
 
 // transforms direction from local to world space
@@ -158,18 +160,20 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     }
 
     // Recreate selected random number range from the choosen index
-    float2 relMinWeight = float2(mipIdx) / gGuidingTextureResolution;
-    float2 relMaxWeight = float2(mipIdx + 1) / gGuidingTextureResolution;
+    pls.guidingPixels = mipIdx;
+    float2 relMinWeight = float2(pls.guidingPixels) / gGuidingTextureResolution;
+    float2 relMaxWeight = float2(pls.guidingPixels + 1) / gGuidingTextureResolution;
     relMinWeight += (relMaxWeight - relMinWeight) * sampleNext2D(sg);
     pls.rndX = relMinWeight.x;
     pls.rndY = relMinWeight.y;
-    float guidingPDF = (gGuidingTextureResolution * gGuidingTextureResolution) * endWeight; //TODO check if correct
+    float guidingPDF = endWeight * (gGuidingTextureResolution * gGuidingTextureResolution);
 
     // Get emissive triangle data
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triIdx);
     const float3 barycentrics = sample_triangle(sampleNext2D(sg));
     pls.posW = tri.getPosition(barycentrics);
     pls.normal = tri.normal;
+    pls.lightIdx = triIdx;
 
     // Get Flux
     float2 uv = tri.getTexCoord(barycentrics);
@@ -257,6 +261,9 @@ void rayGen()
     photon.flux = photonStartFlux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
+    photon.lightIndex = pls.lightIdx;
+    photon.guidingPixel = pls.guidingPixels;
+    photon.guidingRandomVal = float2(pls.rndX, pls.rndY);
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {

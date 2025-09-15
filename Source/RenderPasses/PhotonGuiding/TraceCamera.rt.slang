@@ -10,8 +10,13 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 
+#ifndef NUM_GUIDING_TEXTURES
+#define NUM_GUIDING_TEXTURES 1
+#endif
+
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
+RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
 
 StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
@@ -107,6 +112,9 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         collectedRadiance += max(0, (photonData.flux * bsdf) / (NdotL *  radius * radius)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+
+        // Add to the guiding texture
+        InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
     }
     //Divide by the rest of the photon weight
     collectedRadiance /= M_PI * gNumLightPaths;

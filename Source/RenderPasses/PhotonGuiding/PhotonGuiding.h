@@ -95,6 +95,7 @@ private:
     // Parameters
     //
     uint mFrameCount = 0;
+    uint mGuidingAccumulateCount = 0;
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
