@@ -62,9 +62,15 @@ private:
     //Prepares needed Buffers and Textures and Acceleration Structures
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Compute pass to update the guiding texture
-    void updateGuidingTexturePass(RenderContext* pRenderContext, const RenderData& renderData);
+    //Uses Reduce and updates the guiding textures
+    void updateGuidingTextures(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Uses reduce on the guiding counter to normalize the texture
+    void guidingCounterReducePass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Generates the guiding mipmap traverse chain
+    void generateGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData);
+    
     // Traces the photons and stores them in the scene
     void tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -137,6 +143,7 @@ private:
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     std::vector<ref<Texture>> mGuidingTextures; //Guiding Textures for Photon Guiding
+    std::vector<ref<Texture>> mRecordGuidingTextures; //Textures to record guiding data.
 
 
     //
@@ -163,6 +170,7 @@ private:
     RayTraceProgramHelper mTracePhotonPass;           // Trace Photons
     RayTraceProgramHelper mTraceCameraPass;              // Trace Camera
 
-    ref<ComputePass> mpUpdateGuidingPass; // Generates the mips for the guiding textures
+    ref<ComputePass> mpGuidingCounterReducePass; //Reduce on the guiding counter to obtain the total
+    ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
 };
 

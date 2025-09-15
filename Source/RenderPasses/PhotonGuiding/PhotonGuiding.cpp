@@ -38,7 +38,8 @@ namespace
     const std::string kShaderFolder = "RenderPasses/PhotonGuiding/";
     const std::string kShaderTracePhoton = kShaderFolder + "TracePhoton.rt.slang";
     const std::string kShaderTraceCamera = kShaderFolder + "TraceCamera.rt.slang";
-    const std::string kShaderUpdateGuidingTexture = kShaderFolder + "UpdateGuidingTexture.cs.slang";
+    const std::string kShaderGuidingGenMipTraverseChain = kShaderFolder + "GuidingTextureGenMipTraverseChain.cs.slang";
+    const std::string kShaderGuidingReduce = kShaderFolder + "GuidingCounterReduce.cs.slang";
 
     //Input Textures
     const std::string kInputVBuffer = "VBuffer";
@@ -120,7 +121,8 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     //Prepare Textures and Buffers
     prepareResources(pRenderContext, renderData);
 
-    updateGuidingTexturePass(pRenderContext, renderData);
+    updateGuidingTextures(pRenderContext, renderData);
+
     tracePhotonPass(pRenderContext, renderData);
     traceCameraPass(pRenderContext, renderData);
     
@@ -250,6 +252,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     {
         resetRenderPasses();
         mGuidingTextures.clear();
+        mRecordGuidingTextures.clear();
         mEmissiveLightResetTextures = false;
     }
 
@@ -328,24 +331,105 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             mGuidingTextures[i]->generateMips(pRenderContext);
         }
     }
+
+    if (mRecordGuidingTextures.empty())
+    {
+        mRecordGuidingTextures.resize(mEmissiveLightCount);
+
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+        {
+            mRecordGuidingTextures[i] = Texture::create2D(
+                mpDevice, mGuidingTextureResolution, mGuidingTextureResolution, ResourceFormat::R32Uint, 1u, Texture::kMaxPossible,
+                nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
+            );
+            mRecordGuidingTextures[i]->setName("RecordGuidingTexture" + std::to_string(i));
+
+            pRenderContext->clearUAV(mRecordGuidingTextures[i]->getUAV(0).get(), uint4(1));
+            mRecordGuidingTextures[i]->generateMips(pRenderContext);
+        }
+    }
 }
 
-void PhotonGuiding::updateGuidingTexturePass(RenderContext* pRenderContext, const RenderData& renderData)
+void PhotonGuiding::updateGuidingTextures(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "Update Guiding Texture");
+    FALCOR_PROFILE(pRenderContext, "Update Guiding Textures");
 
-    if (!mpUpdateGuidingPass)
+    guidingCounterReducePass(pRenderContext, renderData);
+    generateGuidingMipTraverseChainPass(pRenderContext, renderData);
+}
+
+void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Reduce Guiding Counter");
+    if (!mpGuidingCounterReducePass)
     {
         Program::Desc desc;
-        desc.addShaderLibrary(kShaderUpdateGuidingTexture).csEntry("main").setShaderModel("6_6");
+        desc.addShaderLibrary(kShaderGuidingReduce).csEntry("main").setShaderModel("6_6");
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
 
-        mpUpdateGuidingPass = ComputePass::create(mpDevice, desc, defines, true);
+        mpGuidingCounterReducePass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    auto var = mpGuidingCounterReducePass->getRootVar();
+
+    const uint maxMipCount = mRecordGuidingTextures[0]->getMipCount() - 1u;
+    for (uint mip = 0; mip < maxMipCount; mip += 5)
+    {
+        uint dstMip = math::min(maxMipCount, mip + 5);
+
+        uint3 dispatchDim = uint3(mRecordGuidingTextures[0]->getWidth(mip), mRecordGuidingTextures[0]->getHeight(mip), mEmissiveLightCount);
+
+        dispatchDim.xy() = dispatchDim.xy() / 2u;
+
+        var["CB"]["gDstSize"] = dispatchDim.xy();
+
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+        {
+            var["gSrc"][i].setSrv(mRecordGuidingTextures[i]->getSRV(mip, 1u));
+            var["gDst"][i].setUav(mRecordGuidingTextures[i]->getUAV(dstMip, 0u, 1u));
+        }
+
+        mpGuidingCounterReducePass->execute(pRenderContext, dispatchDim);
+    }
+}
+
+void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Gen Mip Traverse Chain");
+
+    if (!mpGenerateGuidingMipTraverseChainPass)
+    {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderGuidingGenMipTraverseChain).csEntry("main").setShaderModel("6_6");
+
+        DefineList defines;
+        defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
+
+        mpGenerateGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
     }
 
-    auto var = mpUpdateGuidingPass->getRootVar();
+    auto var = mpGenerateGuidingMipTraverseChainPass->getRootVar();
+
+    //First pass to get the level 0 values from the counter and clear counter to 1
+    {
+        const uint maxMip = mRecordGuidingTextures[0]->getMipCount() - 1u;
+        var["CB"]["gRes"] = mGuidingTextureResolution;
+        var["CB"]["gCopyFromCounter"] = true;
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+        {
+            var["gSrcCounter"][i].setUav(mRecordGuidingTextures[i]->getUAV(0));
+            var["gSrcCounterTotal"][i].setSrv(mRecordGuidingTextures[i]->getSRV(maxMip, 1u));
+            var["gDst"][i].setUav(mGuidingTextures[i]->getUAV(0));
+        }
+
+        mpGenerateGuidingMipTraverseChainPass->execute(
+            pRenderContext, uint3(mGuidingTextureResolution, mGuidingTextureResolution, mEmissiveLightCount)
+        );
+    }
+
+    //Loop to generate the mip chain
+    var["CB"]["gCopyFromCounter"] = false;
     uint resolution = mGuidingTextures[0]->getHeight() / 2;
     int mipCount = int(mGuidingTextures[0]->getMipCount());
     for (int m = 1; m < mipCount; m++)
@@ -358,7 +442,7 @@ void PhotonGuiding::updateGuidingTexturePass(RenderContext* pRenderContext, cons
             var["gDst"][i].setUav(mGuidingTextures[i]->getUAV(m));
         }
 
-        mpUpdateGuidingPass->execute(pRenderContext, uint3(resolution, resolution,mEmissiveLightCount));
+        mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, resolution, mEmissiveLightCount));
         resolution /= 2;
     }    
 }
@@ -588,7 +672,8 @@ void PhotonGuiding::resetRenderPasses()
 {
     mTracePhotonPass = RayTraceProgramHelper::create();
     mTraceCameraPass = RayTraceProgramHelper::create();
-    mpUpdateGuidingPass.reset();
+    mpGuidingCounterReducePass.reset();
+    mpGenerateGuidingMipTraverseChainPass.reset();
 
     mpEmissiveLightSampler.reset();
 }
