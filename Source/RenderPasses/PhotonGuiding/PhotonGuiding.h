@@ -77,6 +77,9 @@ private:
     // Traces the camera and collects the photons
     void traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //For debug
+    void debugPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     // Handles readback of the photon counter
     void handlePhotonCounter(RenderContext* pRenderContext);
 
@@ -136,6 +139,13 @@ private:
     uint mEmissiveLightCount = 0;
     uint mGuidingTextureResolution = 512;
 
+    //Debug
+    bool mDebugFreezeGuidingTextures = false;
+    bool mDebugShowGuidingTexture = false;
+    uint mDebugSelectedTriLight = 0;
+    float mDebugColorScaleFactor = float(mGuidingTextureResolution * mGuidingTextureResolution);
+    float mDebugSizeScaleFactor = 1.f;
+
     //
     // Resources
     //
@@ -146,6 +156,7 @@ private:
     std::vector<ref<Texture>> mGuidingTextures; //Guiding Textures for Photon Guiding
     std::vector<ref<Texture>> mRecordGuidingTextures; //Textures to record guiding data.
 
+    ref<Sampler> mpLinearSampler; //Linear Sampler
 
     //
     // Render Passes/Programms
@@ -173,5 +184,6 @@ private:
 
     ref<ComputePass> mpGuidingCounterReducePass; //Reduce on the guiding counter to obtain the total
     ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
+    ref<ComputePass> mpDebugPass; //For debug
 };
 

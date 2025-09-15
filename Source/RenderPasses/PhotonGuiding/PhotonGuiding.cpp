@@ -40,6 +40,7 @@ namespace
     const std::string kShaderTraceCamera = kShaderFolder + "TraceCamera.rt.slang";
     const std::string kShaderGuidingGenMipTraverseChain = kShaderFolder + "GuidingTextureGenMipTraverseChain.cs.slang";
     const std::string kShaderGuidingReduce = kShaderFolder + "GuidingCounterReduce.cs.slang";
+    const std::string kShaderDebug = kShaderFolder + "Debug.cs.slang";
 
     //Input Textures
     const std::string kInputVBuffer = "VBuffer";
@@ -52,8 +53,10 @@ namespace
 
     //Output textures
     const std::string kOutputColor = "ColorOut";
+    const std::string kOutputDebug = "DebugOut";
     const Falcor::ChannelList kOutputChannels{
-        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float}
+        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputDebug, "gDebug", "Debug Texture", true /*optional*/, ResourceFormat::RGBA32Float}
     };
 
 
@@ -70,6 +73,12 @@ PhotonGuiding::PhotonGuiding(ref<Device> pDevice, const Properties& props)
     // Create sample generator.
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
     FALCOR_ASSERT(mpSampleGenerator);
+
+    //Create Sampler
+    Sampler::Desc samplerDesc = {};
+    samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
+    samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
+    mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
 }
 
 Properties PhotonGuiding::getProperties() const
@@ -131,7 +140,10 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
 
     tracePhotonPass(pRenderContext, renderData);
     traceCameraPass(pRenderContext, renderData);
-    
+
+    if (mDebugShowGuidingTexture)
+        debugPass(pRenderContext, renderData);
+
     mFrameCount++;
     mGuidingAccumulateCount++;
 }
@@ -205,6 +217,17 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.tooltip("Enables Lambertian Diffuse BRDS. If disabled the Frostbyte diffuse BRDF (Falcor default) is used");
     }
 
+    if (auto group = widget.group("Debug"))
+    {
+        group.checkbox("Freeze Guiding Texture", mDebugFreezeGuidingTextures);
+        group.checkbox("Show Guiding Texture", mDebugShowGuidingTexture);
+        if (mDebugShowGuidingTexture)
+        {
+            group.slider("Selected Tri light", mDebugSelectedTriLight, 0u, mEmissiveLightCount - 1);
+            group.var("Color Scale", mDebugColorScaleFactor, 0.f, FLT_MAX, 0.1f);
+            group.var("Size Scale", mDebugSizeScaleFactor, 0.f, FLT_MAX, 0.001f);
+        }
+    }
     mOptionsChanged = changed;
 }
 
@@ -360,6 +383,15 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
 void PhotonGuiding::updateGuidingTextures(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Update Guiding Textures");
+
+    if (mDebugFreezeGuidingTextures)
+    {
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+        {
+            pRenderContext->clearUAV(mRecordGuidingTextures[i]->getUAV(0).get(), uint4(1));
+        }
+        return;
+    }
 
     guidingCounterReducePass(pRenderContext, renderData);
     generateGuidingMipTraverseChainPass(pRenderContext, renderData);
@@ -639,6 +671,37 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     mpScene->raytrace(pRenderContext, mTraceCameraPass.pProgram.get(), mTraceCameraPass.pVars, uint3(mScreenRes, 1));
 }
 
+void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Debug");
+
+    if (!mpDebugPass)
+    {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderDebug).csEntry("main").setShaderModel("6_6");
+
+        DefineList defines;
+        defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
+
+        mpDebugPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+
+    auto var = mpDebugPass->getRootVar();
+
+    uint3 dispatchDim = uint3(renderData.getDefaultTextureDims().xy(), 1);
+
+    var["CB"]["gColorScaleFactor"] = mDebugColorScaleFactor;
+    var["CB"]["gTextureSize"] = mGuidingTextureResolution;
+    var["CB"]["gDispatchSize"] = dispatchDim.xy();
+    var["CB"]["gSizeScaleFactor"] = mDebugSizeScaleFactor;
+    
+    var["gGuidingTexture"] = mGuidingTextures[mDebugSelectedTriLight];
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
+    var["gSampler"] = mpLinearSampler;
+
+    mpDebugPass->execute(pRenderContext, dispatchDim);
+}
+
 void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
 {
     // Copy the photonCounter to a CPU Buffer
@@ -689,6 +752,7 @@ void PhotonGuiding::resetRenderPasses()
     mTraceCameraPass = RayTraceProgramHelper::create();
     mpGuidingCounterReducePass.reset();
     mpGenerateGuidingMipTraverseChainPass.reset();
+    mpDebugPass.reset();
 
     mpEmissiveLightSampler.reset();
 }
