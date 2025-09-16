@@ -1,30 +1,3 @@
-/***************************************************************************
- # Copyright (c) 2015-23, NVIDIA CORPORATION. All rights reserved.
- #
- # Redistribution and use in source and binary forms, with or without
- # modification, are permitted provided that the following conditions
- # are met:
- #  * Redistributions of source code must retain the above copyright
- #    notice, this list of conditions and the following disclaimer.
- #  * Redistributions in binary form must reproduce the above copyright
- #    notice, this list of conditions and the following disclaimer in the
- #    documentation and/or other materials provided with the distribution.
- #  * Neither the name of NVIDIA CORPORATION nor the names of its
- #    contributors may be used to endorse or promote products derived
- #    from this software without specific prior written permission.
- #
- # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY
- # EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- # IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- # PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- # CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- # EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- # PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- # PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- # OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- **************************************************************************/
 #include "ReSTIR_FG_Lite.h"
 #include <memory>
 #include <utility>
@@ -32,8 +5,6 @@
 #include "RenderGraph/RenderPassStandardFlags.h"
 
 #include "Rendering/Lights/EmissivePowerSampler.h"
-
-
 
 namespace
 {
@@ -61,7 +32,6 @@ namespace
     const Falcor::ChannelList kOutputChannels{
         {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float}
     };
-
 
 }; // namespace
 
@@ -98,7 +68,7 @@ Properties ReSTIR_FG_Lite::getProperties() const
 
 RenderPassReflection ReSTIR_FG_Lite::reflect(const CompileData& compileData)
 {
-    //In and Output textures
+    //In- and Output Textures
     RenderPassReflection reflector;
     addRenderPassInputs(reflector, kInputChannels);
     addRenderPassOutputs(reflector, kOutputChannels);
@@ -219,8 +189,8 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
 
     if (auto group = widget.group("Material Options"))
     {
-        group.checkbox("Use Lambertian Diffuse BRDF", mUseLambertianDiffuse);
-        group.tooltip("BRDF used by ReSTIR PT and Suffix ReSTIR prototype");
+        group.checkbox("Use Lambertian Diffuse BSDF", mUseLambertianDiffuse);
+        group.tooltip("BSDF used by ReSTIR PT and Suffix ReSTIR prototype");
 
         group.text("Diffuse Classification Roughness Threshold:");
         group.tooltip("Surfaces with roughness above this threshold are considered diffuse");
@@ -289,18 +259,19 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
 
     mpRTXDI->beginFrame(pRenderContext, mScreenRes);
 
-    //Trace Photons
+    //Trace Photons. Up to two passes may be executed, depending on the light types in the scene
+    //(one for emissive triangles and one for analytic point/spot lights)
     tracePhotonsPass(pRenderContext, renderData, !mMixedLights && mHasAnalyticLights, !mMixedLights && mPhotonAnalyticRatio > 0);
     if (mMixedLights && mPhotonAnalyticRatio > 0)
         tracePhotonsPass(pRenderContext, renderData, true); // Second pass. Always Analytic
 
-    //Initial Samples for ReSTIR FG and inti RTXDI structs
+    //Initial Samples for ReSTIR FG (1SPP Photon Final Gathering) and inti RTXDI structs
     generateInitialSamplesPass(pRenderContext, renderData);
 
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
-    //Spatiotemporal resampling
+    //Spatiotemporal resampling for final gather samples and caustics
     resampleReservoirFGPass(pRenderContext, renderData);
 
     resampleReservoirCausticPass(pRenderContext, renderData);
@@ -308,7 +279,7 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     //Finalize Reservoirs
     evaluateReservoirsPass(pRenderContext, renderData);
 
-    //End ReSTIR
+    //End ReSTIR DI frame
     mpRTXDI->endFrame(pRenderContext);
 
     mFrameCount++;
@@ -350,6 +321,7 @@ void ReSTIR_FG_Lite::prepareLightingStructure(RenderContext* pRenderContext)
 
 void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    //Reset buffers when screen resolution or certain options changed
     auto& screenDims = renderData.getDefaultTextureDims();
     if (screenDims.x != mScreenRes.x || screenDims.y != mScreenRes.y)
     {
@@ -406,6 +378,7 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
         }
     }
 
+    //Photon Counters
     if (!mpPhotonCounter)
     {
         mpPhotonCounter = Buffer::create(
@@ -431,7 +404,7 @@ void ReSTIR_FG_Lite::preparePhotonAccelerationStructure()
         mChangePhotonLightBufferSize = false;
     }
 
-    // Create the Photon AS
+    // Create the Photon Acceleration Structure
     if (!mpPhotonAS)
     {
         std::vector<uint64_t> aabbCount = {mNumMaxPhotons[0], mNumMaxPhotons[1]};
@@ -445,7 +418,7 @@ void ReSTIR_FG_Lite::preparePhotonAccelerationStructure()
 
 void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData,  bool analyticOnly,  bool buildAS)
 {
-    FALCOR_PROFILE(pRenderContext, "Trace Photons");
+    FALCOR_PROFILE(pRenderContext, "TracePhotons");
 
     //Clear Photon Counter
     pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
@@ -502,7 +475,6 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
         dispatchedF *= analyticOnly ? mPhotonAnalyticRatio : 1.f - mPhotonAnalyticRatio;
         dispatchedPhotons = uint(dispatchedF);
     }
-
     uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
     shaderDispatchDim = std::max(32u, shaderDispatchDim);
 
@@ -518,7 +490,7 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
 
-    //Output
+    //Output Buffers
     for (uint32_t i = 0; i < 2; i++)
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
@@ -526,8 +498,10 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     }
     var["gPhotonCounter"] = mpPhotonCounter;
 
+    //Dispatch raytracing shader
     mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1));
 
+    //If two passes are dispatched, the acceleration structure is build on the second dispatch
     if (buildAS)
     {
         //Clear values after the counter
@@ -548,7 +522,7 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
 }
 
 void ReSTIR_FG_Lite::handlePhotonCounter(RenderContext* pRenderContext) {
-    // Copy the photonCounter to a CPU Buffer
+    // Copy the photonCounter to a CPU Buffer (asynchronous, read GPU value can be a couple of frames old)
     pRenderContext->copyBufferRegion(mpPhotonCounterCPU.get(), 0, mpPhotonCounter.get(), 0, sizeof(uint2));
 
     void* data = mpPhotonCounterCPU->map(Buffer::MapType::Read);
@@ -618,7 +592,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
         mGenerateInitialSamplesPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
     }
 
-    //Defines
+    //Defines that can change on runtime
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mGenerateInitialSamplesPass.pProgram->addDefines(getMaterialDefines());
@@ -637,17 +611,19 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //RTXDI Resources
     mpRTXDI->setShaderData(var);
 
-    //Input
+    //Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     mpPhotonAS->bindTlas(var, "gPhotonAS");
-    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
-    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     for (uint32_t i = 0; i < 2; i++)
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
     }
-        
+
+    //Output Resources
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
 
@@ -659,7 +635,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 void ReSTIR_FG_Lite::resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Resampling Final Gather");
-    // Create pass
+    //Initialize compute pass
     if (!mpResampleReservoirFGPass)
     {
         Program::Desc desc;
@@ -677,9 +653,9 @@ void ReSTIR_FG_Lite::resampleReservoirFGPass(RenderContext* pRenderContext, cons
         mpResampleReservoirFGPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirFGPass);
-    mpResampleReservoirFGPass->getProgram()->addDefines(getMaterialDefines());
+    mpResampleReservoirFGPass->getProgram()->addDefines(getMaterialDefines()); //Runtime define
 
-    //Return early if there is no previous reservoir
+    //Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsFG.enable)
     {
         return;
@@ -701,12 +677,14 @@ void ReSTIR_FG_Lite::resampleReservoirFGPass(RenderContext* pRenderContext, cons
     var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
     var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
 
-    // Input
-    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    // Input Resources
     var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount +1) % 2];
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
 
-    // Execute
+    // In-/Output Resources
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+
+    // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpResampleReservoirFGPass->execute(pRenderContext, uint3(targetDim, 1));
@@ -715,7 +693,7 @@ void ReSTIR_FG_Lite::resampleReservoirFGPass(RenderContext* pRenderContext, cons
 void ReSTIR_FG_Lite::resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Resampling Caustics");
-    // Create pass
+    // Initialize compute pass
     if (!mpResampleReservoirCausticPass)
     {
         Program::Desc desc;
@@ -732,9 +710,9 @@ void ReSTIR_FG_Lite::resampleReservoirCausticPass(RenderContext* pRenderContext,
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirCausticPass);
-    mpResampleReservoirCausticPass->getProgram()->addDefines(getMaterialDefines());
+    mpResampleReservoirCausticPass->getProgram()->addDefines(getMaterialDefines()); //Runtime define
 
-    // Return early if there is no previous reservoir
+    // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsCaustic.enable)
     {
         return;
@@ -755,10 +733,12 @@ void ReSTIR_FG_Lite::resampleReservoirCausticPass(RenderContext* pRenderContext,
     var["CB"]["gNormalThreshold"] = mNormalThreshold;
     var["CB"]["gPhotonRadius"] = mPhotonRadius;
 
-    // Input
-    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+    // Input Resources
     var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+
+    // In-/Output Resources
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -770,7 +750,7 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
 {
     FALCOR_PROFILE(pRenderContext, "EvaluateReservoirs");
 
-    // Create pass
+    // Create compute pass
     if (!mpEvaluateReservoirsPass)
     {
         Program::Desc desc;
