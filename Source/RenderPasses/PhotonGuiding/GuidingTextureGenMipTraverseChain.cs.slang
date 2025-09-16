@@ -2,8 +2,12 @@
 #define COUNT_TEXTURES 1
 #endif
 
-RWTexture2D<uint> gSrcCounter[COUNT_TEXTURES];    // RW for clearing; only used when gCopyFromCounter = true
-Texture2D<uint> gSrcCounterTotal[COUNT_TEXTURES]; // Only used when gCopyFromCounter = true
+#ifndef COUNTER_FORMAT
+#define COUNTER_FORMAT uint
+#endif
+
+RWTexture2D<COUNTER_FORMAT> gSrcCounter[COUNT_TEXTURES];    // RW for clearing; only used when gCopyFromCounter = true
+Texture2D<COUNTER_FORMAT> gSrcCounterTotal[COUNT_TEXTURES]; // Only used when gCopyFromCounter = true
 Texture2D<float> gSrc[COUNT_TEXTURES];
 RWTexture2D<float> gDst[COUNT_TEXTURES];
 
@@ -11,6 +15,7 @@ cbuffer CB {
     uint gRes;
     bool gCopyFromCounter;
     uint gIterationCount;
+    float gClearValue;
 }
 
 /* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
@@ -42,7 +47,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
        
         // Write
         gDst[texIdx][pixel] = weight;
-        gSrcCounter[texIdx][pixel] = 1; //Clear
+        gSrcCounter[texIdx][pixel] = (COUNTER_FORMAT)gClearValue; //Clear
     }
     else
     {

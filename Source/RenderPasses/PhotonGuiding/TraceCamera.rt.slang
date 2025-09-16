@@ -9,6 +9,7 @@ import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
+import SharedEnums;
 
 #ifndef NUM_GUIDING_TEXTURES
 #define NUM_GUIDING_TEXTURES 1
@@ -42,11 +43,8 @@ static const bool kUseEnvMap = USE_ENV_MAP;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const float3 kDefaultBackgroundColor = float3(0.0);
-
-// Render Mode
-static const uint kRenderMode_PhotonMapping = 0;
-static const uint kRenderMode_FinalGather = 1;
 static const uint kRenderMode = RENDER_TECHNIQUE;
+static const uint kGuidingMode = GUIDING_MODE;
 
 struct RayPayload
 {
@@ -93,6 +91,8 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
     ray.TMin = 0;
     ray.TMax = kPhotonCollectTMax;
 
+    const float photonWeight = M_PI * gNumLightPaths;
+
     RayQuery<RAY_FLAG_NONE> rayQuery;
 
     rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
@@ -117,13 +117,25 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        collectedRadiance += max(0, (photonData.flux * bsdf) / (NdotL *  radius * radius)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        float3 photonRadiance = max( 0, (photonData.flux * bsdf) / (NdotL * radius * radius * photonWeight)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        collectedRadiance += photonRadiance; 
 
         // Add to the guiding texture
-        InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
+        if (kGuidingMode == (uint)GuidingMode::Emission) {
+            float histogramEmission = luminance(photonRadiance);
+            uint currentColor = 0;
+            uint originalValue;
+            [allow_uav_condition]
+            do {
+                InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 0u, currentColor);
+                float color = asfloat(currentColor);
+                uint updatedColor = asuint(color + histogramEmission);
+                InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
+            } while (originalValue != currentColor);
+        } else {
+            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
+        }
     }
-    //Divide by the rest of the photon weight
-    collectedRadiance /= M_PI * gNumLightPaths;
     return collectedRadiance;
 }
 
@@ -132,9 +144,9 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout S
     // Abort on diffuse surfaces
     bool isDiffuse = roughness > kRoughnessThreshold;
     bool abortPath = false;
-    if (kRenderMode == kRenderMode_PhotonMapping)
+    if (kRenderMode == (uint)PhotonRenderMode::PhotonMapping)
         abortPath = isDiffuse;
-    else if (kRenderMode == kRenderMode_FinalGather)
+    else if (kRenderMode == (uint)PhotonRenderMode::FinalGathering)
         abortPath = camState.diffuseHitCount > 0 && isDiffuse;
 
     if (abortPath)
@@ -205,7 +217,7 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         let bsdfProperties = mi.getProperties(sd);
 
         bool hitEmissive = any(bsdfProperties.emission > 0);
-        bool finalGatherFirstHit = (kRenderMode == kRenderMode_FinalGather) && (camState.diffuseHitCount == 0);
+        bool finalGatherFirstHit = (kRenderMode == (uint)PhotonRenderMode::FinalGathering) && (camState.diffuseHitCount == 0);
         if (hitEmissive && finalGatherFirstHit) {
             outColor += bsdfProperties.emission * thp;
             break;
@@ -293,9 +305,9 @@ void rayGen()
             bool isDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
             if (isDiffuse)
             {
-                uint instanceMask = kRenderMode == kRenderMode_FinalGather ? 2 : 0xFF; // For final gather collect caustic only
+                uint instanceMask = kRenderMode == (uint)PhotonRenderMode::FinalGathering ? 2 : 0xFF; // For final gather collect caustic only
                 outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg);
-                if (kRenderMode == kRenderMode_FinalGather) {
+                if (kRenderMode == (uint)PhotonRenderMode::FinalGathering) {
                     outColor += nextEventEstimation(sd, mi, sg);
                 }
             }

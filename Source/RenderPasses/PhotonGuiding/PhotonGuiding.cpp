@@ -152,7 +152,11 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     bool changed = false;
 
     changed |= widget.dropdown("Render Technique", mPhotonRenderMode);
-    changed |= widget.dropdown("Guiding Mode", mGuidingMode);
+    if (widget.dropdown("Guiding Mode", mGuidingMode))
+    {
+        changed = true;
+        resetRenderPasses();
+    }
 
     if (auto group = widget.group("Photon Options"))
     {
@@ -206,6 +210,12 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.indent(-10.f);
 
         group.checkbox("Enable Russian Roulette", mPhotonRussianRoulette);
+    }
+
+    if (auto group = widget.group("Guiding Options"))
+    {
+        if (mGuidingMode == GuidingMode::Emission)
+            changed |= group.var("Uniform weight (clear value)", mGuidingClearValueEmission, 0.f, FLT_MAX, 0.001f);
     }
 
     if (auto group = widget.group("Path Tracer Options"))
@@ -413,6 +423,7 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
+        defines.add("TEX_FORMAT", mGuidingMode == GuidingMode::Uniform ? "uint" : "float");
 
         mpGuidingCounterReducePass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -450,6 +461,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
+        defines.add("COUNTER_FORMAT", mGuidingMode == GuidingMode::Uniform ? "uint" : "float");
 
         mpGenerateGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -462,6 +474,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["CB"]["gRes"] = mGuidingTextureResolution;
         var["CB"]["gCopyFromCounter"] = true;
         var["CB"]["gIterationCount"] = mGuidingMode == GuidingMode::Disabled ? 0 : mGuidingAccumulateCount;
+        var["CB"]["gClearValue"] = mGuidingMode == GuidingMode::Uniform ? 1.f : mGuidingClearValueEmission;
         for (uint i = 0; i < mEmissiveLightCount; i++)
         {
             var["gSrcCounter"][i].setUav(mRecordGuidingTextures[i]->getUAV(0));
@@ -634,6 +647,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     mTraceCameraPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTraceCameraPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     mTraceCameraPass.pProgram->addDefine("RENDER_TECHNIQUE", std::to_string((uint)mPhotonRenderMode));
+    mTraceCameraPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 

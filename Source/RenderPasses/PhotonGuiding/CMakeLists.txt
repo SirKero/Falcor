@@ -9,6 +9,7 @@ target_sources(PhotonGuiding PRIVATE
     GuidingCounterReduce.cs.slang
     Debug.cs.slang
     StructsAndHelpers.slang
+    SharedEnums.slang
 )
 
 target_copy_shaders(PhotonGuiding RenderPasses/PhotonGuiding)

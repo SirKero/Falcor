@@ -5,14 +5,18 @@
 #define WK_SIZE 16
 #define WK_TOTAL WK_SIZE * WK_SIZE
 
-Texture2D<uint> gSrc[COUNT_TEXTURES];
-RWTexture2D<uint> gDst[COUNT_TEXTURES];
+#ifndef TEX_FORMAT
+#define TEX_FORMAT uint
+#endif
+
+Texture2D<TEX_FORMAT> gSrc[COUNT_TEXTURES];
+RWTexture2D<TEX_FORMAT> gDst[COUNT_TEXTURES];
 
 cbuffer CB {
     uint2 gDstSize;
 }
 
-groupshared uint sdata[WK_TOTAL];
+groupshared TEX_FORMAT sdata[WK_TOTAL];
 
 // "Explodes" an integer, i.e. inserts a 0 between each bit.  Takes inputs up to 16 bit wide.
 //      For example, 0b11111111 -> 0b1010101010101010
@@ -67,7 +71,7 @@ void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_Gro
 
     // Get Sum of 2x2 field
     uint2 startIdx = pixel * 2u;
-    uint startSum = 0;
+    TEX_FORMAT startSum = 0;
     startSum += gSrc[texIdx][startIdx];
     startSum += gSrc[texIdx][startIdx + uint2(1, 0)];
     startSum += gSrc[texIdx][startIdx + uint2(0, 1)];

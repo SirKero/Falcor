@@ -30,8 +30,10 @@
 #include "RenderGraph/RenderPass.h"
 #include "Rendering/Lights/EmissiveLightSampler.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
+#include "SharedEnums.slang"
 
 using namespace Falcor;
+using namespace PhotonGuidingSharedEnums;
 
 class PhotonGuiding : public RenderPass
 {
@@ -50,26 +52,6 @@ public:
     virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
     virtual bool onMouseEvent(const MouseEvent& mouseEvent) override { return false; }
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
-
-    enum class PhotonRenderMode : uint
-    {
-        PhotonMapping = 0u,
-        FinalGathering = 1u
-    };
-    FALCOR_ENUM_INFO(PhotonRenderMode,{
-        {PhotonRenderMode::PhotonMapping, "PhotonMapping"},
-        {PhotonRenderMode::FinalGathering, "FinalGathering"}
-    });
-
-      enum class GuidingMode : uint
-    {
-        Disabled = 0u,
-        Uniform = 1u
-    };
-    FALCOR_ENUM_INFO(GuidingMode, {
-        {GuidingMode::Disabled, "Disabled"},
-        {GuidingMode::Uniform, "Uniform"}
-    });
 
 private:
     //
@@ -161,6 +143,7 @@ private:
     uint mEmissiveLightCount = 0;
     uint mGuidingTextureResolution = 512;
     GuidingMode mGuidingMode = GuidingMode::Uniform;
+    float mGuidingClearValueEmission = 0.1f;
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
@@ -211,5 +194,4 @@ private:
     ref<ComputePass> mpDebugPass; //For debug
 };
 
-FALCOR_ENUM_REGISTER(PhotonGuiding::PhotonRenderMode);
-FALCOR_ENUM_REGISTER(PhotonGuiding::GuidingMode);
+
