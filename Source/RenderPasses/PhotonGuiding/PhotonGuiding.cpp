@@ -212,11 +212,22 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.tooltip("Probability a photon light is stored on diffuse hit. Flux is scaled up appropriately");
         changed |= group.var("Max Bounces", mPhotonMaxBounces, 0u, 256u);
 
-   
-        group.text("Photon Radius(Global / Caustic):");
-        group.indent(10.f);
-        changed |= group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
-        group.indent(-10.f);
+        group.checkbox("Use per pixel adaptive photon radius", mUseAdaptivePhotonRadius);
+        if (mUseAdaptivePhotonRadius)
+        {
+            group.text("Radius adaptive pixel scale (Global / Caustic):");
+            group.indent(10.f);
+            changed |= group.var(" ##AdaptiveRadiusScale", mAdaptivePhotonRadius, 0, FLT_MAX, 0.001f);
+            group.indent(-10.f);
+        }
+        else
+        {
+            group.text("Photon Radius(Global / Caustic):");
+            group.indent(10.f);
+            changed |= group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
+            group.indent(-10.f);
+        }
+      
 
         group.checkbox("Enable Russian Roulette", mPhotonRussianRoulette);
     }
@@ -554,6 +565,22 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
     }    
 }
 
+//Returns the diagonal of a pixel at distance 1
+float getNormalizedPixelDiagonal(ref<Scene> pScene, uint2 screenRes) {
+    // Update Image plane distance
+    auto& cameraData = pScene->getCamera()->getData();
+    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
+
+    // Get normalized pixel area
+    float h = tan(fovY / 2.f) * 2.f;
+    float w = h * cameraData.aspectRatio;
+    float wPix = w / screenRes.x;
+    float hPix = h / screenRes.y;
+
+    float diagonal = sqrt((wPix * wPix) + (hPix * hPix));
+    return diagonal;
+}
+
 void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Trace Photons");
@@ -596,6 +623,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     mTracePhotonPass.pProgram->addDefine("RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -611,15 +639,18 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
     shaderDispatchDim = std::max(32u, shaderDispatchDim);
 
+    float normalizePixelDiagonal = mUseAdaptivePhotonRadius ? getNormalizedPixelDiagonal(mpScene, mScreenRes) : 0.f;
+
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPhotonRadius"] = mPhotonRadius; 
     var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
-    var["CB"]["gDispatchDimension"] = shaderDispatchDim;
     var["CB"]["gScreenRes"] = mScreenRes;
     var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
     var["CB"]["gGuidingTextureMaxMip"] = mGuidingTextures[0]->getMipCount() - 1u;
+    var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
+    var["CB"]["gNormalizedPixelDiagonal"] = normalizePixelDiagonal;
 
     // Output
     for (uint i = 0; i < 2; i++)

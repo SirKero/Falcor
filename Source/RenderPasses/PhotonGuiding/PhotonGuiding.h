@@ -136,6 +136,9 @@ private:
     float mASBuildBufferPhotonOverestimate = 1.15f; // Guard percentage for AS building
     uint2 mCurrentPhotonCount = mNumMaxPhotons;
     float2 mPhotonRadius = float2(0.008f, 0.002f); //Global / Caustic Radius
+    bool mUseAdaptivePhotonRadius = true;
+    float2 mAdaptivePhotonRadius = float2(4.f, 1.5f);    //Pixel Size scale for adptive radius
+
     bool mPhotonRussianRoulette = true; //Enables Russian Roulette for the photon pass
     
     bool mUseDynamicPhotonDispatchCount = true;   // Dynamically change the number of photons to fit the max photon number

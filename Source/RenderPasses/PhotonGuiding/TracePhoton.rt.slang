@@ -22,12 +22,13 @@ cbuffer CB
     uint gFrameCount;   // Frame count since scene was loaded.
     float2 gPhotonRadius;//Global/Caustic radius
 
-    uint gDispatchDimension;    //Dispatch dims (x,y identical) 
     float gGlobalRejectionProb; //Rejection Probability for global photons
     uint2 gScreenRes;   //For back projection
-
     uint gGuidingTextureResolution; // Resolution of all guiding textures. xy is the same
-    uint gGuidingTextureMaxMip;     // Highest Mip of the guiding texture
+
+    uint gGuidingTextureMaxMip; // Highest Mip of the guiding texture
+    float2 gAdaptivePhotonRadius;   // Pixel scale for global/ caustic photons.
+    float gNormalizedPixelDiagonal; //Pixel length at distance 1
 }
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
@@ -40,6 +41,7 @@ static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL,PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = RUSSIAN_ROULETTE;
+static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 
 struct RayPayload
 {
@@ -184,6 +186,19 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     return true;
 }
 
+float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)
+{
+    if (kUseAdaptivePhotonRadius) {
+
+        float distToCamera = distance(hitPos, gScene.camera.getPosition());
+        float adaptiveRadius = (gNormalizedPixelDiagonal * distToCamera) / 2.0;
+        return adaptiveRadius * gAdaptivePhotonRadius[photonTypeIdx];
+    }
+    else {
+        return gPhotonRadius[photonTypeIdx];
+    }
+}
+
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
 {
@@ -298,11 +313,12 @@ void rayGen()
             }
             if (storePhoton) {
                 uint photonTypeIdx = (uint)photonType;
+                float radius = getPhotonRadius(photonTypeIdx, sd.posW);
                 uint photonInsertIndex = 0;
                 InterlockedAdd(gPhotonCounter[photonTypeIdx], 1u, photonInsertIndex);
                 if (photonInsertIndex <= kPhotonBufferSize[photonTypeIdx])
                 {
-                    AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
+                    AABB photonAABB = AABB(sd.posW - radius, sd.posW + radius);
                     gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
                     gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
                 }
