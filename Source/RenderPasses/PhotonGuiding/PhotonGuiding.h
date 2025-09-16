@@ -104,7 +104,6 @@ private:
     // Parameters
     //
     uint mFrameCount = 0;
-    uint mGuidingAccumulateCount = 0;
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
@@ -155,6 +154,10 @@ private:
     GuidingMode mGuidingMode = GuidingMode::Emission;
     float mGuidingClearValueEmission = 0.1f;
     bool mUseGaussianBlur = true;
+    bool mGuidingResetAccumulateCount = false;
+    uint mGuidingAccumulateCount = 0;
+    bool mGuidingRealTimeMode = false;   //If true, the guiding texture does not reset every frame
+    uint mGuidingHistoryLimit = 256;    //History limit for the guiding texture
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;

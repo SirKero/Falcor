@@ -129,8 +129,12 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     //Check if camera moved to reset guiding count
     auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
     auto cameraChanges = mpScene->getCamera()->getChanges();
-    if (((cameraChanges & ~excluded) != Camera::Changes::None) || mOptionsChanged)
+    bool cameraMoved = (cameraChanges & ~excluded) != Camera::Changes::None;
+    if ((cameraMoved && !mGuidingRealTimeMode) || mOptionsChanged || mGuidingResetAccumulateCount)
+    {
         mGuidingAccumulateCount = 0;
+        mGuidingResetAccumulateCount = false;
+    }
 
     mOptionsChanged = false;
 
@@ -240,9 +244,16 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             if (auto blurGroup = group.group("Blur Options"))
                 mpGaussianBlur->renderUI(group);
         }
-           
+
+        group.checkbox("Use Real Time mode", mGuidingRealTimeMode);
+        group.tooltip("In real-time mode, the guiding count is not reset on camera movement. Instead, a history limit is applied");
+        if (mGuidingRealTimeMode)
+            group.var("History Limit", mGuidingHistoryLimit, 0u, UINT_MAX, 1u);
+
         if (mGuidingMode == GuidingMode::Emission)
             changed |= group.var("Uniform weight (clear value)", mGuidingClearValueEmission, 0.f, FLT_MAX, 0.001f);
+
+        mGuidingResetAccumulateCount = group.button("Reset Guiding Textures");
     }
 
     if (auto group = widget.group("Path Tracer Options"))
@@ -536,10 +547,14 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
 
     //First pass to get the level 0 values from the counter and clear counter to 1
     {
+        uint iterationCount = mGuidingMode == GuidingMode::Disabled ? 0 : mGuidingAccumulateCount;
+        if (mGuidingRealTimeMode)
+            iterationCount = math::min(iterationCount, mGuidingHistoryLimit);
+
         const uint maxMip = mRecordGuidingTextures[0]->getMipCount() - 1u;
         var["CB"]["gRes"] = mGuidingTextureResolution;
         var["CB"]["gCopyFromCounter"] = true;
-        var["CB"]["gIterationCount"] = mGuidingMode == GuidingMode::Disabled ? 0 : mGuidingAccumulateCount;
+        var["CB"]["gIterationCount"] = iterationCount;
         var["CB"]["gClearValue"] = mGuidingMode == GuidingMode::Uniform ? 1.f : mGuidingClearValueEmission;
         for (uint i = 0; i < mEmissiveLightCount; i++)
         {
