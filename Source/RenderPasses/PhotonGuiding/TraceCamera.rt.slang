@@ -218,7 +218,7 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
 
         bool hitEmissive = any(bsdfProperties.emission > 0);
         bool finalGatherFirstHit = (kRenderMode == (uint)PhotonRenderMode::FinalGathering) && (camState.diffuseHitCount == 0);
-        if (hitEmissive && finalGatherFirstHit) {
+        if (hitEmissive && (finalGatherFirstHit || kRenderMode == (uint)PhotonRenderMode::PhotonMapping)) {
             outColor += bsdfProperties.emission * thp;
             break;
         }
@@ -229,7 +229,7 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
             uint instanceMask = finalGatherFirstHit ? 2 : 0xFF;
             outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg) * thp;
             if (finalGatherFirstHit)
-                outColor += nextEventEstimation(sd, mi, sg);
+                outColor += nextEventEstimation(sd, mi, sg) * thp;
         }
 
         validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, sg, thp, camState, ray);
