@@ -172,6 +172,7 @@ private:
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     std::vector<ref<Texture>> mGuidingTextures; //Guiding Textures for Photon Guiding
+    std::vector<ref<Texture>> mGuidingLastFrameWeightTextures; //Guiding Textures used for the blur (temporal history needs to be retained)
     std::vector<ref<Texture>> mRecordGuidingTextures; //Textures to record guiding data.
 
     ref<Sampler> mpLinearSampler; //Linear Sampler

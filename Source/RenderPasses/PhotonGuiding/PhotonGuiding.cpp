@@ -301,6 +301,7 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
     {
         mEmissiveLightCount = pLights->getTotalLightCount();
         mGuidingTextures.clear();
+        mGuidingLastFrameWeightTextures.clear();
         mRecordGuidingTextures.clear();
         resetRenderPasses();
     }
@@ -351,7 +352,6 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (any(mScreenRes != renderData.getDefaultTextureDims()))
     {
         mScreenRes = renderData.getDefaultTextureDims();
-        
     }
 
     if (mChangePhotonLightBufferSize)
@@ -427,6 +427,20 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
                 mGuidingTextures[i]->getUAV(0).get(), float4(1.0 / (mGuidingTextureResolution * mGuidingTextureResolution))
             );
             mGuidingTextures[i]->generateMips(pRenderContext);
+        }
+    }
+
+    if (mGuidingLastFrameWeightTextures.empty())
+    {
+        mGuidingLastFrameWeightTextures.resize(mEmissiveLightCount);
+
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+        {
+            mGuidingLastFrameWeightTextures[i] = Texture::create2D(
+                mpDevice, mGuidingTextureResolution, mGuidingTextureResolution, ResourceFormat::R32Float, 1u, 1u,
+                nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+            );
+            mGuidingLastFrameWeightTextures[i]->setName("GuidingBlurTexture" + std::to_string(i));
         }
     }
 
@@ -531,6 +545,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         {
             var["gSrcCounter"][i].setUav(mRecordGuidingTextures[i]->getUAV(0));
             var["gSrcCounterTotal"][i].setSrv(mRecordGuidingTextures[i]->getSRV(maxMip, 1u));
+            var["gWeightLastFrame"][i] = mGuidingLastFrameWeightTextures[i];
             var["gDst"][i].setUav(mGuidingTextures[i]->getUAV(0));
         }
 

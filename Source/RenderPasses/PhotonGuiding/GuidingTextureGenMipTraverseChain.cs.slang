@@ -8,6 +8,7 @@
 
 RWTexture2D<COUNTER_FORMAT> gSrcCounter[COUNT_TEXTURES];    // RW for clearing; only used when gCopyFromCounter = true
 Texture2D<COUNTER_FORMAT> gSrcCounterTotal[COUNT_TEXTURES]; // Only used when gCopyFromCounter = true
+RWTexture2D<float> gWeightLastFrame[COUNT_TEXTURES]; // Only used when gCopyFromCounter = true
 Texture2D<float> gSrc[COUNT_TEXTURES];
 RWTexture2D<float> gDst[COUNT_TEXTURES];
 
@@ -40,13 +41,14 @@ void main(uint3 thdID: SV_DispatchThreadID)
             float total = float(gSrcCounterTotal[texIdx][uint2(0)]);
             float pixelCounterVal = float(gSrcCounter[texIdx][pixel]);
             weight = pixelCounterVal / total;
-            float oldWeight = gDst[texIdx][pixel];
+            float oldWeight = gWeightLastFrame[texIdx][pixel];
             oldWeight *= gIterationCount;
             weight = (weight + oldWeight) / (gIterationCount + 1);
         }
        
         // Write
         gDst[texIdx][pixel] = weight;
+        gWeightLastFrame[texIdx][pixel] = weight;
         gSrcCounter[texIdx][pixel] = (COUNTER_FORMAT)gClearValue; //Clear
     }
     else
