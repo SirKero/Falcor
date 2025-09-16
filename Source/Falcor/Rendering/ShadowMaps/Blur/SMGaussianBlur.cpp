@@ -139,8 +139,17 @@ bool SMGaussianBlur::renderUI(Gui::Widgets& widget) {
     changed |= widget.checkbox("UseBoxFilter", mUseBoxFilter);
     if (!mUseBoxFilter)
         changed |= widget.slider("Sigma", mSigma, 0.001f, mKernelWidth / 2.f);
-    
+
+    //Check if kernel is still valid (uneven), as var allows adding custom values
+    if ((mKernelWidth % 2) == 0)
+    {
+        mKernelWidth = math::clamp(mKernelWidth - 1, 1u, 15u);
+        changed |= true;
+    }
+
     mKernelChanged |= changed;
+
+    
     return changed;
 }
 
