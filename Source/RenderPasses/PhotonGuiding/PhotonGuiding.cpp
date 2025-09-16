@@ -80,7 +80,13 @@ PhotonGuiding::PhotonGuiding(ref<Device> pDevice, const Properties& props)
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
+
+    //Blur
+    mpGaussianBlur = std::make_unique<SMGaussianBlur>(mpDevice);
+    mpGaussianBlur->setBlurKernel(3, 1.f);
+
     mLightBVHOptions = {};
+
 }
 
 Properties PhotonGuiding::getProperties() const
@@ -217,6 +223,13 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("Guiding Options"))
     {
+        group.checkbox("Use Blur", mUseGaussianBlur);
+        if (mUseGaussianBlur)
+        {
+            if (auto blurGroup = group.group("Blur Options"))
+                mpGaussianBlur->renderUI(group);
+        }
+           
         if (mGuidingMode == GuidingMode::Emission)
             changed |= group.var("Uniform weight (clear value)", mGuidingClearValueEmission, 0.f, FLT_MAX, 0.001f);
     }
@@ -513,6 +526,13 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         mpGenerateGuidingMipTraverseChainPass->execute(
             pRenderContext, uint3(mGuidingTextureResolution, mGuidingTextureResolution, mEmissiveLightCount)
         );
+    }
+
+    //Blur
+    if (mUseGaussianBlur)
+    {
+        for (uint i = 0; i < mEmissiveLightCount; i++)
+            mpGaussianBlur->execute(pRenderContext, mGuidingTextures[i]);
     }
 
     //Loop to generate the mip chain

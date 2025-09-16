@@ -31,6 +31,7 @@
 #include "Rendering/Lights/EmissiveLightSampler.h"
 #include "Rendering/Lights/LightBVHSampler.h"
 
+#include "Rendering/ShadowMaps/Blur/SMGaussianBlur.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 #include "SharedEnums.slang"
 
@@ -97,6 +98,7 @@ private:
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler for NEE
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
+    std::unique_ptr<SMGaussianBlur> mpGaussianBlur;               //Gaussian Blur
 
     //
     // Parameters
@@ -142,13 +144,14 @@ private:
     float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
 
     //
-    //Guiding Infos
+    //Guiding Infos/Options
     //
     bool mEmissiveLightResetTextures = false;
     uint mEmissiveLightCount = 0;
     uint mGuidingTextureResolution = 512;
     GuidingMode mGuidingMode = GuidingMode::Emission;
     float mGuidingClearValueEmission = 0.1f;
+    bool mUseGaussianBlur = true;
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
