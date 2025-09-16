@@ -29,6 +29,8 @@
 #include "Falcor.h"
 #include "RenderGraph/RenderPass.h"
 #include "Rendering/Lights/EmissiveLightSampler.h"
+#include "Rendering/Lights/LightBVHSampler.h"
+
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 #include "SharedEnums.slang"
 
@@ -115,6 +117,9 @@ private:
     //
 
     uint mPTMaxBounces = 10;
+    EmissiveLightSamplerType mEmissiveLightSamplerType = EmissiveLightSamplerType::LightBVH;
+    LightBVHSampler::Options mLightBVHOptions;
+    bool mRebuildLightSampler = true;
     PhotonRenderMode mPhotonRenderMode = PhotonRenderMode::PhotonMapping;
 
     //
@@ -139,10 +144,10 @@ private:
     //
     //Guiding Infos
     //
-    bool mEmissiveLightResetTextures = true;
+    bool mEmissiveLightResetTextures = false;
     uint mEmissiveLightCount = 0;
     uint mGuidingTextureResolution = 512;
-    GuidingMode mGuidingMode = GuidingMode::Uniform;
+    GuidingMode mGuidingMode = GuidingMode::Emission;
     float mGuidingClearValueEmission = 0.1f;
 
     //Debug
@@ -174,13 +179,10 @@ private:
         ref<RtBindingTable> pBindingTable;
         ref<RtProgramVars> pVars;
 
-        static const RayTraceProgramHelper create()
+        void reset()
         {
-            RayTraceProgramHelper r;
-            r.pProgram = nullptr;
-            r.pBindingTable = nullptr;
-            r.pVars = nullptr;
-            return r;
+            pProgram.reset();
+            pVars.reset();
         }
 
         void initProgramVars(ref<Device> pDevice, ref<Scene> pScene, ref<SampleGenerator> pSampleGenerator);

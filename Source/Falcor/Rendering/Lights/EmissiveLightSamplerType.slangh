@@ -46,7 +46,7 @@ FALCOR_ENUM_INFO(EmissiveLightSamplerType, {
     { EmissiveLightSamplerType::Uniform, "Uniform" },
     { EmissiveLightSamplerType::LightBVH, "LightBVH" },
     { EmissiveLightSamplerType::Power, "Power" },
-    { EmissiveLightSamplerType::Null, "Null" },
+    //{ EmissiveLightSamplerType::Null, "Null" },
 });
 FALCOR_ENUM_REGISTER(EmissiveLightSamplerType);
 

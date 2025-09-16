@@ -31,6 +31,7 @@
 #include "RenderGraph/RenderPassStandardFlags.h"
 
 #include "Rendering/Lights/EmissiveUniformSampler.h"
+#include "Rendering/Lights/EmissivePowerSampler.h"
 
 namespace
 {
@@ -79,6 +80,7 @@ PhotonGuiding::PhotonGuiding(ref<Device> pDevice, const Properties& props)
     samplerDesc.setFilterMode(Sampler::Filter::Linear, Sampler::Filter::Linear, Sampler::Filter::Linear);
     samplerDesc.setAddressingMode(Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp, Sampler::AddressMode::Clamp);
     mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
+    mLightBVHOptions = {};
 }
 
 Properties PhotonGuiding::getProperties() const
@@ -99,6 +101,7 @@ void PhotonGuiding::setScene(RenderContext* pRenderContext, const ref<Scene>& pS
     //Reset scene 
     mpScene.reset();
     resetRenderPasses();
+    mpEmissiveLightSampler.reset();
 
     if (pScene)
     {
@@ -221,6 +224,17 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     if (auto group = widget.group("Path Tracer Options"))
     {
         changed |= group.var("Bounces", mPTMaxBounces, 0u, 256u, 1u);
+        if (mPhotonRenderMode != PhotonRenderMode::PhotonMapping)
+        {
+            mRebuildLightSampler |= group.dropdown("NEE Sampler", mEmissiveLightSamplerType);
+            if (mEmissiveLightSamplerType == EmissiveLightSamplerType::LightBVH)
+            {
+                if (auto group2 = group.group("NEE Sampler Options"))
+                {
+                    mpEmissiveLightSampler->renderUI(group2);
+                }
+            }
+        }
     }
 
     if (auto group = widget.group("Material Options"))
@@ -262,24 +276,46 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
     if (pLights->getTotalLightCount() != mEmissiveLightCount)
     {
         mEmissiveLightCount = pLights->getTotalLightCount();
-        mEmissiveLightResetTextures = true;
+        mGuidingTextures.clear();
+        mRecordGuidingTextures.clear();
+        resetRenderPasses();
     }
-
     if (emissiveUsed)
     {
-        if (!mpEmissiveLightSampler)
+        if (!mpEmissiveLightSampler || mRebuildLightSampler)
         {
+            resetRenderPasses();
             FALCOR_ASSERT(pLights && pLights->getActiveLightCount(pRenderContext) > 0);
-            mpEmissiveLightSampler = std::make_unique<EmissiveUniformSampler>(pRenderContext, mpScene);
+            switch (mEmissiveLightSamplerType)
+            {
+            case Falcor::EmissiveLightSamplerType::Uniform:
+                mpEmissiveLightSampler = std::make_unique<EmissiveUniformSampler>(pRenderContext, mpScene);
+                break;
+            case Falcor::EmissiveLightSamplerType::LightBVH:
+                mpEmissiveLightSampler = std::make_unique<LightBVHSampler>(pRenderContext, mpScene, mLightBVHOptions);
+                break;
+            case Falcor::EmissiveLightSamplerType::Power:
+                mpEmissiveLightSampler = std::make_unique<EmissivePowerSampler>(pRenderContext, mpScene);
+                break;
+            case Falcor::EmissiveLightSamplerType::Null:
+            default:
+                FALCOR_UNREACHABLE();
+                break;
+            }
+
+            mRebuildLightSampler = false;
         }
     }
     else
     {
         if (mpEmissiveLightSampler)
         {
+            if (auto lightBVHSampler = dynamic_cast<LightBVHSampler*>(mpEmissiveLightSampler.get()))
+            {
+                mLightBVHOptions = lightBVHSampler->getOptions();
+            }
             mpEmissiveLightSampler = nullptr;
-            mTracePhotonPass.pVars.reset();
-            mTraceCameraPass.pVars.reset();
+            resetRenderPasses();
         }
     }
 
@@ -292,14 +328,6 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     {
         mScreenRes = renderData.getDefaultTextureDims();
         
-    }
-
-    if (mEmissiveLightResetTextures)
-    {
-        resetRenderPasses();
-        mGuidingTextures.clear();
-        mRecordGuidingTextures.clear();
-        mEmissiveLightResetTextures = false;
     }
 
     if (mChangePhotonLightBufferSize)
@@ -771,13 +799,10 @@ void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
 
 void PhotonGuiding::resetRenderPasses()
 {
-    mTracePhotonPass = RayTraceProgramHelper::create();
-    mTraceCameraPass = RayTraceProgramHelper::create();
+    mTraceCameraPass.reset();
     mpGuidingCounterReducePass.reset();
     mpGenerateGuidingMipTraverseChainPass.reset();
     mpDebugPass.reset();
-
-    mpEmissiveLightSampler.reset();
 }
 
 void PhotonGuiding::RayTraceProgramHelper::initProgramVars(ref<Device> pDevice, ref<Scene> pScene, ref<SampleGenerator> pSampleGenerator)
