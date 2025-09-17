@@ -129,7 +129,7 @@ private:
     bool mUseVM = true;
     bool mLightTraceOnly = false;
 
-    RenderMode mRenderMode = RenderMode::VCM;
+    RenderMode mRenderMode = RenderMode::Grittmann;
 
     // Material Settings
     bool mUseLambertianDiffuse = false;        // Enable Lambert Diffuse BRDF instead of Frostbyte

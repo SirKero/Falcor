@@ -36,10 +36,10 @@ namespace
 {
 // Shader
 const std::string kShaderFolder = "RenderPasses/ReducedVCM/";
-const std::string kShaderTracePhotonGrittmann = kShaderFolder + "TracePhotonGrittmann.rt.slang";
-const std::string kShaderTracePhotonGrittmannVCM = kShaderFolder + "TracePhotonVCM.rt.slang";
-const std::string kShaderTraceCameraGrittmann = kShaderFolder + "TraceCameraGrittmann.rt.slang";
-const std::string kShaderTraceCameraGrittmannVCM = kShaderFolder + "TraceCameraVCM.rt.slang";
+const std::string kShaderTracePhotonGrittmann = kShaderFolder + "TracePhotonGrittmannV2.rt.slang";
+const std::string kShaderTracePhotonVCM = kShaderFolder + "TracePhotonVCM.rt.slang";
+const std::string kShaderTraceCameraGrittmann = kShaderFolder + "TraceCameraGrittmannV2.rt.slang";
+const std::string kShaderTraceCameraVCM = kShaderFolder + "TraceCameraVCM.rt.slang";
 
 // Input Textures
 const std::string kInputVBuffer = "VBuffer";
@@ -581,7 +581,7 @@ void ReducedVCM::tracePhotonVCMPass(RenderContext* pRenderContext, const RenderD
     {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderTracePhotonGrittmannVCM);
+        desc.addShaderLibrary(kShaderTracePhotonVCM);
         desc.setMaxPayloadSize(sizeof(float) * 4);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1);
@@ -688,7 +688,7 @@ void ReducedVCM::traceCameraVCMPass(RenderContext* pRenderContext, const RenderD
     {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderTraceCameraGrittmannVCM);
+        desc.addShaderLibrary(kShaderTraceCameraVCM);
         desc.setMaxPayloadSize(sizeof(float) * 4);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1);
