@@ -53,7 +53,7 @@ RWStructuredBuffer<AABB> gLightTraceAABB;
 RWStructuredBuffer<float4> gLightTraceData;
 RWStructuredBuffer<ListNode> gLinkedList;
 RWTexture2D<uint> gHeadCounter;
-RWBuffer<uint> gPhotonCounter;
+RWStructuredBuffer<uint> gPhotonCounter;
 Texture2D<uint> gPhotonCullingMask;
 
 RWTexture2D<uint> gColorR;

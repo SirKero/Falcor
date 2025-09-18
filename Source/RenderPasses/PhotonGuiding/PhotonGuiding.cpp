@@ -401,12 +401,12 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
 
     if (!mpPhotonCounter)
     {
-        mpPhotonCounter = Buffer::create(
-            mpDevice, sizeof(uint2), ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None
+        mpPhotonCounter = Buffer::createStructured(
+            mpDevice, sizeof(uint), 2, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
         );
         mpPhotonCounter->setName("PhotonCounter");
 
-        mpPhotonCounterCPU = Buffer::create(mpDevice, sizeof(uint2), ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonCounterCPU = Buffer::createStructured(mpDevice, sizeof(uint), 2, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr, false);
         mpPhotonCounterCPU->setName("PhotonCounterCPU");
     }
 

@@ -33,7 +33,7 @@ cbuffer CB
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<PhotonData> gPhotonData[2];
-RWBuffer<uint> gPhotonCounter;
+RWStructuredBuffer<uint> gPhotonCounter;
 
 Texture2D<float> gGuidingTexture[NUM_GUIDING_TEXTURES];
 

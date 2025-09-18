@@ -248,12 +248,15 @@ void LightTrace::prepareBuffers(RenderContext* pRenderContext, const RenderData&
     // Photon
     if (!mpPhotonCounter)
     {
-        mpPhotonCounter = Buffer::create(mpDevice, sizeof(uint) * 4);
+        mpPhotonCounter = Buffer::createStructured(
+            mpDevice, sizeof(uint), 1, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None,
+            nullptr, false
+        );
         mpPhotonCounter->setName("PM::PhotonCounterGPU");
     }
     if (!mpPhotonCounterCPU)
     {
-        mpPhotonCounterCPU = Buffer::create(mpDevice, sizeof(uint), ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonCounterCPU = Buffer::createStructured(mpDevice, sizeof(uint), 1, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr, false);
         mpPhotonCounterCPU->setName("PM::PhotonCounterCPU");
     }
     

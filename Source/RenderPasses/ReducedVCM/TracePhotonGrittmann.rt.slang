@@ -33,7 +33,7 @@ cbuffer Light {
 
 RWStructuredBuffer<AABB> gPhotonAABB;
 RWStructuredBuffer<PhotonDataVCM> gPhotonData;
-RWBuffer<uint> gPhotonCounter;
+RWStructuredBuffer<uint> gPhotonCounter;
 RWTexture2D<uint> gLightTraceColor[3]; //Uint spinlock color texture for every channel 
 
 static const bool kAlphaTest = true;

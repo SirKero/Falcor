@@ -1104,7 +1104,10 @@ void ReSTIR_FG::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
     {
         for (uint i = 0; i < kPhotonCounterCount; i++)
         {
-            mpPhotonCounter[i] = Buffer::create(mpDevice, sizeof(uint) * 2);
+            mpPhotonCounter[i] = Buffer::createStructured(
+                mpDevice, sizeof(uint), 2, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None,
+                nullptr, false
+            );
             mpPhotonCounter[i]->setName("ReSTIR_FG::PhotonCounterGPU" + std::to_string(i));
         }
         
@@ -1113,7 +1116,8 @@ void ReSTIR_FG::prepareBuffers(RenderContext* pRenderContext, const RenderData& 
     {
         for (uint i = 0; i < kPhotonCounterCount; i++)
         {
-            mpPhotonCounterCPU[i] = Buffer::create(mpDevice, sizeof(uint) * 2, ResourceBindFlags::None, Buffer::CpuAccess::Read);
+            mpPhotonCounterCPU[i] =
+                Buffer::createStructured(mpDevice, sizeof(uint), 2, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr, false);
             mpPhotonCounterCPU[i]->setName("ReSTIR_FG::PhotonCounterCPU" + std::to_string(i));
         }
     }

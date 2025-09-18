@@ -8,7 +8,7 @@ cbuffer CB {
 }
 
 RWStructuredBuffer<AABB> gAABB;
-Buffer<uint> gCounter;
+RWStructuredBuffer<uint> gCounter;
 
 static const bool kUseCounter = USE_COUNTER_TO_CLEAR;
 

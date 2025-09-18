@@ -30,7 +30,7 @@ cbuffer Light {
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<PhotonData> gPhotonData[2];
-RWBuffer<uint> gPhotonCounter;
+RWStructuredBuffer<uint> gPhotonCounter;
 
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);

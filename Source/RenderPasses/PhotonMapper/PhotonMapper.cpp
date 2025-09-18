@@ -371,12 +371,12 @@ void PhotonMapper::prepareBuffers(RenderContext* pRenderContext, const RenderDat
     // Photon
     if (!mpPhotonCounter)
     {
-        mpPhotonCounter = Buffer::create(mpDevice, sizeof(uint) * 2);
+        mpPhotonCounter = Buffer::createStructured(mpDevice, sizeof(uint), 2 , ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false);
         mpPhotonCounter->setName("PM::PhotonCounterGPU");
     }
     if (!mpPhotonCounterCPU)
     {
-        mpPhotonCounterCPU = Buffer::create(mpDevice, sizeof(uint) * 2, ResourceBindFlags::None, Buffer::CpuAccess::Read);
+        mpPhotonCounterCPU = Buffer::createStructured(mpDevice, sizeof(uint), 2, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr, false);
         mpPhotonCounterCPU->setName("PM::PhotonCounterCPU");
     }
     for (uint i = 0; i < 2; i++)
