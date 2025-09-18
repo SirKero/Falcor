@@ -147,7 +147,7 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout S
     if (kRenderMode == (uint)PhotonRenderMode::PhotonMapping)
         abortPath = isDiffuse;
     else if (kRenderMode == (uint)PhotonRenderMode::FinalGathering)
-        abortPath = camState.diffuseHitCount > 0 && isDiffuse;
+        abortPath = camState.diffuseHitCount > 0;
 
     if (abortPath)
         return false;
@@ -225,7 +225,6 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
 
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
-            
             uint instanceMask = finalGatherFirstHit ? 2 : 0xFF;
             outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg) * thp;
             if (finalGatherFirstHit)
