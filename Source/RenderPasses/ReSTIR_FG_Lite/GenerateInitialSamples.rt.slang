@@ -15,6 +15,7 @@ RaytracingAccelerationStructure gPhotonAS;
 
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
+RWTexture2D<float4> gEmission;
 
 static const float kPhotonCollectTMax = 1e-7;
 
@@ -164,11 +165,10 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
     causticReservoir.c = 1;
 }
 
-void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inout float3 thp, inout float pdf, inout bool valid, inout ReservoirFG reservoirFG, inout ReservoirCaustic reservoirCaustic) {
+void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inout float3 thp, inout float pdf, inout bool valid, inout ReservoirFG reservoirFG, inout ReservoirCaustic reservoirCaustic, inout float3 emission) {
     RayPayload rayPayload = RayPayload();
     uint pathLength = 0;
     bool collectCaustics = !prevHitIsRough;
-    uint bouncesAfterCaustic = collectCaustics ? 0 : 1; //Used to check if emissive light should be collected (is only performed on special occasions)
     float3 prevThp = float3(1); //Needed for reservoir
     for (pathLength; pathLength < gFGRayMaxPathLength && valid; pathLength++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -190,6 +190,14 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         let bsdfProperties = mi.getProperties(sd);
         bool hitIsRough = bsdfProperties.roughness > kRoughnessThreshold;
 
+        // Emissive hits are undefined for final gather rays
+        if (any(bsdfProperties.emission > 0) || (prevHitIsRough && !hitIsRough))
+        {
+            if (collectCaustics) // Path is completely specular 
+                emission += bsdfProperties.emission * thp;
+            break;
+        }
+
         if (collectCaustics && hitIsRough) {
             reservoirCaustic.sampleSurface = hit.getData();
             reservoirCaustic.sampleSurfaceView = ray.Direction;
@@ -199,12 +207,10 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
             collectCaustics = false;
         }
 
-        //Check if this is a valid final gather surface
+        // Check if this is a valid final gather surface
         if (hitIsRough && prevHitIsRough) {
             //Collect photons and fill reservoir
             reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
-            if (pathLength > 0 && (bouncesAfterCaustic > 1)) //Path length == 0 is covered by ReSTIR DI
-                reservoirFG.sampleData.radianceOut += bsdfProperties.emission;
             reservoirFG.thp = prevThp;
             reservoirFG.sampleData.posW = sd.posW;
             reservoirFG.sampleData.normal = sd.faceN; // Face normal?
@@ -215,15 +221,12 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
 
             return;
         }
-        // Else
 
         //Update reservoir
         reservoirFG.sampleSurface = hit.getData(); // Update surface
         reservoirFG.pathLength++;                  // Increase path length
         reservoirFG.sampleData.sampleView = -ray.Direction;
         prevThp = thp;
-        if(!collectCaustics)
-            bouncesAfterCaustic++;
 
         //Next ray
         valid = generateFGSampleRay(sd, mi, sg, thp, pdf, ray);
@@ -275,6 +278,7 @@ void rayGen()
     float3 outColor = float3(0);
     ReservoirFG finalGatherReservoir = ReservoirFG();
     ReservoirCaustic causticReservoir = ReservoirCaustic();
+    float3 emission = float3(0);    //Emission on fully specular paths
 
     if (hitInfo.isValid()) {
         //Set RTXDI data
@@ -310,7 +314,7 @@ void rayGen()
         float fgPdf = 0;
         bool validFGRay = generateFGSampleRay(sd, mi, sg, fgThp, fgPdf, ray);
 
-        traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticReservoir);
+        traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticReservoir, emission);
     } else {
         // Set invalid RTXDI data
         gRTXDI.setInvalidSurfaceData(pixel);
@@ -318,4 +322,5 @@ void rayGen()
 
     gFinalGatherReservoir[index2Dto1D(pixel, dispatchDims.x)] = finalGatherReservoir;
     gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)] = causticReservoir;
+    gEmission[pixel] = float4(emission, 1.0);
 }

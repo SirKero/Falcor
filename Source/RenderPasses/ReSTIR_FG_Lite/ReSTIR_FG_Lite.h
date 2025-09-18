@@ -134,6 +134,7 @@ private:
     ref<Buffer> mpPhotonCounterCPU;         // CPU copy of counter for readback
     ref<Buffer> mpFinalGatherReservoir[2];  // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];      // Reservoir for the Caustic sample
+    ref<Texture> mpEmission;                // Emission for paths that travel through highly specular materials
 
     //
     // Render Passes/Programs

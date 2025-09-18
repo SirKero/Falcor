@@ -9,6 +9,7 @@ import StructsAndHelpers;
 Texture2D<PackedHitInfo> gVBuffer;
 StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 StructuredBuffer<ReservoirCaustic> gCausticReservoir;
+Texture2D<float4> gEmission;
 
 RWTexture2D<float4> gOutColor;
 
@@ -58,8 +59,6 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
         outColor /= NdotL;
         outColor *= causticReservoir.thp;
     }
-    if (causticReservoir.pathLength > 0)
-        outColor += bsdfProperties.emission * causticReservoir.thp;
 
     return outColor;
 }
@@ -104,6 +103,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
         outColor += evaluateFinalGatherReservoir(pixel, sg);
         outColor += evaluateCausticReservoir(pixel, sg);
+        outColor += gEmission[pixel].xyz;
     }else{
         outColor = gScene.envMap.eval(viewDir);
     }

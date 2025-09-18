@@ -393,6 +393,15 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
         mpPhotonCounterCPU->setName("PhotonCounterCPU");
     }
 
+    //Emission Texture
+    if (!mpEmission || mResetScreenTex)
+    {
+        mpEmission = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpEmission->setName("EmissionTexture");
+    }
+
     mResetScreenTex = false;
 }
 
@@ -624,6 +633,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+    var["gEmission"] = mpEmission;
 
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
@@ -791,6 +801,7 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+    var["gEmission"] = mpEmission;
 
     //Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
