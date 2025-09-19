@@ -65,6 +65,7 @@ struct CameraState {
   
     float pdf;
     float lightTracePdf;
+    float photonPdf;
 
     bool isSpecularPath;
     bool lastHitWasDelta;
@@ -75,6 +76,7 @@ struct CameraState {
         pathLength = 0;
         pdf = 1.0;
         lightTracePdf = 1.0;
+        photonPdf = 0.0;
         isSpecularPath = true;
         lastHitWasDelta = false;
         isDeltaPath = true;
@@ -127,12 +129,18 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         float pdf = mi.evalPdf(sd, photonData.dir);
         float reversePDF = mi.evalPdf(sd, photonData.dir, sd.V);
         pdf *= continuationProb;
-        
-        //const float wLight = photonData.dVCM * misVcWeightFactorLight + photonData.dVM * pdf;
-        //const float wCamera = camState.dVCM * misVcWeightFactorCamera + camState.dVM * reversePDF;
-        //const float wCamera = 1.0 * misVcWeightFactorCamera + camState.dVM * reversePDF;
 
-        const float misWeight = 1.0;
+        //TODO a bit to dark something not completely right
+        const float cameraScatterPdf = camState.pdf * photonData.reversePdf;
+        float neePdf = photonData.neeReversePdf;
+        if (photonData.pathLenght > 0)
+            neePdf *= camState.pdf;
+        float lightTracePdf = camState.lightTracePdf * photonData.pdf * gNumLightPaths; // Light Trace
+        // Photon pdf for path seperate + full path for denominator
+        float photonPdf = camState.pdf * photonData.pdf * (gNumLightPaths * (M_PI * gPhotonRadius * gPhotonRadius));
+        float photonPathPdf = camState.photonPdf * (photonData.photonReversePdf) + photonPdf;
+
+        const float misWeight = photonPdf / (neePdf + cameraScatterPdf + lightTracePdf + photonPathPdf);
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / NdotL); // NdotL needs to be taken out of the bsdf for Photon Mapping
@@ -168,8 +176,14 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
             camState.lightTracePdf *= 0;
         else
             camState.lightTracePdf *= cosThetaOut;
+        if (camState.pathLength > 0)
+            camState.photonPdf *= cosThetaOut;
         camState.lastHitWasDelta = true;
     } else {
+        if (camState.pathLength > 0) {
+            camState.photonPdf *= reversePdf;
+            camState.photonPdf += camState.pdf * (gNumLightPaths * (M_PI * gPhotonRadius * gPhotonRadius));
+        }
         camState.pdf *= pdf * cosThetaOut;
         camState.lightTracePdf *= reversePdf * cosThetaOut;
         camState.isSpecularPath = false;
@@ -198,8 +212,9 @@ float3 handleEmissiveHit(ShadingData sd, float3 prevPos, float3 prevNormal,Camer
     float cosAtLight = abs(dot(sd.faceN, -sd.V));
     float emissionPdf = (cosAtLight * M_1_PI) / (emissiveTri.area * gScene.lightCollection.getActiveTriangleCount());
     float lightTracePDF = camState.lightTracePdf * emissionPdf * gNumLightPaths; // Light Trace
+    float photonPDF = camState.photonPdf * emissionPdf;
 
-    const float misWeight = camState.pdf / (camState.pdf + lightTracePDF + neePdf);
+    const float misWeight = camState.pdf / (camState.pdf + lightTracePDF + neePdf + photonPDF);
     return misWeight * emission;
 }
 
@@ -228,8 +243,11 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
 
     const float pdf = camState.pdf * directPdf;
     const float scatterPdf = camState.pdf * mi.evalPdf(sd, tls.dir, true) * continuationProb;
+    float photonPdf = 0;
+    if (camState.pathLength > 0)
+        photonPdf = (camState.photonPdf + (camState.pdf * (gNumLightPaths * (M_PI * gPhotonRadius * gPhotonRadius)))) * emissionPdf;
 
-    const float misWeight = pdf / (pdf + lightTracePdf + scatterPdf);
+    const float misWeight = pdf / (pdf + lightTracePdf + scatterPdf + photonPdf);
 
     float3 radiance = misWeight * bsdf * tls.Le / directPdf;
     return radiance;
@@ -276,13 +294,13 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         // Evaluate Photons
         if (bsdfProperties.roughness > kRoughnessThreshold) {
             float3 nee = NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
-            // float3 pm = collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
-            outColor += nee;// + pm;
+            float3 pm = collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
+            outColor += nee + pm;
             #if ENABLE_DEBUG
             if (gDebugBounce < 0 || gDebugBounce == (i+1))
             {
                 gDebug[1][DispatchRaysIndex().xy] += float4(nee, 1);
-                //gDebug[3][DispatchRaysIndex().xy] += float4(pm, 1);
+                gDebug[3][DispatchRaysIndex().xy] += float4(pm, 1);
             }
             #endif
         }

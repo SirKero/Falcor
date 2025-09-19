@@ -199,9 +199,10 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
     float neePdf = photon.neeReversePdf;
     if (photon.pathLenght > 0)
         neePdf *= reversePDF;
+    float photonMappingPdf = photon.photonReversePdf * reversePDF; //TODO maybe add geometry term
 
     // MIS weights
-    const float misWeight = pathPdf / (pathPdf + neePdf + cameraScatterPDF);
+    const float misWeight = pathPdf / (pathPdf + neePdf + cameraScatterPDF);// + photonMappingPdf);
 
     // Contribution on image
     float3 contribution = float3(0);
@@ -324,6 +325,7 @@ void rayGen()
     emissiveLightHit.triangleIndex = pls.triIndex;
     emissiveLightHit.posW = pls.posW;
     emissiveLightHit.normalW = pls.normal;
+    const float photonPdfWeight = lightCount * (M_PI * gPhotonRadius * gPhotonRadius);
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {
@@ -417,8 +419,11 @@ void rayGen()
         // Update MIS weight
         if (reflectedDiffuse)
         {
-            photon.pdf *= bsdfSample.pdf * continuationProb * cosThetaOut;
             float reversePDF = mi.evalPdf(sd, ray.Direction, sd.V) * cosThetaOut;
+            photon.photonReversePdf *= reversePDF;
+            photon.photonReversePdf += photon.pdf * photonPdfWeight;
+            photon.pdf *= bsdfSample.pdf * continuationProb * cosThetaOut;
+            
             if (i > 0)
                 photon.neeReversePdf *= reversePDF;
             photon.reversePdf *= reversePDF; // Continuation prob was handled above
