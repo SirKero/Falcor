@@ -78,7 +78,7 @@ struct ReservoirFG {
         targetFunction = 0;
         sampleData = FGSampleData();
         wSum = 0;
-        c = 0;
+        c = 1;
         pathLength = 0;
         jacobianDeterminant = -1.0;
     }

@@ -189,7 +189,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
         bool hitIsRough = bsdfProperties.roughness > kRoughnessThreshold;
-
+                
         // Emissive hits are undefined for final gather rays
         if (any(bsdfProperties.emission > 0) || (prevHitIsRough && !hitIsRough))
         {

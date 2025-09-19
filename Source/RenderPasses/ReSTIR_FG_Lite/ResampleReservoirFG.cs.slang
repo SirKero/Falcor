@@ -72,9 +72,9 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     bool otherReservoirValid = other.isValid();
     float targetFunctionOther = 0.0;
     if (otherReservoirValid) {
-        float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c);
         //Check if sample can be shifted
         if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) {
+            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c);
             targetFunctionOther = evalApproximateBRDF(currentSD, currentProps, -toSurfaceOther) * luminance(other.sampleData.radianceOut);
             float jacobianDeterminant = dot(other.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
             jacobianDeterminant /= other.jacobianDeterminant;
@@ -84,7 +84,7 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     }
 
     //Check if other sample is selected and replace in reservoir if it was selected
-    bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && otherReservoirValid;
+    bool selectOtherSample = (sampleNext1D(sg) * wSum) <= w_1 && otherReservoirValid;
     if (selectOtherSample) {
         current.sampleData.posW = other.sampleData.posW;
         current.sampleData.normal = other.sampleData.normal;
@@ -144,6 +144,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     ReservoirFG current = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
     HitInfo currentHit = HitInfo(current.sampleSurface);
 
+    //Current camera hit misses the scene
     if (!currentHit.isValid())
         return;
 
@@ -167,12 +168,12 @@ void main(uint2 pixel: SV_DispatchThreadID)
     prevPixelF += rndOffset;
     int2 prevPixel = int2(prevPixelF);
 
-    bool resamplingSuccesfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel);
+    bool resamplingSuccessfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel);
 
     //
     // Spatiotemporal Resampling
     //
-    uint spatialSamples = resamplingSuccesfull ? gSpatialSamples : gSpatialSamples + gDisocclusionBoostSpatialSamples;
+    uint spatialSamples = resamplingSuccessfull ? gSpatialSamples : gSpatialSamples + gDisocclusionBoostSpatialSamples;
     for (uint i = 0; i < spatialSamples; i++) {
         // Sample in a disc radius around the reprojected sample
         float2 spatialOffset = gSpatialRadius * sample_disk_concentric(sampleNext2D(sg));
