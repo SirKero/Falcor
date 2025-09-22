@@ -132,20 +132,19 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
 
         //TODO a bit to dark something not completely right
         const float cameraScatterPdf = camState.pdf * photonData.reversePdf;
-        float neePdf = photonData.neeReversePdf;
-        if (photonData.pathLenght > 0)
-            neePdf *= camState.pdf;
+        float neePdf = photonData.neeReversePdf * camState.pdf;
         float lightTracePdf = camState.lightTracePdf * photonData.pdf * gNumLightPaths; // Light Trace
         // Photon pdf for path seperate + full path for denominator
-        float photonPdf = camState.pdf * photonData.pdf * (gNumLightPaths * (M_PI * gPhotonRadius * gPhotonRadius));
-        float photonPathPdf = camState.photonPdf * (photonData.photonReversePdf) + photonPdf;
+        float photonPdf = camState.pdf * photonData.pdf * (gNumLightPaths * M_PI * gPhotonRadius * gPhotonRadius);
+        float photonPathPdf = photonData.pathLenght == 0 ? photonPdf : camState.photonPdf * photonData.pdf + photonData.photonReversePdf * camState.pdf;
 
         const float misWeight = photonPdf / (neePdf + cameraScatterPdf + lightTracePdf + photonPathPdf);
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / NdotL); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / NdotL);     // NdotL needs to be taken out of the bsdf for Photon Mapping
     }
     collectedRadiance /= M_PI * gPhotonRadius * gPhotonRadius * gNumLightPaths;
+    //collectedRadiance = camState.pdf;
     return collectedRadiance;
 }
 
@@ -182,7 +181,7 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
     } else {
         if (camState.pathLength > 0) {
             camState.photonPdf *= reversePdf;
-            camState.photonPdf += camState.pdf * (gNumLightPaths * (M_PI * gPhotonRadius * gPhotonRadius));
+            //camState.photonPdf += camState.pdf * (gNumLightPaths * M_PI * gPhotonRadius * gPhotonRadius);
         }
         camState.pdf *= pdf * cosThetaOut;
         camState.lightTracePdf *= reversePdf * cosThetaOut;
@@ -245,7 +244,7 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
     const float scatterPdf = camState.pdf * mi.evalPdf(sd, tls.dir, true) * continuationProb;
     float photonPdf = 0;
     if (camState.pathLength > 0)
-        photonPdf = (camState.photonPdf + (camState.pdf * (gNumLightPaths * (M_PI * gPhotonRadius * gPhotonRadius)))) * emissionPdf;
+        photonPdf = camState.photonPdf * emissionPdf;
 
     const float misWeight = pdf / (pdf + lightTracePdf + scatterPdf + photonPdf);
 
@@ -281,6 +280,16 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         let bsdfProperties = mi.getProperties(sd);
         float continuationProb = getContinuationProbablity(bsdfProperties);
 
+        // Update Geometry term
+        bool isDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        float dist = distance(sd.posW, ray.Origin);
+        float cosTheta = abs(dot(sd.faceN, sd.V));
+        float G = cosTheta / (dist * dist);
+        camState.pdf *= G;
+        camState.lightTracePdf *= G;
+        if (isDiffuse)
+            camState.photonPdf += camState.pdf * gNumLightPaths * M_PI * gPhotonRadius * gPhotonRadius;
+
         bool hitEmissive = any(bsdfProperties.emission > 0);
         if (hitEmissive) {
             float3 emissive = handleEmissiveHit(sd, prevPos, prevFaceN, camState, hit.getTriangleHit(), bsdfProperties.emission, sd.V) * thp;
@@ -292,7 +301,7 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
             break;
         }
         // Evaluate Photons
-        if (bsdfProperties.roughness > kRoughnessThreshold) {
+        if (isDiffuse) {
             float3 nee = NextEventEstimation(sd, mi, camState, continuationProb, sg) * thp;
             float3 pm = collectPhotons(sd, mi, bsdfProperties.guideNormal, camState, continuationProb, 0xFF, sg) * thp;
             outColor += nee + pm;
@@ -400,9 +409,9 @@ void rayGen()
         directionToCamera /= distanceToCamera;
         const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3); // Surface to image factor
         camState.lightTracePdf *= cameraPdf;
-        //float cosTheta = abs(dot(sd.faceN, sd.V));
-        //float G = cosTheta / (distanceToCamera * distanceToCamera);
-        //camState.pdf *= G;
+        float cosTheta = abs(dot(sd.faceN, sd.V));
+        float G = cosTheta / (distanceToCamera * distanceToCamera);
+        camState.pdf *= G;
 
         outColor += bsdfProperties.emission; // On first hit, no MIS is necessary if emissive is hit
         #if ENABLE_DEBUG

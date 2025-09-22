@@ -35,7 +35,7 @@ struct PhotonData {
         this.pathLenght = 0;
         this.pdf = 1.0;
         this.reversePdf = 1.0;
-        this.neeReversePdf = 1.0;
+        this.neeReversePdf = 0.0;
         this.photonReversePdf = 0.0;
         this._pad = uint2(0);
     }

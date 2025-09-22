@@ -193,16 +193,16 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
     const float3 camForward = normalize(gScene.camera.data.cameraW);
     const float cosAtCamera = dot(-directionToCamera, camForward);
     const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3);
+    const float camGeometry = cosToCamera / (distanceToCamera * distanceToCamera);
     const float pathPdf = photon.pdf * cameraPdf * lightCount;
-    //const float camGeometry = cosToCamera / (distanceToCamera * distanceToCamera);
     const float cameraScatterPDF = reversePDF * photon.reversePdf;
-    float neePdf = photon.neeReversePdf;
+    float neePdf = photon.neeReversePdf * camGeometry;
     if (photon.pathLenght > 0)
-        neePdf *= reversePDF;
-    float photonMappingPdf = photon.photonReversePdf * reversePDF; //TODO maybe add geometry term
+        neePdf *= reversePDF * camGeometry;
+    float photonMappingPdf = photon.photonReversePdf * reversePDF * camGeometry; //TODO maybe add geometry term
 
     // MIS weights
-    const float misWeight = pathPdf / (pathPdf + neePdf + cameraScatterPDF);// + photonMappingPdf);
+    const float misWeight = pathPdf / (pathPdf + neePdf + cameraScatterPDF + photonMappingPdf);
 
     // Contribution on image
     float3 contribution = float3(0);
@@ -318,14 +318,11 @@ void rayGen()
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
     photon.pdf = pls.emissionPDF;
-    //photon.reversePdf = pls.directPDF;
+    photon.neeReversePdf = pls.directPDF;
 
-    //Used for emissive MIS at the first hit
-    TriangleLightHit emissiveLightHit;
-    emissiveLightHit.triangleIndex = pls.triIndex;
-    emissiveLightHit.posW = pls.posW;
-    emissiveLightHit.normalW = pls.normal;
-    const float photonPdfWeight = lightCount * (M_PI * gPhotonRadius * gPhotonRadius);
+    // Used for emissive MIS at the first hit
+    const uint emissiveTriangleIndex = pls.triIndex;
+    const float photonPdfWeight = lightCount * M_PI * gPhotonRadius * gPhotonRadius;
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {
@@ -354,12 +351,12 @@ void rayGen()
         float G = cosTheta / (dist * dist);
         photon.pdf *= G;
         if (i == 0) {
-            photon.neeReversePdf = gEmissiveSampler.evalPdf(sd.posW, sd.faceN, true, emissiveLightHit);
+            photon.neeReversePdf = gEmissiveSampler.evalTriangleSelectionPdf(sd.posW, sd.faceN, true, emissiveTriangleIndex) * G;
         }
         else
             photon.neeReversePdf *= G;
         photon.reversePdf *= G;
-            
+        photon.photonReversePdf *= G;            
 
        
         float continuationProb = getContinuationProbablity(bsdfProperties);
@@ -420,8 +417,8 @@ void rayGen()
         if (reflectedDiffuse)
         {
             float reversePDF = mi.evalPdf(sd, ray.Direction, sd.V) * cosThetaOut;
-            photon.photonReversePdf *= reversePDF;
-            photon.photonReversePdf += photon.pdf * photonPdfWeight;
+            photon.photonReversePdf *= reversePDF * continuationProb;
+            photon.photonReversePdf += photon.pdf * photonPdfWeight * reversePDF * continuationProb;
             photon.pdf *= bsdfSample.pdf * continuationProb * cosThetaOut;
             
             if (i > 0)
@@ -434,6 +431,7 @@ void rayGen()
             else
                 photon.neeReversePdf *= cosThetaOut;
             photon.reversePdf *= cosThetaOut;
+            photon.photonReversePdf *= cosThetaOut;
             // photon.reversePdf = 0;
         }
     }
