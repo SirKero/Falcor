@@ -183,8 +183,9 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
 
     // Bsdf and pdf to camera
     float3 bsdf = mi.eval(sd, directionToCamera, sg);
+    let bsdfProperties = mi.getProperties(sd);
     float cosToCamera = dot(sd.faceN, directionToCamera);
-    float reversePDF = mi.evalPdf(sd, directionToCamera, sd.V) ;
+    float reversePDF = mi.evalPdf(sd, directionToCamera, sd.V) * getContinuationProbablity(bsdfProperties);
 
     if (all(bsdf <= 0))
         return false;
@@ -195,8 +196,8 @@ bool backprojectPhotonToCamera(ShadingData sd, IMaterialInstance mi, PhotonData 
     const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3);
     const float camGeometry = cosToCamera / (distanceToCamera * distanceToCamera);
     const float pathPdf = photon.pdf * cameraPdf * lightCount;
-    const float cameraScatterPDF = reversePDF * photon.reversePdf;
-    float neePdf = photon.neeReversePdf * camGeometry;
+    const float cameraScatterPDF = reversePDF * photon.reversePdf * camGeometry;
+    float neePdf = photon.neeReversePdf ;
     if (photon.pathLenght > 0)
         neePdf *= reversePDF * camGeometry;
     float photonMappingPdf = photon.photonReversePdf * reversePDF * camGeometry; //TODO maybe add geometry term
@@ -351,7 +352,8 @@ void rayGen()
         float G = cosTheta / (dist * dist);
         photon.pdf *= G;
         if (i == 0) {
-            photon.neeReversePdf = gEmissiveSampler.evalTriangleSelectionPdf(sd.posW, sd.faceN, true, emissiveTriangleIndex) * G;
+            const EmissiveTriangle emissiveTri = gScene.lightCollection.getTriangle(emissiveTriangleIndex);
+            photon.neeReversePdf = gEmissiveSampler.evalTriangleSelectionPdf(sd.posW, sd.faceN, true, emissiveTriangleIndex)/emissiveTri.area;
         }
         else
             photon.neeReversePdf *= G;

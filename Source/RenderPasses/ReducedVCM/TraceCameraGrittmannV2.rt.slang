@@ -138,8 +138,12 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         float photonPdf = camState.pdf * photonData.pdf * (gNumLightPaths * M_PI * gPhotonRadius * gPhotonRadius);
         float photonPathPdf = photonData.pathLenght == 0 ? photonPdf : camState.photonPdf * photonData.pdf + photonData.photonReversePdf * camState.pdf;
 
-        const float misWeight = photonPdf / (neePdf + cameraScatterPdf + lightTracePdf + photonPathPdf);
+        float denom = (neePdf + cameraScatterPdf + lightTracePdf + photonPathPdf);
+        float misWeight = 0;
+        if (denom > 0)
+            misWeight = photonPdf / denom;
 
+        misWeight = clamp(misWeight, 0, 1);
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         collectedRadiance += max(0, (photonData.flux * bsdf * misWeight) / NdotL);     // NdotL needs to be taken out of the bsdf for Photon Mapping
     }
@@ -211,7 +215,7 @@ float3 handleEmissiveHit(ShadingData sd, float3 prevPos, float3 prevNormal,Camer
     float cosAtLight = abs(dot(sd.faceN, -sd.V));
     float emissionPdf = (cosAtLight * M_1_PI) / (emissiveTri.area * gScene.lightCollection.getActiveTriangleCount());
     float lightTracePDF = camState.lightTracePdf * emissionPdf * gNumLightPaths; // Light Trace
-    float photonPDF = camState.photonPdf * emissionPdf;
+    float photonPDF = camState.isSpecularPath ? 0.0 : camState.photonPdf * emissionPdf;
 
     const float misWeight = camState.pdf / (camState.pdf + lightTracePDF + neePdf + photonPDF);
     return misWeight * emission;
@@ -228,7 +232,8 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
     float cosAtLight = abs(dot(emissiveTri.normal, -tls.dir));
     const float emissionPdf = (cosAtLight * M_1_PI) / (emissiveTri.area * gScene.lightCollection.getActiveTriangleCount());
     const float directPdf = tls.pdf; // Multiplied with activeTriangle count
-    float lightTracePdf = camState.lightTracePdf * emissionPdf * mi.evalPdf(sd, tls.dir, sd.V) * continuationProb * gNumLightPaths; // Light Trace
+    const float reversePdf = mi.evalPdf(sd, tls.dir, sd.V) * continuationProb;
+    float lightTracePdf = camState.lightTracePdf * emissionPdf * reversePdf * gNumLightPaths; // Light Trace
 
     float3 bsdf = mi.eval(sd, tls.dir, sg);
 
@@ -240,8 +245,11 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
     if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
         return float3(0);
 
+    float cosToLight = dot(sd.faceN, tls.dir);
+    float G = cosToLight / (tls.distance * tls.distance);
+    lightTracePdf *= G;
     const float pdf = camState.pdf * directPdf;
-    const float scatterPdf = camState.pdf * mi.evalPdf(sd, tls.dir, true) * continuationProb;
+    const float scatterPdf = camState.pdf * mi.evalPdf(sd, tls.dir, true) * continuationProb * G;
     float photonPdf = 0;
     if (camState.pathLength > 0)
         photonPdf = camState.photonPdf * emissionPdf;
