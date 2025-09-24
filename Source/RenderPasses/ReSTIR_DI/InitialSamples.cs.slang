@@ -61,10 +61,8 @@ void genEmissiveSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenera
         // MIS
         float mis = 1.0 / gNumEmissiveSamples;
         if (gNumBSDFSamples > 0) {
-            float G = dot(sd.faceN, tls.dir) / (tls.distance * tls.distance);
-            float solidAnglePdf = tls.pdf * G;
             float bsdfPdf = mi.evalPdf(sd, tls.dir);
-            mis = solidAnglePdf / (solidAnglePdf * gNumEmissiveSamples + bsdfPdf * gNumBSDFSamples);
+            mis = tls.pdf / (tls.pdf * gNumEmissiveSamples + bsdfPdf * gNumBSDFSamples);
         }
                
         //Add to reservoir
@@ -118,9 +116,8 @@ void genBSDFSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenerator 
         const float pdf = bsdfSample.pdf;
         float mis = 1.0 / gNumBSDFSamples;
         if (gNumEmissiveSamples > 0) {
-            float G = dot(sd.faceN, ray.dir) / (hitT * hitT);
-            float solidAngleEmissivePdf = gEmissiveSampler.evalPdf(sd.posW, sd.faceN, true, emissiveHit) * G;
-            mis = pdf / (solidAngleEmissivePdf * gNumEmissiveSamples + pdf * gNumBSDFSamples);
+            float emissivePdf = gEmissiveSampler.evalPdf(sd.posW, sd.faceN, true, emissiveHit);
+            mis = pdf / (emissivePdf * gNumEmissiveSamples + pdf * gNumBSDFSamples);
         }
 
         // Add to reservoir
