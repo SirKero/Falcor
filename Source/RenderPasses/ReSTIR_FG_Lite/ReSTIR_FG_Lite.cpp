@@ -290,6 +290,7 @@ void ReSTIR_FG_Lite::prepareLightingStructure(RenderContext* pRenderContext)
 {
     // Make sure that the emissive light is up to date
     auto& pLights = mpScene->getLightCollection(pRenderContext);
+    pLights->prepareSyncCPUData(pRenderContext);
 
     bool emissiveUsed = mpScene->useEmissiveLights();
     bool analyticUsed = mpScene->useAnalyticLights();
@@ -314,9 +315,10 @@ void ReSTIR_FG_Lite::prepareLightingStructure(RenderContext* pRenderContext)
             mTracePhotonPass.pVars.reset();
         }
     }
-
     if (mpEmissiveLightSampler)
+    {
         mpEmissiveLightSampler->update(pRenderContext);
+    }
 }
 
 void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const RenderData& renderData)

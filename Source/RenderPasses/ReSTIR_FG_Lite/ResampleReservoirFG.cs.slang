@@ -73,7 +73,7 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     float targetFunctionOther = 0.0;
     if (otherReservoirValid) {
         //Check if sample can be shifted
-        if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) {
+        if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) { //This could be optimized and included into the MIS calc in the next line to avoid a ray
             float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c);
             targetFunctionOther = evalApproximateBRDF(currentSD, currentProps, -toSurfaceOther) * luminance(other.sampleData.radianceOut);
             float jacobianDeterminant = dot(other.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
