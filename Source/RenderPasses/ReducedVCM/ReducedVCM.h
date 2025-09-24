@@ -143,7 +143,7 @@ private:
     //
     // Photon Distribution
     //
-    uint mPhotonMaxBounces = 10;                    // Number of Photon bounces
+    uint mPhotonMaxBounces = 9;                    // Number of Photon bounces
     float mGlobalPhotonRejection = 1.0f;            // Probability a global photon is stored
     uint mNumDispatchedPhotons = 2000000;           // Number of Photons dispatched
     uint mNumMaxPhotons = 1000000;                  // Size of the photon buffer

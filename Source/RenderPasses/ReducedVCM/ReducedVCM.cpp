@@ -36,9 +36,9 @@ namespace
 {
 // Shader
 const std::string kShaderFolder = "RenderPasses/ReducedVCM/";
-const std::string kShaderTracePhotonGrittmann = kShaderFolder + "TracePhotonGrittmannV2.rt.slang";
+const std::string kShaderTracePhotonGrittmann = kShaderFolder + "TracePhotonGrittmannV3.rt.slang";
 const std::string kShaderTracePhotonVCM = kShaderFolder + "TracePhotonVCM.rt.slang";
-const std::string kShaderTraceCameraGrittmann = kShaderFolder + "TraceCameraGrittmannV2.rt.slang";
+const std::string kShaderTraceCameraGrittmann = kShaderFolder + "TraceCameraGrittmannV3.rt.slang";
 const std::string kShaderTraceCameraVCM = kShaderFolder + "TraceCameraVCM.rt.slang";
 
 // Input Textures
@@ -407,6 +407,7 @@ void ReducedVCM::tracePhotonGrittmannPass(RenderContext* pRenderContext, const R
     mTracePhotonGrittmannPass.pProgram->addDefine("USE_VC", mUseVC ? "1" : "0");
     mTracePhotonGrittmannPass.pProgram->addDefine("USE_VM", mUseVM ? "1" : "0");
     mTracePhotonGrittmannPass.pProgram->addDefine("USE_LIGHT_TRACE_ONLY", mLightTraceOnly ? "1" : "0");
+    mTracePhotonGrittmannPass.pProgram->addDefine("CAM_PATH_LENGTH", std::to_string(mPTMaxBounces));
 
     if (mpEmissiveLightSampler)
         mTracePhotonGrittmannPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
