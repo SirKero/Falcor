@@ -241,7 +241,7 @@ float evalApproximateBRDFPhoton(ShadingData sd, BSDFProperties bsdfProperties, f
 }
 
 // unbiased p_hat with visibility test
-float evaluateFinalGatherSampleApproximateUnbiased(ReservoirFG r, ShadingData sd, BSDFProperties bsdfProperties)
+float evaluateFinalGatherSampleApproximateUnbiased(ReservoirFG r, ShadingData sd, BSDFProperties bsdfProperties, bool assumeVisible = false)
 {
     float Li = 0.0;
     float3 toSurface = sd.posW - r.sampleData.posW;
@@ -254,8 +254,9 @@ float evaluateFinalGatherSampleApproximateUnbiased(ReservoirFG r, ShadingData sd
         return 0.0;
 
     Li = luminance(r.sampleData.radianceOut) * jacobianDeterminant;
-    if (!dispatchShadowRay(sd, -toSurface, dist))
-        return 0.0;
+    if (!assumeVisible)
+        if (!dispatchShadowRay(sd, -toSurface, dist))
+            return 0.0;
 
     Li *= evalApproximateBRDF(sd, bsdfProperties, -toSurface);
 

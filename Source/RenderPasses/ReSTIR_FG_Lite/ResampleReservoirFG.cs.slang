@@ -32,9 +32,9 @@ RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
 //Generalized Balance Heuristic with two samples
-float generalizedBalanceHeuristic(ReservoirFG r, ShadingData otherSD, BSDFProperties otherProps, uint otherC) {
+float generalizedBalanceHeuristic(ReservoirFG r, ShadingData otherSD, BSDFProperties otherProps, uint otherC, bool assumeVisible = false) {
     float p0 = r.targetFunction * r.c; // No visibility or Jacobian Determinant needed for this sample
-    float p1 = evaluateFinalGatherSampleApproximateUnbiased(r, otherSD, otherProps) * otherC;  // targetFunction + vis  + Jacobian Determinant
+    float p1 = evaluateFinalGatherSampleApproximateUnbiased(r, otherSD, otherProps, assumeVisible) * otherC;  // targetFunction + vis  + Jacobian Determinant
 
     float sum = (p0 + p1);
     if(sum > 0)
@@ -73,8 +73,9 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     float targetFunctionOther = 0.0;
     if (otherReservoirValid) {
         //Check if sample can be shifted
-        if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) { //This could be optimized and included into the MIS calc in the next line to avoid a ray
-            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c);
+        if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) {
+            // We can assume p1 is visible, as this was checked by the visibility ray in the line above
+            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c, true);
             targetFunctionOther = evalApproximateBRDF(currentSD, currentProps, -toSurfaceOther) * luminance(other.sampleData.radianceOut);
             float jacobianDeterminant = dot(other.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
             jacobianDeterminant /= other.jacobianDeterminant;
