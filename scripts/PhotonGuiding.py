@@ -11,6 +11,7 @@ def render_graph_PhotonGuiding():
     g.add_edge('PhotonGuiding.ColorOut', 'AccumulatePass.input')
     g.add_edge('VBufferRT.vbuffer', 'PhotonGuiding.VBuffer')
     g.add_edge('VBufferRT.viewW', 'PhotonGuiding.View')
+    g.add_edge('VBufferRT.mvec', 'PhotonGuiding.MotionVector')
     g.mark_output('ToneMapper.dst')
     g.mark_output('AccumulatePass.output')
     return g

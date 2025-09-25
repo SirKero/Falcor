@@ -30,6 +30,7 @@
 #include "RenderGraph/RenderPass.h"
 #include "Rendering/Lights/EmissiveLightSampler.h"
 #include "Rendering/Lights/LightBVHSampler.h"
+#include "Rendering/RTXDI/RTXDI.h"
 
 #include "Rendering/ShadowMaps/Blur/SMGaussianBlur.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
@@ -91,6 +92,18 @@ private:
     //Reset Render Passes
     void resetRenderPasses();
 
+    //ReSTIR initial sample generation
+    void reSTIRGenerateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //ReSTIR resample final gather reservoirs pass
+    void reSTIRResampleFGPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //ReSTIR resample caustic reservoirs pass
+    void reSTIRResampleCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //ReSTIR evaluate reservoirs pass
+    void reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     //
     // Pointers
     //
@@ -99,6 +112,8 @@ private:
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler for NEE
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
     std::unique_ptr<SMGaussianBlur> mpGaussianBlur;               //Gaussian Blur
+    std::unique_ptr<RTXDI> mpRTXDI;                                 // Ptr to RTXDI for direct use
+    RTXDI::Options mRTXDIOptions;                                 // Options for RTXDI
 
     //
     // Parameters
@@ -146,12 +161,32 @@ private:
     float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
 
     //
+    // ReSTIR FG
+    //
+    struct ResamplingSettings
+    {
+        bool enable = true;
+        uint confidenceCap = 20;                // Maximum confidence allowed
+        uint spatialSamples = 1;                // Number of spatial samples
+        uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found
+        float samplingRadius = 20.f;            // Sampling radius in pixel
+        float relativeDepthThreshold = 0.15f;  // Relative Depth threshold(is neighbor 0.1 = 10 % as near as the current depth)
+        float normalThreshold = 0.6f;          // Cosine of maximum angle between both normals allowed
+        float jacobianDistanceThreshold = 0.001f; // Threshold for Jacobian distances
+        bool usePathThreshold;                     // Enable resampling only if path length are the same
+    };
+    ResamplingSettings mResampleSettingsFG = {};
+    ResamplingSettings mResampleSettingsCaustic = {};
+    bool mRebuildReservoirBuffer = false;
+    bool mCanResample = false;
+
+    //
     //Guiding Infos/Options
     //
     bool mEmissiveLightResetTextures = false;
     uint mEmissiveLightCount = 0;
     uint mGuidingTextureResolution = 512;
-    GuidingMode mGuidingMode = GuidingMode::Emission;
+    GuidingMode mGuidingMode = GuidingMode::Disabled;
     float mGuidingClearValueEmission = 0.1f;
     bool mUseGaussianBlur = true;
     bool mGuidingResetAccumulateCount = false;
@@ -177,6 +212,11 @@ private:
     std::vector<ref<Texture>> mGuidingTextures; //Guiding Textures for Photon Guiding
     std::vector<ref<Texture>> mGuidingLastFrameWeightTextures; //Guiding Textures used for the blur (temporal history needs to be retained)
     std::vector<ref<Texture>> mRecordGuidingTextures; //Textures to record guiding data.
+    //ReSTIR
+    ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
+    ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample
+    ref<Texture> mpEmission;                                   // Emission for paths that travel through highly specular materials (ReSTIR FG)
+
 
     ref<Sampler> mpLinearSampler; //Linear Sampler
 
@@ -200,10 +240,16 @@ private:
 
     RayTraceProgramHelper mTracePhotonPass;           // Trace Photons
     RayTraceProgramHelper mTraceCameraPass;              // Trace Camera
-
+   
     ref<ComputePass> mpGuidingCounterReducePass; //Reduce on the guiding counter to obtain the total
     ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
     ref<ComputePass> mpDebugPass; //For debug
+
+    //ReSTIR Passes
+    RayTraceProgramHelper mGenerateInitialSamplesPass; // Trace Final Gather rays and collect photons
+    ref<ComputePass> mpResampleReservoirFGPass;      // Resampling Pass for Final Gather Reservoirs
+    ref<ComputePass> mpResampleReservoirCausticPass; // Resampling Pass for Caustic Reservoirs
+    ref<ComputePass> mpEvaluateReservoirsPass;       // Evaluates ReSTIR DI and FG reservoirs
 };
 
 

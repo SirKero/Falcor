@@ -9,11 +9,13 @@ namespace PhotonGuidingSharedEnums {
 enum class PhotonRenderMode : uint32_t
 {
     PhotonMapping = 0,
-    FinalGathering = 1
+    FinalGathering = 1,
+    ReSTIR_FG = 2,
 };
 FALCOR_ENUM_INFO(PhotonRenderMode, {
     { PhotonRenderMode::PhotonMapping, "PhotonMapping" },
-    { PhotonRenderMode::FinalGathering, "FinalGathering" }
+    { PhotonRenderMode::FinalGathering, "FinalGathering" },
+    { PhotonRenderMode::ReSTIR_FG, "ReSTIR FG" }
 });
 FALCOR_ENUM_REGISTER(PhotonRenderMode);
 

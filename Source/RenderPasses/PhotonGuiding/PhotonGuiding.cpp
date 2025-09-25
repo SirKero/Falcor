@@ -43,13 +43,22 @@ namespace
     const std::string kShaderGuidingReduce = kShaderFolder + "GuidingCounterReduce.cs.slang";
     const std::string kShaderDebug = kShaderFolder + "Debug.cs.slang";
 
+    //ReSTIR shader
+    const std::string kShaderFolderReSTIR = kShaderFolder + "/ReSTIR_FG/";
+    const std::string kShaderReSTIRInitialSamples = kShaderFolderReSTIR + "GenerateInitialSamples.rt.slang";
+    const std::string kShaderReSTIRResampleFG = kShaderFolderReSTIR + "ResampleReservoirFG.cs.slang";
+    const std::string kShaderReSTIRResampleCaustic = kShaderFolderReSTIR + "ResampleReservoirCaustic.cs.slang";
+    const std::string kShaderReSTIREvalReservoirs = kShaderFolderReSTIR + "EvaluateReservoirs.cs.slang";
+
     //Input Textures
     const std::string kInputVBuffer = "VBuffer";
     const std::string kInputView = "View";
+    const std::string kInputMVec = "MotionVector";
 
     const Falcor::ChannelList kInputChannels{
         {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
         {kInputView, "gView", "View Vector"},
+        {kInputMVec, "gMotionVectors", "Motion Vector"},
     };
 
     //Output textures
@@ -151,7 +160,47 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     updateGuidingTextures(pRenderContext, renderData);
 
     tracePhotonPass(pRenderContext, renderData);
-    traceCameraPass(pRenderContext, renderData);
+
+    switch (mPhotonRenderMode)
+    {
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::PhotonMapping:
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::FinalGathering:
+    {
+        traceCameraPass(pRenderContext, renderData);
+        break;
+    }
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_FG:
+    {
+        //TODO find a better way for these settings
+        mSpecularRoughnessThreshold = 0.25f;
+        mUseAdaptivePhotonRadius = false;
+
+        if (!mpRTXDI)
+            mpRTXDI = std::make_unique<RTXDI>(mpScene, mRTXDIOptions);
+        mpRTXDI->beginFrame(pRenderContext, mScreenRes);
+
+        // Initial Samples for ReSTIR FG (1SPP Photon Final Gathering) and inti RTXDI structs
+        reSTIRGenerateInitialSamplesPass(pRenderContext, renderData);
+
+        // ReSTIR DI pass
+        const auto& pMotionVectors = renderData[kInputMVec]->asTexture();
+        mpRTXDI->update(pRenderContext, pMotionVectors);
+
+        // Spatiotemporal resampling for final gather samples and caustics
+        reSTIRResampleFGPass(pRenderContext, renderData);
+
+        reSTIRResampleCausticPass(pRenderContext, renderData);
+
+        // Finalize Reservoirs
+        reSTIREvaluateReservoirsPass(pRenderContext, renderData);
+
+        // End ReSTIR DI frame
+        mpRTXDI->endFrame(pRenderContext);
+        mCanResample = true;
+        break;
+    }
+    }
+    
 
     if (mDebugShowGuidingTexture)
         debugPass(pRenderContext, renderData);
@@ -256,21 +305,75 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         mGuidingResetAccumulateCount = group.button("Reset Guiding Textures");
     }
 
-    if (auto group = widget.group("Path Tracer Options"))
+    if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_FG)
     {
-        changed |= group.var("Bounces", mPTMaxBounces, 0u, 256u, 1u);
-        if (mPhotonRenderMode != PhotonRenderMode::PhotonMapping)
+        if (auto group = widget.group("RTXDI"))
         {
-            mRebuildLightSampler |= group.dropdown("NEE Sampler", mEmissiveLightSamplerType);
-            if (mEmissiveLightSamplerType == EmissiveLightSamplerType::LightBVH)
+            if (mpRTXDI)
             {
-                if (auto group2 = group.group("NEE Sampler Options"))
+                mpRTXDI->renderUI(group);
+            }
+            else
+            {
+                group.text("Load a scene for RTXDI options");
+            }
+        }
+        if (auto group = widget.group("ReSTIR FG"))
+        {
+            group.var("Final Gather Path Length", mPTMaxBounces, 1u, 64u, 1u);
+            group.tooltip(
+                "Path length for a final gather sample. A final gather sample stops when it encounters a rough enough surface (see "
+                "Material Options)"
+            );
+
+            auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget, bool isCausticResampling = false)
+            {
+                widget.checkbox("Enable Resampling", settings.enable);
+                widget.var("Confidence Cap", settings.confidenceCap, 1u, UINT_MAX, 1u);
+                widget.tooltip("Maximum confidence a reservoir can have");
+                widget.var("Spatial Samples", settings.spatialSamples, 0u, 64u, 1u);
+                widget.var("Disocclusion additional spatial samples", settings.disocclusionBoostExtraSamples, 0u, 16u, 1u);
+                widget.tooltip("Extra spatial samples if temporal resampling fails");
+                widget.var("Spatial Sample Radius", settings.samplingRadius, 0.f, FLT_MAX, 1.f);
+                widget.var("Normal Rejection Threshold", settings.normalThreshold, 0.f, 1.0f, 0.001f);
+                widget.tooltip("Threshold of dot product between both reservoir face normals");
+                widget.var("Sample Distance Threshold", settings.jacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
+                if (!isCausticResampling)
                 {
-                    mpEmissiveLightSampler->renderUI(group2);
+                    widget.checkbox("Use Path Threshold", settings.usePathThreshold);
+                    widget.tooltip("Only resamples if the surfaces used for generating the Final Gather samples have the same path length.");
+                }
+            };
+
+            if (auto group2 = group.group("Resampling FG options"))
+            {
+                resampleUI(mResampleSettingsFG, group2);
+            }
+            if (auto group2 = group.group("Resampling Caustic options"))
+            {
+                resampleUI(mResampleSettingsCaustic, group2, true);
+            }
+        }
+    }
+    else
+    {
+        if (auto group = widget.group("Path Tracer Options"))
+        {
+            changed |= group.var("Bounces", mPTMaxBounces, 0u, 256u, 1u);
+            if (mPhotonRenderMode != PhotonRenderMode::PhotonMapping)
+            {
+                mRebuildLightSampler |= group.dropdown("NEE Sampler", mEmissiveLightSamplerType);
+                if (mEmissiveLightSamplerType == EmissiveLightSamplerType::LightBVH)
+                {
+                    if (auto group2 = group.group("NEE Sampler Options"))
+                    {
+                        mpEmissiveLightSampler->renderUI(group2);
+                    }
                 }
             }
         }
     }
+   
 
     if (auto group = widget.group("Material Options"))
     {
@@ -363,6 +466,11 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (any(mScreenRes != renderData.getDefaultTextureDims()))
     {
         mScreenRes = renderData.getDefaultTextureDims();
+        mpFinalGatherReservoir[0].reset();
+        mpFinalGatherReservoir[1].reset();
+        mpCausticReservoir[0].reset();
+        mpCausticReservoir[1].reset();
+        mpEmission.reset();
     }
 
     if (mChangePhotonLightBufferSize)
@@ -471,6 +579,41 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             mRecordGuidingTextures[i]->generateMips(pRenderContext);
         }
     }
+
+    //ReSTIR Resources
+    for (uint i = 0; i < 2; i++)
+    {
+        if (!mpFinalGatherReservoir[i] || mResetScreenTex)
+        {
+            mCanResample = false;
+            mpFinalGatherReservoir[i] = Buffer::createStructured(
+                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpFinalGatherReservoir[i]->setName("FinalGatherReservoir" + std::to_string(i));
+        }
+        if (!mpCausticReservoir[i] || mResetScreenTex)
+        {
+            mCanResample = false;
+            mpCausticReservoir[i] = Buffer::createStructured(
+                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
+        }
+    }
+
+    // Emission Texture
+    if (!mpEmission || mResetScreenTex)
+    {
+        mpEmission = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpEmission->setName("EmissionTexture");
+    }
+
+    mResetScreenTex = false;
 }
 
 void PhotonGuiding::updateGuidingTextures(RenderContext* pRenderContext, const RenderData& renderData)
@@ -884,6 +1027,244 @@ void PhotonGuiding::resetRenderPasses()
     mpGuidingCounterReducePass.reset();
     mpGenerateGuidingMipTraverseChainPass.reset();
     mpDebugPass.reset();
+
+    mGenerateInitialSamplesPass.reset();
+    mpResampleReservoirCausticPass.reset();
+    mpResampleReservoirFGPass.reset();
+    mpEvaluateReservoirsPass.reset();
+}
+
+void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "ReSTIRInitialSamples");
+
+    // Init Shader
+    if (!mGenerateInitialSamplesPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRInitialSamples);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mGenerateInitialSamplesPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mGenerateInitialSamplesPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        mGenerateInitialSamplesPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+    }
+
+    // Defines that can change on runtime
+    mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
+    mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+
+    // Program Vars
+    if (!mGenerateInitialSamplesPass.pVars)
+        mGenerateInitialSamplesPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+
+    FALCOR_ASSERT(mGenerateInitialSamplesPass.pVars);
+    auto var = mGenerateInitialSamplesPass.pVars->getRootVar();
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
+    var["CB"]["gNumLightPaths"] = mNumberLightPaths;
+
+    // RTXDI Resources
+    mpRTXDI->setShaderData(var);
+
+    // Input Resources
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    mpPhotonAS->bindTlas(var, "gPhotonAS");
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
+    }
+
+    // Output Resources
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+    var["gEmission"] = mpEmission;
+
+    // Dispatch Shader
+    mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
+
+    // Reservoir barrier
+    pRenderContext->uavBarrier(mpFinalGatherReservoir[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpCausticReservoir[mFrameCount % 2].get());
+}
+
+void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Resampling Final Gather");
+    // Initialize compute pass
+    if (!mpResampleReservoirFGPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRResampleFG).csEntry("main").setShaderModel("6_6");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(mpRTXDI->getDefines());
+
+        mpResampleReservoirFGPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpResampleReservoirFGPass);
+
+    // Return early if there is no previous reservoir or resampling is disabled
+    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    {
+        return;
+    }
+
+    // Set variables
+    auto var = mpResampleReservoirFGPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gConfidenceLimit"] = mResampleSettingsFG.confidenceCap;
+    var["CB"]["gSpatialRadius"] = mResampleSettingsFG.samplingRadius;
+    var["CB"]["gSpatialSamples"] = mResampleSettingsFG.spatialSamples;
+    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsFG.disocclusionBoostExtraSamples;
+    var["CB"]["gNormalThreshold"] = mResampleSettingsFG.normalThreshold;
+    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
+    var["CB"]["gUsePathThreshold"] = mResampleSettingsFG.usePathThreshold;
+
+    // Input Resources
+    var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount + 1) % 2];
+    var["gMVec"] = renderData[kInputMVec]->asTexture();
+
+    // In-/Output Resources
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+
+    // Execute Compute Pass
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpResampleReservoirFGPass->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Resampling Caustics");
+    // Initialize compute pass
+    if (!mpResampleReservoirCausticPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRResampleCaustic).csEntry("main").setShaderModel("6_6");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(mpRTXDI->getDefines());
+
+        mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpResampleReservoirCausticPass);
+
+    // Return early if there is no previous reservoir or resampling is disabled
+    if ((!mCanResample) || !mResampleSettingsCaustic.enable)
+    {
+        return;
+    }
+
+    // Set variables
+    auto var = mpResampleReservoirCausticPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gConfidenceLimit"] = mResampleSettingsCaustic.confidenceCap;
+    var["CB"]["gSpatialRadius"] = mResampleSettingsCaustic.samplingRadius;
+    var["CB"]["gSpatialSamples"] = mResampleSettingsCaustic.spatialSamples;
+    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsCaustic.disocclusionBoostExtraSamples;
+    var["CB"]["gNormalThreshold"] = mResampleSettingsCaustic.normalThreshold;
+    var["CB"]["gPhotonRadius"] = mPhotonRadius;
+
+    // Input Resources
+    var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
+    var["gMVec"] = renderData[kInputMVec]->asTexture();
+
+    // In-/Output Resources
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+
+    // Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpResampleReservoirCausticPass->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "EvaluateReservoirs");
+
+    // Create compute pass
+    if (!mpEvaluateReservoirsPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIREvalReservoirs).csEntry("main").setShaderModel("6_6");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(mpRTXDI->getDefines());
+
+        mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpEvaluateReservoirsPass);
+
+    // Runtime Defines
+    mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
+    mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+
+    // Set variables
+    auto var = mpEvaluateReservoirsPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+
+    // RTXDI resources
+    mpRTXDI->setShaderData(var);
+
+    // Input
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+    var["gEmission"] = mpEmission;
+
+    // Output
+    var["gOutColor"] = renderData[kOutputColor]->asTexture();
+
+    // Execute
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpEvaluateReservoirsPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
 void PhotonGuiding::RayTraceProgramHelper::initProgramVars(ref<Device> pDevice, ref<Scene> pScene, ref<SampleGenerator> pSampleGenerator)
