@@ -318,14 +318,12 @@ void rayGen()
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
     photon.pdf = pls.emissionPDF;
-    //photon.neeReversePdf = pls.directPDF;
 
     // Used for emissive MIS at the first hit
     TriangleLightHit emissiveTriangleHit;
     emissiveTriangleHit.triangleIndex = pls.triIndex;
     emissiveTriangleHit.posW = pls.posW;
     emissiveTriangleHit.normalW = pls.normal;
-    //const uint emissiveTriangleIndex = pls.triIndex;
     const float photonPdfWeight = lightCount * M_PI * gPhotonRadius * gPhotonRadius;
 
     // Main Loop
@@ -350,27 +348,7 @@ void rayGen()
 
         photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        /*
-        float dist = distance(sd.posW, ray.Origin);
-        float cosTheta = abs(dot(sd.faceN, sd.V));
-        float G = cosTheta / (dist * dist);
-        photon.pdf *= G;
-        if (i == 0) {
-            const EmissiveTriangle emissiveTri = gScene.lightCollection.getTriangle(emissiveTriangleIndex);
-            photon.neeReversePdf = gEmissiveSampler.evalTriangleSelectionPdf(sd.posW, sd.faceN, true, emissiveTriangleIndex)/emissiveTri.area;
-        }
-        else
-            photon.neeReversePdf *= G;
-        photon.reversePdf *= G;
-        photon.photonReversePdf *= G;            
-
        
-        float continuationProb = getContinuationProbablity(bsdfProperties);
-        photon.reversePdf *= continuationProb;
-        if(i>0)
-            photon.neeReversePdf *= continuationProb;
-        */
-
         // Init nee and scatter pdf
         float continuationProb = getContinuationProbablity(bsdfProperties);
         if (i == 0) {
@@ -385,7 +363,6 @@ void rayGen()
 
         // Store Photon
         if (reflectedDiffuse) {
-            //PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
             bool storePhoton = true;
             if (storePhoton) {
                 uint photonInsertIndex = 0;
@@ -424,31 +401,7 @@ void rayGen()
         photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
         photon.pathLenght++;
-
-        float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
-        // Update MIS weight
-        /*
-        if (reflectedDiffuse)
-        {
-            float reversePDF = mi.evalPdf(sd, ray.Direction, sd.V) * cosThetaOut;
-            photon.photonReversePdf *= reversePDF * continuationProb;
-            photon.photonReversePdf += photon.pdf * photonPdfWeight * reversePDF * continuationProb;
-            photon.pdf *= bsdfSample.pdf * continuationProb * cosThetaOut;
             
-            if (i > 0)
-                photon.neeReversePdf *= reversePDF;
-            photon.reversePdf *= reversePDF; // Continuation prob was handled above
-        } else {
-            photon.pdf *= cosThetaOut;
-            if(i == 0)
-                photon.neeReversePdf *= 0;
-            else
-                photon.neeReversePdf *= cosThetaOut;
-            photon.reversePdf *= cosThetaOut;
-            photon.photonReversePdf *= cosThetaOut;
-            // photon.reversePdf = 0;
-        }
-        */
         // Pdfs
         const float forwardPdf = bsdfSample.pdf * continuationProb;
         //const float forwardPdf = mi.evalPdf(sd, bsdfSample.wo) * continuationProb;

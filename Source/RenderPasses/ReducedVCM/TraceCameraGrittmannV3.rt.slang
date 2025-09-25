@@ -126,21 +126,15 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, CameraStat
         if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0) || (camState.pathLength + photonData.pathLenght) > (gMaxBounces + 1))
             continue;
 
-        //if (photonData.pathLenght <= 0)
-        //    continue;
-
-        float pdf = mi.evalPdf(sd, photonData.dir);
+        float pdf = mi.evalPdf(sd, photonData.dir) * continuationProb;
         float reversePDF = mi.evalPdf(sd, photonData.dir, sd.V) * continuationProb;
-        pdf *= continuationProb;
 
-        //TODO try different ways of connecting a photon
         const float camPathPdf = camState.pdf * camState.lastItForwardPdf;
-        const float lightPathPdf = camState.lightTracePdf * camState.lastItReversePdf;
-        const float photonCamPathPdf = camState.photonPdf * camState.lastItReversePdf;
+        const float lightPathPdf = camState.lightTracePdf * camState.lastItReversePdf * reversePDF;
+        const float photonCamPathPdf = camState.photonPdf * camState.lastItReversePdf * reversePDF;
         const float photonPdfWeight = gNumLightPaths * M_PI * gPhotonRadius * gPhotonRadius;
 
-        // TODO a bit to dark something not completely right
-        const float cameraScatterPdf = camPathPdf * photonData.reversePdf;
+        const float cameraScatterPdf = camPathPdf * photonData.reversePdf * pdf;
         float neePdf = photonData.neeReversePdf * camPathPdf;
         if (photonData.pathLenght > 0)
             neePdf *= pdf;
@@ -217,18 +211,6 @@ float3 NextEventEstimation(ShadingData sd, IMaterialInstance mi ,CameraState cam
     if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
         return float3(0);
 
-    /*
-    float cosToLight = dot(sd.faceN, tls.dir);
-    float G = cosToLight / (tls.distance * tls.distance);
-    lightTracePdf *= G;
-    const float pdf = camState.pdf * directPdf;
-    const float scatterPdf = camState.pdf * mi.evalPdf(sd, tls.dir, true) * continuationProb * G;
-    float photonPdf = 0;
-    if (camState.pathLength > 0)
-        photonPdf = camState.photonPdf * emissionPdf;
-
-    const float misWeight = pdf / (pdf + lightTracePdf + scatterPdf + photonPdf);
-    */
 
     const float misWeight = neePdf / (neePdf + scatterPdf + lightTracePdf + photonPdf);
 
@@ -264,17 +246,6 @@ float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout
         let bsdfProperties = mi.getProperties(sd);
         float continuationProb = getContinuationProbablity(bsdfProperties);
         bool isDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-
-        // Update Geometry term
-        /*
-        float dist = distance(sd.posW, ray.Origin);
-        float cosTheta = abs(dot(sd.faceN, sd.V));
-        float G = cosTheta / (dist * dist);
-        camState.pdf *= G;
-        camState.lightTracePdf *= G;
-        if (isDiffuse)
-            camState.photonPdf += camState.pdf * gNumLightPaths * M_PI * gPhotonRadius * gPhotonRadius;
-        */
 
         bool hitEmissive = any(bsdfProperties.emission > 0);
         if (hitEmissive) {
@@ -328,29 +299,6 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, float c
     float pdf = bsdfSample.pdf * continuationProbability;
     //float pdf = mi.evalPdf(sd, bsdfSample.wo) * continuationProbability;
     float reversePdf = mi.evalPdf(sd, bsdfSample.wo, sd.V) * continuationProbability;
-    float cosThetaOut = abs(dot(sd.faceN, ray.Direction));
-    // Specular
-    /*
-    if (roughness < kRoughnessThreshold) {
-        camState.pdf *= cosThetaOut;
-        if (camState.pathLength == 0)
-            camState.lightTracePdf *= 0;
-        else
-            camState.lightTracePdf *= cosThetaOut;
-        if (camState.pathLength > 0)
-            camState.photonPdf *= cosThetaOut;
-        camState.lastHitWasDelta = true;
-    } else {
-        if (camState.pathLength > 0) {
-            camState.photonPdf *= reversePdf;
-            // camState.photonPdf += camState.pdf * (gNumLightPaths * M_PI * gPhotonRadius * gPhotonRadius);
-        }
-        camState.pdf *= pdf * cosThetaOut;
-        camState.lightTracePdf *= reversePdf * cosThetaOut;
-        camState.isSpecularPath = false;
-        camState.lastHitWasDelta = false;
-    }
-    */
 
     //Update pdfs
     camState.pdf *= camState.lastItForwardPdf;
@@ -452,29 +400,15 @@ void rayGen()
     {
         //Init Camera state with MIS
         CameraState camState = CameraState();
-        //const float3 camForward = normalize(gScene.camera.data.cameraW);
-        //const float cosAtCamera = dot(-viewDir, camForward);
-
+      
         //Get Material Properties
         let lod = ExplicitLodTextureSampler(0);
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 2 + 1);
-
         ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
 
-        // Init MIS
-        /*
-        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
-        float distanceToCamera = length(directionToCamera);
-        directionToCamera /= distanceToCamera;
-        const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3); // Surface to image factor
-        camState.lightTracePdf *= cameraPdf;
-        float cosTheta = abs(dot(sd.faceN, sd.V));
-        float G = cosTheta / (distanceToCamera * distanceToCamera);
-        camState.pdf *= G;
-        */
         // Init light trace pdf
         float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
         float distanceToCamera = length(directionToCamera);
