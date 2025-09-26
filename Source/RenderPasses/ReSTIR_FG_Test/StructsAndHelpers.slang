@@ -15,6 +15,7 @@ struct PhotonData {
     uint _pad2;
     float3 normalW;
     uint _pad3;
+    PackedHitInfo hitInfo;
 
     __init() {
         this.dir = float3(0);

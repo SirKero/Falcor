@@ -33,7 +33,7 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData sd = loadShadingData(hitInfo, -fgReservoir.sampleData.sampleView, lod);
     let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
-
+    let bsdfProperties = mi.getProperties(sd);
     outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
     outColor *= fgReservoir.thp * fgReservoir.wSum;
 

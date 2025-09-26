@@ -355,7 +355,7 @@ void ReSTIR_FG_Test::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpPhotonData[i])
         {
             mpPhotonData[i] = Buffer::createStructured(
-                mpDevice, sizeof(float) * 12, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(float) * 16, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));

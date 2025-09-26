@@ -254,6 +254,7 @@ void rayGen()
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
+        photon.hitInfo = hit.getData();
 
         // Store Photon
         photon.normalW = sd.getOrientedFaceNormal();
