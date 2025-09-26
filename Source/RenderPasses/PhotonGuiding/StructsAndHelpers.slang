@@ -185,6 +185,13 @@ float getContinuationProbablity(BSDFProperties props)
     return clamp(luminance(totalMaterialEnergie), 0.0, 1.0);
 }
 
+// Adaptive Radius helper
+float adaptiveRadius(float distanceToCamera, float normalizedPixelDiagonal, float radiusScale = 1.0)
+{
+    float adaptiveRadius = (normalizedPixelDiagonal * distanceToCamera) / 2.0;
+    return adaptiveRadius * radiusScale;
+}
+
 //Helper for the ReSTIR screen size buffers
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;

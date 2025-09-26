@@ -171,10 +171,6 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     }
     case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_FG:
     {
-        //TODO find a better way for these settings
-        mSpecularRoughnessThreshold = 0.25f;
-        mUseAdaptivePhotonRadius = false;
-
         if (!mpRTXDI)
             mpRTXDI = std::make_unique<RTXDI>(mpScene, mRTXDIOptions);
         mpRTXDI->beginFrame(pRenderContext, mScreenRes);
@@ -761,6 +757,9 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     // Clear Photon Counter
     pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
 
+    //Update normalized diagonal
+    mNormalizePixelDiagonal = mUseAdaptivePhotonRadius ? getNormalizedPixelDiagonal(mpScene, mScreenRes) : 0.f;
+
     // Init Shader
     if (!mTracePhotonPass.pProgram)
     {
@@ -812,8 +811,6 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
     shaderDispatchDim = std::max(32u, shaderDispatchDim);
 
-    float normalizePixelDiagonal = mUseAdaptivePhotonRadius ? getNormalizedPixelDiagonal(mpScene, mScreenRes) : 0.f;
-
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPhotonRadius"] = mPhotonRadius; 
@@ -823,7 +820,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
     var["CB"]["gGuidingTextureMaxMip"] = mGuidingTextures[0]->getMipCount() - 1u;
     var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
-    var["CB"]["gNormalizedPixelDiagonal"] = normalizePixelDiagonal;
+    var["CB"]["gNormalizedPixelDiagonal"] = mNormalizePixelDiagonal;
 
     // Output
     for (uint i = 0; i < 2; i++)
@@ -1175,10 +1172,13 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add(mpRTXDI->getDefines());
+        defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
 
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirCausticPass);
+    //Runtime defines
+    mpResampleReservoirCausticPass->getProgram()->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsCaustic.enable)
@@ -1200,6 +1200,8 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
     var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsCaustic.disocclusionBoostExtraSamples;
     var["CB"]["gNormalThreshold"] = mResampleSettingsCaustic.normalThreshold;
     var["CB"]["gPhotonRadius"] = mPhotonRadius;
+    var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
+    var["CB"]["gNormalizedPixelDiagonal"] = mNormalizePixelDiagonal;
 
     // Input Resources
     var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];

@@ -191,8 +191,7 @@ float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)
     if (kUseAdaptivePhotonRadius) {
 
         float distToCamera = distance(hitPos, gScene.camera.getPosition());
-        float adaptiveRadius = (gNormalizedPixelDiagonal * distToCamera) / 2.0;
-        return adaptiveRadius * gAdaptivePhotonRadius[photonTypeIdx];
+        return adaptiveRadius(distToCamera, gNormalizedPixelDiagonal, gAdaptivePhotonRadius[photonTypeIdx]);
     }
     else {
         return gPhotonRadius[photonTypeIdx];

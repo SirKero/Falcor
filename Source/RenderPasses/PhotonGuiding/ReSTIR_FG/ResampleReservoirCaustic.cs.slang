@@ -19,9 +19,14 @@ cbuffer CB
     float gSpatialRadius;   //radius for spatial resampling
     float gNormalThreshold; // Normal Threshold
 
-    float2 gPhotonRadius; //Global / Caustic
-    uint2 _pad;
+    float2 gPhotonRadius;           // Global / Caustic fixed radius
+    float2 gAdaptivePhotonRadius;   // Pixel scale for global/ caustic photons.
+
+    float gNormalizedPixelDiagonal; // Pixel length at distance 1
+    uint3 _pad;
 }
+
+static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 
 Texture2D<float2> gMVec;
 StructuredBuffer<ReservoirCaustic> gCausticReservoirPrev;
@@ -30,8 +35,17 @@ RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
-inline float getPhotonRadius(ReservoirCaustic r) {
-    return r.pathLength == 0 ? gPhotonRadius.y : gPhotonRadius.x;
+inline float getPhotonRadius(ReservoirCaustic r)
+{
+    uint photonTypeIndex = r.pathLength == 0 ? 1 : 0; //Caustic : Global
+    if (kUseAdaptivePhotonRadius) {
+
+        float distToCamera = distance(r.photonPosW, gScene.camera.getPosition());
+        return adaptiveRadius(distToCamera, gNormalizedPixelDiagonal, gAdaptivePhotonRadius[photonTypeIndex]);
+    }
+    else {
+        return gPhotonRadius[photonTypeIndex];
+    }
 }
 
 // Generalized Balance Heuristic with two samples

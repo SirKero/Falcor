@@ -126,7 +126,7 @@ private:
 
     // Material Settings
     bool mUseLambertianDiffuse = false;         // Enable Lambert Diffuse BRDF instead of Frostbyte
-    float mSpecularRoughnessThreshold = 0.08f; // Any material below this is considered specular (currently set to delta)
+    float mSpecularRoughnessThreshold = 0.25f; // Any material below this is considered specular
 
     //
     // Path Tracer
@@ -152,6 +152,7 @@ private:
     float2 mPhotonRadius = float2(0.008f, 0.002f); //Global / Caustic Radius
     bool mUseAdaptivePhotonRadius = true;
     float2 mAdaptivePhotonRadius = float2(4.f, 1.5f);    //Pixel Size scale for adptive radius
+    float mNormalizePixelDiagonal = 0.f;                //Diagonal of a pixel in world space at distance 1. Used in adaptive photon radius calculation
 
     bool mPhotonRussianRoulette = true; //Enables Russian Roulette for the photon pass
     
