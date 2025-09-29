@@ -114,6 +114,71 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
     return collectedRadiance;
 }
 
+//Select one Final Gather sample representing all samples using RIS
+void selectFGSample(inout ReservoirFG r, float pdf, ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
+    float3 collectedRadiance = float3(0);
+    // Prepare ray
+    RayDesc ray;
+    ray.Origin = sd.posW;
+    ray.Direction = sd.faceN;
+    ray.TMin = 0;
+    ray.TMax = kPhotonCollectTMax;
+
+    let bsdfProperties = mi.getProperties(sd);
+    const float photonWeight = M_PI * gNumLightPaths;
+
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+
+    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
+    while (rayQuery.Proceed()) {
+
+        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
+            continue;
+        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
+        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
+
+        // Check if ray is inside photon radius
+        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
+        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
+        if (!hitSphere(photonAABB.center(), radius, sd.posW))
+            continue;
+
+        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
+        float NdotL = dot(photonData.dir, N);
+        // Check for diffent surfaces (e.g. corners)
+        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
+            continue;
+
+        float targetFunction = 0;
+        float3 radianceOut = float3(0);
+        if (NdotL > 0) {
+            float3 bsdf = mi.eval(sd, photonData.dir, sg);
+            radianceOut = (photonData.flux * bsdf) / NdotL;
+            targetFunction = luminance(radianceOut);
+        }
+        float photonDenom = photonWeight * radius * radius * pdf;
+        float w = targetFunction / photonDenom;
+
+        r.wSum += w;
+        bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
+        if (selectNew) {
+            r.targetFunction = targetFunction;
+            r.sampleData.radianceOut = radianceOut;
+            //Guiding data
+            r.lightIndex = photonData.lightIndex;
+            r.guidingPixels = photonData.guidingPixel;
+            //r.guidingRandomVal = photonData.guidingRandomVal;
+        }
+    }
+
+    // Finalize Reservoir
+    if (r.targetFunction > 0) {
+        r.wSum /= r.targetFunction;
+    }
+    else
+        r.wSum = 0;
+}
+
 bool generateFGSampleRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout float3 thp, inout float pdf, inout RayDesc ray) {
     // Photon Bounce for next iteration
     BSDFSample bsdfSample;
@@ -180,6 +245,11 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
             causticReservoir.photonDir = photonData.dir;
             causticReservoir.photonRadiance = photonData.flux;
             causticReservoir.targetFunction = targetFunction;
+
+            // Guiding data
+            causticReservoir.lightIndex = photonData.lightIndex;
+            causticReservoir.guidingPixels = photonData.guidingPixel;
+            //causticReservoir.guidingRandomVal = photonData.guidingRandomVal;
         }
 
         // Add to the guiding texture
@@ -252,16 +322,28 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
 
         // Check if this is a valid final gather surface
         if (hitIsRough && prevHitIsRough) {
-            //Collect photons and fill reservoir
-            reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
-            reservoirFG.thp = prevThp;
-            reservoirFG.sampleData.posW = sd.posW;
-            reservoirFG.sampleData.normal = sd.faceN; // Face normal?
-            reservoirFG.wSum = 1.0 / pdf;
-            reservoirFG.c = 1;
-            float distanceToSample = distance(ray.Origin, sd.posW);
-            reservoirFG.jacobianDeterminant = dot(reservoirFG.sampleData.normal, sd.V) / (distanceToSample * distanceToSample);
-
+            // Collect photons and fill reservoir
+            if (kGuidingMode != (uint)GuidingMode::ReSTIR)
+            {
+                reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
+                reservoirFG.thp = prevThp;
+                reservoirFG.sampleData.posW = sd.posW;
+                reservoirFG.sampleData.normal = sd.faceN;
+                reservoirFG.wSum = 1.0 / pdf;
+                reservoirFG.c = 1;
+                float distanceToSample = distance(ray.Origin, sd.posW);
+                reservoirFG.jacobianDeterminant = dot(reservoirFG.sampleData.normal, sd.V) / (distanceToSample * distanceToSample);
+            } else
+            {
+                selectFGSample(reservoirFG, pdf, sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
+                reservoirFG.thp = prevThp;
+                reservoirFG.sampleData.posW = sd.posW;
+                reservoirFG.sampleData.normal = sd.faceN; 
+                reservoirFG.c = 1;
+                float distanceToSample = distance(ray.Origin, sd.posW);
+                reservoirFG.jacobianDeterminant = dot(reservoirFG.sampleData.normal, sd.V) / (distanceToSample * distanceToSample);
+            }
+           
             return;
         }
 

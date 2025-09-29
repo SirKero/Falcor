@@ -1,17 +1,23 @@
 #include "../StructsAndHelpers.slang"
+#include "../SharedEnums.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
+import Utils.Color.ColorHelpers;
 import Rendering.RTXDI.RTXDI;
 
+#ifndef NUM_GUIDING_TEXTURES
+#define NUM_GUIDING_TEXTURES 1
+#endif
 
 Texture2D<PackedHitInfo> gVBuffer;
 StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 StructuredBuffer<ReservoirCaustic> gCausticReservoir;
 Texture2D<float4> gEmission;
 
+RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
 RWTexture2D<float4> gOutColor;
 
 cbuffer CB
@@ -22,11 +28,12 @@ cbuffer CB
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const uint kGuidingMode = GUIDING_MODE;
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
     ReservoirFG fgReservoir = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
-    if (!fgReservoir.isValid())
+    if (!fgReservoir.isValid() || fgReservoir.wSum <= 0)
         return outColor;
 
     // Get surface and shading data
@@ -38,13 +45,29 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
     outColor *= fgReservoir.thp * fgReservoir.wSum;
 
+    if (kGuidingMode == (uint)GuidingMode::ReSTIR)
+    {
+        if (fgReservoir.lightIndex < 0)
+            return outColor;
+        float histogramEmission = luminance(outColor);
+        uint currentColor = 0;
+        uint originalValue;
+        [allow_uav_condition]
+        do {
+            InterlockedAdd(gGuidingCounter[fgReservoir.lightIndex][fgReservoir.guidingPixels], 0u, currentColor);
+            float color = asfloat(currentColor);
+            uint updatedColor = asuint(color + histogramEmission);
+            InterlockedCompareExchange(gGuidingCounter[fgReservoir.lightIndex][fgReservoir.guidingPixels], currentColor, updatedColor, originalValue);
+        } while (originalValue != currentColor);
+    }
+    
     return outColor;
 }
 
 float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
     ReservoirCaustic causticReservoir = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
-    if (!causticReservoir.isValid())
+    if (!causticReservoir.isValid() || causticReservoir.wSum <= 0)
         return outColor;
 
     // Get surface and shading data
@@ -59,6 +82,22 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
         outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
         outColor /= NdotL;
         outColor *= causticReservoir.thp;
+    }
+
+    if (kGuidingMode == (uint)GuidingMode::ReSTIR)
+    {
+        if (causticReservoir.lightIndex < 0)
+            return outColor;
+        float histogramEmission = luminance(outColor);
+        uint currentColor = 0;
+        uint originalValue;
+        [allow_uav_condition]
+        do {
+            InterlockedAdd(gGuidingCounter[causticReservoir.lightIndex][causticReservoir.guidingPixels], 0u, currentColor);
+            float color = asfloat(currentColor);
+            uint updatedColor = asuint(color + histogramEmission);
+            InterlockedCompareExchange(gGuidingCounter[causticReservoir.lightIndex][causticReservoir.guidingPixels], currentColor, updatedColor, originalValue);
+        } while (originalValue != currentColor);
     }
 
     return outColor;

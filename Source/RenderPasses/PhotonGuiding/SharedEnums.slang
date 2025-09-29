@@ -24,11 +24,13 @@ enum class GuidingMode : uint
     Disabled = 0u,
     Uniform = 1u,
     Emission = 2u,
+    ReSTIR = 3u,
 };
 FALCOR_ENUM_INFO(GuidingMode, {
     { GuidingMode::Disabled, "Disabled" },
     { GuidingMode::Uniform, "Uniform" },
     { GuidingMode::Emission, "Emission" },
+    { GuidingMode::ReSTIR, "ReSTIR" },
 });
 FALCOR_ENUM_REGISTER(GuidingMode);
 

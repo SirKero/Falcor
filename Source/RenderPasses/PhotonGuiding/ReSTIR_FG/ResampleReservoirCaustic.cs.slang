@@ -104,6 +104,8 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
         current.photonDir = other.photonDir;
         current.photonRadiance = other.photonRadiance;
         current.targetFunction = targetFunctionOther;
+        current.guidingPixels = other.guidingPixels;
+        current.lightIndex = other.lightIndex;
     }
 
     //Increase confidence weights

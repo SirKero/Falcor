@@ -295,7 +295,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         if (mGuidingRealTimeMode)
             group.var("History Limit", mGuidingHistoryLimit, 0u, UINT_MAX, 1u);
 
-        if (mGuidingMode == GuidingMode::Emission)
+        if (mGuidingMode == GuidingMode::Emission || mGuidingMode == GuidingMode::ReSTIR)
             changed |= group.var("Uniform weight (clear value)", mGuidingClearValueEmission, 0.f, FLT_MAX, 0.001f);
 
         mGuidingResetAccumulateCount = group.button("Reset Guiding Textures");
@@ -583,7 +583,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         {
             mCanResample = false;
             mpFinalGatherReservoir[i] = Buffer::createStructured(
-                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, 128u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpFinalGatherReservoir[i]->setName("FinalGatherReservoir" + std::to_string(i));
@@ -592,7 +592,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         {
             mCanResample = false;
             mpCausticReservoir[i] = Buffer::createStructured(
-                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, 128u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
@@ -1245,6 +1245,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add(mpSampleGenerator->getDefines());
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
+        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
+        defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -1253,6 +1255,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     // Runtime Defines
     mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();
@@ -1274,6 +1277,13 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
 
     // Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
+
+    // Guiding textures
+    bool useGuiding = mGuidingMode == GuidingMode::ReSTIR;
+    for (uint i = 0; i < mEmissiveLightCount && useGuiding; i++)
+    {
+        var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
+    }
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

@@ -92,6 +92,8 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
         current.sampleData.radianceOut = other.sampleData.radianceOut;
         current.targetFunction = targetFunctionOther;
         current.jacobianDeterminant = dot(current.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
+        current.guidingPixels = other.guidingPixels;
+        current.lightIndex = other.lightIndex;
     }
 
     //Increase confidence weights

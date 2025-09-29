@@ -34,7 +34,7 @@ struct PhotonData {
     uint _pad;
 
     uint2 guidingPixel;
-    float2 guidingRandomVal;
+    float2 guidingRandomVal; //Not used? 
 
     // Normal helper
     /*
@@ -88,16 +88,23 @@ struct FGSampleData {
     }
 }
 
-// Reservoir for a Final Gather Sample 112B
+// Reservoir for a Final Gather Sample 128B
 struct ReservoirFG {
     PackedHitInfo sampleSurface; // HitSample 16B
+
     float3 thp;                  // Throughput used at the end
     float targetFunction;        // Store target function
+
     FGSampleData sampleData;     // Data of the sample
+
     float wSum;                  // W and wSum
     uint c;                      // Confidence weight
     float jacobianDeterminant;   // Jacobian determinant to the current sample
     uint pathLength;             // Path Length
+
+    int lightIndex;            //Guiding
+    uint2 guidingPixels;   // Pixel for the guiding texture
+    uint _pad;
 
     __init() {
         sampleSurface = {};
@@ -108,7 +115,21 @@ struct ReservoirFG {
         c = 1;
         pathLength = 0;
         jacobianDeterminant = -1.0;
+        lightIndex = -1;
+        guidingPixels = uint2(0);
+        _pad = 0;
     }
+
+    //Guiding pixels helper
+    /*
+    property uint2 guidingPixels {
+        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = newValue.x & 0xFFFF;
+            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+        }
+    }
+    */
 
     // Valid check
     bool isValid() {
@@ -116,21 +137,31 @@ struct ReservoirFG {
     }
 }
 
-// Reservoir for a CausticSample 112B
+// Reservoir for a CausticSample 128B
 struct ReservoirCaustic {
     PackedHitInfo sampleSurface; // HitSample 16B
+
     float3 thp;                  // Throughput used at the end
     float targetFunction;        // Store target function
+
     float3 sampleSurfaceView;    // Incoming View
     float photonDirX;
+
     float3 photonPosW; // Position
     float photonDirY;
+
     float3 photonRadiance; // Radiance
     float photonDirZ;
+
     float wSum;      // W and wSum
     uint c;          // Confidence weight
     uint pathLength; // Path Length
     uint _pad;
+
+    int lightIndex;          // Guiding
+    uint2 guidingPixels;      // Pixel for the guiding texture
+    uint _pad2;
+    //float2 guidingRandomVal;  // Random vals for guiding
 
     __init() {
         sampleSurface = {};
@@ -146,6 +177,9 @@ struct ReservoirCaustic {
         c = 0;
         pathLength = 0;
         _pad = 0;
+        lightIndex = 0-1;
+        guidingPixels = uint2(0);
+        _pad2 = 0;
     }
 
     // Photon dir helper
@@ -157,6 +191,17 @@ struct ReservoirCaustic {
             photonDirZ = newValue.z;
         }
     }
+
+    // Guiding pixels helper
+    /*
+    property uint2 guidingPixels {
+        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = newValue.x & 0xFFFF;
+            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+        }
+    }
+    */
 
     // Valid check
     bool isValid() {
