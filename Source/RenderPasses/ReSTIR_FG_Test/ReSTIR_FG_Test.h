@@ -136,6 +136,9 @@ private:
     ref<Buffer> mpCausticReservoir[2];      // Reservoir for the Caustic sample
     ref<Texture> mpEmission;                // Emission for paths that travel through highly specular materials
 
+    ref<Texture> mpLightTraceHeadCounter;   //Screen size head buffer counter for light tracing to store the first hit
+    ref<Buffer> mpLightTraceLinkedList;     //Linked List for light tracing
+
     //
     // Render Passes/Programs
     //

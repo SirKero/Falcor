@@ -146,6 +146,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (!currentHit.isValid())
         return;
 
+    //TODO handle light trace
+    if (current.pathLength == 0)
+        return;
+
     //Get Shading Data
     ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
     let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);

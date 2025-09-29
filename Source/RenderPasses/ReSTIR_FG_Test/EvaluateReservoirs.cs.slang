@@ -53,11 +53,17 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
     let bsdfProperties = mi.getProperties(sd);
 
-    float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
-    if (NdotL > 0) {
-        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
-        outColor /= NdotL;
-        outColor *= causticReservoir.thp;
+    //Light Trace
+    if (causticReservoir.pathLength == 0) {
+        float3 directionToCamera = normalize(gScene.camera.getPosition() - sd.posW);
+        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg);
+    } else {
+        float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
+        if (NdotL > 0) {
+            outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
+            outColor /= NdotL;
+            outColor *= causticReservoir.thp;
+        }
     }
 
     return outColor;

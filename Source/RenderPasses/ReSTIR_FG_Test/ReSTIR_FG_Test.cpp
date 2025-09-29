@@ -3,6 +3,7 @@
 #include <utility>
 #include "RenderGraph/RenderPassHelpers.h"
 #include "RenderGraph/RenderPassStandardFlags.h"
+#include "Utils/Math/FalcorMath.h"
 
 #include "Rendering/Lights/EmissivePowerSampler.h"
 
@@ -338,6 +339,7 @@ void ReSTIR_FG_Test::prepareResources(RenderContext* pRenderContext, const Rende
         mpPhotonAABB[1].reset();
         mpPhotonData[0].reset();
         mpPhotonData[1].reset();
+        mpLightTraceLinkedList.reset();
         //Flag will be reset in preparePhotonAccelerationStructure()
     }
 
@@ -402,6 +404,26 @@ void ReSTIR_FG_Test::prepareResources(RenderContext* pRenderContext, const Rende
             mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
         );
         mpEmission->setName("EmissionTexture");
+    }
+
+    //Light Trace resources
+    if (!mpLightTraceHeadCounter || mResetScreenTex)
+    {
+        mpLightTraceHeadCounter = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::R32Int, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpLightTraceHeadCounter->setName("LightTraceHeadCounter");
+        pRenderContext->clearUAV(mpLightTraceHeadCounter->getUAV(0).get(), uint4(uint(-1)));
+    }
+
+    if (!mpLightTraceLinkedList)
+    {
+        mpLightTraceLinkedList = Buffer::createStructured(
+            mpDevice, sizeof(uint), mNumMaxPhotons[1], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpLightTraceLinkedList->setName("LightTraceLinkedList");
     }
 
     mResetScreenTex = false;
@@ -497,6 +519,7 @@ void ReSTIR_FG_Test::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gUseAnalyticLights"] = analyticOnly;
     var["CB"]["gDispatchDimension"] = shaderDispatchDim;
+    var["CB"]["gScreenDimensions"] = mScreenRes;
 
     //Structures
     if (mpEmissiveLightSampler)
@@ -510,8 +533,13 @@ void ReSTIR_FG_Test::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     }
     var["gPhotonCounter"] = mpPhotonCounter;
 
+    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
+    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+
     //Dispatch raytracing shader
     mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1));
+
+    pRenderContext->uavBarrier(mpLightTraceHeadCounter.get());
 
     //If two passes are dispatched, the acceleration structure is build on the second dispatch
     if (buildAS)
@@ -575,6 +603,21 @@ void ReSTIR_FG_Test::handlePhotonCounter(RenderContext* pRenderContext) {
     }
 }
 
+float getNormalizedPixelArea(const ref<Scene> pScene, uint2 mScreenRes)
+{
+    // Update Image plane distance
+    auto& cameraData = pScene->getCamera()->getData();
+    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
+
+    // Get normalized pixel area
+    float h = tan(fovY / 2.f) * 2.f;
+    float w = h * cameraData.aspectRatio;
+    float wPix = w / mScreenRes.x;
+    float hPix = h / mScreenRes.y;
+
+    return wPix * hPix;
+}
+
 void ReSTIR_FG_Test::generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "InitialSamples");
@@ -619,6 +662,7 @@ void ReSTIR_FG_Test::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
+    var["CB"]["gNormalizedPixelArea"] = getNormalizedPixelArea(mpScene, mScreenRes);
 
     //RTXDI Resources
     mpRTXDI->setShaderData(var);
@@ -636,6 +680,9 @@ void ReSTIR_FG_Test::generateInitialSamplesPass(RenderContext* pRenderContext, c
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
+
+    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
+    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
 
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));

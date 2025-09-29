@@ -2,6 +2,7 @@
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.Raytracing;
+import Scene.RaytracingInline;
 import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Sampling.SampleGenerator;
@@ -19,7 +20,9 @@ cbuffer CB
     uint gDispatchDimension;    //Dispatch dims (x,y identical) 
     float gGlobalRejectionProb; //Rejection Probability for global photons
     bool gUseAnalyticLights;    //true if analytic lights should be used
-    uint _pad;    
+    uint _pad;
+
+    uint2 gScreenDimensions;    //Screen dimensions for backprojection
 }
 
 #if USE_EMISSIVE_LIGHT // Buffer is only valid if emissive light is enabled
@@ -31,6 +34,9 @@ cbuffer Light {
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<PhotonData> gPhotonData[2];
 RWStructuredBuffer<uint> gPhotonCounter;
+
+RWTexture2D<int> gLightTraceHeadCounter;
+RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
 
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
@@ -147,6 +153,35 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
 
     sampledDir = fromLocalToWorld(pls.normal, woLocal);
     return true;
+}
+
+//Backprojects the caustic photon and stores it in an linked list to collect all pixels caustic photons with RIS
+void causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
+{
+    // Check if position is in camera view
+    float4 screenPos = mul(gScene.camera.getViewProj(), float4(sd.posW, 1));
+    screenPos /= screenPos.w;
+    screenPos.y *= -1;
+    screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+    if (any(screenPos.xy < 0) || any(screenPos.xy >= 1) || screenPos.z < 0 || screenPos.z > 1)
+        return;
+
+    // If the photon is in screen it is assumed that it will contribute something
+    // Check visibility with ray query
+    float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+    float distanceToCamera = length(directionToCamera);
+    directionToCamera /= distanceToCamera;
+
+    SceneRayQuery<1> rayQuery;
+    const Ray ray = Ray(sd.computeNewRayOrigin(), directionToCamera, 0.f, distanceToCamera);
+    if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+        return;
+
+    // Caustic photon is a valid sample, add to the linked list for the RIS pass later
+    uint2 currentPixel = uint2(floor(screenPos.xy * gScreenDimensions));
+    int nodeNext = -1;
+    InterlockedExchange(gLightTraceHeadCounter[currentPixel], photonBufferIndex, /*out*/ nodeNext);
+    gLightTraceLinkedList[photonBufferIndex] = nodeNext;
 }
 
 [shader("miss")]
@@ -276,6 +311,9 @@ void rayGen()
                     AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
                     gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
                     gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
+
+                    if (photonType == PhotonType::Caustic)
+                        causticPhotonBackprojection(photonInsertIndex, sd);
                 }
             }
         }
