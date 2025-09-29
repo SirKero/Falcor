@@ -1057,12 +1057,17 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
             sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
         }
 
-        mGenerateInitialSamplesPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
+
+        mGenerateInitialSamplesPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
 
     // Defines that can change on runtime
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
 
     // Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -1092,6 +1097,13 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
+
+    //Guiding textures
+    bool useGuiding = mGuidingMode == GuidingMode::Uniform || mGuidingMode == GuidingMode::Emission;
+    for (uint i = 0; i < mEmissiveLightCount && useGuiding; i++)
+    {
+        var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
+    }
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));

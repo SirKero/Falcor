@@ -132,7 +132,8 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
                 uint updatedColor = asuint(color + histogramEmission);
                 InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
             } while (originalValue != currentColor);
-        } else if (kGuidingMode == (uint)GuidingMode::Emission) {
+        } else //if (kGuidingMode == (uint)GuidingMode::Uniform)
+        {
             InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
         }
     }
