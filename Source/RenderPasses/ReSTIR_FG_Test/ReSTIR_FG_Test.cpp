@@ -15,6 +15,8 @@ namespace
     const std::string kShaderResamplingReservoirFG = kShaderFolder + "ResampleReservoirFG.cs.slang";
     const std::string kShaderResamplingReservoirCaustic = kShaderFolder + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderEvaluateReservoirs = kShaderFolder + "EvaluateReservoirs.cs.slang";
+    const std::string kShaderTemporalSplatReservoirs = kShaderFolder + "TemporalSplatReservoir.cs.slang";
+    const std::string kShaderSortSplatReservoirs = kShaderFolder + "SortSplatReservoirs.cs.slang";
 
     const std::string kShaderModel = "6_5";
 
@@ -272,6 +274,11 @@ void ReSTIR_FG_Test::execute(RenderContext* pRenderContext, const RenderData& re
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
+    //Reservoir Splatting
+    splatTemporalReservoirsPass(pRenderContext, renderData);
+
+    sortSplattedReservoirsPass(pRenderContext, renderData);
+
     //Spatiotemporal resampling for final gather samples and caustics
     resampleReservoirFGPass(pRenderContext, renderData);
 
@@ -425,6 +432,60 @@ void ReSTIR_FG_Test::prepareResources(RenderContext* pRenderContext, const Rende
         );
         mpLightTraceLinkedList->setName("LightTraceLinkedList");
     }
+
+    /*
+    ref<Buffer> mpSplattingGlobalCounter;   //Counter used in Splatting
+    ref<Buffer> mpSplattingCellCounter;     //Per pixel cell counter
+    ref<Buffer> mpSplattingCellOffsets;     //Per pixel cell offsets
+    ref<Buffer> mpSplattingSortingData;     //Indices needed for sorting
+    ref<Buffer> mpSplattingSortedReservoirs;//Sorted reservoirs
+    */
+    //Set Splatting Resources
+    if (!mpSplattingGlobalCounter)
+    {
+        mpSplattingGlobalCounter = Buffer::createStructured(
+            mpDevice, sizeof(uint), 2, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None,
+            nullptr, false
+        );
+        mpSplattingGlobalCounter->setName("SplattingGlobalCounter");
+    }
+
+    if (!mpSplattingCellCounter || mResetScreenTex)
+    {
+        mpSplattingCellCounter = Buffer::createStructured(
+            mpDevice, sizeof(uint), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingCellCounter->setName("SplattingCellCounter");
+    }
+
+    if (!mpSplattingCellOffsets || mResetScreenTex)
+    {
+        mpSplattingCellOffsets = Buffer::createStructured(
+            mpDevice, sizeof(uint), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingCellOffsets->setName("SplattingCellOffsets");
+    }
+
+    if (!mpSplattingSortingData || mResetScreenTex)
+    {
+        mpSplattingSortingData = Buffer::createStructured(
+            mpDevice, sizeof(uint4), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingSortingData->setName("SplattingSortingData");
+    }
+
+    if (!mpSplattingSortedReservoirs || mResetScreenTex)
+    {
+        mpSplattingSortedReservoirs = Buffer::createStructured(
+            mpDevice, sizeof(uint2), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingSortedReservoirs->setName("SplattingSortedReservoirs");
+    }
+
 
     mResetScreenTex = false;
 }
@@ -690,6 +751,137 @@ void ReSTIR_FG_Test::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //Reservoir barrier
     pRenderContext->uavBarrier(mpFinalGatherReservoir[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpCausticReservoir[mFrameCount % 2].get());
+}
+
+void ReSTIR_FG_Test::splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Splat Caustic Reservoirs");
+
+    pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
+    pRenderContext->clearUAV(mpSplattingCellCounter->getUAV(0).get(), uint4(0));
+    pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0));
+   
+    if (!mpTemporalSplatReservoirs)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderTemporalSplatReservoirs).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(getMaterialDefines());
+
+        mpTemporalSplatReservoirs = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpTemporalSplatReservoirs);
+    mpTemporalSplatReservoirs->getProgram()->addDefines(getMaterialDefines()); // Runtime define
+
+    // Return early if there is no previous reservoir or resampling is disabled
+    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    {
+        return;
+    }
+
+    // Set variables
+    auto var = mpTemporalSplatReservoirs->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+
+    var["CB"]["gFrameDim"] = mScreenRes;
+
+    var["gPrevReservoir"] = mpCausticReservoir[(mFrameCount + 1) % 2];
+    var["gCellCounter"] = mpSplattingCellCounter;
+    var["gGlobalCounter"] = mpSplattingGlobalCounter;
+    var["gSplatSortData"] = mpSplattingSortingData;
+
+    // Execute Compute Pass
+    const uint2 targetDim = mScreenRes;
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpTemporalSplatReservoirs->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void ReSTIR_FG_Test::sortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Sort Splatted Reservoirs");
+
+    //Init Shaders
+    if (!mpSplatSortComputeCellOffsets)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderSortSplatReservoirs).csEntry("computeCellOffsets").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(getMaterialDefines());
+
+        mpSplatSortComputeCellOffsets = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpSplatSortComputeCellOffsets);
+    mpSplatSortComputeCellOffsets->getProgram()->addDefines(getMaterialDefines()); // Runtime define
+    if (!mpSplatSortCellData)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderSortSplatReservoirs).csEntry("sortCellData").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(getMaterialDefines());
+
+        mpSplatSortCellData = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpSplatSortCellData);
+    mpSplatSortCellData->getProgram()->addDefines(getMaterialDefines()); // Runtime define
+
+    // Return early if there is no previous reservoir or resampling is disabled
+    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    {
+        return;
+    }
+
+    //Lambda for shader vars as they are the same for both shaders
+    auto setProgramVars = [&](ShaderVar& var)
+    {
+        mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+        var["CB"]["gFrameDim"] = mScreenRes;
+
+        var["gGlobalCounter"] = mpSplattingGlobalCounter;
+        var["gCellCounter"] = mpSplattingCellCounter;
+        var["gCellOffsets"] = mpSplattingCellOffsets;
+        var["gSortingData"] = mpSplattingSortingData;
+        var["gSortedReservoirs"] = mpSplattingSortedReservoirs;
+    };
+
+    //Cell offset pass
+    {
+        pRenderContext->uavBarrier(mpSplattingGlobalCounter.get());
+        auto var = mpSplatSortComputeCellOffsets->getRootVar();
+        setProgramVars(var);
+
+        const uint2 targetDim = mScreenRes;
+        FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+        mpSplatSortComputeCellOffsets->execute(pRenderContext, uint3(targetDim, 1));
+        pRenderContext->uavBarrier(mpSplattingGlobalCounter.get());
+        pRenderContext->uavBarrier(mpSplattingCellOffsets.get());
+    }
+
+    // Sorting pass
+    {
+        auto var = mpSplatSortCellData->getRootVar();
+        setProgramVars(var);
+
+        const uint targetDim = mScreenRes.x * mScreenRes.y;
+        FALCOR_ASSERT(targetDim.x > 0);
+        mpSplatSortCellData->execute(pRenderContext, uint3(targetDim, 1, 1));
+    }
 }
 
 void ReSTIR_FG_Test::resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData)

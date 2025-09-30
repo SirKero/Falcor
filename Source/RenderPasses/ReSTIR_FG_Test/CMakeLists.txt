@@ -10,6 +10,8 @@ target_sources(ReSTIR_FG_Test PRIVATE
     StructsAndHelpers.slang
     GenerateInitialSamples.rt.slang
     TracePhotons.rt.slang
+    SortSplatReservoirs.cs.slang
+    TemporalSplatReservoir.cs.slang
 )
 
 target_copy_shaders(ReSTIR_FG_Test RenderPasses/ReSTIR_FG_Test)

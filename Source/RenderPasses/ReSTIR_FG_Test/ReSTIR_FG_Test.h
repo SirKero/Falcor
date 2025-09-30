@@ -29,7 +29,7 @@ public:
 private:
     struct ResamplingSettings
     {
-        bool enable = false;
+        bool enable = true;
         uint confidenceCap = 20;                // Maximum confidence allowed
         uint spatialSamples = 1;                // Number of spatial samples
         uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found
@@ -53,6 +53,12 @@ private:
 
     //Generates the initial Samples for the reservoirs (FG) and initializes RTXDI surfaces
     void generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Splat the reservoirs from last frame into the current frame
+    void splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Sort the splatted reservoirs so they can be used in the resampling pass
+    void sortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Reservoir Resampling for Final Gather Samples
     void resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -139,6 +145,13 @@ private:
     ref<Texture> mpLightTraceHeadCounter;   //Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;     //Linked List for light tracing
 
+    //Splatting
+    ref<Buffer> mpSplattingGlobalCounter;   //Counter used in Splatting
+    ref<Buffer> mpSplattingCellCounter;     //Per pixel cell counter
+    ref<Buffer> mpSplattingCellOffsets;     //Per pixel cell offsets
+    ref<Buffer> mpSplattingSortingData;     //Indices needed for sorting
+    ref<Buffer> mpSplattingSortedReservoirs;//Sorted reservoirs
+
     //
     // Render Passes/Programs
     //
@@ -166,5 +179,10 @@ private:
     ref<ComputePass> mpResampleReservoirFGPass;         // Resampling Pass for Final Gather Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass;    // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;          // Evaluates ReSTIR DI and FG reservoirs
+
+    //Splatting
+    ref<ComputePass> mpTemporalSplatReservoirs;         //Reprojects reservoirs from last frame to curren
+    ref<ComputePass> mpSplatSortComputeCellOffsets;     //Sort step 1, compute cell offsets
+    ref<ComputePass> mpSplatSortCellData;               //Sort step 2, sort the cell data
 };
 
