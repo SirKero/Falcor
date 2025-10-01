@@ -20,13 +20,16 @@ void main(uint2 pixel: SV_DispatchThreadID)
     // Load the reservoir from the last frame
     ReservoirCaustic r = gPrevReservoir[index2Dto1D(pixel, gFrameDim.x)];
 
-    //Return for non-splattable reservoirs
-    if (!r.isValid() || r.pathLength > 0)
+    // Return for non-splattable reservoirs
+    if (r.pathLength > 0 || !r.isValid())
         return;
 
     // Get shading data for the current reservoir (TODO could be optimized)
     let lod = ExplicitLodTextureSampler(0.f);
     HitInfo hit = HitInfo(r.sampleSurface);
+    if (!hit.isValid())
+        return;
+
     ShadingData sd = loadShadingData(hit, r.sampleSurfaceView, lod);
 
 

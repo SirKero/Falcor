@@ -451,6 +451,7 @@ float3 evaluateLightTrace(uint2 pixel, inout SampleGenerator sg)
 void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGenerator sg)
 {
     float3 outColor = float3(0);
+    r.c = 1;
     // Get head buffer index
     int headIndex = gLightTraceHeadCounter[pixel];
     if (headIndex == -1)
@@ -479,8 +480,8 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGe
 
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
-        float targetFunction = luminance(photonData.flux * bsdf);
-        float w = targetFunction / cameraPdf;
+        float targetFunction = luminance(photonData.flux * bsdf) / cameraPdf;
+        float w = targetFunction;
 
         r.wSum += w;
         bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
@@ -491,6 +492,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGe
             r.photonDir = photonData.dir;
             r.photonRadiance = photonData.flux;
             r.targetFunction = targetFunction;
+            r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
         }
 
         // Update head index
@@ -505,7 +507,6 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGe
     else
         r.wSum = 0;
 
-    r.c = 1;
 }
 
 [shader("miss")]
@@ -569,8 +570,8 @@ void rayGen()
 
         //Init Caustic reservoir if photons can be collected at the current surface
         if (hitIsRough) {
-            //causticReservoir.sampleSurface = hitInfo.getData();
-            //causticReservoir.sampleSurfaceView = -viewDir;
+            causticReservoir.sampleSurface = hitInfo.getData();
+            causticReservoir.sampleSurfaceView = -viewDir;
             // photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
             lightTraceResampling(pixel, causticReservoir, sg);
         }

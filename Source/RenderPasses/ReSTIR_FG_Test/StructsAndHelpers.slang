@@ -104,7 +104,7 @@ struct ReservoirCaustic {
     float wSum;                     // W and wSum
     uint c;                         // Confidence weight
     uint pathLength;                // Path Length
-    uint _pad;
+    float subPixelJacobian;         // Sub pixel jacobian for reprojection
 
     __init() {
         sampleSurface = {};
@@ -119,7 +119,7 @@ struct ReservoirCaustic {
         wSum = 0;
         c = 0;
         pathLength = 0;
-        _pad = 0;
+        subPixelJacobian = 0;
     }
 
     // Photon dir helper
@@ -151,6 +151,28 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
 
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
+}
+
+float3 getCameraProjection(float4x4 viewProjection, float3 posW) {
+    float4 screenPos = mul(viewProjection, float4(posW, 1));
+    screenPos /= screenPos.w;
+    screenPos.y *= -1;
+    screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+    return screenPos.xyz;
+}
+
+float getCameraBackprojectPDF(float3 directionToCamera, float distanceToCamera, float3 camForward, float normalizedPixelArea)
+{
+    const float cosAtCamera = dot(-directionToCamera, camForward);
+    return distanceToCamera * distanceToCamera * normalizedPixelArea * pow(cosAtCamera, 3);
+}
+
+float getSubpixelLocationJacobian(float dist, float3 toCamera, float3 surfaceN, float3 camForward)
+{
+    float distSquared = dist * dist;
+    float cosNormal = dot(toCamera, surfaceN);
+    float cosSensor = dot(-toCamera, camForward);
+    return abs(cosNormal / (distSquared)) / abs(pow(cosSensor, 3));
 }
 
 bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {

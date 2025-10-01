@@ -226,6 +226,8 @@ void ReSTIR_FG_Test::setScene(RenderContext* pRenderContext, const ref<Scene>& p
         {
             logWarning("This render pass only supports triangles. Other types of geometry will be ignored.");
         }
+
+        mNormalizedPixelArea = getNormalizedPixelArea();
     }
 }
 
@@ -290,6 +292,12 @@ void ReSTIR_FG_Test::execute(RenderContext* pRenderContext, const RenderData& re
     //End ReSTIR DI frame
     mpRTXDI->endFrame(pRenderContext);
 
+    //Copy Camera data for splatting
+    const CameraData& camData = mpScene->getCamera()->getData();
+    mTemporalCameraViewProjection = camData.viewProjMat;
+    mTemporalCameraPosition = camData.posW;
+    mTemporalCameraForward = math::normalize(camData.cameraW);
+
     mFrameCount++;
     mCanResample = true;
 }
@@ -336,6 +344,7 @@ void ReSTIR_FG_Test::prepareResources(RenderContext* pRenderContext, const Rende
     if (screenDims.x != mScreenRes.x || screenDims.y != mScreenRes.y)
     {
         mScreenRes = screenDims;
+        mNormalizedPixelArea = getNormalizedPixelArea();
         mResetScreenTex = true;
     }
 
@@ -664,10 +673,13 @@ void ReSTIR_FG_Test::handlePhotonCounter(RenderContext* pRenderContext) {
     }
 }
 
-float getNormalizedPixelArea(const ref<Scene> pScene, uint2 mScreenRes)
+float ReSTIR_FG_Test::getNormalizedPixelArea()
 {
+    if (!mpScene)
+        return 1.0;
+
     // Update Image plane distance
-    auto& cameraData = pScene->getCamera()->getData();
+    auto& cameraData = mpScene->getCamera()->getData();
     float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
 
     // Get normalized pixel area
@@ -723,7 +735,7 @@ void ReSTIR_FG_Test::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
-    var["CB"]["gNormalizedPixelArea"] = getNormalizedPixelArea(mpScene, mScreenRes);
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     //RTXDI Resources
     mpRTXDI->setShaderData(var);
@@ -984,6 +996,10 @@ void ReSTIR_FG_Test::resampleReservoirCausticPass(RenderContext* pRenderContext,
     var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsCaustic.disocclusionBoostExtraSamples;
     var["CB"]["gNormalThreshold"] = mNormalThreshold;
     var["CB"]["gPhotonRadius"] = mPhotonRadius;
+    var["CB"]["gPrevCamPos"] = mTemporalCameraPosition;
+    var["CB"]["gPrevCamViewProjection"] = mTemporalCameraViewProjection;
+    var["CB"]["gPrevCamForward"] = mTemporalCameraForward;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     // Input Resources
     var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
@@ -991,6 +1007,10 @@ void ReSTIR_FG_Test::resampleReservoirCausticPass(RenderContext* pRenderContext,
 
     // In-/Output Resources
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+
+    var["gCellCounters"] = mpSplattingCellCounter;
+    var["gCellOffsets"] = mpSplattingCellOffsets;
+    var["gSortedReservoirs"] = mpSplattingSortedReservoirs;
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -1034,6 +1054,7 @@ void ReSTIR_FG_Test::evaluateReservoirsPass(RenderContext* pRenderContext, const
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     //RTXDI resources
     mpRTXDI->setShaderData(var);

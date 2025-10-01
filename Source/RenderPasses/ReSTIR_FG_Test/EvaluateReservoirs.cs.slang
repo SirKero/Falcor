@@ -17,6 +17,7 @@ cbuffer CB
 {
     uint gFrameCount;         // Current it for sample gen
     uint2 gFrameDim;          // Frame Dimensions for camera dir
+    float gNormalizedPixelArea;
 }
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
@@ -55,8 +56,11 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
 
     //Light Trace
     if (causticReservoir.pathLength == 0) {
-        float3 directionToCamera = normalize(gScene.camera.getPosition() - sd.posW);
-        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg);
+        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+        float distanceToCamera = length(directionToCamera);
+        directionToCamera /= distanceToCamera;
+        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, normalize(gScene.camera.data.cameraW), gNormalizedPixelArea);
+        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg) / cameraPdf;
     } else {
         float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
         if (NdotL > 0) {
