@@ -14,6 +14,9 @@ target_sources(PhotonGuiding PRIVATE
 	ReSTIR_FG/GenerateInitialSamples.rt.slang
 	ReSTIR_FG/ResampleReservoirCaustic.cs.slang
 	ReSTIR_FG/ResampleReservoirFG.cs.slang
+	ReSTIR_FG/TemporalSplatReservoir.cs.slang
+	ReSTIR_FG/SortSplatReservoirs.cs.slang
+	
 )
 
 target_copy_shaders(PhotonGuiding RenderPasses/PhotonGuiding)

@@ -23,18 +23,24 @@ RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 RWTexture2D<float4> gEmission;
 
-static const float kPhotonCollectTMax = 1e-7;
-static const uint kGuidingMode = GUIDING_MODE;
+RWTexture2D<int> gLightTraceHeadCounter;
+StructuredBuffer<int> gLightTraceLinkedList; // next pointer
+StructuredBuffer<PackedHitInfo> gCausticPhotonHitInfo;
 
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
     uint gFGRayMaxPathLength; // Max path length for a Final Gather sample
-    uint gNumLightPaths; //For photon weight
+    uint gNumLightPaths;      // For photon weight
+    float gNormalizedPixelArea; // Pixel area at distance 1 used in light trace
 }
 
+static const float kPhotonCollectTMax = 1e-7;
+static const uint kGuidingMode = GUIDING_MODE;
+static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 
 struct RayPayload
 {
@@ -360,6 +366,67 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
     valid = false;
 }
 
+void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGenerator sg)
+{
+    float3 outColor = float3(0);
+    r.c = 1;
+    // Get head buffer index
+    int headIndex = gLightTraceHeadCounter[pixel];
+    if (headIndex == -1)
+        return;
+
+    let lod = ExplicitLodTextureSampler(0);
+
+    uint count = 0;
+    while (headIndex != -1)
+    {
+        // Get Photon Data
+        PhotonData photonData = gPhotonData[1][headIndex];
+        HitInfo photonHit = HitInfo(gCausticPhotonHitInfo[headIndex]);
+        if (!photonHit.isValid())
+            return;
+        
+        ShadingData sd = loadShadingData(photonHit, -photonData.dir, lod);
+        let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
+
+        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+        float distanceToCamera = length(directionToCamera);
+        directionToCamera /= distanceToCamera;
+
+        // Pdf conversion factor from image plane
+        const float3 camForward = normalize(gScene.camera.data.cameraW);
+        const float cosAtCamera = dot(-directionToCamera, camForward);
+        const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3);
+
+        const float3 bsdf = mi.eval(sd, directionToCamera, sg);
+
+        float targetFunction = luminance(photonData.flux * bsdf) / (cameraPdf * gNumLightPaths);
+        float w = targetFunction;
+
+        r.wSum += w;
+        bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
+        if (selectNew) {
+            r.sampleSurface = photonHit.getData();
+            r.sampleSurfaceView = -photonData.dir;
+            r.photonPosW = sd.posW;
+            r.photonDir = photonData.dir;
+            r.photonRadiance = photonData.flux / gNumLightPaths;
+            r.targetFunction = targetFunction;
+            r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
+        }
+        // Update head index
+        int newHeadIndex = gLightTraceLinkedList[headIndex];
+        headIndex = newHeadIndex;
+    }
+
+    // Finalize Reservoir
+    if (r.targetFunction > 0) {
+        r.wSum /= r.targetFunction;
+    }
+    else
+        r.wSum = 0;
+}
+
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
 {
@@ -424,7 +491,10 @@ void rayGen()
         if (hitIsRough) {
             causticReservoir.sampleSurface = hitInfo.getData();
             causticReservoir.sampleSurfaceView = -viewDir;
-            photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
+            if (kEnableLightTraceSplatting)
+                lightTraceResampling(pixel, causticReservoir, sg);
+            else
+                photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
         }
             
         //Store surface
@@ -448,4 +518,6 @@ void rayGen()
     gFinalGatherReservoir[index2Dto1D(pixel, dispatchDims.x)] = finalGatherReservoir;
     gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)] = causticReservoir;
     gEmission[pixel] = float4(emission, 1.0);
+    if (kEnableLightTraceSplatting)
+        gLightTraceHeadCounter[pixel] = -1; // Set to invalid
 }

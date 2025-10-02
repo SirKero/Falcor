@@ -24,11 +24,13 @@ cbuffer CB
 {
     uint gFrameCount;         // Current it for sample gen
     uint2 gFrameDim;          // Frame Dimensions for camera dir
+    float gNormalizedPixelArea; //For backprojection
 }
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kGuidingMode = GUIDING_MODE;
+static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
@@ -76,12 +78,21 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     ShadingData sd = loadShadingData(hitInfo, causticReservoir.sampleSurfaceView, lod);
     let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
     let bsdfProperties = mi.getProperties(sd);
-
-    float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
-    if (NdotL > 0) {
-        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
-        outColor /= NdotL;
-        outColor *= causticReservoir.thp;
+    
+    // Light Trace
+    if (kEnableLightTraceSplatting && causticReservoir.pathLength == 0) {
+        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+        float distanceToCamera = length(directionToCamera);
+        directionToCamera /= distanceToCamera;
+        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, normalize(gScene.camera.data.cameraW), gNormalizedPixelArea);
+        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg) / cameraPdf;
+    } else {
+        float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
+        if (NdotL > 0) {
+            outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
+            outColor /= NdotL;
+            outColor *= causticReservoir.thp;
+        }
     }
 
     if (kGuidingMode == (uint)GuidingMode::ReSTIR)

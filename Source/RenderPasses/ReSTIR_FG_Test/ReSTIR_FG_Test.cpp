@@ -456,13 +456,6 @@ void ReSTIR_FG_Test::prepareResources(RenderContext* pRenderContext, const Rende
         mpLightTraceLinkedList->setName("LightTraceLinkedList");
     }
 
-    /*
-    ref<Buffer> mpSplattingGlobalCounter;   //Counter used in Splatting
-    ref<Buffer> mpSplattingCellCounter;     //Per pixel cell counter
-    ref<Buffer> mpSplattingCellOffsets;     //Per pixel cell offsets
-    ref<Buffer> mpSplattingSortingData;     //Indices needed for sorting
-    ref<Buffer> mpSplattingSortedReservoirs;//Sorted reservoirs
-    */
     //Set Splatting Resources
     if (!mpSplattingGlobalCounter)
     {
@@ -907,7 +900,7 @@ void ReSTIR_FG_Test::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
         setProgramVars(var);
 
         const uint targetDim = mScreenRes.x * mScreenRes.y;
-        FALCOR_ASSERT(targetDim.x > 0);
+        FALCOR_ASSERT(targetDim > 0);
         mpSplatSortCellData->execute(pRenderContext, uint3(targetDim, 1, 1));
     }
 }

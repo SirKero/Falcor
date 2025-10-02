@@ -92,6 +92,9 @@ private:
     //Reset Render Passes
     void resetRenderPasses();
 
+    // Gets normalized pixel area for back projection
+    float getNormalizedPixelArea();
+
     //ReSTIR initial sample generation
     void reSTIRGenerateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -103,6 +106,12 @@ private:
 
     //ReSTIR evaluate reservoirs pass
     void reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    // Splat the reservoirs from last frame into the current frame
+    void reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    // Sort the splatted reservoirs so they can be used in the resampling pass
+    void reSTIRSortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //
     // Pointers
@@ -136,7 +145,7 @@ private:
     EmissiveLightSamplerType mEmissiveLightSamplerType = EmissiveLightSamplerType::LightBVH;
     LightBVHSampler::Options mLightBVHOptions;
     bool mRebuildLightSampler = true;
-    PhotonRenderMode mPhotonRenderMode = PhotonRenderMode::PhotonMapping;
+    PhotonRenderMode mPhotonRenderMode = PhotonRenderMode::ReSTIR_FG;
 
     //
     // Photon Distribution
@@ -181,6 +190,13 @@ private:
     bool mRebuildReservoirBuffer = false;
     bool mCanResample = false;
 
+    // Splatting
+    float4x4 mTemporalCameraViewProjection = float4x4::identity();
+    float3 mTemporalCameraPosition = float3(0);
+    float3 mTemporalCameraForward = float3(0);
+    float mNormalizedPixelArea = 1.0; // For light trace
+    bool mEnableLightTraceSplatting = false; //TODO Renderer crashed if enabled and mode changes, look into why
+
     //
     //Guiding Infos/Options
     //
@@ -217,6 +233,15 @@ private:
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample
     ref<Texture> mpEmission;                                   // Emission for paths that travel through highly specular materials (ReSTIR FG)
+    //Caustic ReSTIR Splatting
+    ref<Texture> mpLightTraceHeadCounter;                      // Screen size head buffer counter for light tracing to store the first hit
+    ref<Buffer> mpLightTraceLinkedList;                        // Linked List for light tracing
+    ref<Buffer> mpCausticPhotonHitInfo;                        // Hit info for caustic photons used in light trace
+    ref<Buffer> mpSplattingGlobalCounter;                      // Counter used in Splatting
+    ref<Buffer> mpSplattingCellCounter;                        // Per pixel cell counter
+    ref<Buffer> mpSplattingCellOffsets;                        // Per pixel cell offsets
+    ref<Buffer> mpSplattingSortingData;                        // Indices needed for sorting
+    ref<Buffer> mpSplattingSortedReservoirs;                   // Sorted reservoirs
 
 
     ref<Sampler> mpLinearSampler; //Linear Sampler
@@ -251,6 +276,10 @@ private:
     ref<ComputePass> mpResampleReservoirFGPass;      // Resampling Pass for Final Gather Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass; // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;       // Evaluates ReSTIR DI and FG reservoirs
+    //Caustic ReSTIR Splatting passes
+    ref<ComputePass> mpTemporalSplatReservoirs;     // Reprojects reservoirs from last frame to curren
+    ref<ComputePass> mpSplatSortComputeCellOffsets; // Sort step 1, compute cell offsets
+    ref<ComputePass> mpSplatSortCellData;           // Sort step 2, sort the cell data
 };
 
 

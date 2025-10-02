@@ -155,6 +155,7 @@ uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
 }
 
+// Backprojects to camera with viewProjection matrix
 float3 getCameraProjection(float4x4 viewProjection, float3 posW) {
     float4 screenPos = mul(viewProjection, float4(posW, 1));
     screenPos /= screenPos.w;
@@ -163,12 +164,14 @@ float3 getCameraProjection(float4x4 viewProjection, float3 posW) {
     return screenPos.xyz;
 }
 
+// Returns the Camera backproject PDF
 float getCameraBackprojectPDF(float3 directionToCamera, float distanceToCamera, float3 camForward, float normalizedPixelArea)
 {
     const float cosAtCamera = dot(-directionToCamera, camForward);
     return distanceToCamera * distanceToCamera * normalizedPixelArea * pow(cosAtCamera, 3);
 }
 
+// Returns the Jacobian determinant for a subpixel location
 float getSubpixelLocationJacobian(float dist, float3 toCamera, float3 surfaceN, float3 camForward)
 {
     float distSquared = dist * dist;

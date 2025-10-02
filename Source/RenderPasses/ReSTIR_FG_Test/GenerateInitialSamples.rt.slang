@@ -602,5 +602,6 @@ void rayGen()
     gFinalGatherReservoir[index2Dto1D(pixel, dispatchDims.x)] = finalGatherReservoir;
     gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)] = causticReservoir;
     gEmission[pixel] = float4(emission, 1.0);
-    gLightTraceHeadCounter[pixel] = -1; //Set to invalid
+    if (kEnableLightTrace)
+        gLightTraceHeadCounter[pixel] = -1; //Set to invalid
 }

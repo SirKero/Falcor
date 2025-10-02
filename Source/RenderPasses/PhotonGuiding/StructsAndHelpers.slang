@@ -8,7 +8,10 @@ import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.Fresnel;
 
 static const float kShadowRayEpsilon = 0.98f;
-static const float kDeltaRoughnessThreshold = 0.08; //see StandardBSDF.slang kMinGGXAlpha. Everything under this value is considered a delta event
+static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kMinGGXAlpha. Everything under this value is considered a delta event
+
+static const uint kSplattingGlobalCounterElement = 0; // Index for the platting global counter, that counts the total number of elements
+static const uint kSplattingGlobalCounterPrefixSum = 1; // Index for the platting global counter, used for the prefix sum to determine the offsets
 
 enum class PhotonType // : uint32_t
 {
@@ -156,11 +159,11 @@ struct ReservoirCaustic {
     float wSum;      // W and wSum
     uint c;          // Confidence weight
     uint pathLength; // Path Length
-    uint _pad;
+    float subPixelJacobian; // Sub pixel jacobian for reprojection
 
     int lightIndex;          // Guiding
     uint2 guidingPixels;      // Pixel for the guiding texture
-    uint _pad2;
+    uint _pad;
     //float2 guidingRandomVal;  // Random vals for guiding
 
     __init() {
@@ -176,10 +179,10 @@ struct ReservoirCaustic {
         wSum = 0;
         c = 0;
         pathLength = 0;
-        _pad = 0;
+        subPixelJacobian = 0;
         lightIndex = 0-1;
         guidingPixels = uint2(0);
-        _pad2 = 0;
+        _pad = 0;
     }
 
     // Photon dir helper
@@ -240,6 +243,31 @@ float adaptiveRadius(float distanceToCamera, float normalizedPixelDiagonal, floa
 //Helper for the ReSTIR screen size buffers
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
+}
+
+//Backprojects to camera with viewProjection matrix
+float3 getCameraProjection(float4x4 viewProjection, float3 posW) {
+    float4 screenPos = mul(viewProjection, float4(posW, 1));
+    screenPos /= screenPos.w;
+    screenPos.y *= -1;
+    screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+    return screenPos.xyz;
+}
+
+//Returns the Camera backproject PDF
+float getCameraBackprojectPDF(float3 directionToCamera, float distanceToCamera, float3 camForward, float normalizedPixelArea)
+{
+    const float cosAtCamera = dot(-directionToCamera, camForward);
+    return distanceToCamera * distanceToCamera * normalizedPixelArea * pow(cosAtCamera, 3);
+}
+
+//Returns the Jacobian determinant for a subpixel location
+float getSubpixelLocationJacobian(float dist, float3 toCamera, float3 surfaceN, float3 camForward)
+{
+    float distSquared = dist * dist;
+    float cosNormal = dot(toCamera, surfaceN);
+    float cosSensor = dot(-toCamera, camForward);
+    return abs(cosNormal / (distSquared)) / abs(pow(cosSensor, 3));
 }
 
 //Visibility test helper

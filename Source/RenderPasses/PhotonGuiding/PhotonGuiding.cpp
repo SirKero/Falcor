@@ -49,6 +49,8 @@ namespace
     const std::string kShaderReSTIRResampleFG = kShaderFolderReSTIR + "ResampleReservoirFG.cs.slang";
     const std::string kShaderReSTIRResampleCaustic = kShaderFolderReSTIR + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderReSTIREvalReservoirs = kShaderFolderReSTIR + "EvaluateReservoirs.cs.slang";
+    const std::string kShaderReSTIRTemporalSplatReservoirs = kShaderFolderReSTIR + "TemporalSplatReservoir.cs.slang";
+    const std::string kShaderReSTIRSortSplatReservoirs = kShaderFolderReSTIR + "SortSplatReservoirs.cs.slang";
 
     //Input Textures
     const std::string kInputVBuffer = "VBuffer";
@@ -69,8 +71,8 @@ namespace
         {kOutputDebug, "gDebug", "Debug Texture", true /*optional*/, ResourceFormat::RGBA32Float}
     };
 
-
-}
+    const std::string kShaderModel = "6_6";
+    }
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
@@ -121,6 +123,7 @@ void PhotonGuiding::setScene(RenderContext* pRenderContext, const ref<Scene>& pS
     if (pScene)
     {
         mpScene = pScene;
+        mNormalizedPixelArea = getNormalizedPixelArea();
     }
 }
 
@@ -178,6 +181,15 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
         // Initial Samples for ReSTIR FG (1SPP Photon Final Gathering) and inti RTXDI structs
         reSTIRGenerateInitialSamplesPass(pRenderContext, renderData);
 
+        if (mEnableLightTraceSplatting)
+        {
+            //Reproject reservoirs from last frame to current camera
+            reSTIRSplatTemporalReservoirsPass(pRenderContext, renderData);
+
+            //Sort Splatted reservoirs, so they can be properly used for resampling
+            reSTIRSortSplattedReservoirsPass(pRenderContext, renderData);
+        }
+
         // ReSTIR DI pass
         const auto& pMotionVectors = renderData[kInputMVec]->asTexture();
         mpRTXDI->update(pRenderContext, pMotionVectors);
@@ -203,13 +215,24 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
 
     mFrameCount++;
     mGuidingAccumulateCount++;
+
+    // Copy Camera data for splatting
+    const CameraData& camData = mpScene->getCamera()->getData();
+    mTemporalCameraViewProjection = camData.viewProjMat;
+    mTemporalCameraPosition = camData.posW;
+    mTemporalCameraForward = math::normalize(camData.cameraW);
 }
 
 void PhotonGuiding::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
 
-    changed |= widget.dropdown("Render Technique", mPhotonRenderMode);
+    if(widget.dropdown("Render Technique", mPhotonRenderMode))
+    {
+        changed = true;
+        mCanResample = false;
+        resetRenderPasses();
+    }
     if (widget.dropdown("Guiding Mode", mGuidingMode))
     {
         changed = true;
@@ -348,6 +371,9 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             if (auto group2 = group.group("Resampling Caustic options"))
             {
                 resampleUI(mResampleSettingsCaustic, group2, true);
+                if (group2.checkbox("Use Light Trace Splatting for direct", mEnableLightTraceSplatting))
+                    mCanResample = false;
+                group2.tooltip("Enables Light Trace with ReSTIR Splatting for the directly visible caustics");
             }
         }
     }
@@ -462,11 +488,8 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     if (any(mScreenRes != renderData.getDefaultTextureDims()))
     {
         mScreenRes = renderData.getDefaultTextureDims();
-        mpFinalGatherReservoir[0].reset();
-        mpFinalGatherReservoir[1].reset();
-        mpCausticReservoir[0].reset();
-        mpCausticReservoir[1].reset();
-        mpEmission.reset();
+        mNormalizedPixelArea = getNormalizedPixelArea();
+        mResetScreenTex = true;
     }
 
     if (mChangePhotonLightBufferSize)
@@ -477,6 +500,8 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpPhotonData[0].reset();
         mpPhotonData[1].reset();
         mpPhotonAS.reset();
+        mpLightTraceLinkedList.reset();
+        mpCausticPhotonHitInfo.reset();
         mChangePhotonLightBufferSize = false;
     }
 
@@ -609,6 +634,81 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpEmission->setName("EmissionTexture");
     }
 
+    // Light Trace resources
+    if (!mpLightTraceHeadCounter || mResetScreenTex)
+    {
+        mpLightTraceHeadCounter = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::R32Int, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpLightTraceHeadCounter->setName("LightTraceHeadCounter");
+        pRenderContext->clearUAV(mpLightTraceHeadCounter->getUAV(0).get(), uint4(uint(-1)));
+    }
+
+    if (!mpLightTraceLinkedList)
+    {
+        mpLightTraceLinkedList = Buffer::createStructured(
+            mpDevice, sizeof(uint), mNumMaxPhotons[1], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpLightTraceLinkedList->setName("LightTraceLinkedList");
+    }
+
+    if (!mpCausticPhotonHitInfo)
+    {
+        mpCausticPhotonHitInfo = Buffer::createStructured(
+            mpDevice, sizeof(uint4), mNumMaxPhotons[1], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpCausticPhotonHitInfo->setName("CausticPhotonHitInfo");
+    }
+
+    // Set Splatting Resources
+    if (!mpSplattingGlobalCounter)
+    {
+        mpSplattingGlobalCounter = Buffer::createStructured(
+            mpDevice, sizeof(uint), 2, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None,
+            nullptr, false
+        );
+        mpSplattingGlobalCounter->setName("SplattingGlobalCounter");
+    }
+
+    if (!mpSplattingCellCounter || mResetScreenTex)
+    {
+        mpSplattingCellCounter = Buffer::createStructured(
+            mpDevice, sizeof(uint), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingCellCounter->setName("SplattingCellCounter");
+    }
+
+    if (!mpSplattingCellOffsets || mResetScreenTex)
+    {
+        mpSplattingCellOffsets = Buffer::createStructured(
+            mpDevice, sizeof(uint), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingCellOffsets->setName("SplattingCellOffsets");
+    }
+
+    if (!mpSplattingSortingData || mResetScreenTex)
+    {
+        mpSplattingSortingData = Buffer::createStructured(
+            mpDevice, sizeof(uint4), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingSortingData->setName("SplattingSortingData");
+    }
+
+    if (!mpSplattingSortedReservoirs || mResetScreenTex)
+    {
+        mpSplattingSortedReservoirs = Buffer::createStructured(
+            mpDevice, sizeof(uint2), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingSortedReservoirs->setName("SplattingSortedReservoirs");
+    }
+
     mResetScreenTex = false;
 }
 
@@ -635,7 +735,7 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
     if (!mpGuidingCounterReducePass)
     {
         Program::Desc desc;
-        desc.addShaderLibrary(kShaderGuidingReduce).csEntry("main").setShaderModel("6_6");
+        desc.addShaderLibrary(kShaderGuidingReduce).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
@@ -673,7 +773,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
     if (!mpGenerateGuidingMipTraverseChainPass)
     {
         Program::Desc desc;
-        desc.addShaderLibrary(kShaderGuidingGenMipTraverseChain).csEntry("main").setShaderModel("6_6");
+        desc.addShaderLibrary(kShaderGuidingGenMipTraverseChain).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
@@ -786,6 +886,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         defines.add(mpScene->getSceneDefines());
         defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
         defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
+        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -796,6 +897,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     mTracePhotonPass.pProgram->addDefine("RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -821,6 +923,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gGuidingTextureMaxMip"] = mGuidingTextures[0]->getMipCount() - 1u;
     var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
     var["CB"]["gNormalizedPixelDiagonal"] = mNormalizePixelDiagonal;
+    var["CB"]["gScreenDimensions"] = mScreenRes;
 
     // Output
     for (uint i = 0; i < 2; i++)
@@ -834,6 +937,9 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         var["gGuidingTexture"][i] = mGuidingTextures[i];
     }
 
+    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
+    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+    var["gCausticPhotonHitInfo"] = mpCausticPhotonHitInfo;
     var["gPhotonCounter"] = mpPhotonCounter;
 
     mpScene->raytrace(
@@ -856,6 +962,8 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     };
 
     mpPhotonAS->update(pRenderContext, photonBuildSize);
+
+    pRenderContext->uavBarrier(mpLightTraceHeadCounter.get());
 }
 
 void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -949,7 +1057,7 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     if (!mpDebugPass)
     {
         Program::Desc desc;
-        desc.addShaderLibrary(kShaderDebug).csEntry("main").setShaderModel("6_6");
+        desc.addShaderLibrary(kShaderDebug).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
@@ -1020,6 +1128,7 @@ void PhotonGuiding::handlePhotonCounter(RenderContext* pRenderContext)
 
 void PhotonGuiding::resetRenderPasses()
 {
+    mTracePhotonPass.reset();
     mTraceCameraPass.reset();
     mpGuidingCounterReducePass.reset();
     mpGenerateGuidingMipTraverseChainPass.reset();
@@ -1029,6 +1138,27 @@ void PhotonGuiding::resetRenderPasses()
     mpResampleReservoirCausticPass.reset();
     mpResampleReservoirFGPass.reset();
     mpEvaluateReservoirsPass.reset();
+    mpSplatSortCellData.reset();
+    mpSplatSortComputeCellOffsets.reset();
+    mpTemporalSplatReservoirs.reset();
+}
+
+float PhotonGuiding::getNormalizedPixelArea()
+{
+    if (!mpScene)
+        return 1.0;
+
+    // Update Image plane distance
+    auto& cameraData = mpScene->getCamera()->getData();
+    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
+
+    // Get normalized pixel area
+    float h = tan(fovY / 2.f) * 2.f;
+    float w = h * cameraData.aspectRatio;
+    float wPix = w / mScreenRes.x;
+    float hPix = h / mScreenRes.y;
+
+    return wPix * hPix;
 }
 
 void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1068,6 +1198,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+    mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
     // Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -1080,6 +1211,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     // RTXDI Resources
     mpRTXDI->setShaderData(var);
@@ -1092,6 +1224,10 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
     }
+    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
+    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+    var["gCausticPhotonHitInfo"] = mpCausticPhotonHitInfo;
+
 
     // Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
@@ -1121,7 +1257,7 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderReSTIRResampleFG).csEntry("main").setShaderModel("6_6");
+        desc.addShaderLibrary(kShaderReSTIRResampleFG).csEntry("main").setShaderModel(kShaderModel);
         desc.addTypeConformances(mpScene->getTypeConformances());
 
         DefineList defines;
@@ -1177,7 +1313,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderReSTIRResampleCaustic).csEntry("main").setShaderModel("6_6");
+        desc.addShaderLibrary(kShaderReSTIRResampleCaustic).csEntry("main").setShaderModel(kShaderModel);
         desc.addTypeConformances(mpScene->getTypeConformances());
 
         DefineList defines;
@@ -1185,12 +1321,14 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         defines.add(mpSampleGenerator->getDefines());
         defines.add(mpRTXDI->getDefines());
         defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
+        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirCausticPass);
     //Runtime defines
     mpResampleReservoirCausticPass->getProgram()->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
+    mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsCaustic.enable)
@@ -1215,12 +1353,21 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
     var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
     var["CB"]["gNormalizedPixelDiagonal"] = mNormalizePixelDiagonal;
 
+    var["CB"]["gPrevCamPos"] = mTemporalCameraPosition;
+    var["CB"]["gPrevCamViewProjection"] = mTemporalCameraViewProjection;
+    var["CB"]["gPrevCamForward"] = mTemporalCameraForward;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+
     // Input Resources
     var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
     var["gMVec"] = renderData[kInputMVec]->asTexture();
 
     // In-/Output Resources
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+
+    var["gCellCounters"] = mpSplattingCellCounter;
+    var["gCellOffsets"] = mpSplattingCellOffsets;
+    var["gSortedReservoirs"] = mpSplattingSortedReservoirs;
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -1237,7 +1384,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderReSTIREvalReservoirs).csEntry("main").setShaderModel("6_6");
+        desc.addShaderLibrary(kShaderReSTIREvalReservoirs).csEntry("main").setShaderModel(kShaderModel);
         desc.addTypeConformances(mpScene->getTypeConformances());
 
         DefineList defines;
@@ -1247,6 +1394,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add(mpRTXDI->getDefines());
         defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
         defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -1256,6 +1404,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+    mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();
@@ -1265,6 +1414,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     // RTXDI resources
     mpRTXDI->setShaderData(var);
@@ -1305,4 +1455,130 @@ void PhotonGuiding::RayTraceProgramHelper::initProgramVars(ref<Device> pDevice, 
     // Bind utility classes into shared data.
     auto var = pVars->getRootVar();
     pSampleGenerator->setShaderData(var);
+}
+
+void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Splat Caustic Reservoirs");
+
+    pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
+    pRenderContext->clearUAV(mpSplattingCellCounter->getUAV(0).get(), uint4(0));
+    pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0));
+
+    if (!mpTemporalSplatReservoirs)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRTemporalSplatReservoirs).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+
+        mpTemporalSplatReservoirs = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpTemporalSplatReservoirs);
+
+    // Return early if there is no previous reservoir or resampling is disabled
+    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    {
+        return;
+    }
+
+    // Set variables
+    auto var = mpTemporalSplatReservoirs->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+
+    var["CB"]["gFrameDim"] = mScreenRes;
+
+    var["gPrevReservoir"] = mpCausticReservoir[(mFrameCount + 1) % 2];
+    var["gCellCounter"] = mpSplattingCellCounter;
+    var["gGlobalCounter"] = mpSplattingGlobalCounter;
+    var["gSplatSortData"] = mpSplattingSortingData;
+
+    // Execute Compute Pass
+    const uint2 targetDim = mScreenRes;
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpTemporalSplatReservoirs->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void PhotonGuiding::reSTIRSortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Sort Splatted Reservoirs");
+
+    // Init Shaders
+    if (!mpSplatSortComputeCellOffsets)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRSortSplatReservoirs).csEntry("computeCellOffsets").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+
+        mpSplatSortComputeCellOffsets = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpSplatSortComputeCellOffsets);
+
+    if (!mpSplatSortCellData)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRSortSplatReservoirs).csEntry("sortCellData").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+
+        mpSplatSortCellData = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpSplatSortCellData);
+
+    // Return early if there is no previous reservoir or resampling is disabled
+    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    {
+        return;
+    }
+
+    // Lambda for shader vars as they are the same for both shaders
+    auto setProgramVars = [&](ShaderVar& var)
+    {
+        mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+        var["CB"]["gFrameDim"] = mScreenRes;
+
+        var["gGlobalCounter"] = mpSplattingGlobalCounter;
+        var["gCellCounter"] = mpSplattingCellCounter;
+        var["gCellOffsets"] = mpSplattingCellOffsets;
+        var["gSortingData"] = mpSplattingSortingData;
+        var["gSortedReservoirs"] = mpSplattingSortedReservoirs;
+    };
+
+    // Cell offset pass
+    {
+        pRenderContext->uavBarrier(mpSplattingGlobalCounter.get());
+        auto var = mpSplatSortComputeCellOffsets->getRootVar();
+        setProgramVars(var);
+
+        const uint2 targetDim = mScreenRes;
+        FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+        mpSplatSortComputeCellOffsets->execute(pRenderContext, uint3(targetDim, 1));
+        pRenderContext->uavBarrier(mpSplattingGlobalCounter.get());
+        pRenderContext->uavBarrier(mpSplattingCellOffsets.get());
+    }
+
+    // Sorting pass
+    {
+        auto var = mpSplatSortCellData->getRootVar();
+        setProgramVars(var);
+
+        const uint targetDim = mScreenRes.x * mScreenRes.y;
+        FALCOR_ASSERT(targetDim > 0);
+        mpSplatSortCellData->execute(pRenderContext, uint3(targetDim, 1, 1));
+    }
 }
