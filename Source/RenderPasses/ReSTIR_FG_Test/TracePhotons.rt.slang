@@ -41,7 +41,8 @@ RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-static const bool kRussianRoulette = true;  //TODO as option
+static const bool kRussianRoulette = true; // TODO as option
+static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
 
 struct RayPayload
@@ -311,9 +312,11 @@ void rayGen()
                     AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
                     gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
                     gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
-
-                    if (photonType == PhotonType::Caustic)
-                        causticPhotonBackprojection(photonInsertIndex, sd);
+                    if (kEnableLightTrace) {
+                        if (photonType == PhotonType::Caustic)
+                            causticPhotonBackprojection(photonInsertIndex, sd);
+                    }
+                   
                 }
             }
         }

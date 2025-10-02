@@ -32,6 +32,7 @@ cbuffer CB
 
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
 struct RayPayload
 {
@@ -572,8 +573,10 @@ void rayGen()
         if (hitIsRough) {
             causticReservoir.sampleSurface = hitInfo.getData();
             causticReservoir.sampleSurfaceView = -viewDir;
-            // photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
-            lightTraceResampling(pixel, causticReservoir, sg);
+            if (kEnableLightTrace)
+                lightTraceResampling(pixel, causticReservoir, sg);
+            else
+                photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
         }
             
         //Store surface

@@ -122,6 +122,7 @@ private:
     float3 mTemporalCameraPosition = float3(0);
     float3 mTemporalCameraForward = float3(0);
     float mNormalizedPixelArea = 1.0; //For light trace
+    bool mEnableLightTraceSplatting = true;
 
     //Photon Distribution
     uint mPhotonMaxBounces = 10;                        // Number of photon bounces

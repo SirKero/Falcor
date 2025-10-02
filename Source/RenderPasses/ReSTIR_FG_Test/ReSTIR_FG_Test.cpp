@@ -179,6 +179,8 @@ void ReSTIR_FG_Test::renderUI(Gui::Widgets& widget) {
         if (auto group2 = group.group("Resampling Caustic options"))
         {
             resampleUI(mResampleSettingsCaustic, group2);
+            mClearReservoir |= group2.checkbox("Use Light Trace Splatting for direct", mEnableLightTraceSplatting);
+            group2.tooltip("Enables Light Trace with ReSTIR Splatting for the directly visible caustics");
         }
 
         group.separator();
@@ -188,6 +190,8 @@ void ReSTIR_FG_Test::renderUI(Gui::Widgets& widget) {
         group.var("Sample Distance Threshold", mJacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
         group.checkbox("Use Path Threshold", mUsePathThreshold);
         group.tooltip("Only resamples if the surfaces used for generating the Final Gather samples have the same path length. Always enabled for caustic collection");
+
+        mClearReservoir = group.button("Clear Reservoirs");
     }
 
     if (auto group = widget.group("Material Options"))
@@ -245,6 +249,13 @@ void ReSTIR_FG_Test::execute(RenderContext* pRenderContext, const RenderData& re
         mOptionsChanged = false;
     }
 
+    //Disables Resampling for the frame
+    if (mClearReservoir)
+    {
+        mCanResample = false;
+        mClearReservoir = false;
+    }
+
     //Init ReSTIR DI
     const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
     if (!mpRTXDI)
@@ -277,9 +288,12 @@ void ReSTIR_FG_Test::execute(RenderContext* pRenderContext, const RenderData& re
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
     //Reservoir Splatting
-    splatTemporalReservoirsPass(pRenderContext, renderData);
+    if (mEnableLightTraceSplatting)
+    {
+        splatTemporalReservoirsPass(pRenderContext, renderData);
 
-    sortSplattedReservoirsPass(pRenderContext, renderData);
+        sortSplattedReservoirsPass(pRenderContext, renderData);
+    }
 
     //Spatiotemporal resampling for final gather samples and caustics
     resampleReservoirFGPass(pRenderContext, renderData);
@@ -559,6 +573,7 @@ void ReSTIR_FG_Test::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mTracePhotonPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
     mTracePhotonPass.pProgram->addDefines(getMaterialDefines());
     if (mpEmissiveLightSampler)
         mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
@@ -724,6 +739,7 @@ void ReSTIR_FG_Test::generateInitialSamplesPass(RenderContext* pRenderContext, c
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mGenerateInitialSamplesPass.pProgram->addDefines(getMaterialDefines());
+    mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
 
     //Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -970,11 +986,13 @@ void ReSTIR_FG_Test::resampleReservoirCausticPass(RenderContext* pRenderContext,
         defines.add(mpSampleGenerator->getDefines());
         defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
+        defines.add("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
 
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirCausticPass);
     mpResampleReservoirCausticPass->getProgram()->addDefines(getMaterialDefines()); //Runtime define
+    mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsCaustic.enable)
@@ -1036,6 +1054,7 @@ void ReSTIR_FG_Test::evaluateReservoirsPass(RenderContext* pRenderContext, const
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
+        defines.add("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -1045,6 +1064,7 @@ void ReSTIR_FG_Test::evaluateReservoirsPass(RenderContext* pRenderContext, const
     mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefines(getMaterialDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();

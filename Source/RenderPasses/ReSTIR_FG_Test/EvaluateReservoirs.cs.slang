@@ -22,6 +22,7 @@ cbuffer CB
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
@@ -54,8 +55,8 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
     let bsdfProperties = mi.getProperties(sd);
 
-    //Light Trace
-    if (causticReservoir.pathLength == 0) {
+    // Light Trace
+    if (kEnableLightTrace && causticReservoir.pathLength == 0) {
         float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
         float distanceToCamera = length(directionToCamera);
         directionToCamera /= distanceToCamera;

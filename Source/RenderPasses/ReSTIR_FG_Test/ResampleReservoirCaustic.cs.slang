@@ -41,6 +41,7 @@ StructuredBuffer<uint> gCellOffsets;  // Initial offset for the sorted reservoir
 StructuredBuffer<uint2> gSortedReservoirs;   // Buffer of splatted reservoirs
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
 inline float getPhotonRadius(ReservoirCaustic r) {
     return r.pathLength == 0 ? gPhotonRadius.y : gPhotonRadius.x;
@@ -334,7 +335,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     let currentBsdfProperties = currentMi.getProperties(currentSD);
 
     //Either photon or light trace resample
-    if (current.pathLength == 0)
+    if (kEnableLightTrace && current.pathLength == 0)
         reservoirSplatting(current, pixel, currentSD, currentMi, currentBsdfProperties, sg);
     else
         resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
