@@ -46,6 +46,14 @@ inline float getPhotonRadius(ReservoirCaustic r) {
     return r.pathLength == 0 ? gPhotonRadius.y : gPhotonRadius.x;
 }
 
+inline float evalMISBalanceHeuristic(float p0, float p1) {
+    float sum = (p0 + p1);
+    if (sum > 0)
+        return p0 / sum;
+    else
+        return 0;
+}
+
 // Generalized Balance Heuristic with two samples
 float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFProperties otherProps, uint otherC) {
     float p0 = r.targetFunction * r.c;
@@ -53,11 +61,7 @@ float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFP
     if (length(otherSD.posW - r.photonPosW) < getPhotonRadius(r))
         p1 = evalApproximateBRDFPhoton(otherSD, otherProps, r.photonDir) * luminance(r.photonRadiance) * otherC;
 
-    float sum = (p0 + p1);
-    if (sum > 0)
-        return p0 / sum;
-    else
-        return 0;
+    return evalMISBalanceHeuristic(p0, p1);
 }
 
 //Resampling with 2 reservoirs. Finalizes the reservoir afterwards.
@@ -178,6 +182,18 @@ void resampleReservoirReflectOrRefract(inout ReservoirCaustic current, uint2 pix
     }
 }
 
+float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, ReservoirCaustic r ,ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, out float jacobianWeight, out float targetFunction)
+{
+    jacobianWeight = getSubpixelLocationJacobian(distToCam, toCam, sd.faceN, camForward);
+    float jacobianShifted = jacobianWeight / r.subPixelJacobian;
+    const float3 bsdf = mi.eval(sd, toCam, sg);
+    const float camPdf = getCameraBackprojectPDF(toCam, distToCam, camForward, gNormalizedPixelArea);
+    targetFunction = luminance(r.photonRadiance * bsdf) / camPdf;
+    float misP = targetFunction * jacobianShifted;
+    misP = isnan(misP) ? 0.0f : misP;
+    return misP;
+}
+
 void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData currentSD, IMaterialInstance currentMi , BSDFProperties currentBsdfProperties, inout SampleGenerator sg)
 {
     float currentMIS = 0.0;
@@ -185,8 +201,8 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
     // MIS for current reservoir
     if (current.isValid())
     {
-        float p2 = 0.0;
-        float p1 = current.targetFunction * current.c;
+        float p1 = 0.0;
+        float p0 = current.targetFunction * current.c;
         // Get mis for temporal reprojection
         float3 toPrevCam = gPrevCamPos - currentSD.posW;
         float distToPrevCam = length(toPrevCam);
@@ -205,24 +221,15 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
 
         if (isVisible) {
             // Calc jacobians
-            float jacobianShifted = getSubpixelLocationJacobian(distToPrevCam, toPrevCam, currentSD.faceN, gPrevCamForward);
-            jacobianShifted /= current.subPixelJacobian;
-            const float3 bsdf = currentMi.eval(currentSD, toPrevCam, sg);
-            const float camPdf = getCameraBackprojectPDF(toPrevCam, distToPrevCam, gPrevCamForward, gNormalizedPixelArea);
-            float prevTargetFunc = luminance(current.photonRadiance * bsdf) / camPdf;
-            p2 = prevTargetFunc * jacobianShifted;
-            p2 = isnan(p2) ? 0.0f : p2;
+            float jacobianWeight, targetFunction;
+            p1 = getSplattingMISWeight(toPrevCam, distToPrevCam, gPrevCamForward, current, currentSD, currentMi, sg, jacobianWeight, targetFunction);
             // get confidence weight from backprojection
             uint2 prevPixel = uint2(floor(prevScreenPos.xy * gFrameDim));
             ReservoirCaustic prevR = gCausticReservoirPrev[index2Dto1D(prevPixel, gFrameDim.x)];
-            p2 *= prevR.c;
+            p1 *= prevR.c;
             
         }
-        float sum = (p1 + p2);
-        if (sum > 0)
-            currentMIS = p1 / sum;
-        else
-            currentMIS = 0.0;
+        currentMIS = evalMISBalanceHeuristic(p0,p1);
     }
     float w0 = currentMIS * current.targetFunction * current.wSum;
     float wSum = w0;
@@ -249,8 +256,8 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
             ShadingData prevSD = loadShadingData(HitInfo(prevR.sampleSurface), prevR.sampleSurfaceView, lod);
             let prevMi = gScene.materials.getMaterialInstance(prevSD, lod, kMIHints);
 
-            float p1 = prevR.targetFunction * prevR.c;
-            float p2 = 0.0;
+            float p0 = prevR.targetFunction * prevR.c;
+            float p1 = 0.0;
 
             // MIS weight for current (Visibility was already tested in a previous pass)
             float3 toCurrentCam = currentCamPosW - prevSD.posW;
@@ -258,19 +265,9 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
             toCurrentCam /= distToCurrentCam;
 
             // Calc jacobians
-            jacobianToCurrent = getSubpixelLocationJacobian(distToCurrentCam, toCurrentCam, prevSD.faceN, currentCamForward);
-            float jacobianShifted = jacobianToCurrent / prevR.subPixelJacobian;
-            const float3 bsdf = prevMi.eval(prevSD, toCurrentCam, sg);
-            const float camPdf = getCameraBackprojectPDF(toCurrentCam, distToCurrentCam, currentCamForward, gNormalizedPixelArea);
-            targetFunc = luminance(prevR.photonRadiance * bsdf) / camPdf;
-            p2 = targetFunc * jacobianShifted * current.c;
-            p2 = isnan(p2) ? 0.0f : p2;
-                        
-            float sum = (p1 + p2);
-            if (sum > 0)
-                prevMIS = p1 / sum;
-            else
-                prevMIS = 0.0;
+            p1 = getSplattingMISWeight(toCurrentCam, distToCurrentCam, currentCamForward, prevR, prevSD, prevMi, sg, jacobianToCurrent, targetFunc);
+            p1 *= current.c;
+            prevMIS = evalMISBalanceHeuristic(p0, p1);
         }
         float w1 = prevMIS * targetFunc * prevR.wSum;
         wSum += w1;
@@ -285,7 +282,6 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
     }
 
     // Use motion vector and bilinear interpolation for new confidence weight
-    
     float2 prevPixel = float2(pixel) + gMVec[pixel] * gFrameDim;
     int2 prevPixelTopLeft = int2(floor(prevPixel));
     float2 fractionalCoord = saturate(prevPixel - float2(prevPixelTopLeft));
@@ -297,6 +293,9 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
                 continue;
 
             ReservoirCaustic prevReservoir = gCausticReservoirPrev[index2Dto1D(prevPixel, gFrameDim.x)];
+            //Exclude non contributing reservoirs
+            if (prevReservoir.pathLength > 0)
+                continue;
             float bilinearWeight = lerp(1.0 - x, x, fractionalCoord.x) * lerp(1.0 - y, y, fractionalCoord.y);
             newConfidence += bilinearWeight * prevReservoir.c;
         }
@@ -334,10 +333,9 @@ void main(uint2 pixel: SV_DispatchThreadID)
     let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
     let currentBsdfProperties = currentMi.getProperties(currentSD);
 
-    // TODO handle light trace
-    if (current.pathLength == 0) {
+    //Either photon or light trace resample
+    if (current.pathLength == 0)
         reservoirSplatting(current, pixel, currentSD, currentMi, currentBsdfProperties, sg);
-    }
     else
         resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
 

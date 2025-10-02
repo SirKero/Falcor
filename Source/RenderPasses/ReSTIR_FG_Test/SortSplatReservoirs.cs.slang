@@ -18,10 +18,8 @@ StructuredBuffer<uint4> gSortingData;
 RWStructuredBuffer<uint> gCellOffsets;
 RWStructuredBuffer<uint2> gSortedReservoirs;
 
-/**
-    * Prefix sum to compute where a given cell (pixel) should start its indexing.
-    * @param[in] pixel Pixel corresponding to a given cell.
-    */
+/* Prefix Sum to compute offsets
+*/
 void computeCellOffsetsFunc(const uint2 pixel)
 {
     if (any(pixel >= gFrameDim))
@@ -32,19 +30,17 @@ void computeCellOffsetsFunc(const uint2 pixel)
     uint cellCounter = gCellCounter[index];
 
     uint offset;
-    InterlockedAdd(gGlobalCounter[1], cellCounter, offset);
+    InterlockedAdd(gGlobalCounter[kSplattingGlobalCounterPrefixSum], cellCounter, offset);
 
     gCellOffsets[index] = offset;
 }
 
-/**
-    * Use the cell offsets and the cell index to place an item into a sorted linear buffer.
-    * @param[in] index Index of an item.
-    */
+/* Uses the offset to place reservoir position in the linearized buffer
+*/
 void sortCellDataFunc(const uint index)
 {
     //Check if index is smaller than total number of cells
-    if (index >= gGlobalCounter[0])
+    if (index >= gGlobalCounter[kSplattingGlobalCounterElement])
         return;
 
     // The index queries where the scattered reservoir from prevPixel was at.

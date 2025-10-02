@@ -24,7 +24,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (r.pathLength > 0 || !r.isValid())
         return;
 
-    // Get shading data for the current reservoir (TODO could be optimized)
+    // Get shading data for the current reservoir (TODO could be optimized, as shading data is only used to calculate the offset ray)
     let lod = ExplicitLodTextureSampler(0.f);
     HitInfo hit = HitInfo(r.sampleSurface);
     if (!hit.isValid())
@@ -54,7 +54,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     uint linPixel = index2Dto1D(newPixel, gFrameDim.x);
 
     uint index = 0;
-    InterlockedAdd(gGlobalCounter[0], 1, index);
+    InterlockedAdd(gGlobalCounter[kSplattingGlobalCounterElement], 1, index);
 
     uint cellIndex = 0;
     InterlockedAdd(gCellCounter[linPixel], 1, cellIndex);

@@ -6,7 +6,9 @@ import Utils.Color.ColorHelpers;
 import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.Fresnel;
 
-static const float kShadowRayEpsilon = 0.98f;
+static const float kShadowRayEpsilon = 0.98;
+static const uint kSplattingGlobalCounterElement = 0; //Index for the platting global counter, that counts the total number of elements
+static const uint kSplattingGlobalCounterPrefixSum = 1; //Index for the platting global counter, used for the prefix sum to determine the offsets
 
 struct PhotonData {
     float3 flux;
