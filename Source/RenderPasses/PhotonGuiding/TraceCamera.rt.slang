@@ -143,7 +143,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         // Add to light index guiding texture
         if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
         {
-            uint2 lightIndexTexturePixel = uint2(photonData.lightIndex % gLightIndexGuidingResolution, photonData.lightIndex / gLightIndexGuidingResolution);
+            uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
             InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
         }
             

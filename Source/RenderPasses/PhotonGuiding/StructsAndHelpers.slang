@@ -245,6 +245,11 @@ uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
 }
 
+// Helper for linearized indices to 2d
+uint2 index1Dto2D(uint index, uint frameDimX) {
+    return uint2(index % frameDimX, index / frameDimX);
+}
+
 //Backprojects to camera with viewProjection matrix
 float3 getCameraProjection(float4x4 viewProjection, float3 posW) {
     float4 screenPos = mul(viewProjection, float4(posW, 1));

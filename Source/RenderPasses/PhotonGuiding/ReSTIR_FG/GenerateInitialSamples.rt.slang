@@ -19,6 +19,7 @@ StructuredBuffer<AABB> gPhotonAABB[2];
 RaytracingAccelerationStructure gPhotonAS;
 
 RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
+RWTexture2D<uint> gLightIndexGuidingCounter;
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 RWTexture2D<float4> gEmission;
@@ -33,10 +34,13 @@ cbuffer CB
     uint gFGRayMaxPathLength; // Max path length for a Final Gather sample
     uint gNumLightPaths;      // For photon weight
     float gNormalizedPixelArea; // Pixel area at distance 1 used in light trace
+
+    uint gLightIndexGuidingResolution; // Resolution of "gLightIndexGuidingCounter"
 }
 
 static const float kPhotonCollectTMax = 1e-7;
 static const uint kGuidingMode = GUIDING_MODE;
+static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
@@ -63,6 +67,30 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
     if (radiusTestF < radius * radius)
         return true;
     return false;
+}
+
+void addToGuidingTexture(PhotonData photonData, float emission) {
+    // Add to the guiding texture
+    if (kGuidingMode == (uint)GuidingMode::Emission) {
+        float histogramEmission = emission;
+        uint currentColor = 0;
+        uint originalValue;
+        [allow_uav_condition]
+        do {
+            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 0u, currentColor);
+            float color = asfloat(currentColor);
+            uint updatedColor = asuint(color + histogramEmission);
+            InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
+        } while (originalValue != currentColor);
+    } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
+        InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
+    }
+
+    if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
+    {
+        uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
+        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
+    }
 }
 
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
@@ -101,21 +129,8 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         float3 photonRadiance = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL));
         collectedRadiance += photonRadiance; //NdotL needs to be taken out of the bsdf for Photon Mapping
 
-        // Add to the guiding texture
-        if (kGuidingMode == (uint)GuidingMode::Emission) {
-            float histogramEmission = luminance(photonRadiance);
-            uint currentColor = 0;
-            uint originalValue;
-            [allow_uav_condition]
-            do {
-                InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 0u, currentColor);
-                float color = asfloat(currentColor);
-                uint updatedColor = asuint(color + histogramEmission);
-                InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
-            } while (originalValue != currentColor);
-        } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
-            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
-        }
+        addToGuidingTexture(photonData, luminance(photonRadiance));
+
     }
     return collectedRadiance;
 }
@@ -175,6 +190,9 @@ void selectFGSample(inout ReservoirFG r, float pdf, ShadingData sd, IMaterialIns
             r.guidingPixels = photonData.guidingPixel;
             //r.guidingRandomVal = photonData.guidingRandomVal;
         }
+
+        // Guiding
+        addToGuidingTexture(photonData, w);
     }
 
     // Finalize Reservoir
@@ -258,21 +276,8 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
             //causticReservoir.guidingRandomVal = photonData.guidingRandomVal;
         }
 
-        // Add to the guiding texture
-        if (kGuidingMode == (uint)GuidingMode::Emission) {
-            float histogramEmission = w;
-            uint currentColor = 0;
-            uint originalValue;
-            [allow_uav_condition]
-            do {
-                InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 0u, currentColor);
-                float color = asfloat(currentColor);
-                uint updatedColor = asuint(color + histogramEmission);
-                InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
-            } while (originalValue != currentColor);
-        } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
-            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
-        }
+        //Add to guiding
+        addToGuidingTexture(photonData, w);
     }
 
     // Finalize Reservoir
@@ -414,6 +419,9 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
             r.targetFunction = targetFunction;
             r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
         }
+
+        addToGuidingTexture(photonData, w);
+
         // Update head index
         int newHeadIndex = gLightTraceLinkedList[headIndex];
         headIndex = newHeadIndex;

@@ -1367,6 +1367,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+    mGenerateInitialSamplesPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
     // Program Vars
@@ -1381,6 +1382,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+    var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
 
     // RTXDI Resources
     mpRTXDI->setShaderData(var);
@@ -1409,6 +1411,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     {
         var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
     }
+    var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
