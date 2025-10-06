@@ -76,6 +76,9 @@ private:
 
     //Generates the guiding mipmap traverse chain
     void generateGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Generates the guiding mipmap for the light index
+    void generateLightIndexGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData);
     
     // Traces the photons and stores them in the scene
     void tracePhotonPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -91,9 +94,6 @@ private:
 
     //Reset Render Passes
     void resetRenderPasses();
-
-    //Clear Resources
-    void resetClearResources(RenderContext* pRenderContext);
 
     // Gets normalized pixel area for back projection
     float getNormalizedPixelArea();
@@ -206,14 +206,16 @@ private:
     //
     bool mEmissiveLightResetTextures = false;
     uint mEmissiveLightCount = 0;
-    uint mGuidingTextureResolution = 512;
+    uint mGuidingTextureResolution = 64;
     GuidingMode mGuidingMode = GuidingMode::Disabled;
+    GuidingLightIndexMode mGuidingLightIndexMode = GuidingLightIndexMode::Disabled;
     float mGuidingClearValueEmission = 0.1f;
     bool mUseGaussianBlur = true;
     bool mGuidingResetAccumulateCount = false;
     uint mGuidingAccumulateCount = 0;
     bool mGuidingRealTimeMode = false;   //If true, the guiding texture does not reset every frame
     uint mGuidingHistoryLimit = 256;    //History limit for the guiding texture
+    uint mGuidingLightIndexSize = 1;    //Pixel width/height of the index guiding texture
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
@@ -222,6 +224,8 @@ private:
     float mDebugColorScaleFactor = float(mGuidingTextureResolution * mGuidingTextureResolution);
     float mDebugSizeScaleFactor = 1.f;
     bool mDebugScaleToDstDim = true;
+    bool mDebugShowLightIndexGuidingTex = false;
+    float mDebugLightIndexScale = 1.f;
 
     //
     // Resources
@@ -233,6 +237,8 @@ private:
     std::vector<ref<Texture>> mGuidingTextures; //Guiding Textures for Photon Guiding
     std::vector<ref<Texture>> mGuidingLastFrameWeightTextures; //Guiding Textures used for the blur (temporal history needs to be retained)
     std::vector<ref<Texture>> mRecordGuidingTextures; //Textures to record guiding data.
+    ref<Texture> mpLightIndexGuidingTexture;            //Texture with the size corresponding to the number of lights
+    ref<Texture> mpRecordLightIndexGuidingTexture;      //Record the guiding
     //ReSTIR
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample
@@ -249,6 +255,7 @@ private:
 
 
     ref<Sampler> mpLinearSampler; //Linear Sampler
+    ref<Sampler> mpPointSampler;    //Point Sampler
 
     //
     // Render Passes/Programms
@@ -272,7 +279,10 @@ private:
     RayTraceProgramHelper mTraceCameraPass;              // Trace Camera
    
     ref<ComputePass> mpGuidingCounterReducePass; //Reduce on the guiding counter to obtain the total
+    ref<ComputePass> mpGuidingLightIndexCounterReducePass;            // Uses same shader as above, but is may need other data formats
     ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
+    ref<ComputePass> mpGenerateLightIndexGuidingMipTraverseChainPass;  // Uses same shader as above, but is may need other data formats
+
     ref<ComputePass> mpDebugPass; //For debug
 
     //ReSTIR Passes

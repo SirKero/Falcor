@@ -31,6 +31,8 @@ cbuffer CB
     float gNormalizedPixelDiagonal; //Pixel length at distance 1
 
     uint2 gScreenDimensions; // Screen dimensions for backprojection
+    uint gLightIndexGuidingResolution; // Resolution of "gGuidingLightIndex"
+    uint gLightIndexGuidingMaxMip;     //Max Mip of "gGuidingLightIndex"
 }
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
@@ -42,6 +44,7 @@ RWStructuredBuffer<int> gLightTraceLinkedList; // next pointer
 RWStructuredBuffer<PackedHitInfo> gCausticPhotonHitInfo;
 
 Texture2D<float> gGuidingTexture[NUM_GUIDING_TEXTURES];
+Texture2D<float> gGuidingLightIndex;
 
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL,PHOTON_BUFFER_SIZE_CAUSTIC);
@@ -112,22 +115,79 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
     return true;
 }
 
+uint sampleLightIndex(inout SampleGenerator sg, out float selectPdf)
+{
+    selectPdf = 0.0;
+
+    float tw = sampleNext1D(sg); // traverse weight
+    uint2 mipIdx = uint2(0);     // Working index for mip chain traversal. Starts top left (0)
+    int startMip = int(gLightIndexGuidingMaxMip) - 1; // start from secound highest level
+
+    // Start traversal from the second highest miplevel to level 0
+    for (int m = startMip; m >= 0; m--)
+    {
+        // Update mip index from last iteration (does not matter for first iteration)
+        mipIdx *= 2;
+        // Fetch samples in 2x2 grid
+        float4 mipSamples;
+        mipSamples[0] = gGuidingLightIndex.Load(uint3(mipIdx.x, mipIdx.y, m));
+        mipSamples[1] = gGuidingLightIndex.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+        mipSamples[2] = gGuidingLightIndex.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+        mipSamples[3] = gGuidingLightIndex.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+
+        // Select a sample using the current traverse weight
+        float totalWeight = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+        float currWeight = 0;      // Total for select in loop
+        uint selectedSubpixel = 0; // Selected subpixel id
+        float selWeight = 0;       // Selected weight
+        for (uint x = 0; x < 4 && totalWeight > 0; x++) {
+            selWeight = mipSamples[x];
+            currWeight += selWeight;
+            selectedSubpixel = x;
+            if (tw < currWeight)
+                break;
+        }
+
+        // Update traversal weight
+        float nonSelectedWeight = currWeight - selWeight;
+        tw -= nonSelectedWeight;
+
+        // Update the index used to fetch the next mip level
+        if (selectedSubpixel == 1 || selectedSubpixel == 3)
+            mipIdx.x += 1;
+        if (selectedSubpixel > 1) // 2 or 3
+            mipIdx.y += 1;
+
+        if (m == 0)
+            selectPdf = mipSamples[selectedSubpixel];
+    }
+
+    // Linearize the selected mip idx
+    return mipIdx.x + mipIdx.y * gLightIndexGuidingResolution;
+}
+
 bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
 {
     pls = {};
     if (gScene.lightCollection.isEmpty())
         return false;
 
+    /* Uniform sample code
     // Randomly pick a triangle out of the global list with uniform probability
     const uint triangleCount = gScene.lightCollection.triangleCount;
     // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
     uint triIdx = min((uint)(sampleNext1D(sg) * triangleCount), triangleCount - 1);
     float triangleSelectionPdf = 1.0 / triangleCount;
+    */
 
+    //Select triangle index with guiding texture
+    float triangleSelectionPdf;
+    uint triIdx = sampleLightIndex(sg, triangleSelectionPdf);
+    
     // Traverse the mipmap
     float tw = sampleNext1D(sg); // traverse weight
     uint2 mipIdx = uint2(0);       // Working index for mip chain traversal. Starts top left (0)
-    int startMip = int(gGuidingTextureMaxMip) - 1;
+    int startMip = int(gGuidingTextureMaxMip) - 1; //start from secound highest level
     float endWeight = 0;
 
     // Start traversal from the second highest miplevel to level 0

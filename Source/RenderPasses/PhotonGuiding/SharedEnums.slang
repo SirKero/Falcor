@@ -34,6 +34,17 @@ FALCOR_ENUM_INFO(GuidingMode, {
 });
 FALCOR_ENUM_REGISTER(GuidingMode);
 
+enum class GuidingLightIndexMode : uint
+{
+    Disabled = 0u,
+    Uniform = 1u
+};
+FALCOR_ENUM_INFO(GuidingLightIndexMode, {
+    { GuidingLightIndexMode::Disabled, "Disabled" },
+    { GuidingLightIndexMode::Uniform, "Uniform" }
+});
+FALCOR_ENUM_REGISTER(GuidingLightIndexMode);
+
 #ifdef HOST_CODE
 } //namespace PhotonGuiding
 #endif

@@ -18,6 +18,7 @@ import SharedEnums;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
+RWTexture2D<uint> gLightIndexGuidingCounter;
 
 StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
@@ -35,7 +36,8 @@ cbuffer CB
     uint gMaxBounces; // Max path length for a Final Gather sample
     float2 gPhotonRadius; // TODO remove temporary for MIS
 
-    uint gNumLightPaths; // Number of light paths for MIS
+    uint gNumLightPaths;               // Number of light paths for MIS
+    uint gLightIndexGuidingResolution; // Resolution of "gLightIndexGuidingCounter"
 }
 
 static const float kPhotonCollectTMax = 1e-7;
@@ -45,6 +47,7 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const float3 kDefaultBackgroundColor = float3(0.0);
 static const uint kRenderMode = RENDER_TECHNIQUE;
 static const uint kGuidingMode = GUIDING_MODE;
+static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 
 struct RayPayload
 {
@@ -132,10 +135,18 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
                 uint updatedColor = asuint(color + histogramEmission);
                 InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
             } while (originalValue != currentColor);
-        } else //if (kGuidingMode == (uint)GuidingMode::Uniform)
+        } else if (kGuidingMode != (uint)GuidingMode::Disabled)
         {
             InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
         }
+
+        // Add to light index guiding texture
+        if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
+        {
+            uint2 lightIndexTexturePixel = uint2(photonData.lightIndex % gLightIndexGuidingResolution, photonData.lightIndex / gLightIndexGuidingResolution);
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
+        }
+            
     }
     return collectedRadiance;
 }

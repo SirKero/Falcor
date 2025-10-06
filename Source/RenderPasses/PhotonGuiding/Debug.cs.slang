@@ -3,9 +3,11 @@
 #endif
 
 Texture2D<float> gGuidingTexture;
+Texture2D<float> gLightIndexGuidingTexture;
 RWTexture2D<float4> gDebug;
 
-SamplerState gSampler;
+SamplerState gLinearSampler;
+SamplerState gPointSampler;
 
 
 cbuffer CB {
@@ -13,6 +15,9 @@ cbuffer CB {
     uint gTextureSize;   // Guiding Texture size
     float gColorScaleFactor;
     float gSizeScaleFactor;
+    bool gShowLightIndexGuiding;
+    uint gLightIndexGuidingSize;
+    float gLightIndexGuidingScale;
 }
 
 [numthreads(16, 16, 1)]
@@ -23,13 +28,17 @@ void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_Gro
         return;
 
     // TODO add other scaling settings
-    float divident = min(min(gTextureSize * gSizeScaleFactor, float(gDispatchSize.x)), float(gDispatchSize.y));
+    uint textureSize = gShowLightIndexGuiding ? gLightIndexGuidingSize : gTextureSize;
+    float divident = min(min(textureSize * gSizeScaleFactor, float(gDispatchSize.x)), float(gDispatchSize.y));
     float4 output = float4(0, 0, 0, 1);
     float2 uv = (float2(pixel) + 0.5) / divident;
 
     if (all(uv <= 1))
     {
-        output.x = gGuidingTexture.SampleLevel(gSampler, uv, 0) * gColorScaleFactor;
+        if (gShowLightIndexGuiding)
+            output.x = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
+        else
+            output.x = gGuidingTexture.SampleLevel(gLinearSampler, uv, 0) * gColorScaleFactor;
     }
     gDebug[pixel] = output; 
 }
