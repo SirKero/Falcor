@@ -490,6 +490,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mScreenRes = renderData.getDefaultTextureDims();
         mNormalizedPixelArea = getNormalizedPixelArea();
         mResetScreenTex = true;
+        mResetClearResources = true;
     }
 
     if (mChangePhotonLightBufferSize)
@@ -503,6 +504,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpLightTraceLinkedList.reset();
         mpCausticPhotonHitInfo.reset();
         mChangePhotonLightBufferSize = false;
+        mResetClearResources = true;
     }
 
     //Photon Buffers
@@ -642,7 +644,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
         );
         mpLightTraceHeadCounter->setName("LightTraceHeadCounter");
-        pRenderContext->clearUAV(mpLightTraceHeadCounter->getUAV(0).get(), uint4(uint(-1)));
+        mResetClearResources = true; //Just to be sure this is triggered
     }
 
     if (!mpLightTraceLinkedList)
@@ -709,6 +711,20 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpSplattingSortedReservoirs->setName("SplattingSortedReservoirs");
     }
 
+    if (mResetClearResources)
+    {
+        pRenderContext->clearUAV(mpLightTraceHeadCounter->getUAV(0).get(), uint4(uint(-1)));
+        pRenderContext->clearUAV(mpLightTraceLinkedList->getUAV(0).get(), uint4(-1));
+        pRenderContext->clearUAV(mpCausticPhotonHitInfo->getUAV(0).get(), uint4(0));
+        for (uint i = 0; i < 2; i++)
+        {
+            pRenderContext->clearUAV(mpCausticReservoir[i]->getUAV(0).get(), uint4(0));
+            pRenderContext->clearUAV(mpFinalGatherReservoir[i]->getUAV(0).get(), uint4(0));
+        }
+       
+    }
+
+    mResetClearResources = false;
     mResetScreenTex = false;
 }
 
@@ -1141,6 +1157,8 @@ void PhotonGuiding::resetRenderPasses()
     mpSplatSortCellData.reset();
     mpSplatSortComputeCellOffsets.reset();
     mpTemporalSplatReservoirs.reset();
+
+    mResetClearResources = true;
 }
 
 float PhotonGuiding::getNormalizedPixelArea()

@@ -92,6 +92,9 @@ private:
     //Reset Render Passes
     void resetRenderPasses();
 
+    //Clear Resources
+    void resetClearResources(RenderContext* pRenderContext);
+
     // Gets normalized pixel area for back projection
     float getNormalizedPixelArea();
 
@@ -131,6 +134,7 @@ private:
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
+    bool mResetClearResources = false;
     uint mNumberLightPaths = 0;
 
     // Material Settings
