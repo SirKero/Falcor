@@ -48,6 +48,7 @@ static const float3 kDefaultBackgroundColor = float3(0.0);
 static const uint kRenderMode = RENDER_TECHNIQUE;
 static const uint kGuidingMode = GUIDING_MODE;
 static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
+static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 
 struct RayPayload
 {
@@ -125,6 +126,9 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
 
         // Add to the guiding texture
         float histogramEmission = luminance(photonRadiance);
+        if (histogramEmission <= 0)
+            continue;
+
         if (kGuidingMode == (uint)GuidingMode::Emission || kGuidingMode == (uint)GuidingMode::ReSTIR)
         {
             uint currentColor = 0;
@@ -136,10 +140,14 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
                 uint updatedColor = asuint(color + histogramEmission);
                 InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
             } while (originalValue != currentColor);
-        } else if (kGuidingMode != (uint)GuidingMode::Disabled)
+        } else if (kGuidingMode == (uint)GuidingMode::Uniform)
         {
             InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
-        }
+        } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized || kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
+        {
+            uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * histogramEmission)),1);
+            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], discretizedEmission);
+        } 
 
         // Add to light index guiding texture
         if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
@@ -149,7 +157,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission || kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
         {
             uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
-            uint discretizedEmission = uint(floor(kDiscretizedEmissionFactor * histogramEmission));
+            uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * histogramEmission)),1);
             InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
         }
     }

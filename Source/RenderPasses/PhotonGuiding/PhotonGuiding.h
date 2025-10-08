@@ -216,6 +216,7 @@ private:
     bool mGuidingRealTimeMode = false;   //If true, the guiding texture does not reset every frame
     uint mGuidingHistoryLimit = 256;    //History limit for the guiding texture
     uint mGuidingLightIndexSize = 1;    //Pixel width/height of the index guiding texture
+    uint mGuidingDiscretizedEmissionFactor = 255;    //For the discretized modis, the emission is multiplied with this factor
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;

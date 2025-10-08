@@ -45,6 +45,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
+static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 
 struct RayPayload
 {
@@ -70,6 +71,8 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
 }
 
 void addToGuidingTexture(PhotonData photonData, float emission) {
+    if (emission <= 0)
+        return;
     // Add to the guiding texture
     if (kGuidingMode == (uint)GuidingMode::Emission) {
         uint currentColor = 0;
@@ -83,6 +86,10 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
         InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
+    } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized)
+    {
+        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
+        InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], discretizedEmission);
     }
 
     if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
@@ -92,7 +99,7 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
     } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission)
     {
         uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
-        uint discretizedEmission = uint(floor(kDiscretizedEmissionFactor * emission));
+        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
         InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
     }
 }

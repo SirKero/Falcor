@@ -25,12 +25,16 @@ enum class GuidingMode : uint
     Uniform = 1u,
     Emission = 2u,
     ReSTIR = 3u,        //Emission but applied to the surviving sample of the ReSTIR pass
+    EmissionDiscretized = 4u,
+    ReSTIRDiscretized = 5u, // DiscretizedEmission but applied to the surviving sample of the ReSTIR pass
 };
 FALCOR_ENUM_INFO(GuidingMode, {
     { GuidingMode::Disabled, "Disabled" },
     { GuidingMode::Uniform, "Uniform" },
     { GuidingMode::Emission, "Emission" },
     { GuidingMode::ReSTIR, "ReSTIR" },
+    { GuidingMode::EmissionDiscretized, "EmissionDiscretized" },
+    { GuidingMode::ReSTIRDiscretized, "ReSTIRDiscretized" },
 });
 FALCOR_ENUM_REGISTER(GuidingMode);
 

@@ -321,6 +321,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 mpGaussianBlur->renderUI(group);
         }
 
+        group.var("Guiding Discretized Factor", mGuidingDiscretizedEmissionFactor, 1u, UINT_MAX, 1u);
+        group.tooltip("The emission is multiplied with this factor before beeing added to the texture");
         group.checkbox("Use Real Time mode", mGuidingRealTimeMode);
         group.tooltip("In real-time mode, the guiding count is not reset on camera movement. Instead, a history limit is applied");
         if (mGuidingRealTimeMode)
@@ -780,6 +782,24 @@ void PhotonGuiding::updateGuidingTextures(RenderContext* pRenderContext, const R
     
 }
 
+bool guidingIsUintFormat(PhotonGuidingSharedEnums::GuidingMode guidingMode) {
+    switch (guidingMode)
+    {
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::Disabled:
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::Uniform:
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::EmissionDiscretized:
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::ReSTIRDiscretized:
+        return true;
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::Emission:
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::ReSTIR:
+        return false;
+    default:
+        FALCOR_UNREACHABLE();
+        break;
+    }
+    return true;
+}
+
 void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "ReduceGuidingCounters");
@@ -790,7 +810,7 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
-        defines.add("TEX_FORMAT", mGuidingMode == GuidingMode::Uniform ? "uint" : "float");
+        defines.add("TEX_FORMAT", guidingIsUintFormat(mGuidingMode) ? "uint" : "float");
 
         mpGuidingCounterReducePass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -869,7 +889,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
-        defines.add("COUNTER_FORMAT", mGuidingMode == GuidingMode::Uniform ? "uint" : "float");
+        defines.add("COUNTER_FORMAT", guidingIsUintFormat(mGuidingMode) ? "uint" : "float");
         defines.add("USE_TEMPORAL_WEIGHT_TEXTURE", "1");
         defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "0");
@@ -889,7 +909,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["CB"]["gRes"] = mGuidingTextureResolution;
         var["CB"]["gCopyFromCounter"] = true;
         var["CB"]["gIterationCount"] = iterationCount;
-        var["CB"]["gClearValue"] = mGuidingMode == GuidingMode::Uniform ? 1.f : mGuidingClearValueEmission;
+        var["CB"]["gClearValue"] = guidingIsUintFormat(mGuidingMode) ? 1.f : mGuidingClearValueEmission;
         for (uint i = 0; i < mEmissiveLightCount; i++)
         {
             var["gSrcCounter"][i].setUav(mRecordGuidingTextures[i]->getUAV(0));
@@ -1162,6 +1182,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     mTraceCameraPass.pProgram->addDefine("RENDER_TECHNIQUE", std::to_string((uint)mPhotonRenderMode));
     mTraceCameraPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     mTraceCameraPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
+    mTraceCameraPass.pProgram->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -1369,6 +1390,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     mGenerateInitialSamplesPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
 
     // Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -1568,6 +1590,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
         defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
+        defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -1579,6 +1602,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     mpEvaluateReservoirsPass->getProgram()->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
+    mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();
