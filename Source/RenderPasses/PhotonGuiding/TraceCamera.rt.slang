@@ -121,11 +121,12 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         float3 photonRadiance = max( 0, (photonData.flux * bsdf) / (NdotL * radius * radius * photonWeight)); // NdotL needs to be taken out of the bsdf for Photon Mapping
-        collectedRadiance += photonRadiance; 
+        collectedRadiance += photonRadiance;
 
         // Add to the guiding texture
-        if (kGuidingMode == (uint)GuidingMode::Emission) {
-            float histogramEmission = luminance(photonRadiance);
+        float histogramEmission = luminance(photonRadiance);
+        if (kGuidingMode == (uint)GuidingMode::Emission || kGuidingMode == (uint)GuidingMode::ReSTIR)
+        {
             uint currentColor = 0;
             uint originalValue;
             [allow_uav_condition]
@@ -145,8 +146,12 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         {
             uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
             InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
+        } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission || kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
+        {
+            uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
+            uint discretizedEmission = uint(floor(kDiscretizedEmissionFactor * histogramEmission));
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
         }
-            
     }
     return collectedRadiance;
 }

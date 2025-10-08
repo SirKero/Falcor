@@ -72,14 +72,13 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
 void addToGuidingTexture(PhotonData photonData, float emission) {
     // Add to the guiding texture
     if (kGuidingMode == (uint)GuidingMode::Emission) {
-        float histogramEmission = emission;
         uint currentColor = 0;
         uint originalValue;
         [allow_uav_condition]
         do {
             InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 0u, currentColor);
             float color = asfloat(currentColor);
-            uint updatedColor = asuint(color + histogramEmission);
+            uint updatedColor = asuint(color + emission);
             InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
@@ -90,6 +89,11 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
     {
         uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
         InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
+    } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission)
+    {
+        uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
+        uint discretizedEmission = uint(floor(kDiscretizedEmissionFactor * emission));
+        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
     }
 }
 

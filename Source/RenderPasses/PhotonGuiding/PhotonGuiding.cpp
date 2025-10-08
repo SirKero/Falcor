@@ -1566,6 +1566,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add(mpRTXDI->getDefines());
         defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
         defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+        defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -1576,6 +1577,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+    mpEvaluateReservoirsPass->getProgram()->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
     // Set variables
@@ -1587,6 +1589,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+    var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
 
     // RTXDI resources
     mpRTXDI->setShaderData(var);
@@ -1606,6 +1609,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     {
         var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
     }
+    if (mGuidingLightIndexMode == GuidingLightIndexMode::ReSTIR)
+        var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

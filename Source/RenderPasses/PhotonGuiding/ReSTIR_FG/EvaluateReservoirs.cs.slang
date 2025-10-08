@@ -18,19 +18,48 @@ StructuredBuffer<ReservoirCaustic> gCausticReservoir;
 Texture2D<float4> gEmission;
 
 RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
+RWTexture2D<uint> gLightIndexGuidingCounter;
+
 RWTexture2D<float4> gOutColor;
 
 cbuffer CB
 {
     uint gFrameCount;         // Current it for sample gen
     uint2 gFrameDim;          // Frame Dimensions for camera dir
-    float gNormalizedPixelArea; //For backprojection
+    float gNormalizedPixelArea; // For backprojection
+    uint gLightIndexGuidingResolution;
 }
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kGuidingMode = GUIDING_MODE;
+static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
+
+void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission)
+{
+    if (lightIndex < 0 && emission > 0)
+        return;
+    if (kGuidingMode == (uint)GuidingMode::ReSTIR)
+    {
+        uint currentColor = 0;
+        uint originalValue;
+        [allow_uav_condition]
+        do {
+            InterlockedAdd(gGuidingCounter[lightIndex][guidingPixel], 0u, currentColor);
+            float color = asfloat(currentColor);
+            uint updatedColor = asuint(color + emission);
+            InterlockedCompareExchange(gGuidingCounter[lightIndex][guidingPixel], currentColor, updatedColor, originalValue);
+        } while (originalValue != currentColor);
+    }
+
+    if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
+    {
+        uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
+        uint discretizedEmission = uint(floor(kDiscretizedEmissionFactor * emission));
+        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+    }
+}
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
@@ -47,21 +76,7 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
     outColor *= fgReservoir.thp * fgReservoir.wSum;
 
-    if (kGuidingMode == (uint)GuidingMode::ReSTIR)
-    {
-        if (fgReservoir.lightIndex < 0)
-            return outColor;
-        float histogramEmission = luminance(outColor);
-        uint currentColor = 0;
-        uint originalValue;
-        [allow_uav_condition]
-        do {
-            InterlockedAdd(gGuidingCounter[fgReservoir.lightIndex][fgReservoir.guidingPixels], 0u, currentColor);
-            float color = asfloat(currentColor);
-            uint updatedColor = asuint(color + histogramEmission);
-            InterlockedCompareExchange(gGuidingCounter[fgReservoir.lightIndex][fgReservoir.guidingPixels], currentColor, updatedColor, originalValue);
-        } while (originalValue != currentColor);
-    }
+    addToGuidingTexture(fgReservoir.lightIndex, fgReservoir.guidingPixels, luminance(outColor));
     
     return outColor;
 }
@@ -80,13 +95,15 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     let bsdfProperties = mi.getProperties(sd);
     
     // Light Trace
-    if (kEnableLightTraceSplatting && causticReservoir.pathLength == 0) {
+    if (kEnableLightTraceSplatting && causticReservoir.pathLength == 0)
+    {
         float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
         float distanceToCamera = length(directionToCamera);
         directionToCamera /= distanceToCamera;
         const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, normalize(gScene.camera.data.cameraW), gNormalizedPixelArea);
         outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg) / cameraPdf;
-    } else {
+    } else //Photon Mapping
+    {
         float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
         if (NdotL > 0) {
             outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
@@ -95,21 +112,7 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
         }
     }
 
-    if (kGuidingMode == (uint)GuidingMode::ReSTIR)
-    {
-        if (causticReservoir.lightIndex < 0)
-            return outColor;
-        float histogramEmission = luminance(outColor);
-        uint currentColor = 0;
-        uint originalValue;
-        [allow_uav_condition]
-        do {
-            InterlockedAdd(gGuidingCounter[causticReservoir.lightIndex][causticReservoir.guidingPixels], 0u, currentColor);
-            float color = asfloat(currentColor);
-            uint updatedColor = asuint(color + histogramEmission);
-            InterlockedCompareExchange(gGuidingCounter[causticReservoir.lightIndex][causticReservoir.guidingPixels], currentColor, updatedColor, originalValue);
-        } while (originalValue != currentColor);
-    }
+    addToGuidingTexture(causticReservoir.lightIndex, causticReservoir.guidingPixels, luminance(outColor));
 
     return outColor;
 }
