@@ -199,7 +199,7 @@ private:
     float3 mTemporalCameraPosition = float3(0);
     float3 mTemporalCameraForward = float3(0);
     float mNormalizedPixelArea = 1.0; // For light trace
-    bool mEnableLightTraceSplatting = false; //TODO Renderer crashed if enabled and mode changes, look into why
+    bool mEnableLightTraceSplatting = false;
 
     //
     //Guiding Infos/Options

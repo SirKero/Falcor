@@ -311,7 +311,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         if (!hit.isValid()) {
             valid = false;
-            //TODO add valid reservoir if envMap was hit
+            //TODO add valid reservoir if envMap was hit?
             return;
         }
 

@@ -848,7 +848,7 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", "1");
-        defines.add("TEX_FORMAT", true ? "uint" : "float"); //TODO add guiding mode
+        defines.add("TEX_FORMAT", "uint");
 
         mpGuidingLightIndexCounterReducePass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -959,7 +959,7 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", "1");
-        defines.add("COUNTER_FORMAT", true ? "uint" : "float"); //TODO add format switch
+        defines.add("COUNTER_FORMAT", "uint");
         defines.add("USE_TEMPORAL_WEIGHT_TEXTURE", "0");
         defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "1");
@@ -1202,7 +1202,6 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gMaxBounces"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
-    var["CB"]["gPhotonRadius"] = mPhotonRadius;
     var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
 
     // Input

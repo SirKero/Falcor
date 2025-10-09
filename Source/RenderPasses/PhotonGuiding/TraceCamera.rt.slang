@@ -34,7 +34,6 @@ cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
     uint gMaxBounces; // Max path length for a Final Gather sample
-    float2 gPhotonRadius; // TODO remove temporary for MIS
 
     uint gNumLightPaths;               // Number of light paths for MIS
     uint gLightIndexGuidingResolution; // Resolution of "gLightIndexGuidingCounter"
