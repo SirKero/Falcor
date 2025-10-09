@@ -8,17 +8,13 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Rendering.RTXDI.RTXDI;
 
-#ifndef NUM_GUIDING_TEXTURES
-#define NUM_GUIDING_TEXTURES 1
-#endif
-
 Texture2D<PackedHitInfo> gVBuffer;
 
 StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
 RaytracingAccelerationStructure gPhotonAS;
 
-RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
+RWTexture2D<uint> gGuidingCounter;
 RWTexture2D<uint> gLightIndexGuidingCounter;
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
@@ -79,17 +75,17 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
         uint originalValue;
         [allow_uav_condition]
         do {
-            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 0u, currentColor);
+            InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 0u, currentColor);
             float color = asfloat(currentColor);
             uint updatedColor = asuint(color + emission);
-            InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
+            InterlockedCompareExchange(gGuidingCounter[photonData.guidingPixel], currentColor, updatedColor, originalValue);
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
-        InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
+        InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 1u);
     } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized)
     {
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
-        InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], discretizedEmission);
+        InterlockedAdd(gGuidingCounter[photonData.guidingPixel], discretizedEmission);
     }
 
     if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)

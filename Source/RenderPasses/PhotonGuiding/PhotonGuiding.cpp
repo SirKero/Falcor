@@ -450,9 +450,9 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
     if (pLights->getTotalLightCount() != mEmissiveLightCount)
     {
         mEmissiveLightCount = pLights->getTotalLightCount();
-        mGuidingTextures.clear();
-        mGuidingLastFrameWeightTextures.clear();
-        mRecordGuidingTextures.clear();
+        mGuidingTextures.reset();
+        mGuidingLastFrameWeightTextures.reset();
+        mRecordGuidingTextures.reset();
         mpLightIndexGuidingTexture.reset();
         mpRecordLightIndexGuidingTexture.reset();
         resetRenderPasses();
@@ -569,54 +569,48 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     }
 
     //Guiding Textures
-    if (mGuidingTextures.empty())
+    if (!mGuidingTextures)
     {
-        mGuidingTextures.resize(mEmissiveLightCount);
+        //Update atlas size
+        float minSideLength =
+            math::ceil(math::sqrt(float(mEmissiveLightCount * mGuidingTextureResolution * mGuidingTextureResolution))); // ceiled pixel
+                                                                                                                        // width/length
+        mGuidingAtlasResolution = uint(pow(2.f, math::ceil(math::log2(minSideLength)))); // Gets next nearest power 2 number
+        mGuidingAtlasMipLevels = uint(round(math::log2(float(mGuidingTextureResolution)))) + 1;
 
-        for (uint i = 0; i < mEmissiveLightCount; i++)
-        {
-            mGuidingTextures[i] = Texture::create2D(
-                mpDevice, mGuidingTextureResolution, mGuidingTextureResolution, ResourceFormat::R32Float, 1u, Texture::kMaxPossible,
-                nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
-            );
-            mGuidingTextures[i]->setName("GuidingTexture" + std::to_string(i));
+        mGuidingTextures = Texture::create2D(
+            mpDevice, mGuidingAtlasResolution, mGuidingAtlasResolution, ResourceFormat::R32Float, 1u, mGuidingAtlasMipLevels,
+            nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
+        );
+        mGuidingTextures->setName("GuidingTextureAtlas");
 
-            pRenderContext->clearUAV(
-                mGuidingTextures[i]->getUAV(0).get(), float4(1.0 / (mGuidingTextureResolution * mGuidingTextureResolution))
-            );
-            mGuidingTextures[i]->generateMips(pRenderContext);
-        }
+        pRenderContext->clearUAV(
+            mGuidingTextures->getUAV(0).get(), float4(1.0 / (mGuidingTextureResolution * mGuidingTextureResolution))
+        );
+        mGuidingTextures->generateMips(pRenderContext);
+        
     }
 
-    if (mGuidingLastFrameWeightTextures.empty())
-    {
-        mGuidingLastFrameWeightTextures.resize(mEmissiveLightCount);
-
-        for (uint i = 0; i < mEmissiveLightCount; i++)
-        {
-            mGuidingLastFrameWeightTextures[i] = Texture::create2D(
-                mpDevice, mGuidingTextureResolution, mGuidingTextureResolution, ResourceFormat::R32Float, 1u, 1u,
-                nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
-            );
-            mGuidingLastFrameWeightTextures[i]->setName("GuidingBlurTexture" + std::to_string(i));
-        }
+    if (!mGuidingLastFrameWeightTextures)
+{
+        mGuidingLastFrameWeightTextures = Texture::create2D(
+        mpDevice, mGuidingAtlasResolution, mGuidingAtlasResolution, ResourceFormat::R32Float, 1u, 1u,
+            nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mGuidingLastFrameWeightTextures->setName("GuidingBlurTextureAtlas");
+        
     }
 
-    if (mRecordGuidingTextures.empty())
+    if (!mRecordGuidingTextures)
     {
-        mRecordGuidingTextures.resize(mEmissiveLightCount);
+        mRecordGuidingTextures = Texture::create2D(
+            mpDevice, mGuidingAtlasResolution, mGuidingAtlasResolution, ResourceFormat::R32Uint, 1u, mGuidingAtlasMipLevels,
+            nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
+        );
+        mRecordGuidingTextures->setName("RecordGuidingTextureAtlas");
 
-        for (uint i = 0; i < mEmissiveLightCount; i++)
-        {
-            mRecordGuidingTextures[i] = Texture::create2D(
-                mpDevice, mGuidingTextureResolution, mGuidingTextureResolution, ResourceFormat::R32Uint, 1u, Texture::kMaxPossible,
-                nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
-            );
-            mRecordGuidingTextures[i]->setName("RecordGuidingTexture" + std::to_string(i));
-
-            pRenderContext->clearUAV(mRecordGuidingTextures[i]->getUAV(0).get(), uint4(1));
-            mRecordGuidingTextures[i]->generateMips(pRenderContext);
-        }
+        pRenderContext->clearUAV(mRecordGuidingTextures->getUAV(0).get(), uint4(1));
+        //mRecordGuidingTextures->generateMips(pRenderContext);
     }
         
     if (!mpLightIndexGuidingTexture)
@@ -769,10 +763,7 @@ void PhotonGuiding::updateGuidingTextures(RenderContext* pRenderContext, const R
 
     if (mDebugFreezeGuidingTextures)
     {
-        for (uint i = 0; i < mEmissiveLightCount; i++)
-        {
-            pRenderContext->clearUAV(mRecordGuidingTextures[i]->getUAV(0).get(), uint4(1));
-        }
+        pRenderContext->clearUAV(mRecordGuidingTextures->getUAV(0).get(), uint4(1));
         return;
     }
 
@@ -803,13 +794,13 @@ bool guidingIsUintFormat(PhotonGuidingSharedEnums::GuidingMode guidingMode) {
 void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "ReduceGuidingCounters");
+    
     if (!mpGuidingCounterReducePass)
     {
         Program::Desc desc;
         desc.addShaderLibrary(kShaderGuidingReduce).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
-        defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
         defines.add("TEX_FORMAT", guidingIsUintFormat(mGuidingMode) ? "uint" : "float");
 
         mpGuidingCounterReducePass = ComputePass::create(mpDevice, desc, defines, true);
@@ -818,24 +809,31 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
     //Per triangle light guiding texture
     {
         auto var = mpGuidingCounterReducePass->getRootVar();
-        const uint maxMipCount = mRecordGuidingTextures[0]->getMipCount() - 1u;
-        for (uint mip = 0; mip < maxMipCount; mip += 5)
+        const uint maxMipCount = mGuidingAtlasMipLevels - 1u;
+        
+        bool useMipMapReduce = maxMipCount < 5;
+        uint increments = useMipMapReduce ? 1 : 5;
+
+        for (uint mip = 0; mip < maxMipCount; mip += increments)
         {
-            uint dstMip = math::min(maxMipCount, mip + 5);
+            if (!useMipMapReduce && (mip + increments) >= maxMipCount)
+            {
+                increments = 1;
+                useMipMapReduce = true;
+            }
+            uint dstMip = mip + increments;
 
             uint3 dispatchDim =
-                uint3(mRecordGuidingTextures[0]->getWidth(mip), mRecordGuidingTextures[0]->getHeight(mip), mEmissiveLightCount);
+                uint3(mRecordGuidingTextures->getWidth(mip), mRecordGuidingTextures->getHeight(mip), 1);
 
             dispatchDim.x = dispatchDim.x / 2u;
             dispatchDim.y = dispatchDim.y / 2u;
 
             var["CB"]["gDstSize"] = dispatchDim.xy();
+            var["CB"]["gUseMip"] = useMipMapReduce;
 
-            for (uint i = 0; i < mEmissiveLightCount; i++)
-            {
-                var["gSrc"][i].setSrv(mRecordGuidingTextures[i]->getSRV(mip, 1u));
-                var["gDst"][i].setUav(mRecordGuidingTextures[i]->getUAV(dstMip, 0u, 1u));
-            }
+            var["gSrc"].setSrv(mRecordGuidingTextures->getSRV(mip, 1u));
+            var["gDst"].setUav(mRecordGuidingTextures->getUAV(dstMip, 0u, 1u));
 
             mpGuidingCounterReducePass->execute(pRenderContext, dispatchDim);
         }
@@ -847,7 +845,6 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
         desc.addShaderLibrary(kShaderGuidingReduce).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
-        defines.add("COUNT_TEXTURES", "1");
         defines.add("TEX_FORMAT", "uint");
 
         mpGuidingLightIndexCounterReducePass = ComputePass::create(mpDevice, desc, defines, true);
@@ -869,13 +866,14 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
             dispatchDim.y = dispatchDim.y / 2u;
 
             var["CB"]["gDstSize"] = dispatchDim.xy();
-            uint idx = 0; //Needs to be this way otherwise the overload does not work
-            var["gSrc"][idx].setSrv(mpRecordLightIndexGuidingTexture->getSRV(mip, 1u));
-            var["gDst"][idx].setUav(mpRecordLightIndexGuidingTexture->getUAV(dstMip, 0u, 1u));
+            var["CB"]["gUseMip"] = false;
+            var["gSrc"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(mip, 1u));
+            var["gDst"].setUav(mpRecordLightIndexGuidingTexture->getUAV(dstMip, 0u, 1u));
           
             mpGuidingLightIndexCounterReducePass->execute(pRenderContext, dispatchDim);
         }
     }
+    
 }
 
 void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -905,48 +903,46 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         if (mGuidingRealTimeMode)
             iterationCount = math::min(iterationCount, mGuidingHistoryLimit);
 
-        const uint maxMip = mRecordGuidingTextures[0]->getMipCount() - 1u;
+        const uint maxMip = mGuidingAtlasMipLevels - 1;
         var["CB"]["gRes"] = mGuidingTextureResolution;
         var["CB"]["gCopyFromCounter"] = true;
         var["CB"]["gIterationCount"] = iterationCount;
         var["CB"]["gClearValue"] = guidingIsUintFormat(mGuidingMode) ? 1.f : mGuidingClearValueEmission;
-        for (uint i = 0; i < mEmissiveLightCount; i++)
-        {
-            var["gSrcCounter"][i].setUav(mRecordGuidingTextures[i]->getUAV(0));
-            var["gSrcCounterTotal"][i].setSrv(mRecordGuidingTextures[i]->getSRV(maxMip, 1u));
-            var["gWeightLastFrame"][i] = mGuidingLastFrameWeightTextures[i];
-            var["gDst"][i].setUav(mGuidingTextures[i]->getUAV(0));
-        }
+        var["gSrcCounter"].setUav(mRecordGuidingTextures->getUAV(0));
+        var["gSrcCounterTotal"].setSrv(mRecordGuidingTextures->getSRV(maxMip, 1u));
+        var["gWeightLastFrame"] = mGuidingLastFrameWeightTextures;
+        var["gDst"].setUav(mGuidingTextures->getUAV(0));
+        
 
         mpGenerateGuidingMipTraverseChainPass->execute(
-            pRenderContext, uint3(mGuidingTextureResolution, mGuidingTextureResolution, mEmissiveLightCount)
+            pRenderContext, uint3(mGuidingAtlasResolution, mGuidingAtlasResolution, 1)
         );
     }
 
     //Blur
+    /*
     if (mUseGaussianBlur)
     {
         for (uint i = 0; i < mEmissiveLightCount; i++)
             mpGaussianBlur->execute(pRenderContext, mGuidingTextures[i]);
     }
+    */
 
     //Loop to generate the mip chain
     var["CB"]["gCopyFromCounter"] = false;
-    uint resolution = mGuidingTextures[0]->getHeight() / 2;
-    int mipCount = int(mGuidingTextures[0]->getMipCount());
+    uint resolution = mGuidingAtlasResolution / 2;
+    int mipCount = mGuidingAtlasMipLevels - 1;
     for (int m = 1; m < mipCount; m++)
     {
         var["CB"]["gRes"] = resolution;
 
-        for (uint i = 0; i < mEmissiveLightCount; i++)
-        {
-            var["gSrc"][i].setSrv(mGuidingTextures[i]->getSRV(m-1, 1u));
-            var["gDst"][i].setUav(mGuidingTextures[i]->getUAV(m));
-        }
+        var["gSrc"].setSrv(mGuidingTextures->getSRV(m-1, 1u));
+        var["gDst"].setUav(mGuidingTextures->getUAV(m));
+        
 
-        mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, resolution, mEmissiveLightCount));
+        mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, resolution, 1));
         resolution /= 2;
-    }    
+    }
 }
 
 void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData) {
@@ -981,10 +977,9 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
         var["CB"]["gIterationCount"] = iterationCount;
         var["CB"]["gClearValue"] = 1.f;
 
-        uint idx = 0; //Is needed for overload to work
-        var["gSrcCounter"][idx].setUav(mpRecordLightIndexGuidingTexture->getUAV(0));
-        var["gSrcCounterTotal"][idx].setSrv(mpRecordLightIndexGuidingTexture->getSRV(maxMip, 1u));
-        var["gDst"][idx].setUav(mpLightIndexGuidingTexture->getUAV(0));
+        var["gSrcCounter"].setUav(mpRecordLightIndexGuidingTexture->getUAV(0));
+        var["gSrcCounterTotal"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(maxMip, 1u));
+        var["gDst"].setUav(mpLightIndexGuidingTexture->getUAV(0));
 
         mpGenerateLightIndexGuidingMipTraverseChainPass->execute(
             pRenderContext, uint3(mGuidingLightIndexSize, mGuidingLightIndexSize, 1)
@@ -998,9 +993,8 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
     for (int m = 1; m < mipCount; m++)
     {
         var["CB"]["gRes"] = resolution;
-        uint idx = 0; // Is needed for overload to work
-        var["gSrc"][idx].setSrv(mpLightIndexGuidingTexture->getSRV(m - 1, 1u));
-        var["gDst"][idx].setUav(mpLightIndexGuidingTexture->getUAV(m));
+        var["gSrc"].setSrv(mpLightIndexGuidingTexture->getSRV(m - 1, 1u));
+        var["gDst"].setUav(mpLightIndexGuidingTexture->getUAV(m));
 
         mpGenerateLightIndexGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, resolution, 1));
         resolution /= 2;
@@ -1058,7 +1052,6 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
         defines.add(mpScene->getSceneDefines());
         defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
-        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
@@ -1091,9 +1084,9 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gPhotonRadius"] = mPhotonRadius; 
     var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
-    var["CB"]["gScreenRes"] = mScreenRes;
     var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
-    var["CB"]["gGuidingTextureMaxMip"] = mGuidingTextures[0]->getMipCount() - 1u;
+    var["CB"]["gGuidingTextureMaxMip"] = mGuidingAtlasMipLevels - 1;
+    var["CB"]["gGuidingAtlasResolution"] = mGuidingAtlasResolution;
     var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
     var["CB"]["gNormalizedPixelDiagonal"] = mNormalizePixelDiagonal;
     var["CB"]["gScreenDimensions"] = mScreenRes;
@@ -1107,10 +1100,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         var["gPhotonData"][i] = mpPhotonData[i];
     }
 
-    for (uint i = 0; i < mGuidingTextures.size(); i++)
-    {
-        var["gGuidingTexture"][i] = mGuidingTextures[i];
-    }
+    var["gGuidingTexture"] = mGuidingTextures;
     var["gGuidingLightIndex"] = mpLightIndexGuidingTexture;
 
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
@@ -1169,7 +1159,6 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
         }
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
-        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
 
         mTraceCameraPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -1216,11 +1205,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
     }
-
-    for (uint i = 0; i < mEmissiveLightCount; i++)
-    {
-        var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
-    }
+    var["gGuidingCounter"] = mRecordGuidingTextures;
     var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
@@ -1247,18 +1232,18 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     auto var = mpDebugPass->getRootVar();
 
     uint3 dispatchDim = uint3(renderData.getDefaultTextureDims().xy(), 1);
-    uint showDebugTexRes = mDebugShowLightIndexGuidingTex ? mGuidingLightIndexSize : mGuidingTextureResolution;
+    uint showDebugTexRes = mDebugShowLightIndexGuidingTex ? mGuidingLightIndexSize : mGuidingAtlasResolution;
     float scaleToDebugTexFactor = (float(math::min(dispatchDim.x, dispatchDim.y)) / float(showDebugTexRes)) + 0.5f;
 
     var["CB"]["gColorScaleFactor"] = mDebugColorScaleFactor;
-    var["CB"]["gTextureSize"] = mGuidingTextureResolution;
+    var["CB"]["gTextureSize"] = mGuidingAtlasResolution;
     var["CB"]["gDispatchSize"] = dispatchDim.xy();
     var["CB"]["gSizeScaleFactor"] = mDebugScaleToDstDim ? scaleToDebugTexFactor : mDebugSizeScaleFactor;
     var["CB"]["gShowLightIndexGuiding"] = mDebugShowLightIndexGuidingTex;
     var["CB"]["gLightIndexGuidingSize"] = mGuidingLightIndexSize;
     var["CB"]["gLightIndexGuidingScale"] = mDebugLightIndexScale;
     
-    var["gGuidingTexture"] = mGuidingTextures[mDebugSelectedTriLight];
+    var["gGuidingTexture"] = mGuidingTextures;
     var["gLightIndexGuidingTexture"] = mpLightIndexGuidingTexture;
     var["gDebug"] = renderData[kOutputDebug]->asTexture();
     var["gLinearSampler"] = mpLinearSampler;
@@ -1378,7 +1363,6 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
 
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
-        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
 
         mGenerateInitialSamplesPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -1427,11 +1411,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["gEmission"] = mpEmission;
 
     //Guiding textures
-    bool useGuiding = mGuidingMode == GuidingMode::Uniform || mGuidingMode == GuidingMode::Emission;
-    for (uint i = 0; i < mEmissiveLightCount && useGuiding; i++)
-    {
-        var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
-    }
+    var["gGuidingCounter"] = mRecordGuidingTextures;
     var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
 
     // Dispatch Shader
@@ -1585,7 +1565,6 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add(mpSampleGenerator->getDefines());
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
-        defines.add("NUM_GUIDING_TEXTURES", std::to_string(mEmissiveLightCount));
         defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
         defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
@@ -1627,13 +1606,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
 
     // Guiding textures
-    bool useGuiding = mGuidingMode == GuidingMode::ReSTIR;
-    for (uint i = 0; i < mEmissiveLightCount && useGuiding; i++)
-    {
-        var["gGuidingCounter"][i] = mRecordGuidingTextures[i];
-    }
-    if (mGuidingLightIndexMode == GuidingLightIndexMode::ReSTIR)
-        var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
+    var["gGuidingCounter"] = mRecordGuidingTextures;
+    var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

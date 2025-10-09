@@ -18,11 +18,11 @@
 #define IS_LIGHT_INDEX_TEXTURE 0
 #endif
 
-RWTexture2D<COUNTER_FORMAT> gSrcCounter[COUNT_TEXTURES];    // RW for clearing; only used when gCopyFromCounter = true
-Texture2D<COUNTER_FORMAT> gSrcCounterTotal[COUNT_TEXTURES]; // Only used when gCopyFromCounter = true
-RWTexture2D<float> gWeightLastFrame[COUNT_TEXTURES]; // Only used when gCopyFromCounter = true
-Texture2D<float> gSrc[COUNT_TEXTURES];
-RWTexture2D<float> gDst[COUNT_TEXTURES];
+RWTexture2D<COUNTER_FORMAT> gSrcCounter;    // RW for clearing; only used when gCopyFromCounter = true
+Texture2D<COUNTER_FORMAT> gSrcCounterTotal; // Only used when gCopyFromCounter = true
+RWTexture2D<float> gWeightLastFrame; // Only used when gCopyFromCounter = true
+Texture2D<float> gSrc;
+RWTexture2D<float> gDst;
 
 cbuffer CB {
     uint gRes;
@@ -40,10 +40,8 @@ cbuffer CB {
 void main(uint3 thdID: SV_DispatchThreadID)
 {
     const uint2 pixel = thdID.xy;
-    if (any(pixel > gRes))
-        return;
-
-    const uint texIdx = thdID.z;
+    //if (any(pixel > gRes))
+    //    return;
 
     if (gCopyFromCounter)
     {
@@ -56,14 +54,18 @@ void main(uint3 thdID: SV_DispatchThreadID)
             weight = 1.0 / (gRes * gRes); // Uniform
         #endif
         if (gIterationCount > 0) {
-            float total = float(gSrcCounterTotal[texIdx][uint2(0)]);
-            float pixelCounterVal = float(gSrcCounter[texIdx][pixel]);
+            uint2 totalCounterIndex = uint2(0);
+            #if !USE_TEMPORAL_WEIGHT_TEXTURE
+                totalCounterIndex = pixel / gRes;
+            #endif
+            float total = float(gSrcCounterTotal[totalCounterIndex]);
+            float pixelCounterVal = float(gSrcCounter[pixel]);
             weight = pixelCounterVal / total;
             float oldWeight = 0.0;
             #if USE_TEMPORAL_WEIGHT_TEXTURE
-                oldWeight = gWeightLastFrame[texIdx][pixel];
+                oldWeight = gWeightLastFrame[pixel];
             #else
-                oldWeight = gDst[texIdx][pixel];
+                oldWeight = gDst[pixel];
             #endif
 
             oldWeight *= gIterationCount;
@@ -78,10 +80,10 @@ void main(uint3 thdID: SV_DispatchThreadID)
         #endif
 
         // Write
-        gDst[texIdx][pixel] = weight;
-        gSrcCounter[texIdx][pixel] = clearValue;
+        gDst[pixel] = weight;
+        gSrcCounter[pixel] = clearValue;
         #if USE_TEMPORAL_WEIGHT_TEXTURE
-            gWeightLastFrame[texIdx][pixel] = weight;
+            gWeightLastFrame[pixel] = weight;
         #endif
     }
     else
@@ -89,11 +91,11 @@ void main(uint3 thdID: SV_DispatchThreadID)
         uint2 srcIdx = pixel * 2;
         //Sum of the 4 corresponding pixels of one mip below
         float sum = 0;
-        sum += gSrc[texIdx][uint2(srcIdx.x, srcIdx.y)];
-        sum += gSrc[texIdx][uint2(srcIdx.x + 1, srcIdx.y)];
-        sum += gSrc[texIdx][uint2(srcIdx.x, srcIdx.y + 1)];
-        sum += gSrc[texIdx][uint2(srcIdx.x + 1, srcIdx.y + 1)];
+        sum += gSrc[uint2(srcIdx.x, srcIdx.y)];
+        sum += gSrc[uint2(srcIdx.x + 1, srcIdx.y)];
+        sum += gSrc[uint2(srcIdx.x, srcIdx.y + 1)];
+        sum += gSrc[uint2(srcIdx.x + 1, srcIdx.y + 1)];
 
-        gDst[texIdx][pixel] = sum;
+        gDst[pixel] = sum;
     }
 }

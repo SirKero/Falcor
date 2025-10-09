@@ -206,7 +206,9 @@ private:
     //
     bool mEmissiveLightResetTextures = false;
     uint mEmissiveLightCount = 0;
-    uint mGuidingTextureResolution = 64;
+    uint mGuidingTextureResolution = 64;    //Resolution of one guiding texture
+    uint mGuidingAtlasResolution = 512;     //Resolution of the guiding atlas
+    uint mGuidingAtlasMipLevels = 1;        //
     GuidingMode mGuidingMode = GuidingMode::Disabled;
     GuidingLightIndexMode mGuidingLightIndexMode = GuidingLightIndexMode::Disabled;
     float mGuidingClearValueEmission = 0.1f;
@@ -235,9 +237,9 @@ private:
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
-    std::vector<ref<Texture>> mGuidingTextures; //Guiding Textures for Photon Guiding
-    std::vector<ref<Texture>> mGuidingLastFrameWeightTextures; //Guiding Textures used for the blur (temporal history needs to be retained)
-    std::vector<ref<Texture>> mRecordGuidingTextures; //Textures to record guiding data.
+    ref<Texture> mGuidingTextures;                  //Atlas for Guiding Textures for Photon Guiding
+    ref<Texture> mGuidingLastFrameWeightTextures;   //Atlas Guiding Textures used for the blur (temporal history needs to be retained)
+    ref<Texture> mRecordGuidingTextures;            //Atlas texture to record guiding data.
     ref<Texture> mpLightIndexGuidingTexture;            //Texture with the size corresponding to the number of lights
     ref<Texture> mpRecordLightIndexGuidingTexture;      //Record the guiding
     //ReSTIR

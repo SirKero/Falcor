@@ -11,13 +11,9 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 import SharedEnums;
 
-#ifndef NUM_GUIDING_TEXTURES
-#define NUM_GUIDING_TEXTURES 1
-#endif
-
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
-RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
+RWTexture2D<uint> gGuidingCounter;
 RWTexture2D<uint> gLightIndexGuidingCounter;
 
 StructuredBuffer<PhotonData> gPhotonData[2];
@@ -134,18 +130,18 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
             uint originalValue;
             [allow_uav_condition]
             do {
-                InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 0u, currentColor);
+                InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 0u, currentColor);
                 float color = asfloat(currentColor);
                 uint updatedColor = asuint(color + histogramEmission);
-                InterlockedCompareExchange(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], currentColor, updatedColor, originalValue);
+                InterlockedCompareExchange(gGuidingCounter[photonData.guidingPixel], currentColor, updatedColor, originalValue);
             } while (originalValue != currentColor);
         } else if (kGuidingMode == (uint)GuidingMode::Uniform)
         {
-            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], 1u);
+            InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 1u);
         } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized || kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
         {
             uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * histogramEmission)),1);
-            InterlockedAdd(gGuidingCounter[photonData.lightIndex][photonData.guidingPixel], discretizedEmission);
+            InterlockedAdd(gGuidingCounter[photonData.guidingPixel], discretizedEmission);
         } 
 
         // Add to light index guiding texture

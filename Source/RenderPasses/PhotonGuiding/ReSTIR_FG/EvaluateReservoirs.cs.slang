@@ -8,16 +8,12 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Rendering.RTXDI.RTXDI;
 
-#ifndef NUM_GUIDING_TEXTURES
-#define NUM_GUIDING_TEXTURES 1
-#endif
-
 Texture2D<PackedHitInfo> gVBuffer;
 StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 StructuredBuffer<ReservoirCaustic> gCausticReservoir;
 Texture2D<float4> gEmission;
 
-RWTexture2D<uint> gGuidingCounter[NUM_GUIDING_TEXTURES];
+RWTexture2D<uint> gGuidingCounter;
 RWTexture2D<uint> gLightIndexGuidingCounter;
 
 RWTexture2D<float4> gOutColor;
@@ -48,15 +44,15 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission)
         uint originalValue;
         [allow_uav_condition]
         do {
-            InterlockedAdd(gGuidingCounter[lightIndex][guidingPixel], 0u, currentColor);
+            InterlockedAdd(gGuidingCounter[guidingPixel], 0u, currentColor);
             float color = asfloat(currentColor);
             uint updatedColor = asuint(color + emission);
-            InterlockedCompareExchange(gGuidingCounter[lightIndex][guidingPixel], currentColor, updatedColor, originalValue);
+            InterlockedCompareExchange(gGuidingCounter[guidingPixel], currentColor, updatedColor, originalValue);
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
     {
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
-        InterlockedAdd(gGuidingCounter[lightIndex][guidingPixel], discretizedEmission);
+        InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
     }
 
     if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
