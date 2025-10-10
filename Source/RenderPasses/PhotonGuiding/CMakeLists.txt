@@ -6,6 +6,7 @@ target_sources(PhotonGuiding PRIVATE
     TracePhoton.rt.slang
     TraceCamera.rt.slang
     GuidingTextureGenMipTraverseChain.cs.slang
+    GuidingBlurAtlas.cs.slang
     GuidingCounterReduce.cs.slang
     Debug.cs.slang
     StructsAndHelpers.slang

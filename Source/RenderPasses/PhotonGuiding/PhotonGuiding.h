@@ -32,7 +32,6 @@
 #include "Rendering/Lights/LightBVHSampler.h"
 #include "Rendering/RTXDI/RTXDI.h"
 
-#include "Rendering/ShadowMaps/Blur/SMGaussianBlur.h"
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 #include "SharedEnums.slang"
 
@@ -76,6 +75,9 @@ private:
 
     //Generates the guiding mipmap traverse chain
     void generateGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Blurs the guiding atlas
+    void blurGuidingAtlasPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Generates the guiding mipmap for the light index
     void generateLightIndexGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -123,7 +125,6 @@ private:
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler for NEE
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
-    std::unique_ptr<SMGaussianBlur> mpGaussianBlur;               //Gaussian Blur
     std::unique_ptr<RTXDI> mpRTXDI;                                 // Ptr to RTXDI for direct use
     RTXDI::Options mRTXDIOptions;                                 // Options for RTXDI
 
@@ -219,6 +220,10 @@ private:
     uint mGuidingHistoryLimit = 256;    //History limit for the guiding texture
     uint mGuidingLightIndexSize = 1;    //Pixel width/height of the index guiding texture
     uint mGuidingDiscretizedEmissionFactor = 255;    //For the discretized modis, the emission is multiplied with this factor
+    uint mGuidingBlurWidth = 3;        //Blur radius
+    float mGuidingBlurSigma = 1.f;      //Gaussian blur sigma
+    bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
+
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
@@ -239,6 +244,8 @@ private:
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     ref<Texture> mGuidingTextures;                  //Atlas for Guiding Textures for Photon Guiding
     ref<Texture> mGuidingLastFrameWeightTextures;   //Atlas Guiding Textures used for the blur (temporal history needs to be retained)
+    ref<Texture> mpGuidingAtlasBlurHelper;           //Gaussian blur helper (seperated)
+    ref<Buffer> mpAtlasBlurWeights;                 //Weights for the atlas blur
     ref<Texture> mRecordGuidingTextures;            //Atlas texture to record guiding data.
     ref<Texture> mpLightIndexGuidingTexture;            //Texture with the size corresponding to the number of lights
     ref<Texture> mpRecordLightIndexGuidingTexture;      //Record the guiding
@@ -282,6 +289,7 @@ private:
     RayTraceProgramHelper mTraceCameraPass;              // Trace Camera
    
     ref<ComputePass> mpGuidingCounterReducePass; //Reduce on the guiding counter to obtain the total
+    ref<ComputePass> mpGuidingBlurPass[2];         //Blurs the guiding atlas. Horizonal and vertical pass
     ref<ComputePass> mpGuidingLightIndexCounterReducePass;            // Uses same shader as above, but is may need other data formats
     ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
     ref<ComputePass> mpGenerateLightIndexGuidingMipTraverseChainPass;  // Uses same shader as above, but is may need other data formats

@@ -40,6 +40,7 @@ namespace
     const std::string kShaderTracePhoton = kShaderFolder + "TracePhoton.rt.slang";
     const std::string kShaderTraceCamera = kShaderFolder + "TraceCamera.rt.slang";
     const std::string kShaderGuidingGenMipTraverseChain = kShaderFolder + "GuidingTextureGenMipTraverseChain.cs.slang";
+    const std::string kShaderGuidingBlurAtlas = kShaderFolder + "GuidingBlurAtlas.cs.slang";
     const std::string kShaderGuidingReduce = kShaderFolder + "GuidingCounterReduce.cs.slang";
     const std::string kShaderDebug = kShaderFolder + "Debug.cs.slang";
 
@@ -93,10 +94,6 @@ PhotonGuiding::PhotonGuiding(ref<Device> pDevice, const Properties& props)
     mpLinearSampler = Sampler::create(mpDevice, samplerDesc);
     samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     mpPointSampler = Sampler::create(mpDevice, samplerDesc);
-
-    //Blur
-    mpGaussianBlur = std::make_unique<SMGaussianBlur>(mpDevice);
-    mpGaussianBlur->setBlurKernel(3, 1.f);
 
     mLightBVHOptions = {};
 
@@ -315,12 +312,14 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     if (auto group = widget.group("Guiding Options"))
     {
         group.checkbox("Use Blur", mUseGaussianBlur);
-        if (mUseGaussianBlur)
+        if (auto group2 = group.group("Blur Options"))
         {
-            if (auto blurGroup = group.group("Blur Options"))
-                mpGaussianBlur->renderUI(group);
+            group2.text("To update Kernel, please press the button below.");
+            group2.var("Blur Kernel Width", mGuidingBlurWidth, 3u, 15u, 2u);
+            group2.slider("Sigma", mGuidingBlurSigma, 0.001f, mGuidingBlurWidth / 2.f);
+            mGuidingBlurUpdateWeights = group2.button("Update Kernel");
         }
-
+        
         group.var("Guiding Discretized Factor", mGuidingDiscretizedEmissionFactor, 1u, UINT_MAX, 1u);
         group.tooltip("The emission is multiplied with this factor before beeing added to the texture");
         group.checkbox("Use Real Time mode", mGuidingRealTimeMode);
@@ -597,8 +596,18 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpDevice, mGuidingAtlasResolution, mGuidingAtlasResolution, ResourceFormat::R32Float, 1u, 1u,
             nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
         );
-        mGuidingLastFrameWeightTextures->setName("GuidingBlurTextureAtlas");
+        mGuidingLastFrameWeightTextures->setName("GuidingTextureAtlasNoBlur");
         
+    }
+
+    //Used in blur
+    if (!mpGuidingAtlasBlurHelper)
+    {
+        mpGuidingAtlasBlurHelper = Texture::create2D(
+            mpDevice, mGuidingAtlasResolution, mGuidingAtlasResolution, ResourceFormat::R32Float, 1u, 1u, nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mpGuidingAtlasBlurHelper->setName("GuidingAtlasBlurHelper");
     }
 
     if (!mRecordGuidingTextures)
@@ -919,14 +928,8 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         );
     }
 
-    //Blur
-    /*
     if (mUseGaussianBlur)
-    {
-        for (uint i = 0; i < mEmissiveLightCount; i++)
-            mpGaussianBlur->execute(pRenderContext, mGuidingTextures[i]);
-    }
-    */
+        blurGuidingAtlasPass(pRenderContext, renderData);
 
     //Loop to generate the mip chain
     var["CB"]["gCopyFromCounter"] = false;
@@ -942,6 +945,86 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
 
         mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, resolution, 1));
         resolution /= 2;
+    }
+}
+
+void PhotonGuiding::blurGuidingAtlasPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "BlurGuidingAtlas");
+    if (!mpGuidingBlurPass[0] || !mpGuidingBlurPass[1] || mGuidingBlurUpdateWeights)
+    {
+        Program::Desc desc;
+        desc.addShaderLibrary(kShaderGuidingBlurAtlas).csEntry("main").setShaderModel(kShaderModel);
+
+        DefineList defines;
+        defines.add("BLUR_WIDTH", std::to_string(mGuidingBlurWidth));
+        defines.add("IS_HORIZONTAL", "1");
+        defines.add("IS_VERTICAL", "0");
+        mpGuidingBlurPass[0] = ComputePass::create(mpDevice, desc, defines, true);
+        defines.add("IS_HORIZONTAL", "0");
+        defines.add("IS_VERTICAL", "1");
+        mpGuidingBlurPass[1] = ComputePass::create(mpDevice, desc, defines, true);
+    }
+
+    //Update blur weights
+    if (!mpAtlasBlurWeights || mGuidingBlurUpdateWeights)
+    {
+        auto getCoefficient = [&](float centerOff) {
+            float sigmaSquared = mGuidingBlurSigma * mGuidingBlurSigma;
+            float p = -(centerOff * centerOff) / (2 * sigmaSquared);
+            float e = std::exp(p);
+
+            float a = 2 * (float)M_PI * sigmaSquared;
+            return e / a;
+        };
+
+        uint center = mGuidingBlurWidth / 2;
+        float sum = 0.f;
+        std::vector<float> weights(center + 1);
+        for (uint i = 0; i <= center; i++)
+        {
+            weights[i] = getCoefficient((float)i);
+            sum += (i == 0) ? weights[i] : 2.f * weights[i];
+        }
+        //Fill CPU vector
+        std::vector<float> weightBufferData (mGuidingBlurWidth);
+        for (uint i = 0; i <= center; i++)
+        {
+            float w = weights[i] / sum;
+            weightBufferData[center + i] = w;
+            weightBufferData[center - i] = w;
+        }
+
+        mpAtlasBlurWeights = Buffer::createStructured(
+            mpDevice, sizeof(float), mGuidingBlurWidth, ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None,
+            weightBufferData.data(), false
+        );
+        mpAtlasBlurWeights->setName("GuidingAtlasBlurWeights");
+
+        mGuidingBlurUpdateWeights = false;
+    }
+
+    uint3 dispatchSize = uint3(mGuidingAtlasResolution, mGuidingAtlasResolution, 1);
+    //Horizontal Blur
+    {
+        auto var = mpGuidingBlurPass[0]->getRootVar();
+        var["CB"]["gGuidingSize"] = mGuidingTextureResolution;
+        var["CB"]["gAtlasSize"] = mGuidingAtlasResolution;
+        var["gBlurWeights"] = mpAtlasBlurWeights;
+        var["gSrc"].setSrv(mGuidingTextures->getSRV(0, 1u));
+        var["gDst"] = mpGuidingAtlasBlurHelper;
+        mpGuidingBlurPass[0]->execute(pRenderContext, dispatchSize);
+    }
+
+    // Vertical Blur
+    {
+        auto var = mpGuidingBlurPass[1]->getRootVar();
+        var["CB"]["gGuidingSize"] = mGuidingTextureResolution;
+        var["CB"]["gAtlasSize"] = mGuidingAtlasResolution;
+        var["gBlurWeights"] = mpAtlasBlurWeights;
+        var["gSrc"] = mpGuidingAtlasBlurHelper;
+        var["gDst"].setUav(mGuidingTextures->getUAV(0));
+        mpGuidingBlurPass[1]->execute(pRenderContext, dispatchSize);
     }
 }
 
