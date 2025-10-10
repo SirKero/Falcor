@@ -66,7 +66,7 @@ struct ReservoirFG {
     PackedHitInfo sampleSurface; // HitSample 16B
     float3 thp;                     // Throughput used at the end
     float targetFunction;           // Store target function
-    FGSampleData sampleData;        // Data of the sample
+    FGSampleData sampleData;        // Data of the sample 64B
     float wSum;                     // W and wSum
     uint c;                         // Confidence weight
     float jacobianDeterminant;      // Jacobian determinant to the current sample
@@ -94,12 +94,12 @@ struct ReservoirCaustic {
     PackedHitInfo sampleSurface;    // HitSample 16B
     float3 thp;                     // Throughput used at the end
     float targetFunction;           // Store target function
-    float3 sampleSurfaceView;       // Incoming View
-    float photonDirX;
+    float3 sampleSurfaceView;       // Incoming Camera View
+    float photonDirX;               // (Incoming) photon direction (x)
     float3 photonPosW;              // Position
-    float photonDirY;
+    float photonDirY;               // (Incoming) photon direction (y)
     float3 photonRadiance;          // Radiance
-    float photonDirZ;      
+    float photonDirZ;               // (Incoming) photon direction (z)
     float wSum;                     // W and wSum
     uint c;                         // Confidence weight
     uint pathLength;                // Path Length
@@ -148,10 +148,12 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
+//2D pixel index to 1D reservoir index
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
 }
 
+//Visibility test with shadow ray
 bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
     // Create a DXR 1.1 query object to trace a ray (the <1> means use alpha testing)
     SceneRayQuery<1> rayQuery;
@@ -159,24 +161,17 @@ bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
     return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
 }
 
-//Unbiased f(x) without jacobian determinant TODO seems that jacobian and visibility is not needed, as this is handled by MIS during resampling
+//Evaluates a Final Gather sample after resampling.
+//Jacobian and visibility ray are not needed, as it was already handled in the resampling process
 float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg) {
     float3 Li = float3(0);
-
-    float3 toLight = r.sampleData.posW - sd.posW;
-    float dist = length(toLight);
-    toLight /= dist;
-    //float jacobianDeterminant = dot(r.sampleData.normal, -toLight) / (dist * dist);
-    //jacobianDeterminant /= r.jacobianDeterminant;
     Li = r.sampleData.radianceOut;
-    //if (dispatchShadowRay(sd, toLight, dist)) {
-        Li *= mi.eval(sd, toLight, sg);
-    //} else
-    //    Li = float3(0);
+    Li *= mi.eval(sd, toLight, sg);
 
     return Li;
 }
 
+//Target Function for final gather reservoirs
 float evalApproximateBRDF(ShadingData sd, BSDFProperties bsdfProperties, float3 toLight) {
     const float3 N = bsdfProperties.guideNormal;
     const float3 H = normalize(sd.V + toLight);
@@ -207,6 +202,7 @@ float evalApproximateBRDF(ShadingData sd, BSDFProperties bsdfProperties, float3 
     return max(0.f, brdf);
 }
 
+//Target function for radiance estimate resampling (caustics)
 float evalApproximateBRDFPhoton(ShadingData sd, BSDFProperties bsdfProperties, float3 toLight) {
     const float3 N = bsdfProperties.guideNormal;
     const float3 H = normalize(sd.V + toLight);
@@ -240,7 +236,7 @@ float evalApproximateBRDFPhoton(ShadingData sd, BSDFProperties bsdfProperties, f
     return max(0.f, brdf);
 }
 
-// unbiased p_hat with visibility test
+// Unbiased target function (p_hat) with Jacobian and Visibility test
 float evaluateFinalGatherSampleApproximateUnbiased(ReservoirFG r, ShadingData sd, BSDFProperties bsdfProperties, bool assumeVisible = false)
 {
     float Li = 0.0;

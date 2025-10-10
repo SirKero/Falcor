@@ -10,17 +10,17 @@ import StructsAndHelpers;
 
 cbuffer CB
 {
-    uint gFrameCount; // Current it for sample gen
-    uint2 gFrameDim;  // Frame Dimensions
-    uint gConfidenceLimit;  //Confidence Limit
+    uint gFrameCount;                       // Current Iteration for the Sample Generator
+    uint2 gFrameDim;                        // Frame Dimensions
+    uint gConfidenceLimit;                  // Confidence Limit
 
-    uint gSpatialSamples;                   //Number of spatial samples
-    uint gDisocclusionBoostSpatialSamples;  //How many extra spatial samples if temporal resampling fails
-    float gSpatialRadius;   //radius for spatial resampling
-    float gNormalThreshold; // Normal Threshold
+    uint gSpatialSamples;                   // Number of spatial samples
+    uint gDisocclusionBoostSpatialSamples;  // How many extra spatial samples if temporal resampling fails
+    float gSpatialRadius;                   // (Pixel)radius for spatial resampling
+    float gNormalThreshold;                 // Normal Threshold
 
-    float gJacobianDistanceThreshold; // Jacobian distance threshold
-    bool gUsePathThreshold; //Enables and disables path threshold
+    float gJacobianDistanceThreshold;       // Jacobian distance threshold
+    bool gUsePathThreshold;                 // Enables and disables path threshold
     uint2 _pad;
 }
 
@@ -34,7 +34,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 //Generalized Balance Heuristic with two samples
 float generalizedBalanceHeuristic(ReservoirFG r, ShadingData otherSD, BSDFProperties otherProps, uint otherC, bool assumeVisible = false) {
     float p0 = r.targetFunction * r.c; // No visibility or Jacobian Determinant needed for this sample
-    float p1 = evaluateFinalGatherSampleApproximateUnbiased(r, otherSD, otherProps, assumeVisible) * otherC;  // targetFunction + vis  + Jacobian Determinant
+    float p1 = evaluateFinalGatherSampleApproximateUnbiased(r, otherSD, otherProps, assumeVisible) * otherC;  // targetFunction * vis * Jacobian Determinant
 
     float sum = (p0 + p1);
     if(sum > 0)

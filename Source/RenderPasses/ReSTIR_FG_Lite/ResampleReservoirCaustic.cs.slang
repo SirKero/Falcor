@@ -10,16 +10,16 @@ import StructsAndHelpers;
 
 cbuffer CB
 {
-    uint gFrameCount; // Current it for sample gen
-    uint2 gFrameDim;  // Frame Dimensions
-    uint gConfidenceLimit;  //Confidence Limit
+    uint gFrameCount;                       // Current Iteration for the Sample Generator
+    uint2 gFrameDim;                        // Frame Dimensions
+    uint gConfidenceLimit;                  // Confidence Limit
 
-    uint gSpatialSamples;                   //Number of spatial samples
-    uint gDisocclusionBoostSpatialSamples;  //How many extra spatial samples if temporal resampling fails
-    float gSpatialRadius;   //radius for spatial resampling
-    float gNormalThreshold; // Normal Threshold
+    uint gSpatialSamples;                   // Number of spatial samples
+    uint gDisocclusionBoostSpatialSamples;  // How many extra spatial samples if temporal resampling fails
+    float gSpatialRadius;                   // (Pixel)radius for spatial resampling
+    float gNormalThreshold;                 // Normal Threshold
 
-    float2 gPhotonRadius; //Global / Caustic
+    float2 gPhotonRadius;                   // Collection radius Global / Caustic
     uint2 _pad;
 }
 
@@ -38,7 +38,7 @@ inline float getPhotonRadius(ReservoirCaustic r) {
 float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFProperties otherProps, uint otherC) {
     float p0 = r.targetFunction * r.c;
     float p1 = 0;
-    if (length(otherSD.posW - r.photonPosW) < getPhotonRadius(r))
+    if (length(otherSD.posW - r.photonPosW) < getPhotonRadius(r))   //Check if sample could have been collected from the surface of the other reservoir
         p1 = evalApproximateBRDFPhoton(otherSD, otherProps, r.photonDir) * luminance(r.photonRadiance) * otherC;
 
     float sum = (p0 + p1);

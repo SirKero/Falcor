@@ -51,6 +51,7 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
     return false;
 }
 
+// Collects all photons in a radius and estimates radiance.
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
     float3 collectedRadiance = float3(0);
     //Prepare ray
@@ -70,7 +71,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         const uint instanceIdx = rayQuery.CandidateInstanceIndex();
         const uint primIdx = rayQuery.CandidatePrimitiveIndex();
 
-        //Check if ray is inside photon radius
+        //Check if ray origin is inside photon radius
         AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
         float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
         if (!hitSphere(photonAABB.center(), radius, sd.posW))
@@ -82,7 +83,8 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
             continue;
 
-        float3 bsdf = mi.eval(sd, photonData.dir, sg); //;
+        // Radiance for current photon
+        float3 bsdf = mi.eval(sd, photonData.dir, sg);
         collectedRadiance += max(0, (photonData.flux * bsdf) / (M_PI * radius * radius * NdotL)); //NdotL needs to be taken out of the bsdf for Photon Mapping
     }
     return collectedRadiance;
@@ -176,7 +178,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         if (!hit.isValid()) {
             valid = false;
-            //TODO add valid reservoir if envMap was hit
+            //TODO EnvMap hits could be added to the reservoir
             return;
         }
 
@@ -198,6 +200,9 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
             break;
         }
 
+        // Collect caustics if this was the first diffuse hit on the path
+        // Additionally, global photons with path length 0 are collected,
+        // as they are missing from RTXDI when the path encountered a (highly) specular surface
         if (collectCaustics && hitIsRough) {
             reservoirCaustic.sampleSurface = hit.getData();
             reservoirCaustic.sampleSurfaceView = ray.Direction;
@@ -209,7 +214,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
 
         // Check if this is a valid final gather surface
         if (hitIsRough && prevHitIsRough) {
-            //Collect photons and fill reservoir
+            //Collect photons, estimate outgoing radiance and finalize the reservoir
             reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
             reservoirFG.thp = prevThp;
             reservoirFG.sampleData.posW = sd.posW;
@@ -224,7 +229,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
 
         //Update reservoir
         reservoirFG.sampleSurface = hit.getData(); // Update surface
-        reservoirFG.pathLength++;                  // Increase path length
+        reservoirFG.pathLength++;                  
         reservoirFG.sampleData.sampleView = -ray.Direction;
         prevThp = thp;
 
@@ -257,6 +262,7 @@ void anyHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersection
     }
 }
 
+//Store triangle hit in ray payload
 [shader("closesthit")]
 void closestHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs: SV_IntersectionAttributes) {
     TriangleHit triangleHit;
@@ -281,7 +287,7 @@ void rayGen()
     float3 emission = float3(0);    //Emission on fully specular paths
 
     if (hitInfo.isValid()) {
-        //Set RTXDI data
+        //Get info for the hit surface
         let lod = ExplicitLodTextureSampler(0);
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 1);
 
@@ -291,11 +297,11 @@ void rayGen()
         let bsdfProperties = mi.getProperties(sd);
         float distanceToSurface = distance(sd.posW, gScene.camera.getPosition());
 
+        // Set RTXDI data
         gRTXDI.setSurfaceData(pixel, sd.computeNewRayOrigin(), bsdfProperties.guideNormal, bsdfProperties.diffuseReflectionAlbedo, bsdfProperties.specularReflectance, bsdfProperties.roughness, distanceToSurface);
 
+        // Initialize Caustic reservoir if photons can be collected at the current surface
         bool hitIsRough = bsdfProperties.roughness > kRoughnessThreshold;
-
-        //Init Caustic reservoir if photons can be collected at the current surface
         if (hitIsRough) {
             causticReservoir.sampleSurface = hitInfo.getData();
             causticReservoir.sampleSurfaceView = -viewDir;
@@ -306,7 +312,7 @@ void rayGen()
         finalGatherReservoir.sampleSurface = hitInfo.getData();
         finalGatherReservoir.sampleData.sampleView = viewDir;
 
-        // Distribute a Final Gather ray
+        // Distribute a Final Gather or specular trace ray
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
@@ -316,7 +322,7 @@ void rayGen()
 
         traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticReservoir, emission);
     } else {
-        // Set invalid RTXDI data
+        // Set invalid RTXDI data (ray missed scene)
         gRTXDI.setInvalidSurfaceData(pixel);
     }
 
