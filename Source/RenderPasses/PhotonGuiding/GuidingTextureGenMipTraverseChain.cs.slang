@@ -55,7 +55,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         #endif
         if (gIterationCount > 0) {
             uint2 totalCounterIndex = uint2(0);
-            #if !USE_TEMPORAL_WEIGHT_TEXTURE
+            #if !IS_LIGHT_INDEX_TEXTURE
                 totalCounterIndex = pixel / gRes;
             #endif
             float total = float(gSrcCounterTotal[totalCounterIndex]);

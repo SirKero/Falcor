@@ -223,7 +223,7 @@ private:
     //Debug
     bool mDebugFreezeGuidingTextures = false;
     bool mDebugShowGuidingTexture = false;
-    uint mDebugSelectedTriLight = 0;
+    int mDebugSelectedTriLight = -1;
     float mDebugColorScaleFactor = float(mGuidingTextureResolution * mGuidingTextureResolution);
     float mDebugSizeScaleFactor = 1.f;
     bool mDebugScaleToDstDim = true;

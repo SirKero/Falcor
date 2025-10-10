@@ -422,7 +422,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         if (mDebugShowGuidingTexture)
         {
             group.checkbox("Show Light Index Select Guiding Tex", mDebugShowLightIndexGuidingTex);
-            group.slider("Selected Tri light", mDebugSelectedTriLight, 0u, mEmissiveLightCount - 1);
+            group.slider("Selected Tri light", mDebugSelectedTriLight, -1, int(mEmissiveLightCount) - 1);
             if (mDebugShowLightIndexGuidingTex)
                 group.var("Color Scale", mDebugLightIndexScale, 0.f, FLT_MAX, 0.1f);
             else
@@ -931,8 +931,8 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
     //Loop to generate the mip chain
     var["CB"]["gCopyFromCounter"] = false;
     uint resolution = mGuidingAtlasResolution / 2;
-    int mipCount = mGuidingAtlasMipLevels - 1;
-    for (int m = 1; m < mipCount; m++)
+    //int mipCount = mGuidingAtlasMipLevels;
+    for (uint m = 1; m < mGuidingAtlasMipLevels; m++)
     {
         var["CB"]["gRes"] = resolution;
 
@@ -1236,8 +1236,10 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     float scaleToDebugTexFactor = (float(math::min(dispatchDim.x, dispatchDim.y)) / float(showDebugTexRes)) + 0.5f;
 
     var["CB"]["gColorScaleFactor"] = mDebugColorScaleFactor;
-    var["CB"]["gTextureSize"] = mGuidingAtlasResolution;
+    var["CB"]["gGuidingAtlasSize"] = mGuidingAtlasResolution;
     var["CB"]["gDispatchSize"] = dispatchDim.xy();
+    var["CB"]["gLightIndex"] = mDebugSelectedTriLight;
+    var["CB"]["gGuidingTextureSize"] = mGuidingTextureResolution;
     var["CB"]["gSizeScaleFactor"] = mDebugScaleToDstDim ? scaleToDebugTexFactor : mDebugSizeScaleFactor;
     var["CB"]["gShowLightIndexGuiding"] = mDebugShowLightIndexGuidingTex;
     var["CB"]["gLightIndexGuidingSize"] = mGuidingLightIndexSize;

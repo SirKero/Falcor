@@ -192,10 +192,8 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     // Start traversal from the second highest miplevel to level 0
     for (int m = startMip; m >= 0; m--) {
         // Update mip index and offset from last iteration
-        if (m < startMip) {
-            mipIdx *= 2;
-            atlasOffset *= 2;
-        }
+        mipIdx *= 2;
+        atlasOffset *= 2;
         
         // Fetch samples in 2x2 grid
         uint2 fetchIdx = atlasOffset + mipIdx;

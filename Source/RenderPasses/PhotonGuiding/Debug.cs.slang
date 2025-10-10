@@ -12,11 +12,15 @@ SamplerState gPointSampler;
 
 cbuffer CB {
     uint2 gDispatchSize; // Dispatch Dimensions
-    uint gTextureSize;   // Guiding Texture size
+    uint gGuidingAtlasSize;   // Guiding Texture size
     float gColorScaleFactor;
+
     float gSizeScaleFactor;
+    int gLightIndex;
+    uint gGuidingTextureSize;
     bool gShowLightIndexGuiding;
     uint gLightIndexGuidingSize;
+
     float gLightIndexGuidingScale;
 }
 
@@ -28,17 +32,25 @@ void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_Gro
         return;
 
     // TODO add other scaling settings
-    uint textureSize = gShowLightIndexGuiding ? gLightIndexGuidingSize : gTextureSize;
+    uint textureSize = gShowLightIndexGuiding ? gLightIndexGuidingSize : gGuidingAtlasSize;
     float divident = min(min(textureSize * gSizeScaleFactor, float(gDispatchSize.x)), float(gDispatchSize.y));
     float4 output = float4(0, 0, 0, 1);
     float2 uv = (float2(pixel) + 0.5) / divident;
 
+    // Scale UV to light area
+    if (gLightIndex >= 0 && all(uv <= 1)) {
+        uint atlasLightsPerRow = gGuidingAtlasSize / gGuidingTextureSize;
+        uint2 atlasOffset = uint2(gLightIndex % atlasLightsPerRow, gLightIndex / atlasLightsPerRow); // Offset in the atlas for the current lights
+        uv /= float(atlasLightsPerRow);
+        uv += float2(atlasOffset) / float(atlasLightsPerRow);
+    }
+
     if (all(uv <= 1))
     {
         if (gShowLightIndexGuiding)
-            output.x = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
+            output.xyz = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
         else
-            output.x = gGuidingTexture.SampleLevel(gLinearSampler, uv, 0) * gColorScaleFactor;
+            output.xyz = gGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gColorScaleFactor;
     }
     gDebug[pixel] = output; 
 }
