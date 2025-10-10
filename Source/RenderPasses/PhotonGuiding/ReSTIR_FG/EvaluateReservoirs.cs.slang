@@ -33,9 +33,9 @@ static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 
-void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission)
+void addToGuidingTexture(int lightIndex, int2 guidingPixel, float emission)
 {
-    if (lightIndex < 0 && emission <= 0)
+    if (lightIndex < 0 || emission <= 0|| any(guidingPixel < 0))
         return;
 
     if (kGuidingMode == (uint)GuidingMode::ReSTIR)

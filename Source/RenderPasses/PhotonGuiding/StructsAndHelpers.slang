@@ -106,7 +106,7 @@ struct ReservoirFG {
     uint pathLength;             // Path Length
 
     int lightIndex;            //Guiding
-    uint2 guidingPixels;   // Pixel for the guiding texture
+    int2 guidingPixels;   // Pixel for the guiding texture
     uint _pad;
 
     __init() {
@@ -119,7 +119,7 @@ struct ReservoirFG {
         pathLength = 0;
         jacobianDeterminant = -1.0;
         lightIndex = -1;
-        guidingPixels = uint2(0);
+        guidingPixels = int2(-1);
         _pad = 0;
     }
 
@@ -162,7 +162,7 @@ struct ReservoirCaustic {
     float subPixelJacobian; // Sub pixel jacobian for reprojection
 
     int lightIndex;          // Guiding
-    uint2 guidingPixels;      // Pixel for the guiding texture
+    int2 guidingPixels;      // Pixel for the guiding texture
     uint _pad;
     //float2 guidingRandomVal;  // Random vals for guiding
 
@@ -181,7 +181,7 @@ struct ReservoirCaustic {
         pathLength = 0;
         subPixelJacobian = 0;
         lightIndex = 0-1;
-        guidingPixels = uint2(0);
+        guidingPixels = uint2(-1);
         _pad = 0;
     }
 
