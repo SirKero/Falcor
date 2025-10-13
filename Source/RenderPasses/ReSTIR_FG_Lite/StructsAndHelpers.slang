@@ -8,12 +8,13 @@ import Rendering.Materials.Fresnel;
 
 static const float kShadowRayEpsilon = 0.98f;
 
+//Struct for a photon. Could be packed tighter
 struct PhotonData {
-    float3 flux;
-    uint pathLenght;
-    float3 dir;
+    float3 flux;        //Incoming flux
+    uint pathLenght;    //Length of the photon path
+    float3 dir;         //Incoming direction
     uint _pad2;
-    float3 normalW;
+    float3 normalW;     //Face normal of the photon surface
     uint _pad3;
 
     __init() {
@@ -63,7 +64,7 @@ struct FGSampleData {
 
 //Reservoir for a Final Gather Sample 112B
 struct ReservoirFG {
-    PackedHitInfo sampleSurface; // HitSample 16B
+    PackedHitInfo sampleSurface;    // HitSample 16B
     float3 thp;                     // Throughput used at the end
     float targetFunction;           // Store target function
     FGSampleData sampleData;        // Data of the sample 64B
@@ -121,7 +122,7 @@ struct ReservoirCaustic {
         _pad = 0;
     }
 
-    // Photon dir helper
+    // Photon direction helper
     property float3 photonDir {
         get { return float3(photonDirX, photonDirY, photonDirZ); }
         set {
@@ -137,7 +138,12 @@ struct ReservoirCaustic {
     }
 }
 
-//Load in shading data from hit and direction
+/*  Load shading data from hit and direction
+    \param[in] Triangle Hit
+    \param[in] incoming world direction (ray direction)
+    \param[in] Level of Detail sample mode (LOD 0 for all casess)
+    \return Shading data of the triangle hit
+*/
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
 {
     const TriangleHit triangleHit = hit.getTriangleHit();
@@ -148,21 +154,37 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
-//2D pixel index to 1D reservoir index
+/*  2D pixel index to 1D reservoir index
+    \param[in] Pixel coordinate
+    \param[in] Pixel resolution on X axis
+    \return Linear index
+*/
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
 }
 
-//Visibility test with shadow ray
+/*  Visibility test with shadow ray. The ray is dipatched from the surface to the light source
+    \param[in] Shading data from the surface the visibility should be tested
+    \param[in] Direction to the light source
+    \param[in] Distance to the light source
+*/
 bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
-    // Create a DXR 1.1 query object to trace a ray (the <1> means use alpha testing)
+    //Use ray query, <1> means alpha test is enabled
     SceneRayQuery<1> rayQuery;
-    const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.f, distanceToLight * kShadowRayEpsilon);
+    // A epsilon is applied to the distance to avoid self-intersections with emissive triangle light sources
+    distanceToLight *= kShadowRayEpsilon;
+    const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.f, distanceToLight); 
     return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
 }
 
-//Evaluates a Final Gather sample after resampling.
-//Jacobian and visibility ray are not needed, as it was already handled in the resampling process
+/*  Evaluates a Final Gather sample after resampling and multiplies with BSDF
+    Jacobian and visibility ray are not needed, as it was already handled in the resampling process
+    \param[in] Current Reservoir
+    \param[in] Corresponding shading data
+    \param[in] Corresponding Material instance
+    \param[in/out] Random Number Generator
+    \return Radiance for the reservoir
+*/
 float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg) {
     float3 Li = float3(0);
     Li = r.sampleData.radianceOut;
@@ -171,7 +193,12 @@ float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstanc
     return Li;
 }
 
-//Target Function for final gather reservoirs
+/*  Target Function for final gather reservoirs
+    \param[in] Shading data
+    \param[in] Properties of the BSDF
+    \param[in] Direction to Light/Sample
+    \return One-channel Target Function that approximates the BSDF
+*/
 float evalApproximateBRDF(ShadingData sd, BSDFProperties bsdfProperties, float3 toLight) {
     const float3 N = bsdfProperties.guideNormal;
     const float3 H = normalize(sd.V + toLight);
@@ -202,7 +229,12 @@ float evalApproximateBRDF(ShadingData sd, BSDFProperties bsdfProperties, float3 
     return max(0.f, brdf);
 }
 
-//Target function for radiance estimate resampling (caustics)
+/*  Target function for radiance estimate resampling (caustics)
+    \param[in] Shading data
+    \param[in] Properties of the BSDF
+    \param[in] Direction to Light/Sample
+    \return One-channel Target Function that approximates the BSDF
+*/
 float evalApproximateBRDFPhoton(ShadingData sd, BSDFProperties bsdfProperties, float3 toLight) {
     const float3 N = bsdfProperties.guideNormal;
     const float3 H = normalize(sd.V + toLight);
@@ -225,7 +257,7 @@ float evalApproximateBRDFPhoton(ShadingData sd, BSDFProperties bsdfProperties, f
 
     // eval brdf terms
     float diffuseBRDF = M_1_PI;
-    float specularBRDF = D * G * F / (4.f * NdotV * NdotL);
+    float specularBRDF = D * G * F / (4.f * NdotV * NdotL); //Take NdotL out of the specular term
 
     // Mix diffuse and specular BRDF
     float diffuseProb = 0;
@@ -236,7 +268,13 @@ float evalApproximateBRDFPhoton(ShadingData sd, BSDFProperties bsdfProperties, f
     return max(0.f, brdf);
 }
 
-// Unbiased target function (p_hat) with Jacobian and Visibility test
+/*  Unbiased target function (p_hat) with Jacobian and Visibility test
+    \param[in] Current Reservoir
+    \param[in] Corresponding Shading data
+    \param[in] Corresponding Properties of the BSDF
+    \param[in] If true, sample is assumed visible (due to previous visibility test) and the visibility test is skipped
+    \return One-channel Target Function that approximates the BSDF
+*/
 float evaluateFinalGatherSampleApproximateUnbiased(ReservoirFG r, ShadingData sd, BSDFProperties bsdfProperties, bool assumeVisible = false)
 {
     float Li = 0.0;

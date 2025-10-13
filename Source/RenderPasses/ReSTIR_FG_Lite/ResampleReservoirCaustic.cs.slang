@@ -34,7 +34,13 @@ inline float getPhotonRadius(ReservoirCaustic r) {
     return r.pathLength == 0 ? gPhotonRadius.y : gPhotonRadius.x;
 }
 
-// Generalized Balance Heuristic with two samples
+/*  Generalized Balance Heuristic with two samples
+    \param[in] Reservoir which sample is used for MIS
+    \param[in] Shading data of the resampling surface from the other sample
+    \param[in] BSDF Properties of the resampling surface from the other sample
+    \param[in] Cofidence weight of the other sample
+    \return MIS weight
+*/
 float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFProperties otherProps, uint otherC) {
     float p0 = r.targetFunction * r.c;
     float p1 = 0;
@@ -48,7 +54,16 @@ float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFP
         return 0;
 }
 
-//Resampling with 2 reservoirs. Finalizes the reservoir afterwards.
+/*  Resampling with 2 reservoirs. Finalizes the reservoir afterwards.
+    \param[in/out] Current reservoir for the pixel. Is the finalized reservoir at the end of the function
+    \param[in] Shading data for current reservoir
+    \param[in] BSDF Properties for current reservoir
+    \param[in] Other (spatial or temporal) reservoir
+    \param[in] Shading data for other reservoir
+    \param[in] BSDF Properties for other reservoir
+    \param[in/out] Random Number Generator
+    \return True if resampling was successful
+*/
 bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData currentSD, BSDFProperties currentProps,
                                 ReservoirCaustic other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg)
 {
@@ -109,6 +124,14 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
     return true;
 }
 
+/*  Loads the necessary data for the other reservoir and resamples
+    \param[in/out] Current reservoir for the pixel.
+    \param[in] Shading data for current reservoir
+    \param[in] BSDF Properties for current reservoir
+    \param[in/out] Random Number Generator
+    \param[in] Pixel location where the other reservoir is located
+    \return True if resampling was successful
+*/
 bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg , int2 resamplePixel) {
 
     //Check if reservoir is inside the screen. 

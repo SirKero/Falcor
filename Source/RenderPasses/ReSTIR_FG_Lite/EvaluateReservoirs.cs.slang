@@ -22,6 +22,11 @@ cbuffer CB
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
+/*  Evaluates the final gather reservoir
+    \param[in] Current Pixel
+    \param[in/out] Random Number Generator
+    \return Radiance of the evaluated reserovir
+*/
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
     ReservoirFG fgReservoir = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
@@ -40,6 +45,11 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     return outColor;
 }
 
+/*  Evaluates the (caustic) photon reservoir
+    \param[in] Current Pixel
+    \param[in/out] Random Number Generator
+    \return Radiance of the evaluated reserovir
+*/
 float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
     ReservoirCaustic causticReservoir = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];

@@ -57,7 +57,11 @@ struct PhotonLightSample {
     float3 flux;
 };
 
-// transforms direction from local to world space
+/*  Transforms direction from local to world space
+    \param[in] Face Normal
+    \param[in] local direction
+    \return world space direction
+*/
 float3 fromLocalToWorld(const in float3 normal, float3 w)
 {
     // transform from local space -> random dir vector in world space
@@ -68,6 +72,11 @@ float3 fromLocalToWorld(const in float3 normal, float3 w)
 }
 
 #if USE_EMISSIVE_LIGHT // Function is only valid if the emissive sampler is set
+/*  Creates a photon light sample from emissive triangles weighted by emissive power
+    \param[in/out] Random Number Generator
+    \param[out] Photon light sample
+    \return true if light sample is valid
+*/
 bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
     pls = {};
     if (gScene.lightCollection.isEmpty())
@@ -88,6 +97,7 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
 
     float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * gEmissiveSampler._emissivePower.invWeightsSum;
 
+    //Sample emissive triangle
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
     const float3 barycentrics = sample_triangle(sampleNext2D(sg));
     pls.posW = tri.getPosition(barycentrics);
@@ -104,6 +114,12 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
 }
 #endif
 
+/*  Creates a photon light sample from analytic point or spot lights
+    \param[in/out] Random Number Generator
+    \param[out] Photon light sample
+    \param[out] Direction the photon should be dispatched
+    \return true if light sample is valid
+*/
 bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample pls, out float3 sampledDir)
 {
     pls = {};
@@ -149,6 +165,7 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
     return true;
 }
 
+//Add empty hit info for miss
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
 {
@@ -171,6 +188,7 @@ void anyHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersection
     }
 }
 
+//Add triangle hit to the payload
 [shader("closesthit")]
 void closestHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersectionAttributes attribs: SV_IntersectionAttributes) {
     TriangleHit triangleHit;
@@ -224,7 +242,7 @@ void rayGen()
     
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
-    ray.TMin = 0.0f;
+    ray.TMin = 0.0;
     ray.TMax = FLT_MAX;
     RayPayload rayPayload = RayPayload();
     
@@ -233,45 +251,46 @@ void rayGen()
     float3 photonStartFlux = pls.flux;
     float3 thp = float3(1.0); //Throughput
 
+    //Prepare photon
     PhotonData photon = PhotonData();
     photon.flux = photonStartFlux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
 
-    // Main Loop
+    // Main Raytrace Loop
     for (uint i = 0; i < gMaxBounces; i++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
 
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
+        //Stop if photon leaves the scene
         if (!hit.isValid())
             return;
 
-        // Get shading infos
+        // Get shading infos and material properties
         let lod = ExplicitLodTextureSampler(0);
-
-        // Get Material properties
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
 
-        // Store Photon
+        // Store Photon if a diffuse surface was hit
         photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
         if (reflectedDiffuse) {
             PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
+            //Global photons can be rejected. The flux of the stored ones should be increased by the inverse of the rejection probability
             bool storePhoton = true;
             if (photonType == PhotonType::Global) {
                 storePhoton = sampleNext1D(sg) <= gGlobalRejectionProb;
                 photon.flux *= invRejection;
             }
+            //Insert photon into buffer using a counter with interlocked add
             if (storePhoton) {
                 uint photonTypeIdx = (uint)photonType;
                 uint photonInsertIndex = 0;
                 InterlockedAdd(gPhotonCounter[photonTypeIdx], 1u, photonInsertIndex);
                 if (photonInsertIndex <= kPhotonBufferSize[photonTypeIdx])
                 {
-                    // photon.flux = float3(1, 0, 0);
                     AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
                     gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
                     gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
@@ -279,7 +298,7 @@ void rayGen()
             }
         }
 
-        //Photon Bounce for next iteration
+        // Sample Photon bounce for next iteration
         BSDFSample bsdfSample;
         bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
         if (!validSample)
@@ -289,7 +308,7 @@ void rayGen()
         ray.Direction = bsdfSample.wo;
         thp *= bsdfSample.weight;
 
-        // RussianRoulette
+        // Russian Roulette
         const float rrVal = (thp.x + thp.y + thp.z) / 3.0;
         const float prob = max(0.f, 1.f - rrVal);
         if (sampleNext1D(sg) < prob)
