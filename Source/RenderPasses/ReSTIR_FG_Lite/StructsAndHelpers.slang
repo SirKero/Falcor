@@ -187,6 +187,9 @@ bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
 */
 float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg) {
     float3 Li = float3(0);
+    float3 toLight = r.sampleData.posW - sd.posW;
+    float dist = length(toLight);
+    toLight /= dist;
     Li = r.sampleData.radianceOut;
     Li *= mi.eval(sd, toLight, sg);
 
