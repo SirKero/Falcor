@@ -863,9 +863,17 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
     {
         auto var = mpGuidingLightIndexCounterReducePass->getRootVar();
         const uint maxMipCount = mpRecordLightIndexGuidingTexture->getMipCount() - 1u;
-        for (uint mip = 0; mip < maxMipCount; mip += 5)
+
+        bool useMipMapReduce = maxMipCount < 5;
+        uint increments = useMipMapReduce ? 1 : 5;
+        for (uint mip = 0; mip < maxMipCount; mip += increments)
         {
-            uint dstMip = math::min(maxMipCount, mip + 5);
+            if (!useMipMapReduce && (mip + increments) >= maxMipCount)
+            {
+                increments = 1;
+                useMipMapReduce = true;
+            }
+            uint dstMip = mip + increments;
 
             uint3 dispatchDim = uint3(
                 mpRecordLightIndexGuidingTexture->getWidth(mip), mpRecordLightIndexGuidingTexture->getHeight(mip), 1
@@ -875,7 +883,7 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
             dispatchDim.y = dispatchDim.y / 2u;
 
             var["CB"]["gDstSize"] = dispatchDim.xy();
-            var["CB"]["gUseMip"] = false;
+            var["CB"]["gUseMip"] = useMipMapReduce;
             var["gSrc"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(mip, 1u));
             var["gDst"].setUav(mpRecordLightIndexGuidingTexture->getUAV(dstMip, 0u, 1u));
           
@@ -917,6 +925,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["CB"]["gCopyFromCounter"] = true;
         var["CB"]["gIterationCount"] = iterationCount;
         var["CB"]["gClearValue"] = guidingIsUintFormat(mGuidingMode) ? 1.f : mGuidingClearValueEmission;
+        var["CB"]["gDispatchSize"] = mGuidingAtlasResolution;
         var["gSrcCounter"].setUav(mRecordGuidingTextures->getUAV(0));
         var["gSrcCounterTotal"].setSrv(mRecordGuidingTextures->getSRV(maxMip, 1u));
         var["gWeightLastFrame"] = mGuidingLastFrameWeightTextures;
@@ -1031,7 +1040,7 @@ void PhotonGuiding::blurGuidingAtlasPass(RenderContext* pRenderContext, const Re
 void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData) {
     FALCOR_PROFILE(pRenderContext, "LightIndexGuidingTraverseChain");
 
-     if (!mpGenerateLightIndexGuidingMipTraverseChainPass)
+    if (!mpGenerateLightIndexGuidingMipTraverseChainPass)
     {
         Program::Desc desc;
         desc.addShaderLibrary(kShaderGuidingGenMipTraverseChain).csEntry("main").setShaderModel(kShaderModel);
@@ -1059,6 +1068,7 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
         var["CB"]["gCopyFromCounter"] = true;
         var["CB"]["gIterationCount"] = iterationCount;
         var["CB"]["gClearValue"] = 1.f;
+        var["CB"]["gDispatchSize"] = mGuidingLightIndexSize;
 
         var["gSrcCounter"].setUav(mpRecordLightIndexGuidingTexture->getUAV(0));
         var["gSrcCounterTotal"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(maxMip, 1u));

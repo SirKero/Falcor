@@ -31,7 +31,7 @@ struct PhotonData {
     uint pathLenght;
 
     float3 dir;
-    uint lightIndex;
+    int lightIndex;
 
     float3 normalW;
     uint _pad;
@@ -55,7 +55,7 @@ struct PhotonData {
         this.normalW = float3(0,1,0);
         this.flux = float3(0);
         this.pathLenght = 0;
-        this.lightIndex = 0;
+        this.lightIndex = -1;
         this.guidingPixel = uint2(0);
         this._pad = 0;
         this.guidingRandomVal = float2(0);
