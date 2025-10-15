@@ -121,7 +121,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
 
         // Add to the guiding texture
         float histogramEmission = luminance(photonRadiance);
-        if (histogramEmission <= 0)
+        if (histogramEmission <= 0 || photonData.lightIndex < 0)
             continue;
 
         if (kGuidingMode == (uint)GuidingMode::Emission || kGuidingMode == (uint)GuidingMode::ReSTIR)

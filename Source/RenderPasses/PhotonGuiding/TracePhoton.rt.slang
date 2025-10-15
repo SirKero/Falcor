@@ -111,8 +111,9 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
     return true;
 }
 
-uint sampleLightIndex(inout SampleGenerator sg, out float selectPdf)
+bool sampleLightIndex(inout SampleGenerator sg, out uint selectedIdx , out float selectPdf)
 {
+    selectedIdx = 0;
     selectPdf = 0.0;
 
     float tw = sampleNext1D(sg); // traverse weight
@@ -159,7 +160,11 @@ uint sampleLightIndex(inout SampleGenerator sg, out float selectPdf)
     }
 
     // Linearize the selected mip idx
-    return mipIdx.x + mipIdx.y * gLightIndexGuidingResolution;
+    selectedIdx = mipIdx.x + mipIdx.y * gLightIndexGuidingResolution;
+    if (selectedIdx >= gScene.lightCollection.triangleCount)
+        return false;
+
+    return true;
 }
 
 bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
@@ -169,16 +174,19 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
         return false;
 
     //Uniform sample code
+    /*
     // Randomly pick a triangle out of the global list with uniform probability
     const uint triangleCount = gScene.lightCollection.triangleCount;
     // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
     uint triIdx = min((uint)(sampleNext1D(sg) * triangleCount), triangleCount - 1);
     float triangleSelectionPdf = 1.0 / triangleCount;
-    
+    */
 
     //Select triangle index with guiding texture
-    //float triangleSelectionPdf;
-    //uint triIdx = sampleLightIndex(sg, triangleSelectionPdf);
+    float triangleSelectionPdf;
+    uint triIdx;
+    if (!sampleLightIndex(sg, triIdx, triangleSelectionPdf))
+        return false;
     
     // Traverse the mipmap
     float tw = sampleNext1D(sg); // traverse weight

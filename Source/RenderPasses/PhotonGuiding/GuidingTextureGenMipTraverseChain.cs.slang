@@ -29,6 +29,8 @@ cbuffer CB {
     bool gCopyFromCounter;
     uint gIterationCount;
     float gClearValue;
+
+    uint gDispatchSize;
 }
 
 /* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
@@ -40,8 +42,8 @@ cbuffer CB {
 void main(uint3 thdID: SV_DispatchThreadID)
 {
     const uint2 pixel = thdID.xy;
-    //if (any(pixel > gRes))
-    //    return;
+    if (any(pixel > gDispatchSize))
+        return;
 
     if (gCopyFromCounter)
     {
