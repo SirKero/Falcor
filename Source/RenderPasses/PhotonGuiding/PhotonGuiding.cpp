@@ -581,13 +581,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             mpDevice, mGuidingAtlasResolution, mGuidingAtlasResolution, ResourceFormat::R32Float, 1u, mGuidingAtlasMipLevels,
             nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
         );
-        mGuidingTextures->setName("GuidingTextureAtlas");
-
-        pRenderContext->clearUAV(
-            mGuidingTextures->getUAV(0).get(), float4(1.0 / (mGuidingTextureResolution * mGuidingTextureResolution))
-        );
-        mGuidingTextures->generateMips(pRenderContext);
-        
+        mGuidingTextures->setName("GuidingTextureAtlas");        
     }
 
     if (!mGuidingLastFrameWeightTextures)
@@ -597,7 +591,6 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
         );
         mGuidingLastFrameWeightTextures->setName("GuidingTextureAtlasNoBlur");
-        
     }
 
     //Used in blur
@@ -618,8 +611,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         );
         mRecordGuidingTextures->setName("RecordGuidingTextureAtlas");
 
-        pRenderContext->clearUAV(mRecordGuidingTextures->getUAV(0).get(), uint4(1));
-        //mRecordGuidingTextures->generateMips(pRenderContext);
+        pRenderContext->clearUAV(mRecordGuidingTextures->getUAV(0).get(), uint4(0));
     }
         
     if (!mpLightIndexGuidingTexture)
@@ -893,6 +885,13 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
     
 }
 
+//Returns optimized y dispatch size, as the atlas is not always full
+uint getOptimizedAtlasYDispatch(uint atlasResolution, uint guidingTexResolution, uint lightCount) {
+   
+    const uint lightsPerRow = atlasResolution / guidingTexResolution;
+    return ((lightCount / lightsPerRow) + 1) * guidingTexResolution;
+}
+
 void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "GuidingTraverseChain");
@@ -930,10 +929,10 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["gSrcCounterTotal"].setSrv(mRecordGuidingTextures->getSRV(maxMip, 1u));
         var["gWeightLastFrame"] = mGuidingLastFrameWeightTextures;
         var["gDst"].setUav(mGuidingTextures->getUAV(0));
-        
 
-        mpGenerateGuidingMipTraverseChainPass->execute(
-            pRenderContext, uint3(mGuidingAtlasResolution, mGuidingAtlasResolution, 1)
+        const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mEmissiveLightCount);
+
+        mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(mGuidingAtlasResolution, maxYDispatch, 1)
         );
     }
 
@@ -943,17 +942,21 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
     //Loop to generate the mip chain
     var["CB"]["gCopyFromCounter"] = false;
     uint resolution = mGuidingAtlasResolution / 2;
+    uint resPerLight = mGuidingTextureResolution / 2;
     //int mipCount = mGuidingAtlasMipLevels;
     for (uint m = 1; m < mGuidingAtlasMipLevels; m++)
     {
-        var["CB"]["gRes"] = resolution;
+        var["CB"]["gRes"] = resPerLight;
+        var["CB"]["gDispatchSize"] = resolution;
 
         var["gSrc"].setSrv(mGuidingTextures->getSRV(m-1, 1u));
         var["gDst"].setUav(mGuidingTextures->getUAV(m));
-        
 
-        mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, resolution, 1));
+        const uint maxYDispatch = getOptimizedAtlasYDispatch(resolution, resPerLight, mEmissiveLightCount);
+
+        mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, maxYDispatch, 1));
         resolution /= 2;
+        resPerLight /= 2;
     }
 }
 
@@ -967,6 +970,7 @@ void PhotonGuiding::blurGuidingAtlasPass(RenderContext* pRenderContext, const Re
 
         DefineList defines;
         defines.add("BLUR_WIDTH", std::to_string(mGuidingBlurWidth));
+        defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
         defines.add("IS_HORIZONTAL", "1");
         defines.add("IS_VERTICAL", "0");
         mpGuidingBlurPass[0] = ComputePass::create(mpDevice, desc, defines, true);
@@ -1013,7 +1017,8 @@ void PhotonGuiding::blurGuidingAtlasPass(RenderContext* pRenderContext, const Re
         mGuidingBlurUpdateWeights = false;
     }
 
-    uint3 dispatchSize = uint3(mGuidingAtlasResolution, mGuidingAtlasResolution, 1);
+    const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mEmissiveLightCount);
+    uint3 dispatchSize = uint3(mGuidingAtlasResolution, maxYDispatch, 1);
     //Horizontal Blur
     {
         auto var = mpGuidingBlurPass[0]->getRootVar();
@@ -1085,7 +1090,7 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
     int mipCount = int(mpLightIndexGuidingTexture->getMipCount());
     for (int m = 1; m < mipCount; m++)
     {
-        var["CB"]["gRes"] = resolution;
+        var["CB"]["gDispatchSize"] = resolution;
         var["gSrc"].setSrv(mpLightIndexGuidingTexture->getSRV(m - 1, 1u));
         var["gDst"].setUav(mpLightIndexGuidingTexture->getUAV(m));
 

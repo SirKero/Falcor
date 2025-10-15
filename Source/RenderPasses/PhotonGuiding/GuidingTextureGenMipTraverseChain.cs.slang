@@ -45,6 +45,15 @@ void main(uint3 thdID: SV_DispatchThreadID)
     if (any(pixel > gDispatchSize))
         return;
 
+    //Check if there is a light at the pixel
+    #if !IS_LIGHT_INDEX_TEXTURE
+        uint lightsPerRow = gDispatchSize / gRes;
+        uint2 lightPixel = pixel / gRes;
+        uint lightIdx = lightPixel.x + lightPixel.y * lightsPerRow;
+        if (lightIdx >= COUNT_LIGHTS)
+            return;
+    #endif
+
     if (gCopyFromCounter)
     {
         // Get Start weight

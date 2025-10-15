@@ -10,6 +10,10 @@
 #define BLUR_WIDTH 3
 #endif
 
+#ifndef COUNT_LIGHTS
+#define COUNT_LIGHTS 1
+#endif
+
 cbuffer CB {
     uint gGuidingSize;
     uint gAtlasSize;
@@ -46,6 +50,13 @@ float blur(int2 pixel) {
 void main(uint2 pixel: SV_DispatchThreadID)
 {
     if (any(pixel >= gAtlasSize))
+        return;
+
+    // Return early if light is not set
+    const uint lightsPerRow = gAtlasSize / gGuidingSize;
+    uint2 lightPixel = pixel / gGuidingSize;
+    uint lightIdx = lightPixel.x + lightPixel.y * lightsPerRow;
+    if (lightIdx >= COUNT_LIGHTS)
         return;
 
     float outColor = blur(pixel);
