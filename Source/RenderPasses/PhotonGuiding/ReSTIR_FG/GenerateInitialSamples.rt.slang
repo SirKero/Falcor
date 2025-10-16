@@ -195,7 +195,7 @@ void selectFGSample(inout ReservoirFG r, float pdf, ShadingData sd, IMaterialIns
             //Guiding data
             r.lightIndex = photonData.lightIndex;
             r.guidingPixels = photonData.guidingPixel;
-            //r.guidingRandomVal = photonData.guidingRandomVal;
+            r.guidingPdf = photonData.guidingPdf;
         }
 
         // Guiding
@@ -280,7 +280,7 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
             // Guiding data
             causticReservoir.lightIndex = photonData.lightIndex;
             causticReservoir.guidingPixels = photonData.guidingPixel;
-            //causticReservoir.guidingRandomVal = photonData.guidingRandomVal;
+            causticReservoir.guidingPdf = photonData.guidingPdf;
         }
 
         //Add to guiding
@@ -424,6 +424,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
             r.photonRadiance = photonData.flux / gNumLightPaths;
             r.targetFunction = targetFunction;
             r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
+            r.guidingPdf = photonData.guidingPdf;
         }
 
         addToGuidingTexture(photonData, w);

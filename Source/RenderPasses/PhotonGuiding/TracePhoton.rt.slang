@@ -70,7 +70,8 @@ struct PhotonLightSample {
     float3 flux;
     uint lightIdx;
     uint2 guidingPixels;
-    uint2 _pad;
+    float guidingPdf;
+    uint _pad;
 };
 
 // transforms direction from local to world space
@@ -258,7 +259,8 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
 
     pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
-    pls.flux /= triangleSelectionPdf * guidingPDF;
+    pls.guidingPdf = triangleSelectionPdf * guidingPDF;
+    pls.flux /= pls.guidingPdf;
     return true;
 }
 
@@ -383,6 +385,7 @@ void rayGen()
     photon.lightIndex = pls.lightIdx;
     photon.guidingPixel = pls.guidingPixels;
     photon.guidingRandomVal = float2(pls.rndX, pls.rndY);
+    photon.guidingPdf = pls.guidingPdf;
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {

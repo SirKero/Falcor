@@ -223,6 +223,7 @@ private:
     uint mGuidingBlurWidth = 3;        //Blur radius
     float mGuidingBlurSigma = 1.f;      //Gaussian blur sigma
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
+    bool mReSTIREnableGuidingJacobian = true;   //Enable guiding jacobian
 
 
     //Debug
@@ -242,12 +243,12 @@ private:
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
-    ref<Texture> mGuidingTextures;                  //Atlas for Guiding Textures for Photon Guiding
-    ref<Texture> mGuidingLastFrameWeightTextures;   //Atlas Guiding Textures used for the blur (temporal history needs to be retained)
+    ref<Texture> mpGuidingAtlas[2];                  //Atlas for Guiding Textures for Photon Guiding
+    ref<Texture> mpGuidingAtlasPrevUnblurred;   //Atlas Guiding Textures used for the blur (temporal history needs to be retained)
     ref<Texture> mpGuidingAtlasBlurHelper;           //Gaussian blur helper (seperated)
     ref<Buffer> mpAtlasBlurWeights;                 //Weights for the atlas blur
-    ref<Texture> mRecordGuidingTextures;            //Atlas texture to record guiding data.
-    ref<Texture> mpLightIndexGuidingTexture;            //Texture with the size corresponding to the number of lights
+    ref<Texture> mpRecordGuidingAtlas;            //Atlas texture to record guiding data.
+    ref<Texture> mpLightIndexGuidingTexture[2];            //Texture with the size corresponding to the number of lights
     ref<Texture> mpRecordLightIndexGuidingTexture;      //Record the guiding
     //ReSTIR
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample

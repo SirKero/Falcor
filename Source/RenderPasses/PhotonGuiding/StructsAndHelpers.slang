@@ -34,7 +34,7 @@ struct PhotonData {
     int lightIndex;
 
     float3 normalW;
-    uint _pad;
+    float guidingPdf;
 
     uint2 guidingPixel;
     float2 guidingRandomVal; //Not used? 
@@ -57,7 +57,7 @@ struct PhotonData {
         this.pathLenght = 0;
         this.lightIndex = -1;
         this.guidingPixel = uint2(0);
-        this._pad = 0;
+        this.guidingPdf = 0;
         this.guidingRandomVal = float2(0);
     }
 }
@@ -106,8 +106,8 @@ struct ReservoirFG {
     uint pathLength;             // Path Length
 
     int lightIndex;            //Guiding
-    int2 guidingPixels;   // Pixel for the guiding texture
-    uint _pad;
+    int2 guidingPixels;        // Pixel for the guiding texture
+    float guidingPdf;          //pdf for guiding
 
     __init() {
         sampleSurface = {};
@@ -120,7 +120,7 @@ struct ReservoirFG {
         jacobianDeterminant = -1.0;
         lightIndex = -1;
         guidingPixels = int2(-1);
-        _pad = 0;
+        guidingPdf = 0;
     }
 
     //Guiding pixels helper
@@ -163,8 +163,7 @@ struct ReservoirCaustic {
 
     int lightIndex;          // Guiding
     int2 guidingPixels;      // Pixel for the guiding texture
-    uint _pad;
-    //float2 guidingRandomVal;  // Random vals for guiding
+    float guidingPdf;       //Pdf for guiding
 
     __init() {
         sampleSurface = {};
@@ -182,7 +181,7 @@ struct ReservoirCaustic {
         subPixelJacobian = 0;
         lightIndex = 0-1;
         guidingPixels = uint2(-1);
-        _pad = 0;
+        guidingPdf = 0;
     }
 
     // Photon dir helper

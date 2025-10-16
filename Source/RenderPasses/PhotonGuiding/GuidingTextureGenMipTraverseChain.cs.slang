@@ -76,7 +76,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
             #if USE_TEMPORAL_WEIGHT_TEXTURE
                 oldWeight = gWeightLastFrame[pixel];
             #else
-                oldWeight = gDst[pixel];
+                oldWeight = gSrc[pixel];
             #endif
 
             oldWeight *= gIterationCount;

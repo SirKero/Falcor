@@ -20,21 +20,63 @@ cbuffer CB
     float gNormalThreshold; // Normal Threshold
 
     float gJacobianDistanceThreshold; // Jacobian distance threshold
-    bool gUsePathThreshold; //Enables and disables path threshold
-    uint2 _pad;
+    bool gUsePathThreshold;           // Enables and disables path threshold
+    uint gLightGuidingTextureResSq;   // Square of the Resolution of one guiding texture
+    uint gLightIndexGuidingResolution; //Resolution of the light index guiding texture
 }
 
 Texture2D<float2> gMVec;
 StructuredBuffer<ReservoirFG> gFinalGatherReservoirPrev;
+Texture2D<float> gGuidingAtlas;
+Texture2D<float> gGuidingAtlasPrev;
+Texture2D<float> gLightIndexGuiding;
+Texture2D<float> gLightIndexGuidingPrev;
 
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kLightIndexGuidingEnabled = IS_LIGHT_INDEX_GUIDING_ENABLED;
+static const bool kLightGuidingEnabled = IS_LIGHT_GUIDING_ENABLED;
+
+float getCurrentGuidingPdf(ReservoirFG r) {
+    if(r.lightIndex < 0 || any(r.guidingPixels < 0))
+        return 0.0;
+
+    float guidingPdf = 1.0;
+
+    if (kLightGuidingEnabled)
+        guidingPdf *= gGuidingAtlas[r.guidingPixels] * gLightGuidingTextureResSq;
+
+    if (kLightIndexGuidingEnabled) {
+        uint2 lightIndexTexturePixel = index1Dto2D(r.lightIndex, gLightIndexGuidingResolution);
+        guidingPdf *= gLightIndexGuiding[lightIndexTexturePixel];
+    }
+
+    return guidingPdf;
+}
+
+float getPrevGuidingPdf(ReservoirFG r) {
+    if (r.lightIndex < 0 || any(r.guidingPixels < 0))
+        return 0.0;
+
+    float guidingPdf = 1.0;
+
+    if (kLightGuidingEnabled)
+        guidingPdf *= gGuidingAtlasPrev[r.guidingPixels] * gLightGuidingTextureResSq;
+
+    if (kLightIndexGuidingEnabled) {
+        uint2 lightIndexTexturePixel = index1Dto2D(r.lightIndex, gLightIndexGuidingResolution);
+        guidingPdf *= gLightIndexGuidingPrev[lightIndexTexturePixel];
+    }
+
+    return guidingPdf;
+}
+
 
 //Generalized Balance Heuristic with two samples
-float generalizedBalanceHeuristic(ReservoirFG r, ShadingData otherSD, BSDFProperties otherProps, uint otherC, bool assumeVisible = false) {
+float generalizedBalanceHeuristic(ReservoirFG r, ShadingData otherSD, BSDFProperties otherProps, uint otherC, float guidingJacobian = 1.0,  bool assumeVisible = false) {
     float p0 = r.targetFunction * r.c; // No visibility or Jacobian Determinant needed for this sample
-    float p1 = evaluateFinalGatherSampleApproximateUnbiased(r, otherSD, otherProps, assumeVisible) * otherC;  // targetFunction + vis  + Jacobian Determinant
+    float p1 = evaluateFinalGatherSampleApproximateUnbiased(r, otherSD, otherProps, assumeVisible) * otherC * guidingJacobian;  // targetFunction + vis  + Jacobian Determinant
 
     float sum = (p0 + p1);
     if(sum > 0)
@@ -61,9 +103,13 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     float w_0, w_1 = 0;
     float wSum = 0;
 
+    float currentToOtherGuidingJacobian = 1.0;
+    if (kLightIndexGuidingEnabled || kLightGuidingEnabled)
+        currentToOtherGuidingJacobian = current.guidingPdf / getPrevGuidingPdf(current);
+
     //Get ReSTIR weight of current reservoir
     if (current.isValid()) {
-        float mis = generalizedBalanceHeuristic(current, otherSD, otherProps, other.c);
+        float mis = generalizedBalanceHeuristic(current, otherSD, otherProps, other.c, currentToOtherGuidingJacobian);
         w_0 = mis * current.targetFunction * current.wSum;
         wSum += w_0;
     }
@@ -71,15 +117,23 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     //Calculate ReSTIR weight for other reservoir sample
     bool otherReservoirValid = other.isValid();
     float targetFunctionOther = 0.0;
+    float updatedGuidingPdf = other.guidingPdf;
     if (otherReservoirValid) {
         //Check if sample can be shifted
         if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) {
+            // Update guiding jacobian
+            float otherToCurrentGuidingJacobian = 1.0;
+            if (kLightIndexGuidingEnabled || kLightGuidingEnabled) {
+                updatedGuidingPdf = getCurrentGuidingPdf(other);
+                otherToCurrentGuidingJacobian = other.guidingPdf / updatedGuidingPdf;
+            }
+                
             // We can assume p1 is visible, as this was checked by the visibility ray in the line above
-            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c, true);
+            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c, otherToCurrentGuidingJacobian, true);
             targetFunctionOther = evalApproximateBRDF(currentSD, currentProps, -toSurfaceOther) * luminance(other.sampleData.radianceOut);
             float jacobianDeterminant = dot(other.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
             jacobianDeterminant /= other.jacobianDeterminant;
-            w_1 = mis * targetFunctionOther * jacobianDeterminant * other.wSum;
+            w_1 = mis * targetFunctionOther * jacobianDeterminant * other.wSum * otherToCurrentGuidingJacobian;
         }
         wSum += w_1;
     }
@@ -94,6 +148,7 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
         current.jacobianDeterminant = dot(current.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
         current.guidingPixels = other.guidingPixels;
         current.lightIndex = other.lightIndex;
+        current.guidingPdf = updatedGuidingPdf;
     }
 
     //Increase confidence weights
