@@ -33,7 +33,7 @@ static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 
-void addToGuidingTexture(int lightIndex, int2 guidingPixel, float emission)
+void addToGuidingTexture(int lightIndex, int2 guidingPixel, float emission, uint reservoirConfidence)
 {
     if (lightIndex < 0 || emission <= 0|| any(guidingPixel < 0))
         return;
@@ -58,7 +58,13 @@ void addToGuidingTexture(int lightIndex, int2 guidingPixel, float emission)
     if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
     {
         uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
-        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
+        uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
+        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+    }
+    else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIRConf)
+    {
+        uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
+        uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence));
         InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
     }
 }
@@ -78,7 +84,7 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
     outColor *= fgReservoir.thp * fgReservoir.wSum;
 
-    addToGuidingTexture(fgReservoir.lightIndex, fgReservoir.guidingPixels, luminance(outColor));
+    addToGuidingTexture(fgReservoir.lightIndex, fgReservoir.guidingPixels, luminance(outColor), fgReservoir.c);
     
     return outColor;
 }
@@ -114,7 +120,7 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
         }
     }
 
-    addToGuidingTexture(causticReservoir.lightIndex, causticReservoir.guidingPixels, luminance(outColor));
+    addToGuidingTexture(causticReservoir.lightIndex, causticReservoir.guidingPixels, luminance(outColor), causticReservoir.c);
 
     return outColor;
 }

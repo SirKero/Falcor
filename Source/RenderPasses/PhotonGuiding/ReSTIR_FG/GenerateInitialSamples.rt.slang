@@ -341,7 +341,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         // Check if this is a valid final gather surface
         if (hitIsRough && prevHitIsRough) {
             // Collect photons and fill reservoir
-            if (kGuidingMode != (uint)GuidingMode::ReSTIR)
+            if (kGuidingMode == (uint)GuidingMode::Disabled && kLightIndexGuidingMode == (uint)GuidingMode::Disabled)
             {
                 reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
                 reservoirFG.thp = prevThp;

@@ -44,12 +44,14 @@ enum class GuidingLightIndexMode : uint
     Uniform = 1u,
     DiscretizedEmission = 2u,
     ReSTIR = 3u,                    // DiscretizedEmission but applied to the surviving sample of the ReSTIR pass
+    ReSTIRConf = 4u,                // ReSTIR but with confidence weights
 };
 FALCOR_ENUM_INFO(GuidingLightIndexMode, {
     { GuidingLightIndexMode::Disabled, "Disabled" },
     { GuidingLightIndexMode::Uniform, "Uniform" },
     { GuidingLightIndexMode::DiscretizedEmission, "DiscretizedEmission" },
     { GuidingLightIndexMode::ReSTIR, "ReSTIR" },
+    { GuidingLightIndexMode::ReSTIRConf, "ReSTIRConf" },
 
 });
 FALCOR_ENUM_REGISTER(GuidingLightIndexMode);
