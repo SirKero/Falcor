@@ -188,8 +188,7 @@ float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, Re
     jacobianWeight = getSubpixelLocationJacobian(distToCam, toCam, sd.faceN, camForward);
     float jacobianShifted = jacobianWeight / r.subPixelJacobian;
     const float3 bsdf = mi.eval(sd, toCam, sg);
-    const float camPdf = getCameraBackprojectPDF(toCam, distToCam, camForward, gNormalizedPixelArea);
-    targetFunction = luminance(r.photonRadiance * bsdf);// / camPdf;
+    targetFunction = luminance(r.photonRadiance * bsdf);;
     float misP = targetFunction * jacobianShifted;
     misP = isnan(misP) ? 0.0f : misP;
     return misP;

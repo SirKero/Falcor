@@ -407,13 +407,12 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
 
         // Pdf conversion factor from image plane
         const float3 camForward = normalize(gScene.camera.data.cameraW);
-        const float cosAtCamera = dot(-directionToCamera, camForward);
-        const float cameraPdf = distanceToCamera * distanceToCamera * gNormalizedPixelArea * pow(cosAtCamera, 3);
+        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
 
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
-        float targetFunction = luminance(photonData.flux * bsdf) / (cameraPdf * gNumLightPaths);
-        float w = targetFunction;
+        float targetFunction = luminance(photonData.flux * bsdf) / gNumLightPaths;
+        float w = targetFunction / cameraPdf;
 
         r.wSum += w;
         bool selectNew = (sampleNext1D(sg) * r.wSum) < w;

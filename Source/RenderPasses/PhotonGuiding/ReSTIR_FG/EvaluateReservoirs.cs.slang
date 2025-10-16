@@ -105,11 +105,8 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     // Light Trace
     if (kEnableLightTraceSplatting && causticReservoir.pathLength == 0)
     {
-        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
-        float distanceToCamera = length(directionToCamera);
-        directionToCamera /= distanceToCamera;
-        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, normalize(gScene.camera.data.cameraW), gNormalizedPixelArea);
-        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg) / cameraPdf;
+        float3 directionToCamera = normalize(gScene.camera.getPosition() - sd.posW);
+        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg);
     } else //Photon Mapping
     {
         float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);

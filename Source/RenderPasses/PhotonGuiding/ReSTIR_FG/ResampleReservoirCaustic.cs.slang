@@ -201,8 +201,7 @@ float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, Re
     jacobianWeight = getSubpixelLocationJacobian(distToCam, toCam, sd.faceN, camForward);
     float jacobianShifted = jacobianWeight / r.subPixelJacobian;
     const float3 bsdf = mi.eval(sd, toCam, sg);
-    const float camPdf = getCameraBackprojectPDF(toCam, distToCam, camForward, gNormalizedPixelArea);
-    targetFunction = luminance(r.photonRadiance * bsdf) / camPdf;
+    targetFunction = luminance(r.photonRadiance * bsdf);
     float misP = targetFunction * jacobianShifted;
     misP = isnan(misP) ? 0.0f : misP;
     return misP;
@@ -282,7 +281,8 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
             p1 *= current.c;
             prevMIS = evalMISBalanceHeuristic(p0, p1);
         }
-        float w1 = prevMIS * targetFunc * prevR.wSum;
+        float jacobianShift = jacobianToCurrent / prevR.subPixelJacobian;
+        float w1 = prevMIS * targetFunc * prevR.wSum * jacobianShift;
         wSum += w1;
         // Check if other sample is selected and replace in reservoir if it was selected
         bool selectOtherSample = (sampleNext1D(sg) * wSum) < w1 && prevReservoirValid;

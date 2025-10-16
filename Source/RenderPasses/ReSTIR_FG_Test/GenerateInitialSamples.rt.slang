@@ -474,8 +474,9 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGe
         float distanceToCamera = length(directionToCamera);
         directionToCamera /= distanceToCamera;
 
-        //Camera pdf
-        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, normalize(gScene.camera.data.cameraW), gNormalizedPixelArea);
+        // Camera pdf
+        const float3 camForward = normalize(gScene.camera.data.cameraW);
+        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
 
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
