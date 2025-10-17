@@ -36,6 +36,7 @@ RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEnableGuidingJacobian = ENABLE_GUIDING_JACOBIAN;
+static const bool kGuidingJacobianMISOnly = true;   //Only use for MIS
 
 float getCurrentGuidingPdf(ReservoirFG r) {
     if(r.lightIndex < 0 || any(r.guidingPixels < 0))
@@ -123,7 +124,9 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
             targetFunctionOther = evalApproximateBRDF(currentSD, currentProps, -toSurfaceOther) * luminance(other.sampleData.radianceOut);
             float jacobianDeterminant = dot(other.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
             jacobianDeterminant /= other.jacobianDeterminant;
-            w_1 = mis * targetFunctionOther * jacobianDeterminant * other.wSum * otherToCurrentGuidingJacobian;
+            w_1 = mis * targetFunctionOther * jacobianDeterminant * other.wSum;
+            if (!kGuidingJacobianMISOnly)
+                w_1 *= otherToCurrentGuidingJacobian;
         }
         wSum += w_1;
     }

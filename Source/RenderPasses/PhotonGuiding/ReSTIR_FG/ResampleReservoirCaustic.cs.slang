@@ -54,6 +54,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const bool kEnableGuidingJacobian = ENABLE_GUIDING_JACOBIAN;
+static const bool kGuidingJacobianMISOnly = true; // Only use for MIS
 
 float getCurrentGuidingPdf(ReservoirCaustic r) {
     if (r.lightIndex < 0 || any(r.guidingPixels < 0))
@@ -150,7 +151,9 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
 
             float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c, otherToCurrentGuidingJacobian);
             targetFunctionOther = evalApproximateBRDFPhoton(currentSD, currentProps, other.photonDir) * luminance(other.photonRadiance);
-            w_1 = mis * targetFunctionOther * other.wSum * otherToCurrentGuidingJacobian;
+            w_1 = mis * targetFunctionOther * other.wSum;
+            if (!kGuidingJacobianMISOnly)
+                w_1 *= otherToCurrentGuidingJacobian;
         }
         wSum += w_1;
     }
@@ -344,7 +347,9 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
             prevMIS = evalMISBalanceHeuristic(p0, p1);
         }
         float jacobianShift = jacobianToCurrent / prevR.subPixelJacobian;
-        float w1 = prevMIS * targetFunc * prevR.wSum * jacobianShift * prevToCurrentGuidingJacobian;
+        float w1 = prevMIS * targetFunc * prevR.wSum * jacobianShift;
+        if (!kGuidingJacobianMISOnly)
+            w1 *= prevToCurrentGuidingJacobian;
         wSum += w1;
         // Check if other sample is selected and replace in reservoir if it was selected
         bool selectOtherSample = (sampleNext1D(sg) * wSum) < w1 && prevReservoirValid;

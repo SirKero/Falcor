@@ -200,7 +200,7 @@ private:
     float3 mTemporalCameraPosition = float3(0);
     float3 mTemporalCameraForward = float3(0);
     float mNormalizedPixelArea = 1.0; // For light trace
-    bool mEnableLightTraceSplatting = false;
+    bool mEnableLightTraceSplatting = true;
 
     //
     //Guiding Infos/Options
@@ -210,8 +210,8 @@ private:
     uint mGuidingTextureResolution = 64;    //Resolution of one guiding texture
     uint mGuidingAtlasResolution = 512;     //Resolution of the guiding atlas
     uint mGuidingAtlasMipLevels = 1;        //
-    GuidingMode mGuidingMode = GuidingMode::Disabled;
-    GuidingLightIndexMode mGuidingLightIndexMode = GuidingLightIndexMode::Disabled;
+    GuidingMode mGuidingMode = GuidingMode::ReSTIRDiscretized;
+    GuidingLightIndexMode mGuidingLightIndexMode = GuidingLightIndexMode::ReSTIR;
     float mGuidingClearValueEmission = 0.1f;
     bool mUseGaussianBlur = true;
     bool mGuidingResetAccumulateCount = false;
