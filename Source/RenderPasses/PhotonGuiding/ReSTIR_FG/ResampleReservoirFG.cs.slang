@@ -35,23 +35,16 @@ Texture2D<float> gLightIndexGuidingPrev;
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-static const bool kLightIndexGuidingEnabled = IS_LIGHT_INDEX_GUIDING_ENABLED;
-static const bool kLightGuidingEnabled = IS_LIGHT_GUIDING_ENABLED;
+static const bool kEnableGuidingJacobian = ENABLE_GUIDING_JACOBIAN;
 
 float getCurrentGuidingPdf(ReservoirFG r) {
     if(r.lightIndex < 0 || any(r.guidingPixels < 0))
         return 0.0;
 
-    float guidingPdf = 1.0;
-
-    if (kLightGuidingEnabled)
-        guidingPdf *= gGuidingAtlas[r.guidingPixels] * gLightGuidingTextureResSq;
-
-    if (kLightIndexGuidingEnabled) {
-        uint2 lightIndexTexturePixel = index1Dto2D(r.lightIndex, gLightIndexGuidingResolution);
-        guidingPdf *= gLightIndexGuiding[lightIndexTexturePixel];
-    }
-
+    float guidingPdf = gGuidingAtlas[r.guidingPixels] * gLightGuidingTextureResSq;
+    uint2 lightIndexTexturePixel = index1Dto2D(r.lightIndex, gLightIndexGuidingResolution);
+    guidingPdf *= gLightIndexGuiding[lightIndexTexturePixel];
+    
     return guidingPdf;
 }
 
@@ -59,16 +52,11 @@ float getPrevGuidingPdf(ReservoirFG r) {
     if (r.lightIndex < 0 || any(r.guidingPixels < 0))
         return 0.0;
 
-    float guidingPdf = 1.0;
+    float guidingPdf = gGuidingAtlasPrev[r.guidingPixels] * gLightGuidingTextureResSq;
 
-    if (kLightGuidingEnabled)
-        guidingPdf *= gGuidingAtlasPrev[r.guidingPixels] * gLightGuidingTextureResSq;
-
-    if (kLightIndexGuidingEnabled) {
-        uint2 lightIndexTexturePixel = index1Dto2D(r.lightIndex, gLightIndexGuidingResolution);
-        guidingPdf *= gLightIndexGuidingPrev[lightIndexTexturePixel];
-    }
-
+    uint2 lightIndexTexturePixel = index1Dto2D(r.lightIndex, gLightIndexGuidingResolution);
+    guidingPdf *= gLightIndexGuidingPrev[lightIndexTexturePixel];
+    
     return guidingPdf;
 }
 
@@ -104,9 +92,11 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     float wSum = 0;
 
     float currentToOtherGuidingJacobian = 1.0;
-    if (kLightIndexGuidingEnabled || kLightGuidingEnabled)
-        currentToOtherGuidingJacobian = current.guidingPdf / getPrevGuidingPdf(current);
-
+    if (kEnableGuidingJacobian) {
+        float prevGuiding = getPrevGuidingPdf(current);
+        currentToOtherGuidingJacobian = prevGuiding > 0 ? current.guidingPdf / prevGuiding : 0.0;
+    }
+        
     //Get ReSTIR weight of current reservoir
     if (current.isValid()) {
         float mis = generalizedBalanceHeuristic(current, otherSD, otherProps, other.c, currentToOtherGuidingJacobian);
@@ -123,9 +113,9 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
         if (dispatchShadowRay(currentSD, -toSurfaceOther, distToSurfaceOther)) {
             // Update guiding jacobian
             float otherToCurrentGuidingJacobian = 1.0;
-            if (kLightIndexGuidingEnabled || kLightGuidingEnabled) {
+            if (kEnableGuidingJacobian) {
                 updatedGuidingPdf = getCurrentGuidingPdf(other);
-                otherToCurrentGuidingJacobian = other.guidingPdf / updatedGuidingPdf;
+                otherToCurrentGuidingJacobian = updatedGuidingPdf > 0 ? other.guidingPdf / updatedGuidingPdf : 0.0;
             }
                 
             // We can assume p1 is visible, as this was checked by the visibility ray in the line above

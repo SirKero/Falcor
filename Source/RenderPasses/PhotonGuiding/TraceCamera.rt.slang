@@ -116,7 +116,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        float3 photonRadiance = max( 0, (photonData.flux * bsdf) / (NdotL * radius * radius * photonWeight)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        float3 photonRadiance = max( 0, (photonData.flux * bsdf) / (NdotL * radius * radius * photonWeight * photonData.guidingPdf)); // NdotL needs to be taken out of the bsdf for Photon Mapping
         collectedRadiance += photonRadiance;
 
         // Add to the guiding texture

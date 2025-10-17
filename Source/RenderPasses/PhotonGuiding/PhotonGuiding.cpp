@@ -1556,24 +1556,14 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
         defines.add(mpSampleGenerator->getDefines());
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
-        defines.add(
-            "IS_LIGHT_INDEX_GUIDING_ENABLED",
-            mGuidingLightIndexMode != GuidingLightIndexMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0"
-        );
-        defines.add("IS_LIGHT_GUIDING_ENABLED", mGuidingMode != GuidingMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0");
+        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
 
         mpResampleReservoirFGPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirFGPass);
 
     //Runtime defines
-    mpResampleReservoirFGPass->getProgram()->addDefine(
-        "IS_LIGHT_INDEX_GUIDING_ENABLED",
-        mGuidingLightIndexMode != GuidingLightIndexMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0"
-    );
-    mpResampleReservoirFGPass->getProgram()->addDefine(
-        "IS_LIGHT_GUIDING_ENABLED", mGuidingMode != GuidingMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0"
-    );
+    mpResampleReservoirFGPass->getProgram()->addDefine("ENABLE_GUIDING_JACOBIAN",mReSTIREnableGuidingJacobian ? "1" : "0");
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsFG.enable)
@@ -1633,11 +1623,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         defines.add(mpRTXDI->getDefines());
         defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-        defines.add(
-            "IS_LIGHT_INDEX_GUIDING_ENABLED",
-            mGuidingLightIndexMode != GuidingLightIndexMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0"
-        );
-        defines.add("IS_LIGHT_GUIDING_ENABLED", mGuidingMode != GuidingMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0");
+        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
 
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -1645,13 +1631,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
     //Runtime defines
     mpResampleReservoirCausticPass->getProgram()->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
     mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-    mpResampleReservoirCausticPass->getProgram()->addDefine(
-        "IS_LIGHT_INDEX_GUIDING_ENABLED",
-        mGuidingLightIndexMode != GuidingLightIndexMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0"
-    );
-    mpResampleReservoirCausticPass->getProgram()->addDefine(
-        "IS_LIGHT_GUIDING_ENABLED", mGuidingMode != GuidingMode::Disabled && mReSTIREnableGuidingJacobian ? "1" : "0"
-    );
+    mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_GUIDING_JACOBIAN",mReSTIREnableGuidingJacobian ? "1" : "0"); 
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsCaustic.enable)

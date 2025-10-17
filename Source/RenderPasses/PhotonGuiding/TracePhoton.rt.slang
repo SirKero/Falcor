@@ -260,7 +260,7 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
 
     pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
     pls.guidingPdf = triangleSelectionPdf * guidingPDF;
-    pls.flux /= pls.guidingPdf;
+    //pls.flux /= pls.guidingPdf;
     return true;
 }
 

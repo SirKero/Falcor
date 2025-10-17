@@ -133,7 +133,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        float3 photonRadiance = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL));
+        float3 photonRadiance = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL * photonData.guidingPdf));
         collectedRadiance += photonRadiance; //NdotL needs to be taken out of the bsdf for Photon Mapping
 
         addToGuidingTexture(photonData, luminance(photonRadiance));
@@ -184,7 +184,7 @@ void selectFGSample(inout ReservoirFG r, float pdf, ShadingData sd, IMaterialIns
             radianceOut = (photonData.flux * bsdf) / NdotL;
             targetFunction = luminance(radianceOut);
         }
-        float photonDenom = photonWeight * radius * radius * pdf;
+        float photonDenom = photonWeight * radius * radius * pdf * photonData.guidingPdf;
         float w = targetFunction / photonDenom;
 
         r.wSum += w;
@@ -266,7 +266,7 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
         float targetFunction = 0;
         if (NdotL > 0)
             targetFunction = evalApproximateBRDFPhoton(sd, bsdfProperties, photonData.dir) * luminance(photonData.flux);
-        float photonDenom = photonWeight * radius * radius;
+        float photonDenom = photonWeight * radius * radius * photonData.guidingPdf;
         float w =  targetFunction / photonDenom;
 
         causticReservoir.wSum += w;
@@ -412,7 +412,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
         float targetFunction = luminance(photonData.flux * bsdf) / gNumLightPaths;
-        float w = targetFunction / cameraPdf;
+        float w = targetFunction / (cameraPdf * photonData.guidingPdf);
 
         r.wSum += w;
         bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
@@ -424,6 +424,8 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
             r.photonRadiance = photonData.flux / gNumLightPaths;
             r.targetFunction = targetFunction;
             r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
+            r.lightIndex = photonData.lightIndex;
+            r.guidingPixels = photonData.guidingPixel;
             r.guidingPdf = photonData.guidingPdf;
         }
 
