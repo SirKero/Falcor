@@ -6,17 +6,18 @@ target_sources(PhotonGuiding PRIVATE
     TracePhoton.rt.slang
     TraceCamera.rt.slang
     GuidingTextureGenMipTraverseChain.cs.slang
+    MapGuidingToPhotons.cs.slang
     GuidingBlurAtlas.cs.slang
     GuidingCounterReduce.cs.slang
     Debug.cs.slang
     StructsAndHelpers.slang
     SharedEnums.slang
-	ReSTIR_FG/EvaluateReservoirs.cs.slang
-	ReSTIR_FG/GenerateInitialSamples.rt.slang
-	ReSTIR_FG/ResampleReservoirCaustic.cs.slang
-	ReSTIR_FG/ResampleReservoirFG.cs.slang
-	ReSTIR_FG/TemporalSplatReservoir.cs.slang
-	ReSTIR_FG/SortSplatReservoirs.cs.slang
+    ReSTIR_FG/EvaluateReservoirs.cs.slang
+    ReSTIR_FG/GenerateInitialSamples.rt.slang
+    ReSTIR_FG/ResampleReservoirCaustic.cs.slang
+    ReSTIR_FG/ResampleReservoirFG.cs.slang
+    ReSTIR_FG/TemporalSplatReservoir.cs.slang
+    ReSTIR_FG/SortSplatReservoirs.cs.slang
 	
 )
 

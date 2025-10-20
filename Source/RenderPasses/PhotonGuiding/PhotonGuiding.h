@@ -79,6 +79,9 @@ private:
     //Blurs the guiding atlas
     void blurGuidingAtlasPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Maps the guiding textures to the number of distributed photons. Also guarantees that a photon is dispatched per guiding texel
+    void mapGuidingToPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool isLightIndexPass);
+
     //Generates the guiding mipmap for the light index
     void generateLightIndexGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData);
     
@@ -223,8 +226,8 @@ private:
     uint mGuidingBlurWidth = 3;        //Blur radius
     float mGuidingBlurSigma = 1.f;      //Gaussian blur sigma
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
-    bool mReSTIREnableGuidingJacobian = true;   //Enable guiding jacobian
-
+    bool mReSTIREnableGuidingJacobian = false;   //Enable guiding jacobian
+    bool mUseFixedGuidingDispatch = false;      //Determine guiding dispatch beforehand and distribute on trace photon pixels
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
@@ -249,6 +252,7 @@ private:
     ref<Buffer> mpAtlasBlurWeights;                 //Weights for the atlas blur
     ref<Texture> mpRecordGuidingAtlas;            //Atlas texture to record guiding data.
     ref<Texture> mpLightIndexGuidingTexture[2];            //Texture with the size corresponding to the number of lights
+    ref<Texture> mpLightIndexGuidingPrevTex;            //Light index guiding texture from last frame
     ref<Texture> mpRecordLightIndexGuidingTexture;      //Record the guiding
     //ReSTIR
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
@@ -292,6 +296,7 @@ private:
     ref<ComputePass> mpGuidingCounterReducePass; //Reduce on the guiding counter to obtain the total
     ref<ComputePass> mpGuidingBlurPass[2];         //Blurs the guiding atlas. Horizonal and vertical pass
     ref<ComputePass> mpGuidingLightIndexCounterReducePass;            // Uses same shader as above, but is may need other data formats
+    ref<ComputePass> mpMapGuidingToDistributedPhotonsPass;      //Maps the current guiding texture to the actual number of photons. Also guarantees that 1 photon is distributed per guiding pixel
     ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
     ref<ComputePass> mpGenerateLightIndexGuidingMipTraverseChainPass;  // Uses same shader as above, but is may need other data formats
 

@@ -48,6 +48,7 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = RUSSIAN_ROULETTE;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
+static const bool kUseFixedPhotonGuiding = USE_FIXED_PHOTON_GUIDING; //Photons are distributed before the pass
 
 struct RayPayload
 {
@@ -120,6 +121,7 @@ bool sampleLightIndex(inout SampleGenerator sg, out uint selectedIdx , out float
     float tw = sampleNext1D(sg); // traverse weight
     uint2 mipIdx = uint2(0);     // Working index for mip chain traversal. Starts top left (0)
     int startMip = int(gLightIndexGuidingMaxMip) - 1; // start from secound highest level
+    float weightNormFactor = gGuidingLightIndex.Load(uint3(0, 0, gLightIndexGuidingMaxMip)); //Sum of all weights, used for normalization
 
     // Start traversal from the second highest miplevel to level 0
     for (int m = startMip; m >= 0; m--)
@@ -132,6 +134,7 @@ bool sampleLightIndex(inout SampleGenerator sg, out uint selectedIdx , out float
         mipSamples[1] = gGuidingLightIndex.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
         mipSamples[2] = gGuidingLightIndex.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
         mipSamples[3] = gGuidingLightIndex.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+        mipSamples /= weightNormFactor;
 
         // Select a sample using the current traverse weight
         float totalWeight = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
@@ -198,6 +201,7 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     // uint2 atlasOffset = uint2(lightIdx1D % gGuidingAtlasResolution, (lightIdx1D / gGuidingAtlasResolution) * gGuidingTextureResolution); // Offset in the atlas for the current light
     uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
     uint2 atlasOffset = uint2(triIdx % atlasLightsPerRow, triIdx / atlasLightsPerRow); // Offset in the atlas for the current light
+    float weightNormFactor = gGuidingTexture.Load(uint3(atlasOffset.x, atlasOffset.y, gGuidingTextureMaxMip)); //Sum of all weights, used for normalization
     // Start traversal from the second highest miplevel to level 0
     for (int m = startMip; m >= 0; m--) {
         // Update mip index and offset from last iteration
@@ -211,6 +215,7 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
         mipSamples[1] = gGuidingTexture.Load(uint3(fetchIdx.x + 1, fetchIdx.y, m));
         mipSamples[2] = gGuidingTexture.Load(uint3(fetchIdx.x, fetchIdx.y + 1, m));
         mipSamples[3] = gGuidingTexture.Load(uint3(fetchIdx.x + 1, fetchIdx.y + 1, m));
+        mipSamples /= weightNormFactor;
 
         // Select a sample using the current traverse weight
         float totalWeight = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
@@ -262,6 +267,96 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     pls.guidingPdf = triangleSelectionPdf * guidingPDF;
     //pls.flux /= pls.guidingPdf;
     return true;
+}
+
+bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenerator sg, out PhotonLightSample pls)
+{
+    pls = {};
+    if (gScene.lightCollection.isEmpty())
+        return false;
+
+    //Get current Id and number of photons
+    float tw = pixel.x + pixel.y * dispatchDimX; // TODO better traverse pattern (z-curve)
+    float maxPhotons = gGuidingTexture.Load(uint3(0, 0, gGuidingTextureMaxMip)); // Sum of all photons
+
+    if (tw >= maxPhotons)
+        return false;
+
+    //Traverse the mipmap chain
+    uint2 mipIdx = uint2(0);                       // Working index for mip chain traversal. Starts top left (0)
+    int startMip = int(gGuidingTextureMaxMip) - 1; // start from second highest level
+    float endWeight = 0;
+    for (int m = startMip; m >= 0; m--) {
+        // Update mip index and offset from last iteration
+        mipIdx *= 2;
+
+        // Fetch samples in 2x2 grid
+        uint2 fetchIdx = mipIdx;
+        float4 mipSamples;
+        mipSamples[0] = gGuidingTexture.Load(uint3(mipIdx.x, mipIdx.y, m));
+        mipSamples[1] = gGuidingTexture.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+        mipSamples[2] = gGuidingTexture.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+        mipSamples[3] = gGuidingTexture.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+
+        // Select a sample using the current traverse weight
+        float totalWeight = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+        float currWeight = 0;      // Total for select in loop
+        uint selectedSubpixel = 0; // Selected subpixel id
+        float selWeight = 0;       // Selected weight
+        for (uint x = 0; x < 4 && totalWeight > 0; x++) {
+            selWeight = mipSamples[x];
+            currWeight += selWeight;
+            selectedSubpixel = x;
+            if (tw < currWeight)
+                break;
+        }
+
+        // Update traversal weight
+        float nonSelectedWeight = currWeight - selWeight;
+        tw -= nonSelectedWeight;
+
+        // Update the index used to fetch the next mip level
+        if (selectedSubpixel == 1 || selectedSubpixel == 3)
+            mipIdx.x += 1;
+        if (selectedSubpixel > 1) // 2 or 3
+            mipIdx.y += 1;
+
+        if (m == 0)
+            endWeight = mipSamples[selectedSubpixel];
+    }
+    // Recreate selected random number range from the choosen index
+    pls.guidingPixels = mipIdx;
+    uint2 relIdx = mipIdx % gGuidingTextureResolution;
+    float2 relMinWeight = float2(relIdx) / gGuidingTextureResolution;
+    float2 relMaxWeight = float2(relIdx + 1) / gGuidingTextureResolution;
+    relMinWeight += (relMaxWeight - relMinWeight) * sampleNext2D(sg);
+    pls.rndX = relMinWeight.x;
+    pls.rndY = relMinWeight.y;
+    float guidingPDF = (endWeight / maxPhotons) * (gGuidingTextureResolution * gGuidingTextureResolution);
+
+    // Recreate light index
+    uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
+    uint2 lightIdxPixel = mipIdx / gGuidingTextureResolution;
+    const uint lightIndex = lightIdxPixel.x + lightIdxPixel.y * atlasLightsPerRow;
+    if (lightIndex >= gScene.lightCollection.triangleCount)
+        return false;
+
+    // Get emissive triangle data
+    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(lightIndex);
+    const float3 barycentrics = sample_triangle(sampleNext2D(sg));
+    pls.posW = tri.getPosition(barycentrics);
+    pls.normal = tri.normal;
+    pls.lightIdx = lightIndex;
+
+    // Get Flux
+    float2 uv = tri.getTexCoord(barycentrics);
+    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
+
+    pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
+    pls.guidingPdf = guidingPDF;
+    // pls.flux /= pls.guidingPdf;
+    return true;
+
 }
 
 float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)
@@ -350,9 +445,14 @@ void rayGen()
     PhotonLightSample pls;
 
     // Create a photon by sampling from emissive lights or analytic light sources
-    if (!createGuidingLightSample(sg, pls))
-        return;
-
+    if (kUseFixedPhotonGuiding) {
+        if (!createGuidingSampleFixed(pixel, dispatchDims.x, sg, pls))
+            return;
+    } else {
+        if (!createGuidingLightSample(sg, pls))
+            return;
+    }
+    
     float lightDirPDF = 1.0;
     float2 randomValues = float2(pls.rndX, pls.rndY);
     //float2 randomValues = sampleNext2D(sg);

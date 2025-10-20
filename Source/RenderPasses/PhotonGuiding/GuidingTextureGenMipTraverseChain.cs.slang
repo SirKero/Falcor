@@ -46,6 +46,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         return;
 
     //Check if there is a light at the pixel
+    /*
     #if !IS_LIGHT_INDEX_TEXTURE
         uint lightsPerRow = gDispatchSize / gRes;
         uint2 lightPixel = pixel / gRes;
@@ -53,6 +54,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         if (lightIdx >= COUNT_LIGHTS)
             return;
     #endif
+    */
 
     if (gCopyFromCounter)
     {
