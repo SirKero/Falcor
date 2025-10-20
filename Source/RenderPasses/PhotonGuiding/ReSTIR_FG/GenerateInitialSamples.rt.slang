@@ -341,6 +341,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
         // Check if this is a valid final gather surface
         if (hitIsRough && prevHitIsRough) {
             // Collect photons and fill reservoir
+            /* //(Old Method) collect over radiance estimate
             if (kGuidingMode == (uint)GuidingMode::Disabled && kLightIndexGuidingMode == (uint)GuidingMode::Disabled)
             {
                 reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
@@ -352,6 +353,7 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
                 float distanceToSample = distance(ray.Origin, sd.posW);
                 reservoirFG.jacobianDeterminant = dot(reservoirFG.sampleData.normal, sd.V) / (distanceToSample * distanceToSample);
             } else
+            */ //Select 1 respresentative photon
             {
                 selectFGSample(reservoirFG, pdf, sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
                 reservoirFG.thp = prevThp;
