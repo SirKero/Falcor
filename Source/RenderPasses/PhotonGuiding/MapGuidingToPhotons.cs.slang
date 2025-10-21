@@ -4,21 +4,16 @@
 
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
+RWTexture2D<float4> gDebug;
 
 cbuffer CB {
     uint2 gDispatchDim;
     uint gDistributedPhotons;
     bool gIsLightIdxPass;
 
-    uint gFixedPhotonsPerPixel;
     uint gGuidingTextureRes;
     uint gLightIdxRes;
 }
-
-/* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
-   gSrc is the lower Mip, gDst is one Mip higher.
-   The dispatch dimensions are derived from gDst. 
-*/
 
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
@@ -27,7 +22,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
     if (any(pixel > gDispatchDim))
         return;
 
-    float numberPhotons = gFixedPhotonsPerPixel;
+    float numberPhotons = 0;
     if (gIsLightIdxPass) {
         const uint lightIndex = pixel.x + pixel.y * gLightIdxRes;
         if (lightIndex >= COUNT_LIGHTS)
@@ -36,13 +31,16 @@ void main(uint3 thdID: SV_DispatchThreadID)
             numberPhotons += floor(gDst[pixel] * gDistributedPhotons);
     }
     else {
+        numberPhotons = 1.0;
         const uint2 lightIndexPixel = pixel / gGuidingTextureRes; // Pixel in light index texture
         const uint lightIndex = lightIndexPixel.x + lightIndexPixel.y * gLightIdxRes;
         if (lightIndex >= COUNT_LIGHTS)
             numberPhotons = 0;
         else {
             float photonsPerLight = gSrc[lightIndexPixel];
-            numberPhotons += floor(gDst[pixel] * photonsPerLight);
+            float percentPhotons = gDst[pixel];
+            numberPhotons += floor(percentPhotons * photonsPerLight);
+            gDebug[pixel] = float4(photonsPerLight, percentPhotons, 1,1);
         }
     }
 

@@ -42,6 +42,7 @@ RWStructuredBuffer<PackedHitInfo> gCausticPhotonHitInfo;
 Texture2D<float> gGuidingTexture;
 Texture2D<float> gGuidingLightIndex;
 
+static const uint kFixed1DIndexBlockSize = 16;
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL,PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
@@ -275,8 +276,17 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenera
     if (gScene.lightCollection.isEmpty())
         return false;
 
-    //Get current Id and number of photons
-    float tw = pixel.x + pixel.y * dispatchDimX; // TODO better traverse pattern (z-curve)
+    //Get start id and compaire against the total number of photons
+
+    // Get a 1D index, divided into blocks
+    const uint blockSize = kFixed1DIndexBlockSize;
+    uint2 blockPixel = pixel % blockSize;
+    uint2 blockID = pixel / blockSize;
+    uint block1D = blockPixel.x + blockPixel.y * blockSize;
+    uint blockOffset = blockID.x * (blockSize * blockSize) + blockID.y * dispatchDimX * blockSize;
+    float tw = block1D + blockOffset;
+
+    //float tw = pixel.x + pixel.y * dispatchDimX; //Old simple linearized version
     float maxPhotons = gGuidingTexture.Load(uint3(0, 0, gGuidingTextureMaxMip)); // Sum of all photons
 
     if (tw >= maxPhotons)

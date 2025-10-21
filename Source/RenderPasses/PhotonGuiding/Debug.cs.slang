@@ -49,8 +49,9 @@ void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_Gro
     {
         if (gShowLightIndexGuiding)
             output.xyz = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
-        else
+        else {
             output.xyz = gGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gColorScaleFactor;
+        }
     }
     gDebug[pixel] = output; 
 }

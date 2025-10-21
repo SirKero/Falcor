@@ -73,7 +73,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
             #endif
             float total = float(gSrcCounterTotal[totalCounterIndex]);
             float pixelCounterVal = float(gSrcCounter[pixel]);
-            weight = pixelCounterVal / total;
+            weight = total > 0 ? pixelCounterVal / total : 0.0;
             float oldWeight = 0.0;
             #if USE_TEMPORAL_WEIGHT_TEXTURE
                 oldWeight = gWeightLastFrame[pixel];

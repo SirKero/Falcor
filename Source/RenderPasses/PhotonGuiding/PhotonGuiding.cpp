@@ -430,10 +430,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         {
             group.checkbox("Show Light Index Select Guiding Tex", mDebugShowLightIndexGuidingTex);
             group.slider("Selected Tri light", mDebugSelectedTriLight, -1, int(mEmissiveLightCount) - 1);
-            if (mDebugShowLightIndexGuidingTex)
-                group.var("Color Scale", mDebugLightIndexScale, 0.f, FLT_MAX, 0.1f);
-            else
-                group.var("Color Scale", mDebugColorScaleFactor, 0.f, FLT_MAX, 0.1f);
+            group.var("Color Scale", mDebugColorScaleFactor, 0.f, FLT_MAX, 0.01f, false, "%.6f");
             group.checkbox("Scale to DebugTex", mDebugScaleToDstDim);
             if (!mDebugScaleToDstDim)
                 group.var("Size Scale", mDebugSizeScaleFactor, 0.f, FLT_MAX, 0.001f);     
@@ -1103,10 +1100,10 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
     auto var = mpMapGuidingToDistributedPhotonsPass->getRootVar();
 
     //Get photons that can be freely distributed
-    uint reservedPhotons = mGuidingTextureResolution * mGuidingTextureResolution * mEmissiveLightCount; //Reserve 1 photon for every guiding pixel
+    mFixedGuidingDispatchReservedPhotons = mGuidingTextureResolution * mGuidingTextureResolution * mEmissiveLightCount; // Reserve 1 photon for every guiding pixel
     uint freePhotons = static_cast<uint>(std::floor(sqrt(mNumDispatchedPhotons)));
-    freePhotons = std::max(freePhotons * freePhotons, reservedPhotons);
-    freePhotons -= reservedPhotons;
+    freePhotons = std::max(freePhotons * freePhotons, mFixedGuidingDispatchReservedPhotons);
+    freePhotons -= mFixedGuidingDispatchReservedPhotons;
 
     var["CB"]["gDistributedPhotons"] = freePhotons;
     var["CB"]["gGuidingTextureRes"] = mGuidingTextureResolution;
@@ -1117,8 +1114,8 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
     {
         dispatchSize = uint2(mGuidingLightIndexSize);
         var["CB"]["gIsLightIdxPass"] = true;
-        var["CB"]["gFixedPhotonsPerPixel"] = mGuidingTextureResolution * mGuidingTextureResolution;
 
+        var["gSrc"].setSrv(pCurrentAtlas->getSRV(0, 1));
         var["gDst"].setUav(pCurrentIdxGuiding->getUAV(0));
     }
     else
@@ -1127,10 +1124,10 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
         dispatchSize = uint2(mGuidingAtlasResolution, maxYDispatch);
 
         var["CB"]["gIsLightIdxPass"] = false;
-        var["CB"]["gFixedPhotonsPerPixel"] = 1u;
 
         var["gSrc"].setSrv(pCurrentIdxGuiding->getSRV(0,1));
         var["gDst"].setUav(pCurrentAtlas->getUAV(0));
+        var["gDebug"] = renderData[kOutputDebug]->asTexture();
     }
     var["CB"]["gDispatchDim"] = dispatchSize;
 
@@ -1281,8 +1278,12 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     // Handle shader dimension
     uint dispatchedPhotons = mNumDispatchedPhotons;
 
+    uint minDispatchedPhotons = 128u; //At least 128^2 photons
+    if (mUseFixedGuidingDispatch)
+        minDispatchedPhotons = static_cast<uint>(std::floor(sqrt(mFixedGuidingDispatchReservedPhotons))) + 1;
+
     uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
-    shaderDispatchDim = std::max(32u, shaderDispatchDim);
+    shaderDispatchDim = std::max(minDispatchedPhotons, shaderDispatchDim);
 
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
@@ -1441,7 +1442,13 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     uint showDebugTexRes = mDebugShowLightIndexGuidingTex ? mGuidingLightIndexSize : mGuidingAtlasResolution;
     float scaleToDebugTexFactor = (float(math::min(dispatchDim.x, dispatchDim.y)) / float(showDebugTexRes)) + 0.5f;
 
-    var["CB"]["gColorScaleFactor"] = mDebugColorScaleFactor;
+    //Determine color scales
+    float atlasColorScale = mDebugColorScaleFactor * mGuidingTextureResolution * mGuidingTextureResolution;
+    if (mUseFixedGuidingDispatch)
+        atlasColorScale /= mNumDispatchedPhotons;
+    float lightIdxColorScale = mUseFixedGuidingDispatch ? mDebugColorScaleFactor / mNumDispatchedPhotons : mDebugColorScaleFactor;
+
+    var["CB"]["gColorScaleFactor"] = atlasColorScale;
     var["CB"]["gGuidingAtlasSize"] = mGuidingAtlasResolution;
     var["CB"]["gDispatchSize"] = dispatchDim.xy();
     var["CB"]["gLightIndex"] = mDebugSelectedTriLight;
@@ -1449,8 +1456,8 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     var["CB"]["gSizeScaleFactor"] = mDebugScaleToDstDim ? scaleToDebugTexFactor : mDebugSizeScaleFactor;
     var["CB"]["gShowLightIndexGuiding"] = mDebugShowLightIndexGuidingTex;
     var["CB"]["gLightIndexGuidingSize"] = mGuidingLightIndexSize;
-    var["CB"]["gLightIndexGuidingScale"] = mDebugLightIndexScale;
-    
+    var["CB"]["gLightIndexGuidingScale"] = lightIdxColorScale;
+      
     var["gGuidingTexture"] = mpGuidingAtlas[mFrameCount % 2];
     var["gLightIndexGuidingTexture"] = mpLightIndexGuidingTexture[mFrameCount % 2];
     var["gDebug"] = renderData[kOutputDebug]->asTexture();

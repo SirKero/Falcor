@@ -228,16 +228,16 @@ private:
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
     bool mReSTIREnableGuidingJacobian = false;   //Enable guiding jacobian
     bool mUseFixedGuidingDispatch = false;      //Determine guiding dispatch beforehand and distribute on trace photon pixels
+    uint mFixedGuidingDispatchReservedPhotons = 32; //Number of photons that are reserved due to fixed dispatch
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
     bool mDebugShowGuidingTexture = false;
     int mDebugSelectedTriLight = -1;
-    float mDebugColorScaleFactor = float(mGuidingTextureResolution * mGuidingTextureResolution);
+    float mDebugColorScaleFactor = 1.f;
     float mDebugSizeScaleFactor = 1.f;
     bool mDebugScaleToDstDim = true;
     bool mDebugShowLightIndexGuidingTex = false;
-    float mDebugLightIndexScale = 1.f;
 
     //
     // Resources
