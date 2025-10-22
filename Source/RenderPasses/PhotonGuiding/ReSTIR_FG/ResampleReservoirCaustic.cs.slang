@@ -78,12 +78,13 @@ float getPrevGuidingPdf(ReservoirCaustic r) {
     return guidingPdf;
 }
 
-inline float getPhotonRadius(ReservoirCaustic r)
+inline float getPhotonRadius(ReservoirCaustic r, bool isPrev = false)
 {
-    uint photonTypeIndex = r.pathLength == 0 ? 1 : 0; //Caustic : Global
+    uint photonTypeIndex = r.pathLength == 0 ? 1 : 0; // Caustic : Global
+    float3 cameraPos = isPrev ? gPrevCamPos : gScene.camera.getPosition();
     if (kUseAdaptivePhotonRadius) {
 
-        float distToCamera = distance(r.photonPosW, gScene.camera.getPosition());
+        float distToCamera = distance(r.photonPosW, cameraPos);
         return adaptiveRadius(distToCamera, gNormalizedPixelDiagonal, gAdaptivePhotonRadius[photonTypeIndex]);
     }
     else {
@@ -100,10 +101,10 @@ inline float evalMISBalanceHeuristic(float p0, float p1) {
 }
 
 // Generalized Balance Heuristic with two samples
-float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFProperties otherProps, uint otherC, float guidingJacobian = 1.0) {
+float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFProperties otherProps, uint otherC, bool otherIsPrev, float guidingJacobian = 1.0) {
     float p0 = r.targetFunction * r.c;
     float p1 = 0;
-    if (length(otherSD.posW - r.photonPosW) < getPhotonRadius(r))
+    if (length(otherSD.posW - r.photonPosW) < getPhotonRadius(r, otherIsPrev))
         p1 = evalApproximateBRDFPhoton(otherSD, otherProps, r.photonDir) * luminance(r.photonRadiance) * otherC * guidingJacobian;
 
     return evalMISBalanceHeuristic(p0, p1);
@@ -130,7 +131,7 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
 
     //Get ReSTIR weight of current reservoir
     if (current.isValid()) {
-        float mis = generalizedBalanceHeuristic(current, otherSD, otherProps, other.c, currentToOtherGuidingJacobian);
+        float mis = generalizedBalanceHeuristic(current, otherSD, otherProps, other.c, true, currentToOtherGuidingJacobian);
         w_0 = mis * current.targetFunction * current.wSum;
         wSum += w_0;
     }
@@ -149,7 +150,7 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
                 otherToCurrentGuidingJacobian = other.guidingPdf / updatedGuidingPdf;
             }
 
-            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c, otherToCurrentGuidingJacobian);
+            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c, false, otherToCurrentGuidingJacobian);
             targetFunctionOther = evalApproximateBRDFPhoton(currentSD, currentProps, other.photonDir) * luminance(other.photonRadiance);
             w_1 = mis * targetFunctionOther * other.wSum;
             if (!kGuidingJacobianMISOnly)
