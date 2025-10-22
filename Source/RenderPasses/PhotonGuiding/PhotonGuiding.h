@@ -258,6 +258,7 @@ private:
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample
     ref<Texture> mpEmission;                                   // Emission for paths that travel through highly specular materials (ReSTIR FG)
+    ref<Texture> mpResampleMVec;                               // Motion vectors for resampling (includes reflections and refractions)
     //Caustic ReSTIR Splatting
     ref<Texture> mpLightTraceHeadCounter;                      // Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;                        // Linked List for light tracing

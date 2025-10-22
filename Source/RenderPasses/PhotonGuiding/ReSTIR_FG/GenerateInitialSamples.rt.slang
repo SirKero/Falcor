@@ -6,9 +6,11 @@
 import Scene.Raytracing;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
 import Rendering.RTXDI.RTXDI;
 
 Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<float2> gMVec;
 
 StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
@@ -19,6 +21,7 @@ RWTexture2D<uint> gLightIndexGuidingCounter;
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 RWTexture2D<float4> gEmission;
+RWTexture2D<float2> gResamplingMVec;
 
 RWTexture2D<int> gLightTraceHeadCounter;
 StructuredBuffer<int> gLightTraceLinkedList; // next pointer
@@ -285,7 +288,7 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
     causticReservoir.c = 1;
 }
 
-void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inout float3 thp, inout float pdf, inout bool valid, inout ReservoirFG reservoirFG, inout ReservoirCaustic reservoirCaustic, inout float3 emission) {
+void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inout float3 thp, inout float pdf, inout bool valid, inout ReservoirFG reservoirFG, inout ReservoirCaustic reservoirCaustic, inout float3 emission, inout float mVecDistance) {
     RayPayload rayPayload = RayPayload();
     uint pathLength = 0;
     bool collectCaustics = !prevHitIsRough;
@@ -317,6 +320,10 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
                 emission += bsdfProperties.emission * thp;
             break;
         }
+
+        //Travel distance for mvec (collect Caustic flag can be reused)
+        if (collectCaustics)
+            mVecDistance += distance(sd.posW, ray.Origin);
 
         if (collectCaustics && hitIsRough) {
             reservoirCaustic.sampleSurface = hit.getData();
@@ -478,7 +485,8 @@ void rayGen()
     float3 outColor = float3(0);
     ReservoirFG finalGatherReservoir = ReservoirFG();
     ReservoirCaustic causticReservoir = ReservoirCaustic();
-    float3 emission = float3(0);    //Emission on fully specular paths
+    float3 emission = float3(0); // Emission on fully specular paths
+    float2 mVec = gMVec[pixel];
 
     if (hitInfo.isValid()) {
         //Set RTXDI data
@@ -504,7 +512,6 @@ void rayGen()
             else
                 photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
         }
-            
         //Store surface
         finalGatherReservoir.sampleSurface = hitInfo.getData();
         finalGatherReservoir.sampleData.sampleView = viewDir;
@@ -516,8 +523,20 @@ void rayGen()
         float3 fgThp = float3(1.0);
         float fgPdf = 0;
         bool validFGRay = generateFGSampleRay(sd, mi, sg, fgThp, fgPdf, ray);
+        float mVecDistance = 0;
+        float3 mVecPosW = sd.posW; 
 
-        traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticReservoir, emission);
+        traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticReservoir, emission, mVecDistance);
+
+        //Update Mvec (we assume the primary ray travels the total reflection distance)
+        if (mVecDistance > 0)
+        {
+            mVecPosW += -viewDir * mVecDistance;
+            // Compute motion vector.
+            float2 pixelPos = pixel + float2(0.5f, 0.5f);
+            float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(mVecPosW, 1.f));
+            mVec = calcMotionVector(pixelPos, prevPosH, dispatchDims) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
+        }
     } else {
         // Set invalid RTXDI data
         gRTXDI.setInvalidSurfaceData(pixel);
@@ -526,6 +545,7 @@ void rayGen()
     gFinalGatherReservoir[index2Dto1D(pixel, dispatchDims.x)] = finalGatherReservoir;
     gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)] = causticReservoir;
     gEmission[pixel] = float4(emission, 1.0);
+    gResamplingMVec[pixel] = mVec;
     if (kEnableLightTraceSplatting)
         gLightTraceHeadCounter[pixel] = -1; // Set to invalid
 }

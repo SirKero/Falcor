@@ -694,6 +694,15 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpEmission->setName("EmissionTexture");
     }
 
+    if (!mpResampleMVec || mResetScreenTex)
+    {
+        mpResampleMVec = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RG32Float, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpResampleMVec->setName("MVecResampling");
+    }
+
     // Light Trace resources
     if (!mpLightTraceHeadCounter || mResetScreenTex)
     {
@@ -1638,12 +1647,13 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
     var["gCausticPhotonHitInfo"] = mpCausticPhotonHitInfo;
-
+    var["gMVec"] = renderData[kInputMVec]->asTexture();
 
     // Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
+    var["gResamplingMVec"] = mpResampleMVec;
 
     //Guiding textures
     var["gGuidingCounter"] = mpRecordGuidingAtlas;
@@ -1655,6 +1665,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     // Reservoir barrier
     pRenderContext->uavBarrier(mpFinalGatherReservoir[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpCausticReservoir[mFrameCount % 2].get());
+
 }
 
 void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1708,7 +1719,7 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
 
     // Input Resources
     var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount + 1) % 2];
-    var["gMVec"] = renderData[kInputMVec]->asTexture();
+    var["gMVec"] = mpResampleMVec;
     var["gLightIndexGuiding"] = mpLightIndexGuidingTexture[mFrameCount % 2];
     var["gLightIndexGuidingPrev"] = mpLightIndexGuidingTexture[(mFrameCount + 1) % 2];
     var["gGuidingAtlas"] = mpGuidingAtlas[mFrameCount % 2];
@@ -1782,7 +1793,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
 
     // Input Resources
     var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
-    var["gMVec"] = renderData[kInputMVec]->asTexture();
+    var["gMVec"] = mpResampleMVec;
     var["gLightIndexGuiding"] = mpLightIndexGuidingTexture[mFrameCount % 2];
     var["gLightIndexGuidingPrev"] = mpLightIndexGuidingTexture[(mFrameCount + 1) % 2];
     var["gGuidingAtlas"] = mpGuidingAtlas[mFrameCount % 2];
