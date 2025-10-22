@@ -1127,7 +1127,6 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
 
         var["gSrc"].setSrv(pCurrentIdxGuiding->getSRV(0,1));
         var["gDst"].setUav(pCurrentAtlas->getUAV(0));
-        var["gDebug"] = renderData[kOutputDebug]->asTexture();
     }
     var["CB"]["gDispatchDim"] = dispatchSize;
 

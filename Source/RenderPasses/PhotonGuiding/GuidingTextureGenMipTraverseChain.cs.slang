@@ -46,16 +46,17 @@ void main(uint3 thdID: SV_DispatchThreadID)
         return;
 
     //Check if there is a light at the pixel
-    /*
-    #if !IS_LIGHT_INDEX_TEXTURE
+#if !IS_LIGHT_INDEX_TEXTURE
+    if (gRes > 0) //Res can be 0 in case fixed photon distribution is used
+    { 
         uint lightsPerRow = gDispatchSize / gRes;
         uint2 lightPixel = pixel / gRes;
         uint lightIdx = lightPixel.x + lightPixel.y * lightsPerRow;
         if (lightIdx >= COUNT_LIGHTS)
             return;
-    #endif
-    */
-
+    }
+#endif
+    
     if (gCopyFromCounter)
     {
         // Get Start weight

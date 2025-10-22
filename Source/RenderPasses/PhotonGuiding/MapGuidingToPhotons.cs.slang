@@ -4,7 +4,6 @@
 
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
-RWTexture2D<float4> gDebug;
 
 cbuffer CB {
     uint2 gDispatchDim;
@@ -40,7 +39,6 @@ void main(uint3 thdID: SV_DispatchThreadID)
             float photonsPerLight = gSrc[lightIndexPixel];
             float percentPhotons = gDst[pixel];
             numberPhotons += floor(percentPhotons * photonsPerLight);
-            gDebug[pixel] = float4(photonsPerLight, percentPhotons, 1,1);
         }
     }
 
