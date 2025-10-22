@@ -109,15 +109,11 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     IgnoreHit();
 }
 
-//Checks if the ray start point is inside the sphere.
+// Checks if the ray start point is inside the sphere.
 bool hitSphere(const float3 center, const float radius, const float3 p)
 {
     float3 radiusTest = p - center;
-    radiusTest = radiusTest * radiusTest;
-    float radiusTestF = radiusTest.x + radiusTest.y + radiusTest.z;
-    if (radiusTestF < radius * radius)
-        return true;
-    return false;
+    return dot(radiusTest, radiusTest) < radius * radius;
 }
 
 [shader("intersection")]

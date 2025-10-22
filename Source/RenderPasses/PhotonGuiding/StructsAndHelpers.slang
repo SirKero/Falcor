@@ -232,6 +232,13 @@ float getContinuationProbablity(BSDFProperties props)
     return clamp(luminance(totalMaterialEnergie), 0.0, 1.0);
 }
 
+// Checks if the ray start point is inside the sphere.
+bool hitSphere(const float3 center, const float radius, const float3 p)
+{
+    float3 radiusTest = p - center;
+    return dot(radiusTest, radiusTest) < radius * radius;
+}
+
 // Adaptive Radius helper
 float adaptiveRadius(float distanceToCamera, float normalizedPixelDiagonal, float radiusScale = 1.0)
 {

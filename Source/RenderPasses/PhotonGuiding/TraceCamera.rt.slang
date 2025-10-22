@@ -70,17 +70,6 @@ struct CameraState {
     }
 }
 
-// Checks if the ray start point is inside the sphere.
-bool hitSphere(const float3 center, const float radius, const float3 p)
-{
-    float3 radiusTest = p - center;
-    radiusTest = radiusTest * radiusTest;
-    float radiusTestF = radiusTest.x + radiusTest.y + radiusTest.z;
-    if (radiusTestF < radius * radius)
-        return true;
-    return false;
-}
-
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
     float3 collectedRadiance = float3(0);
     // Prepare ray
