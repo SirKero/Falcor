@@ -228,7 +228,7 @@ private:
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
     bool mReSTIREnableGuidingJacobian = false;   //Enable guiding jacobian
     bool mUseFixedGuidingDispatch = false;      //Determine guiding dispatch beforehand and distribute on trace photon pixels
-    uint mFixedGuidingDispatchReservedPhotons = 32; //Number of photons that are reserved due to fixed dispatch
+    uint mFixedGuidingDispatchReservedPhotons = 64; //Number of photons that are reserved due to fixed dispatch
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;

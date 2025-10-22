@@ -338,6 +338,11 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
         changed |= group.checkbox("Map Guiding to Photon dispatch size", mUseFixedGuidingDispatch);
 
+        changed |= group.var(
+            "Map Guiding: Min Photons Per Light", mFixedGuidingDispatchReservedPhotons, 32u, mGuidingTextureResolution * mGuidingTextureResolution, 1u
+        );
+
+
         mGuidingResetAccumulateCount = group.button("Reset Guiding Textures");
     }
 
@@ -953,6 +958,8 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["CB"]["gIterationCount"] = iterationCount;
         var["CB"]["gClearValue"] = clearValue;
         var["CB"]["gDispatchSize"] = mGuidingAtlasResolution;
+        var["CB"]["gFixedGuidingCheckPhotonCount"] = false;
+
         var["gSrcCounter"].setUav(mpRecordGuidingAtlas->getUAV(0));
         var["gSrcCounterTotal"].setSrv(mpRecordGuidingAtlas->getSRV(maxMip, 1u));
         var["gWeightLastFrame"] = mpGuidingAtlasPrevUnblurred;
@@ -976,6 +983,8 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
                 
     //Loop to generate the mip chain
     var["CB"]["gCopyFromCounter"] = false;
+    var["gFixedGuidingLightIdxPhotons"] = mpLightIndexGuidingTexture[mFrameCount % 2];
+
     uint resolution = mGuidingAtlasResolution / 2;
     uint resPerLight = mGuidingTextureResolution / 2;
     uint mipCount = mUseFixedGuidingDispatch ? pCurrentGuidingTex->getMipCount() : mGuidingAtlasMipLevels;
@@ -983,6 +992,10 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
     {
         var["CB"]["gRes"] = resPerLight;
         var["CB"]["gDispatchSize"] = resolution;
+        if (m == mGuidingAtlasMipLevels - 1)
+            var["CB"]["gFixedGuidingCheckPhotonCount"] = true;
+        else
+            var["CB"]["gFixedGuidingCheckPhotonCount"] = false;
 
         var["gSrc"].setSrv(pCurrentGuidingTex->getSRV(m - 1, 1u));
         var["gDst"].setUav(pCurrentGuidingTex->getUAV(m));
@@ -1089,10 +1102,14 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
 
         DefineList defines;
         defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
+        defines.add("LIGHT_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
 
         mpMapGuidingToDistributedPhotonsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpMapGuidingToDistributedPhotonsPass);
+    mpMapGuidingToDistributedPhotonsPass->getProgram()->addDefine(
+        "LIGHT_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution)
+    );
 
     auto& pCurrentAtlas = mpGuidingAtlas[mFrameCount % 2];
     auto& pCurrentIdxGuiding = mpLightIndexGuidingTexture[mFrameCount % 2];
@@ -1100,14 +1117,15 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
     auto var = mpMapGuidingToDistributedPhotonsPass->getRootVar();
 
     //Get photons that can be freely distributed
-    mFixedGuidingDispatchReservedPhotons = mGuidingTextureResolution * mGuidingTextureResolution * mEmissiveLightCount; // Reserve 1 photon for every guiding pixel
+    //mFixedGuidingDispatchReservedPhotons = mGuidingTextureResolution * mGuidingTextureResolution; // Reserve 1 photon for every guiding pixel
     uint freePhotons = static_cast<uint>(std::floor(sqrt(mNumDispatchedPhotons)));
-    freePhotons = std::max(freePhotons * freePhotons, mFixedGuidingDispatchReservedPhotons);
-    freePhotons -= mFixedGuidingDispatchReservedPhotons;
+    freePhotons = std::max(freePhotons * freePhotons, mFixedGuidingDispatchReservedPhotons * mEmissiveLightCount);
+    freePhotons -= mFixedGuidingDispatchReservedPhotons * mEmissiveLightCount;
 
     var["CB"]["gDistributedPhotons"] = freePhotons;
     var["CB"]["gGuidingTextureRes"] = mGuidingTextureResolution;
     var["CB"]["gLightIdxRes"] = mGuidingLightIndexSize;
+    var["CB"]["gMinPhotonsPerLight"] = mFixedGuidingDispatchReservedPhotons;
 
     uint2 dispatchSize = uint2(0);
     if (isLightIndexPass)
@@ -1253,6 +1271,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
         defines.add("USE_FIXED_PHOTON_GUIDING", mUseFixedGuidingDispatch ? "1" : "0");
+        defines.add("FIXED_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -1265,6 +1284,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_FIXED_PHOTON_GUIDING", mUseFixedGuidingDispatch ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("FIXED_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -1279,7 +1299,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
 
     uint minDispatchedPhotons = 128u; //At least 128^2 photons
     if (mUseFixedGuidingDispatch)
-        minDispatchedPhotons = static_cast<uint>(std::floor(sqrt(mFixedGuidingDispatchReservedPhotons))) + 1;
+        minDispatchedPhotons = static_cast<uint>(std::floor(sqrt(mFixedGuidingDispatchReservedPhotons * mEmissiveLightCount))) + 1;
 
     uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
     shaderDispatchDim = std::max(minDispatchedPhotons, shaderDispatchDim);
@@ -1290,14 +1310,14 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
-    var["CB"]["gGuidingTextureMaxMip"] =
-        mUseFixedGuidingDispatch ? mpGuidingAtlas[mFrameCount % 2]->getMipCount() - 1 : mGuidingAtlasMipLevels - 1;
+    var["CB"]["gGuidingTextureMaxMip"] = mGuidingAtlasMipLevels - 1;
     var["CB"]["gGuidingAtlasResolution"] = mGuidingAtlasResolution;
     var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
     var["CB"]["gNormalizedPixelDiagonal"] = mNormalizePixelDiagonal;
     var["CB"]["gScreenDimensions"] = mScreenRes;
     var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
-    var["CB"]["gLightIndexGuidingMaxMip"] = mpLightIndexGuidingTexture[mFrameCount % 2]->getMipCount() - 1u;
+    var["CB"]["gLightIndexGuidingMaxMip"] = mUseFixedGuidingDispatch ? mpGuidingAtlas[mFrameCount % 2]->getMipCount() - 1
+                                                                     : mpLightIndexGuidingTexture[mFrameCount % 2]->getMipCount() - 1u;
 
     // Output
     for (uint i = 0; i < 2; i++)
@@ -1456,6 +1476,7 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     var["CB"]["gShowLightIndexGuiding"] = mDebugShowLightIndexGuidingTex;
     var["CB"]["gLightIndexGuidingSize"] = mGuidingLightIndexSize;
     var["CB"]["gLightIndexGuidingScale"] = lightIdxColorScale;
+    var["CB"]["gIsFixedGuidingMode"] = mUseFixedGuidingDispatch;
       
     var["gGuidingTexture"] = mpGuidingAtlas[mFrameCount % 2];
     var["gLightIndexGuidingTexture"] = mpLightIndexGuidingTexture[mFrameCount % 2];

@@ -24,7 +24,7 @@ cbuffer CB
     uint gGuidingAtlasResolution; //Resolution of the guiding atlas
 
     float gNormalizedPixelDiagonal; // Pixel length at distance 1
-    uint gLightIndexGuidingMaxMip;  // Max Mip of "gGuidingLightIndex"
+    uint gLightIndexGuidingMaxMip;  // Max Mip of "gGuidingLightIndex" or of the combined guiding atlas if kUseFixedPhotonGuiding == true
     uint2 gScreenDimensions; // Screen dimensions for backprojection
 
     uint gLightIndexGuidingResolution; // Resolution of "gGuidingLightIndex"
@@ -49,7 +49,8 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = RUSSIAN_ROULETTE;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
-static const bool kUseFixedPhotonGuiding = USE_FIXED_PHOTON_GUIDING; //Photons are distributed before the pass
+static const bool kUseFixedPhotonGuiding = USE_FIXED_PHOTON_GUIDING; // Photons are distributed before the pass
+static const uint kFixedPhotonGuidingMinPhotons = FIXED_GUIDING_MIN_PHOTONS; //Min photons for light guiding
 
 struct RayPayload
 {
@@ -286,16 +287,20 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenera
     uint blockOffset = blockID.x * (blockSize * blockSize) + blockID.y * dispatchDimX * blockSize;
     float tw = block1D + blockOffset;
 
-    //float tw = pixel.x + pixel.y * dispatchDimX; //Old simple linearized version
-    float maxPhotons = gGuidingTexture.Load(uint3(0, 0, gGuidingTextureMaxMip)); // Sum of all photons
+    // float tw = pixel.x + pixel.y * dispatchDimX; //Old simple linearized version
+    float maxPhotons = gGuidingTexture.Load(uint3(0, 0, gLightIndexGuidingMaxMip)); // Sum of all photons
 
     if (tw >= maxPhotons)
         return false;
 
     //Traverse the mipmap chain
-    uint2 mipIdx = uint2(0);                       // Working index for mip chain traversal. Starts top left (0)
-    int startMip = int(gGuidingTextureMaxMip) - 1; // start from second highest level
+    uint2 mipIdx = uint2(0); // Working index for mip chain traversal. Starts top left (0)
+    const uint mipLevelCheckLightCount = gGuidingTextureMaxMip; 
+    int startMip = int(gLightIndexGuidingMaxMip) - 1; // start from second highest level
     float endWeight = 0;
+    uint lightIndex = 0;
+    const uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
+    bool endedLoopEarly = false;
     for (int m = startMip; m >= 0; m--) {
         // Update mip index and offset from last iteration
         mipIdx *= 2;
@@ -331,23 +336,45 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenera
         if (selectedSubpixel > 1) // 2 or 3
             mipIdx.y += 1;
 
+        if (m == mipLevelCheckLightCount)
+        {
+            lightIndex = mipIdx.x + mipIdx.y * atlasLightsPerRow;
+            if (mipSamples[selectedSubpixel] < kFixedPhotonGuidingMinPhotons)
+            {
+                endWeight = mipSamples[selectedSubpixel];
+                endedLoopEarly = true;
+                break;
+            }
+        }
+
         if (m == 0)
             endWeight = mipSamples[selectedSubpixel];
     }
     // Recreate selected random number range from the choosen index
-    pls.guidingPixels = mipIdx;
-    uint2 relIdx = mipIdx % gGuidingTextureResolution;
-    float2 relMinWeight = float2(relIdx) / gGuidingTextureResolution;
-    float2 relMaxWeight = float2(relIdx + 1) / gGuidingTextureResolution;
-    relMinWeight += (relMaxWeight - relMinWeight) * sampleNext2D(sg);
-    pls.rndX = relMinWeight.x;
-    pls.rndY = relMinWeight.y;
-    float guidingPDF = (endWeight / maxPhotons) * (gGuidingTextureResolution * gGuidingTextureResolution);
+    float2 randomVal = sampleNext2D(sg);
+    float guidingPDF = endWeight / maxPhotons;
 
+    //Fill out random values depending if the loop ended at the light or direction
+    if (endedLoopEarly) {
+        pls.rndX = randomVal.x;
+        pls.rndY = randomVal.y;
+        uint2 offsetLightIdx = uint2(lightIndex % atlasLightsPerRow, lightIndex / atlasLightsPerRow) * gGuidingTextureResolution;
+        pls.guidingPixels = offsetLightIdx + uint2(floor(randomVal * gGuidingTextureResolution));
+    } else {
+        pls.guidingPixels = mipIdx;
+        uint2 relIdx = mipIdx % gGuidingTextureResolution;
+        float2 relMinWeight = float2(relIdx) / gGuidingTextureResolution;
+        float2 relMaxWeight = float2(relIdx + 1) / gGuidingTextureResolution;
+        relMinWeight += (relMaxWeight - relMinWeight) * randomVal;
+        pls.rndX = relMinWeight.x;
+        pls.rndY = relMinWeight.y;
+        guidingPDF *= (gGuidingTextureResolution * gGuidingTextureResolution);
+    }
+    
     // Recreate light index
-    uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
-    uint2 lightIdxPixel = mipIdx / gGuidingTextureResolution;
-    const uint lightIndex = lightIdxPixel.x + lightIdxPixel.y * atlasLightsPerRow;
+    //uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
+    //uint2 lightIdxPixel = mipIdx / gGuidingTextureResolution;
+    //const uint lightIndex = lightIdxPixel.x + lightIdxPixel.y * atlasLightsPerRow;
     if (lightIndex >= gScene.lightCollection.triangleCount)
         return false;
 

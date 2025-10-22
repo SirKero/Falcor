@@ -23,6 +23,7 @@ Texture2D<COUNTER_FORMAT> gSrcCounterTotal; // Only used when gCopyFromCounter =
 RWTexture2D<float> gWeightLastFrame; // Only used when gCopyFromCounter = true
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
+Texture2D<float> gFixedGuidingLightIdxPhotons; //Only used on a certain mip level
 
 cbuffer CB {
     uint gRes;
@@ -31,6 +32,7 @@ cbuffer CB {
     float gClearValue;
 
     uint gDispatchSize;
+    bool gFixedGuidingCheckPhotonCount;  
 }
 
 /* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
@@ -109,6 +111,15 @@ void main(uint3 thdID: SV_DispatchThreadID)
         sum += gSrc[uint2(srcIdx.x + 1, srcIdx.y)];
         sum += gSrc[uint2(srcIdx.x, srcIdx.y + 1)];
         sum += gSrc[uint2(srcIdx.x + 1, srcIdx.y + 1)];
+
+        if (gFixedGuidingCheckPhotonCount) {
+            //Check if photons where distributed on the lower levels
+            if (sum <= 0) {
+                // Sample the light texture and use the number of photons
+                sum += gFixedGuidingLightIdxPhotons[pixel];
+            }
+
+        }
 
         gDst[pixel] = sum;
     }

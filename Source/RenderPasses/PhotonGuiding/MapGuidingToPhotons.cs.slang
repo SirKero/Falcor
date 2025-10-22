@@ -12,7 +12,10 @@ cbuffer CB {
 
     uint gGuidingTextureRes;
     uint gLightIdxRes;
+    uint gMinPhotonsPerLight; // Guranteed less than kMinPhotonsNeededForLightGuiding
 }
+
+static const uint kMinPhotonsNeededForLightGuiding = LIGHT_GUIDING_MIN_PHOTONS;
 
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
@@ -27,18 +30,23 @@ void main(uint3 thdID: SV_DispatchThreadID)
         if (lightIndex >= COUNT_LIGHTS)
             numberPhotons = 0;
         else
-            numberPhotons += floor(gDst[pixel] * gDistributedPhotons);
+            numberPhotons += floor(gDst[pixel] * gDistributedPhotons) + gMinPhotonsPerLight;
     }
     else {
-        numberPhotons = 1.0;
         const uint2 lightIndexPixel = pixel / gGuidingTextureRes; // Pixel in light index texture
         const uint lightIndex = lightIndexPixel.x + lightIndexPixel.y * gLightIdxRes;
         if (lightIndex >= COUNT_LIGHTS)
             numberPhotons = 0;
         else {
             float photonsPerLight = gSrc[lightIndexPixel];
-            float percentPhotons = gDst[pixel];
-            numberPhotons += floor(percentPhotons * photonsPerLight);
+            if (photonsPerLight > kMinPhotonsNeededForLightGuiding)
+            {
+                photonsPerLight -= kMinPhotonsNeededForLightGuiding;
+                float percentPhotons = gDst[pixel];
+                numberPhotons += floor(percentPhotons * photonsPerLight) + 1;
+            } else if (photonsPerLight == kMinPhotonsNeededForLightGuiding) {
+                numberPhotons = 1;
+            }
         }
     }
 

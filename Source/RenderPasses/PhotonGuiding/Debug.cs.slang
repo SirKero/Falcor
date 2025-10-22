@@ -22,6 +22,7 @@ cbuffer CB {
     uint gLightIndexGuidingSize;
 
     float gLightIndexGuidingScale;
+    bool gIsFixedGuidingMode; 
 }
 
 [numthreads(16, 16, 1)]
@@ -50,7 +51,10 @@ void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_Gro
         if (gShowLightIndexGuiding)
             output.xyz = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
         else {
-            output.xyz = gGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gColorScaleFactor;
+            float guidingValue = gGuidingTexture.SampleLevel(gPointSampler, uv, 0);
+            output.xyz = guidingValue * gColorScaleFactor;
+            if (guidingValue < 1 && gIsFixedGuidingMode)
+                output.xy += gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
         }
     }
     gDebug[pixel] = output; 
