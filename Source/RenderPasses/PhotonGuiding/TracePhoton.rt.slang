@@ -50,7 +50,9 @@ static const bool kRussianRoulette = RUSSIAN_ROULETTE;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const bool kUseFixedPhotonGuiding = USE_FIXED_PHOTON_GUIDING; // Photons are distributed before the pass
-static const uint kFixedPhotonGuidingMinPhotons = FIXED_GUIDING_MIN_PHOTONS; //Min photons for light guiding
+static const uint kFixedPhotonGuidingMinPhotons = FIXED_GUIDING_MIN_PHOTONS; // Min photons for light guiding
+static const uint kAnalyticLightIdxOffset = ANALYTIC_START_INDEX;
+static const uint kTotalLightCount = TOTAL_LIGHT_COUNT;
 
 struct RayPayload
 {
@@ -167,7 +169,7 @@ bool sampleLightIndex(inout SampleGenerator sg, out uint selectedIdx , out float
 
     // Linearize the selected mip idx
     selectedIdx = mipIdx.x + mipIdx.y * gLightIndexGuidingResolution;
-    if (selectedIdx >= gScene.lightCollection.triangleCount)
+    if (selectedIdx >= kTotalLightCount)
         return false;
 
     return true;
@@ -254,7 +256,12 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     pls.rndY = relMinWeight.y;
     float guidingPDF = endWeight * (gGuidingTextureResolution * gGuidingTextureResolution);
 
+    pls.lightIdx = triIdx;
+    pls.guidingPdf = triangleSelectionPdf * guidingPDF;
+
+    return true;
     // Get emissive triangle data
+    /*
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triIdx);
     const float3 barycentrics = sample_triangle(sampleNext2D(sg));
     pls.posW = tri.getPosition(barycentrics);
@@ -269,6 +276,7 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     pls.guidingPdf = triangleSelectionPdf * guidingPDF;
     //pls.flux /= pls.guidingPdf;
     return true;
+    */
 }
 
 bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenerator sg, out PhotonLightSample pls)
@@ -371,29 +379,85 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenera
         guidingPDF *= (gGuidingTextureResolution * gGuidingTextureResolution);
     }
     
-    // Recreate light index
-    //uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
-    //uint2 lightIdxPixel = mipIdx / gGuidingTextureResolution;
-    //const uint lightIndex = lightIdxPixel.x + lightIdxPixel.y * atlasLightsPerRow;
-    if (lightIndex >= gScene.lightCollection.triangleCount)
+    if (lightIndex >= kTotalLightCount)
         return false;
 
-    // Get emissive triangle data
-    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(lightIndex);
-    const float3 barycentrics = sample_triangle(sampleNext2D(sg));
-    pls.posW = tri.getPosition(barycentrics);
-    pls.normal = tri.normal;
+    pls.guidingPdf = guidingPDF;
     pls.lightIdx = lightIndex;
 
-    // Get Flux
-    float2 uv = tri.getTexCoord(barycentrics);
-    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
-
-    pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
-    pls.guidingPdf = guidingPDF;
-    // pls.flux /= pls.guidingPdf;
     return true;
+}
 
+//Samples the light
+bool sampleLight(inout PhotonLightSample pls, inout RayDesc ray, inout SampleGenerator sg)
+{
+    // Check if the light is emissive or analytic
+    bool isAnalytic = pls.lightIdx >= kAnalyticLightIdxOffset;
+    float2 randomValues = float2(pls.rndX, pls.rndY);
+    // float2 randomValues = sampleNext2D(sg);
+
+    float3 woLocal = float3 (0);
+
+    // Sample Light depending on type
+    if (isAnalytic)
+    {
+        const uint analyticLightIndex = pls.lightIdx - kAnalyticLightIdxOffset;
+        LightData lightData = gScene.getLight(analyticLightIndex);
+        //For now only point (and spot) lights are supported
+        if (lightData.type != uint(LightType::Point))
+            return false;
+
+        float spotAngle = lightData.cosOpeningAngle;
+       
+        if (lightData.openingAngle < M_2PI) // If the opening angle is smaller than 2PI it is a spotlight
+        {
+            // TODO support penumbra
+            woLocal = sample_cone(randomValues.xy, spotAngle);
+        } else // Pointlight
+        {
+            spotAngle = 0;
+            woLocal = sample_sphere(randomValues.xy);
+        }
+        float invLightPdf = M_2PI * (1.0 - spotAngle);
+
+        if (invLightPdf <= 0.f)
+            return false;
+
+        pls.posW = lightData.posW;
+        pls.normal = lightData.dirW;
+        pls.flux = lightData.intensity * invLightPdf;
+
+    } else //Emissive
+    {
+        // Get light data
+        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(pls.lightIdx);
+        const float3 barycentrics = sample_triangle(sampleNext2D(sg));
+        pls.posW = tri.getPosition(barycentrics);
+        pls.normal = tri.normal;
+
+        // Get Flux
+        float2 uv = tri.getTexCoord(barycentrics);
+        pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
+
+        pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
+
+        //Light direction
+        float lightDirPDF = 1.0;
+        
+        woLocal = sample_cosine_hemisphere_concentric(randomValues, lightDirPDF);
+
+        if (lightDirPDF <= 0.)
+            return false;
+
+        pls.flux *= M_PI; // Lambert Emitter
+    }
+
+    ray.Origin = pls.posW;
+    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+    ray.TMin = 0.0f;
+    ray.TMax = FLT_MAX;
+    
+    return true;
 }
 
 float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)
@@ -478,8 +542,8 @@ void rayGen()
     const float invRejection = 1.f / gGlobalRejectionProb;
 
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 2);
-    RayDesc ray;
-    PhotonLightSample pls;
+    RayDesc ray = {};
+    PhotonLightSample pls = {};
 
     // Create a photon by sampling from emissive lights or analytic light sources
     if (kUseFixedPhotonGuiding) {
@@ -489,25 +553,14 @@ void rayGen()
         if (!createGuidingLightSample(sg, pls))
             return;
     }
-    
-    float lightDirPDF = 1.0;
-    float2 randomValues = float2(pls.rndX, pls.rndY);
-    //float2 randomValues = sampleNext2D(sg);
 
-    float3 woLocal = sample_cosine_hemisphere_concentric(randomValues, lightDirPDF);
-
-    if (lightDirPDF <= 0.)
+    //Sample emissive or analytic light
+    if (!sampleLight(pls, ray, sg))
         return;
-
-    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-    pls.flux *= M_PI; // Lambert Emitter
     
     const uint lightCount = dispatchDims.x * dispatchDims.y;
 
-    //Prepare the rest of the ray
-    ray.Origin = pls.posW;
-    ray.TMin = 0.0f;
-    ray.TMax = FLT_MAX;
+    //Prepare photon data
     RayPayload rayPayload = RayPayload();
     
     bool storeAsCaustic = false;

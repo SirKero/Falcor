@@ -210,6 +210,8 @@ private:
     //
     bool mEmissiveLightResetTextures = false;
     uint mEmissiveLightCount = 0;
+    uint mAnalyticLightCount = 0;
+    uint mTotalLightCount = 0;
     uint mGuidingTextureResolution = 64;    //Resolution of one guiding texture
     uint mGuidingAtlasResolution = 512;     //Resolution of the guiding atlas
     uint mGuidingAtlasMipLevels = 1;        //
@@ -227,7 +229,7 @@ private:
     float mGuidingBlurSigma = 1.f;      //Gaussian blur sigma
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
     bool mReSTIREnableGuidingJacobian = false;   //Enable guiding jacobian
-    bool mUseFixedGuidingDispatch = false;      //Determine guiding dispatch beforehand and distribute on trace photon pixels
+    bool mUseFixedGuidingDispatch = true;      //Determine guiding dispatch beforehand and distribute on trace photon pixels
     uint mFixedGuidingDispatchReservedPhotons = 64; //Number of photons that are reserved due to fixed dispatch
 
     //Debug

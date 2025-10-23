@@ -154,7 +154,7 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     prepareLightingStructure(pRenderContext);
 
     //Return if there is no emissive light
-    if (mEmissiveLightCount == 0)
+    if (mTotalLightCount == 0)
         return;
 
     //Prepare Textures and Buffers
@@ -434,7 +434,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         if (mDebugShowGuidingTexture)
         {
             group.checkbox("Show Light Index Select Guiding Tex", mDebugShowLightIndexGuidingTex);
-            group.slider("Selected Tri light", mDebugSelectedTriLight, -1, int(mEmissiveLightCount) - 1);
+            group.slider("Selected Tri light", mDebugSelectedTriLight, -1, int(mTotalLightCount) - 1);
             group.var("Color Scale", mDebugColorScaleFactor, 0.f, FLT_MAX, 0.01f, false, "%.6f");
             group.checkbox("Scale to DebugTex", mDebugScaleToDstDim);
             if (!mDebugScaleToDstDim)
@@ -456,9 +456,11 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
     //mHasAnalyticLights = analyticUsed;
     //mMixedLights = emissiveUsed && analyticUsed;
 
-    if (pLights->getTotalLightCount() != mEmissiveLightCount)
+    if (pLights->getTotalLightCount() != mEmissiveLightCount || mpScene->getLightCount() != mAnalyticLightCount)
     {
         mEmissiveLightCount = pLights->getTotalLightCount();
+        mAnalyticLightCount = mpScene->getLightCount();
+        mTotalLightCount = mEmissiveLightCount + mAnalyticLightCount;
         mpGuidingAtlas[0].reset();
         mpGuidingAtlas[1].reset();
         mpGuidingAtlasPrevUnblurred.reset();
@@ -584,7 +586,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     {
         //Update atlas size
         float minSideLength =
-            math::ceil(math::sqrt(float(mEmissiveLightCount * mGuidingTextureResolution * mGuidingTextureResolution))); // ceiled pixel
+            math::ceil(math::sqrt(float(mTotalLightCount * mGuidingTextureResolution * mGuidingTextureResolution))); // ceiled pixel
                                                                                                                         // width/length
         mGuidingAtlasResolution = uint(pow(2.f, math::ceil(math::log2(minSideLength)))); // Gets next nearest power 2 number
         mGuidingAtlasMipLevels = uint(round(math::log2(float(mGuidingTextureResolution)))) + 1;
@@ -631,7 +633,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         
     if (!mpLightIndexGuidingTexture[0] || !mpLightIndexGuidingTexture[1])
     {
-        float minSideLength = math::ceil(math::sqrt(float(mEmissiveLightCount)));                                  //ceiled pixel width/length
+        float minSideLength = math::ceil(math::sqrt(float(mTotalLightCount)));                          // ceiled pixel width/length
         mGuidingLightIndexSize = uint(pow(2.f, math::ceil(math::log(minSideLength) / math::log(2.f)))); //Gets next nearest power 2 number
         for (uint i = 0; i < 2; i++)
         {
@@ -938,10 +940,10 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         desc.addShaderLibrary(kShaderGuidingGenMipTraverseChain).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
-        defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
+        defines.add("COUNT_TEXTURES", std::to_string(mTotalLightCount));
         defines.add("COUNTER_FORMAT", guidingIsUintFormat(mGuidingMode) ? "uint" : "float");
         defines.add("USE_TEMPORAL_WEIGHT_TEXTURE", "1");
-        defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
+        defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "0");
 
         mpGenerateGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -975,7 +977,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["gSrc"].setSrv(mpGuidingAtlas[(mFrameCount + 1) % 2]->getSRV(0,1u));
         var["gDst"].setUav(pCurrentGuidingTex->getUAV(0));
 
-        const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mEmissiveLightCount);
+        const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mTotalLightCount);
 
         mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(mGuidingAtlasResolution, maxYDispatch, 1)
         );
@@ -1011,7 +1013,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
 
         uint maxYDispatch = resolution;
         if (m < mGuidingAtlasMipLevels)
-            maxYDispatch = getOptimizedAtlasYDispatch(resolution, resPerLight, mEmissiveLightCount);
+            maxYDispatch = getOptimizedAtlasYDispatch(resolution, resPerLight, mTotalLightCount);
 
         mpGenerateGuidingMipTraverseChainPass->execute(pRenderContext, uint3(resolution, maxYDispatch, 1));
         resolution /= 2;
@@ -1029,7 +1031,7 @@ void PhotonGuiding::blurGuidingAtlasPass(RenderContext* pRenderContext, const Re
 
         DefineList defines;
         defines.add("BLUR_WIDTH", std::to_string(mGuidingBlurWidth));
-        defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
+        defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("IS_HORIZONTAL", "1");
         defines.add("IS_VERTICAL", "0");
         mpGuidingBlurPass[0] = ComputePass::create(mpDevice, desc, defines, true);
@@ -1076,7 +1078,7 @@ void PhotonGuiding::blurGuidingAtlasPass(RenderContext* pRenderContext, const Re
         mGuidingBlurUpdateWeights = false;
     }
 
-    const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mEmissiveLightCount);
+    const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mTotalLightCount);
     uint3 dispatchSize = uint3(mGuidingAtlasResolution, maxYDispatch, 1);
     //Horizontal Blur
     {
@@ -1110,7 +1112,7 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
         desc.addShaderLibrary(kShaderMapGuidingToPhotons).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
-        defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
+        defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("LIGHT_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
 
         mpMapGuidingToDistributedPhotonsPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -1128,8 +1130,8 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
     //Get photons that can be freely distributed
     //mFixedGuidingDispatchReservedPhotons = mGuidingTextureResolution * mGuidingTextureResolution; // Reserve 1 photon for every guiding pixel
     uint freePhotons = static_cast<uint>(std::floor(sqrt(mNumDispatchedPhotons)));
-    freePhotons = std::max(freePhotons * freePhotons, mFixedGuidingDispatchReservedPhotons * mEmissiveLightCount);
-    freePhotons -= mFixedGuidingDispatchReservedPhotons * mEmissiveLightCount;
+    freePhotons = std::max(freePhotons * freePhotons, mFixedGuidingDispatchReservedPhotons * mTotalLightCount);
+    freePhotons -= mFixedGuidingDispatchReservedPhotons * mTotalLightCount;
 
     var["CB"]["gDistributedPhotons"] = freePhotons;
     var["CB"]["gGuidingTextureRes"] = mGuidingTextureResolution;
@@ -1147,7 +1149,7 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
     }
     else
     {
-        const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mEmissiveLightCount);
+        const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mTotalLightCount);
         dispatchSize = uint2(mGuidingAtlasResolution, maxYDispatch);
 
         var["CB"]["gIsLightIdxPass"] = false;
@@ -1172,7 +1174,7 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
         defines.add("COUNT_TEXTURES", "1");
         defines.add("COUNTER_FORMAT", "uint");
         defines.add("USE_TEMPORAL_WEIGHT_TEXTURE", "1");
-        defines.add("COUNT_LIGHTS", std::to_string(mEmissiveLightCount));
+        defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "1");
 
         mpGenerateLightIndexGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -1281,6 +1283,8 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
         defines.add("USE_FIXED_PHOTON_GUIDING", mUseFixedGuidingDispatch ? "1" : "0");
         defines.add("FIXED_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
+        defines.add("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+        defines.add("TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
@@ -1294,6 +1298,8 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_FIXED_PHOTON_GUIDING", mUseFixedGuidingDispatch ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("FIXED_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
+    mTracePhotonPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+    mTracePhotonPass.pProgram->addDefine("TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -1308,7 +1314,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
 
     uint minDispatchedPhotons = 128u; //At least 128^2 photons
     if (mUseFixedGuidingDispatch)
-        minDispatchedPhotons = static_cast<uint>(std::floor(sqrt(mFixedGuidingDispatchReservedPhotons * mEmissiveLightCount))) + 1;
+        minDispatchedPhotons = static_cast<uint>(std::floor(sqrt(mFixedGuidingDispatchReservedPhotons * mTotalLightCount))) + 1;
 
     uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
     shaderDispatchDim = std::max(minDispatchedPhotons, shaderDispatchDim);
@@ -1459,7 +1465,7 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
         desc.addShaderLibrary(kShaderDebug).csEntry("main").setShaderModel(kShaderModel);
 
         DefineList defines;
-        defines.add("COUNT_TEXTURES", std::to_string(mEmissiveLightCount));
+        defines.add("COUNT_TEXTURES", std::to_string(mTotalLightCount));
 
         mpDebugPass = ComputePass::create(mpDevice, desc, defines, true);
     }
