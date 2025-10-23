@@ -240,6 +240,8 @@ private:
     float mDebugSizeScaleFactor = 1.f;
     bool mDebugScaleToDstDim = true;
     bool mDebugShowLightIndexGuidingTex = false;
+    bool mDebugDisableDirectLight = false;
+    bool mDebugDisableIndirectLight = false;
 
     //
     // Resources

@@ -440,6 +440,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             if (!mDebugScaleToDstDim)
                 group.var("Size Scale", mDebugSizeScaleFactor, 0.f, FLT_MAX, 0.001f);     
         }
+        changed |= group.checkbox("Disable Direct Light", mDebugDisableDirectLight);
+        changed |= group.checkbox("Disable Indirect Light", mDebugDisableIndirectLight);
     }
     mOptionsChanged = changed;
 }
@@ -1839,6 +1841,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
         defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+        defines.add("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));
+        defines.add("DEBUG_DISABLE_INDIRECT_LIGHT", std::to_string(mDebugDisableIndirectLight));
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -1851,6 +1855,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     mpEvaluateReservoirsPass->getProgram()->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
     mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+    mpEvaluateReservoirsPass->getProgram()->addDefine("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));
+    mpEvaluateReservoirsPass->getProgram()->addDefine("DEBUG_DISABLE_INDIRECT_LIGHT", std::to_string(mDebugDisableIndirectLight));
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();

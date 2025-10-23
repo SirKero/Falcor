@@ -32,6 +32,8 @@ static const uint kGuidingMode = GUIDING_MODE;
 static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
+static const bool kDisableDirectLight = DEBUG_DISABLE_DIRECT_LIGHT;
+static const bool kDisableIndirectLight = DEBUG_DISABLE_INDIRECT_LIGHT;
 
 void addToGuidingTexture(int lightIndex, int2 guidingPixel, float emission, uint reservoirConfidence)
 {
@@ -155,14 +157,18 @@ void main(uint2 pixel: SV_DispatchThreadID)
         {
             rtxdiValid = dispatchShadowRay(sd, dir, dist);
         }
-        if (rtxdiValid)
+        if (rtxdiValid && !kDisableDirectLight)
         {
             outColor += mi.eval(sd, dir, sg) * Li;
         }
 
-        outColor += evaluateFinalGatherReservoir(pixel, sg);
-        outColor += evaluateCausticReservoir(pixel, sg);
-        outColor += gEmission[pixel].xyz;
+        float3 indirectLight = float3(0);
+        indirectLight += evaluateFinalGatherReservoir(pixel, sg);
+        indirectLight += evaluateCausticReservoir(pixel, sg);
+        indirectLight += gEmission[pixel].xyz;
+        if (!kDisableIndirectLight)
+            outColor += indirectLight;
+       
     }else{
         outColor = gScene.envMap.eval(viewDir);
     }
