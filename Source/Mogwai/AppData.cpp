@@ -77,7 +77,16 @@ namespace Mogwai
     {
         paths.erase(std::remove_if(paths.begin(), paths.end(), [](const auto& path) {
             // Remove path if file does not exist.
-            if (!std::filesystem::exists(path)) return true;
+            try
+            {
+                if (!std::filesystem::exists(path))
+                    return true;
+            }
+            catch (...)
+            {
+                return true;
+            }
+            
             auto canonicalPath = std::filesystem::canonical(path);
             // Remove path if not in canonical form.
             return path != canonicalPath;
