@@ -56,6 +56,22 @@ FALCOR_ENUM_INFO(GuidingLightIndexMode, {
 });
 FALCOR_ENUM_REGISTER(GuidingLightIndexMode);
 
+enum class GuidingHistogramAccumulateMode : uint
+{
+    ResetOnMove = 0u,
+    AverageFrames = 1u,
+    AveragePercentage = 2u,
+    UseLastFrame = 3u,
+};
+FALCOR_ENUM_INFO(GuidingHistogramAccumulateMode, {
+    { GuidingHistogramAccumulateMode::ResetOnMove, "ResetOnMove" },
+    { GuidingHistogramAccumulateMode::AverageFrames, "AverageFrames" },
+    { GuidingHistogramAccumulateMode::AveragePercentage, "AveragePercentage" },
+    { GuidingHistogramAccumulateMode::UseLastFrame, "UseLastFrame" },
+
+});
+FALCOR_ENUM_REGISTER(GuidingHistogramAccumulateMode);
+
 #ifdef HOST_CODE
 } //namespace PhotonGuiding
 #endif

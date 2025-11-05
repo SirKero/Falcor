@@ -221,8 +221,12 @@ private:
     bool mUseGaussianBlur = true;
     bool mGuidingResetAccumulateCount = false;
     uint mGuidingAccumulateCount = 0;
+
+    GuidingHistogramAccumulateMode mGuidingHistrogramAccumMode = GuidingHistogramAccumulateMode::ResetOnMove;   //Determines what happens with the accumulate texture
+    float mGuidingHistogramAccumValue = 64.f;            //Additional value needed for some accumulate modes
     bool mGuidingRealTimeMode = false;   //If true, the guiding texture does not reset every frame
     uint mGuidingHistoryLimit = 256;    //History limit for the guiding texture
+
     uint mGuidingLightIndexSize = 1;    //Pixel width/height of the index guiding texture
     uint mGuidingDiscretizedEmissionFactor = 255;    //For the discretized modis, the emission is multiplied with this factor
     uint mGuidingBlurWidth = 3;        //Blur radius

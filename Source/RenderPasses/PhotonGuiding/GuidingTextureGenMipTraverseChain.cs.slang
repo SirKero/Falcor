@@ -1,13 +1,11 @@
+import SharedEnums;
+
 #ifndef COUNT_TEXTURES
 #define COUNT_TEXTURES 1
 #endif
 
 #ifndef COUNTER_FORMAT
 #define COUNTER_FORMAT uint
-#endif
-
-#ifndef USE_TEMPORAL_WEIGHT_TEXTURE
-#define USE_TEMPORAL_WEIGHT_TEXTURE 1
 #endif
 
 #ifndef COUNT_LIGHTS
@@ -18,12 +16,24 @@
 #define IS_LIGHT_INDEX_TEXTURE 0
 #endif
 
+#ifndef HISTORAM_ACCUM_MODE
+#define HISTORAM_ACCUM_MODE 0
+#endif
+
 RWTexture2D<COUNTER_FORMAT> gSrcCounter;    // RW for clearing; only used when gCopyFromCounter = true
 Texture2D<COUNTER_FORMAT> gSrcCounterTotal; // Only used when gCopyFromCounter = true
 RWTexture2D<float> gWeightLastFrame; // Only used when gCopyFromCounter = true
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
 Texture2D<float> gFixedGuidingLightIdxPhotons; //Only used on a certain mip level
+
+//Histogram accumulate modes
+static const uint kAccumMode_Offline = (uint)(GuidingHistogramAccumulateMode::ResetOnMove);
+static const uint kAccumMode_FrameAvrg = (uint)(GuidingHistogramAccumulateMode::AverageFrames);
+static const uint kAccumMode_PercentageAvrg = (uint)(GuidingHistogramAccumulateMode::AveragePercentage);
+static const uint kAccumMode_LastFrame = (uint)(GuidingHistogramAccumulateMode::UseLastFrame);
+
+static const uint kAccumMode = HISTORAM_ACCUM_MODE;
 
 cbuffer CB {
     uint gRes;
@@ -32,7 +42,8 @@ cbuffer CB {
     float gClearValue;
 
     uint gDispatchSize;
-    bool gFixedGuidingCheckPhotonCount;  
+    bool gFixedGuidingCheckPhotonCount;
+    float gAccumValue;          //Used in some accumulate modes
 }
 
 /* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
@@ -78,14 +89,13 @@ void main(uint3 thdID: SV_DispatchThreadID)
             float pixelCounterVal = float(gSrcCounter[pixel]);
             weight = total > 0 ? pixelCounterVal / total : 0.0;
             float oldWeight = 0.0;
-            #if USE_TEMPORAL_WEIGHT_TEXTURE
+            if(kAccumMode != kAccumMode_LastFrame)
                 oldWeight = gWeightLastFrame[pixel];
-            #else
-                oldWeight = gSrc[pixel];
-            #endif
-
-            oldWeight *= gIterationCount;
-            weight = (weight + oldWeight) / (gIterationCount + 1);
+           
+            if(kAccumMode == kAccumMode_Offline || kAccumMode == kAccumMode_FrameAvrg)
+                weight = (weight + oldWeight * gIterationCount) / (gIterationCount + 1);
+            else if (kAccumMode == kAccumMode_PercentageAvrg)
+                weight = (weight * gAccumValue) + (oldWeight * (1.0 - gAccumValue));
         }
 
         COUNTER_FORMAT clearValue = 0;
@@ -98,9 +108,8 @@ void main(uint3 thdID: SV_DispatchThreadID)
         // Write
         gDst[pixel] = weight;
         gSrcCounter[pixel] = clearValue;
-        #if USE_TEMPORAL_WEIGHT_TEXTURE
+        if(kAccumMode != kAccumMode_LastFrame)
             gWeightLastFrame[pixel] = weight;
-        #endif
     }
     else
     {
@@ -118,7 +127,6 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 // Sample the light texture and use the number of photons
                 sum += gFixedGuidingLightIdxPhotons[pixel];
             }
-
         }
 
         gDst[pixel] = sum;

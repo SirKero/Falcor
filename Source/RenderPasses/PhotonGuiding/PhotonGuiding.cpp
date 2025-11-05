@@ -142,7 +142,7 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
     auto cameraChanges = mpScene->getCamera()->getChanges();
     bool cameraMoved = (cameraChanges & ~excluded) != Camera::Changes::None;
-    if ((cameraMoved && !mGuidingRealTimeMode) || mOptionsChanged || mGuidingResetAccumulateCount)
+    if ((cameraMoved && (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::ResetOnMove)) || mOptionsChanged || mGuidingResetAccumulateCount)
     {
         mGuidingAccumulateCount = 0;
         mGuidingResetAccumulateCount = false;
@@ -312,6 +312,27 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("Guiding Options"))
     {
+        //Set default values on reset
+        if (group.dropdown("Guiding Histogram Accumulate Mode", mGuidingHistrogramAccumMode))
+        {
+            mGuidingResetAccumulateCount = true;
+            if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+                mGuidingHistogramAccumValue = 64.f;
+            else if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AveragePercentage)
+                mGuidingHistogramAccumValue = 0.3f;
+        }
+        
+        //2nd option for accum mode
+        if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+        {
+            uint frameVal = (uint)floor(mGuidingHistogramAccumValue);
+            group.var("Frame Limit", frameVal, 0u, UINT_MAX, 1u);
+            mGuidingHistogramAccumValue = (float)frameVal;
+        }
+        else if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AveragePercentage)
+            group.var("Running Percentage", mGuidingHistogramAccumValue, 0.f, 1.f, 0.0001f);
+           
+
         group.checkbox("Use Blur", mUseGaussianBlur);
         if (auto group2 = group.group("Blur Options"))
         {
@@ -944,12 +965,17 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mTotalLightCount));
         defines.add("COUNTER_FORMAT", guidingIsUintFormat(mGuidingMode) ? "uint" : "float");
-        defines.add("USE_TEMPORAL_WEIGHT_TEXTURE", "1");
         defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "0");
+        defines.add("HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode));
 
         mpGenerateGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
     }
+
+    //Runtime define
+    mpGenerateGuidingMipTraverseChainPass->getProgram()->addDefine(
+        "HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode)
+    );
 
     auto var = mpGenerateGuidingMipTraverseChainPass->getRootVar();
     auto pCurrentGuidingTex = mpGuidingAtlas[mFrameCount % 2];
@@ -957,8 +983,8 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
     //First pass to get the level 0 values from the counter and clear counter to 1
     {
         uint iterationCount = mGuidingMode == GuidingMode::Disabled ? 0 : mGuidingAccumulateCount;
-        if (mGuidingRealTimeMode)
-            iterationCount = math::min(iterationCount, mGuidingHistoryLimit);
+        if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+            iterationCount = math::min(iterationCount, (uint)floor(mGuidingHistogramAccumValue));
 
         //Adjust clear value
         float clearValue = guidingIsUintFormat(mGuidingMode) ? 1.f : mGuidingClearValueEmission;
@@ -972,6 +998,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["CB"]["gClearValue"] = clearValue;
         var["CB"]["gDispatchSize"] = mGuidingAtlasResolution;
         var["CB"]["gFixedGuidingCheckPhotonCount"] = false;
+        var["CB"]["gAccumValue"] = mGuidingHistogramAccumValue;
 
         var["gSrcCounter"].setUav(mpRecordGuidingAtlas->getUAV(0));
         var["gSrcCounterTotal"].setSrv(mpRecordGuidingAtlas->getSRV(maxMip, 1u));
@@ -1175,12 +1202,17 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
         DefineList defines;
         defines.add("COUNT_TEXTURES", "1");
         defines.add("COUNTER_FORMAT", "uint");
-        defines.add("USE_TEMPORAL_WEIGHT_TEXTURE", "1");
         defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "1");
+        defines.add("HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode));
 
         mpGenerateLightIndexGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
     }
+
+    // Runtime define
+    mpGenerateLightIndexGuidingMipTraverseChainPass->getProgram()->addDefine(
+        "HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode)
+    );
 
     auto var = mpGenerateLightIndexGuidingMipTraverseChainPass->getRootVar();
     auto pCurrLightGuidingTex = mpLightIndexGuidingTexture[mFrameCount % 2];
@@ -1188,8 +1220,8 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
     // First pass to get the level 0 values from the counter and clear counter to 1
     {
         uint iterationCount = mGuidingLightIndexMode == GuidingLightIndexMode::Disabled ? 0 : mGuidingAccumulateCount; 
-        if (mGuidingRealTimeMode)
-            iterationCount = math::min(iterationCount, mGuidingHistoryLimit);
+       if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+            iterationCount = math::min(iterationCount, (uint)floor(mGuidingHistogramAccumValue));
 
         const uint maxMip = mpRecordLightIndexGuidingTexture->getMipCount() - 1u;
         var["CB"]["gRes"] = mGuidingLightIndexSize;
@@ -1197,6 +1229,7 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
         var["CB"]["gIterationCount"] = iterationCount;
         var["CB"]["gClearValue"] = mUseFixedGuidingDispatch ? 0.f : 1.f;
         var["CB"]["gDispatchSize"] = mGuidingLightIndexSize;
+        var["CB"]["gAccumValue"] = mGuidingHistogramAccumValue;
 
         var["gSrcCounter"].setUav(mpRecordLightIndexGuidingTexture->getUAV(0));
         var["gSrcCounterTotal"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(maxMip, 1u));
