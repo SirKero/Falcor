@@ -178,7 +178,7 @@ bool sampleLightIndex(inout SampleGenerator sg, out uint selectedIdx , out float
 bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
 {
     pls = {};
-    if (gScene.lightCollection.isEmpty())
+    if (kTotalLightCount == 0)
         return false;
 
     //Uniform sample code
@@ -282,7 +282,7 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
 bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenerator sg, out PhotonLightSample pls)
 {
     pls = {};
-    if (gScene.lightCollection.isEmpty())
+    if (kTotalLightCount == 0)
         return false;
 
     //Get start id and compaire against the total number of photons
