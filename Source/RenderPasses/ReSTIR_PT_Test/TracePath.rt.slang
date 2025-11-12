@@ -8,6 +8,7 @@ import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import Rendering.RTXDI.RTXDI;
+import SharedStructsAndFunctions;
 
 cbuffer CB
 {
@@ -42,18 +43,24 @@ struct RayPayload
     }
 }
 
-// Load in shading data from hit and direction
-ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)
-{
-    const TriangleHit triangleHit = hit.getTriangleHit();
-    VertexData v = gScene.getVertexData(triangleHit);
-    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+struct PathData {
+    float3 thp;
+    float pathPdf;
 
-    return sd;
+    float scatterPdf;
+    bool isDeltaReflection;
+    uint pathLength;
+
+    __init() {
+        thp = float3(1.0);
+        pathPdf = 1.0;
+        scatterPdf = 0;
+        isDeltaReflection = false;
+        pathLength = 0;
+    }
 }
 
-bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout float3 thp, inout float pdf, inout RayDesc ray)
+bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout PathData pd, inout RayDesc ray)
 {
     BSDFSample bsdfSample;
     bool validSample = mi.sample(sd, sg, bsdfSample, true);
@@ -61,11 +68,13 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
-        thp *= bsdfSample.weight;
-        pdf = bsdfSample.pdf;
+        pd.thp *= bsdfSample.weight;
+        pd.scatterPdf = bsdfSample.pdf;
+        pd.pathPdf *= pd.scatterPdf;
+        pd.isDeltaReflection = bsdfSample.isLobe(LobeType::Delta);
     }
 
-    return validSample && any(thp > 0);
+    return validSample && any(pd.thp > 0);
 }
 
 /* Evaluate MIS weight
@@ -95,9 +104,7 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, inout SampleGen
         return float3(0);
 
     // Shadow Ray
-    SceneRayQuery<1> rayQuery;
-    const Ray ray = Ray(sd.computeNewRayOrigin(), tls.dir, 0.f, tls.distance * 0.98);
-    if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+    if (!dispatchShadowRay(sd, tls.dir, tls.distance))
         return float3(0);
 
     float scatterPdf = mi.evalPdf(sd, tls.dir);
@@ -106,25 +113,23 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, inout SampleGen
     return misWeight * bsdf * tls.Le / tls.pdf;
 }
 
-float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout float3 thp)
+float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout PathData pd)
 {
     float3 outColor = float3(0);
     RayPayload rayPayload = RayPayload();
-    uint pathLength = 0;
 
     // Used for scatter MIS (at pathLength > 0)
     float3 lastOrigin = ray.Origin;      
     float3 lastFaceNormal = float3(0, 1, 0);
-    float scatterPdf = 1.0;
 
-    for (pathLength; pathLength <= gMaxBounces; pathLength++) {
+    for (pd.pathLength ; pd.pathLength <= gMaxBounces; pd.pathLength++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
         // Get surface hit info
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         //Scene miss (eval env map)
         if (!hit.isValid()) {
-            if (kUseEnvMap && pathLength > 0)
-                outColor += gScene.envMap.eval(ray.Direction) * thp;
+            if (kUseEnvMap && pd.pathLength > 0)
+                outColor += gScene.envMap.eval(ray.Direction) * pd.thp;
             return outColor;
         }
 
@@ -137,7 +142,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout float3 thp)
         let bsdfProperties = mi.getProperties(sd);
 
         //Ray hits emissive (only used after 2nd bounce, as RTXDI handles direct light)
-        if (any(bsdfProperties.emission > 0) && pathLength > 0) {
+        if (any(bsdfProperties.emission > 0) && pd.pathLength > 0) {
             //Get hit in light collection representation
             TriangleHit triangleHit = hit.getTriangleHit();
             TriangleLightHit lightHit;
@@ -147,26 +152,29 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout float3 thp)
 
             // Evaluate nee pdf
             float neePDF = gEmissiveSampler.evalPdf(lastOrigin, lastFaceNormal, true, lightHit);
-            float misWeight = 0;
-            if(scatterPdf > 0)
-                misWeight = evalMIS(1.0, scatterPdf, 1.0, neePDF);
+            float misWeight = 1;
+            if (!pd.isDeltaReflection)
+                misWeight = evalMIS(1.0, pd.scatterPdf, 1.0, neePDF);
 
-            outColor += misWeight * bsdfProperties.emission * thp;
+            outColor += misWeight * bsdfProperties.emission * pd.thp;
         }
 
-        //Scatter ray should be traced for the current iteration
-        if (pathLength >= gMaxBounces)
+        // Scatter ray should be traced for the current iteration
+        if (pd.pathLength >= gMaxBounces)
             break;
 
-        //Sample light (NEE)
-        float3 nee = nextEventEstimation(sd, mi, sg);
-        outColor += nee * thp;
-
+        // Sample light (NEE)
+        bool currentIsDelta = bsdfProperties.roughness <= kDeltaRoughnessThreshold;
+        if (!currentIsDelta) {
+            float3 nee = nextEventEstimation(sd, mi, sg);
+            outColor += nee * pd.thp;
+        }
+       
         lastOrigin = sd.posW;
         lastFaceNormal = sd.getOrientedFaceNormal();
 
         //New ray
-        if (!sampleNewRay(sd, mi, sg, thp, scatterPdf, ray))
+        if (!sampleNewRay(sd, mi, sg, pd, ray))
             break;
     }
 
@@ -228,14 +236,14 @@ void rayGen()
         gRTXDI.setSurfaceData(pixel, sd.computeNewRayOrigin(), bsdfProperties.guideNormal, bsdfProperties.diffuseReflectionAlbedo, bsdfProperties.specularReflectance, bsdfProperties.roughness, distanceToSurface);
 
         // Prepare for the first ray
+        PathData pd = PathData();
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
         float3 thp = float3(1.0);
-        float pdf = 1.0;
 
-        if (sampleNewRay(sd, mi, sg, thp, pdf, ray))
-            outColor = tracePath(ray, sg, thp);
+        if (sampleNewRay(sd, mi, sg, pd, ray))
+            outColor = tracePath(ray, sg, pd);
 
     } else
     {

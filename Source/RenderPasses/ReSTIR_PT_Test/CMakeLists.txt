@@ -5,6 +5,7 @@ target_sources(ReSTIR_PT_Test PRIVATE
     ReSTIR_PT_Test.h
 	TracePath.rt.slang
 	EvaluateReservoir.cs.slang
+	SharedStructsAndFunctions.slang
 )
 
 target_copy_shaders(ReSTIR_PT_Test RenderPasses/ReSTIR_PT_Test)
