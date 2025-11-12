@@ -106,7 +106,7 @@ void ReSTIR_PT_Test::setScene(RenderContext* pRenderContext, const ref<Scene>& p
 void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
 {
     bool changed = false;
-    if (auto group = widget.group("Path Tracer Options"))
+    if (auto group = widget.group("ReSTIR PT Options"))
     {
         changed |= group.var("Bounces", mPTBounces, 0u, 256u, 1u);
         mRebuildLightSampler |= group.dropdown("NEE Sampler", mEmissiveLightSamplerType);
@@ -117,6 +117,8 @@ void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
                 mpEmissiveLightSampler->renderUI(group2);
             }
         }
+        changed |= group.var("Reuse Roughness Threshold", mRoughnessThreshold, 0.f, 1.f, 0.001f);
+        
     }
 
     if (auto group = widget.group("RTXDI"))
@@ -243,7 +245,7 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpReservoirPT[i])
         {
             mpReservoirPT[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint4), mScreenRes.x * mScreenRes.y,
+                mpDevice, sizeof(uint) * 16, mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpReservoirPT[i]->setName("ReservoirPT_" + std::to_string(i));
@@ -283,6 +285,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     mTracePathPass.pProgram->addDefine("USE_ANALYTIC_LIGHT", mpScene->useAnalyticLights() ? "1" : "0");
     mTracePathPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTracePathPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mTracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
     mTracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
     mTracePathPass.pProgram->addDefines(mpRTXDI->getDefines());
 
@@ -304,6 +307,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gView"] = renderData[kInputView]->asTexture();
 
+    var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
     var["gColorOut"] = renderData[kOutputColor]->asTexture();
 
     // Dispatch Shader

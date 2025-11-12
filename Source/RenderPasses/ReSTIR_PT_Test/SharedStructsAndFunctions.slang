@@ -14,22 +14,28 @@ static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kM
 // Structs
 //
 
+// Reservoir; Size: 80 Byte (20 floats)
 struct ReservoirPT
 {
+    PackedHitInfo reuseSurface;     //(Packed) Surface which reuses the sample
     PackedHitInfo sampleSurface;    //(Packed) Surface info for the sample
+
     float3 sampleRadiance;          //Radiance at the sample point
     uint rngSeed;                   //RNG seed used to create this sample
+
     float3 sampleIncomingDirection; //Incoming direction of the sample
     uint pathLength;                //Path length until the connectable surface is reached
+
     float wSum;                     //Unbiased contribution weight
     uint c;                         //Confidence weight
     float jacobianDeterminant;      //(stored) jacobian determinant
     float targetFunction;           //(stored) target Function
 
     __init() {
+        reuseSurface = {};
         sampleSurface = {};
         sampleRadiance = float3(0);
-        uint rngSeed = 0;
+        rngSeed = 0;
         sampleIncomingDirection = float3(0);
         pathLength = 0;
         wSum = 0.0;
@@ -46,6 +52,16 @@ struct ReservoirPT
 //
 // Functions
 //
+
+// Helper for the ReSTIR screen size buffers
+uint index2Dto1D(uint2 index, uint frameDimX) {
+    return index.x + index.y * frameDimX;
+}
+
+// Helper for linearized indices to 2d
+uint2 index1Dto2D(uint index, uint frameDimX) {
+    return uint2(index % frameDimX, index / frameDimX);
+}
 
 // Load in shading data from hit and direction
 ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextureSampler lod)

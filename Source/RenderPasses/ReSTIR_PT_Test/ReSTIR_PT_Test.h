@@ -94,6 +94,7 @@ private:
     bool mOptionsChanged = false;
 
     uint mPTBounces = 10;
+    float mRoughnessThreshold = 0.25f;  //Threshold for reuse
     //
     // Resources
     //

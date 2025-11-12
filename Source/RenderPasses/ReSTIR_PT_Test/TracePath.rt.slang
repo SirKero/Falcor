@@ -23,6 +23,7 @@ cbuffer Light {
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
+RWStructuredBuffer<ReservoirPT> gReservoir;
 RWTexture2D<float4> gColorOut;
 
 static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
@@ -30,6 +31,7 @@ static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 
 struct RayPayload
 {
@@ -49,6 +51,7 @@ struct PathData {
 
     float scatterPdf;
     bool isDeltaReflection;
+    bool lastHitWasDiffuse;
     uint pathLength;
 
     __init() {
@@ -56,6 +59,7 @@ struct PathData {
         pathPdf = 1.0;
         scatterPdf = 0;
         isDeltaReflection = false;
+        lastHitWasDiffuse = false;
         pathLength = 0;
     }
 }
@@ -113,14 +117,15 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, inout SampleGen
     return misWeight * bsdf * tls.Le / tls.pdf;
 }
 
-float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout PathData pd)
+float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout PathData pd, inout ReservoirPT reservoir)
 {
     float3 outColor = float3(0);
     RayPayload rayPayload = RayPayload();
 
     // Used for scatter MIS (at pathLength > 0)
-    float3 lastOrigin = ray.Origin;      
+    float3 lastOrigin = ray.Origin;
     float3 lastFaceNormal = float3(0, 1, 0);
+    bool validReservoir = false; //If the reservoir is valid, the reuse surface does not need to be replaced
 
     for (pd.pathLength ; pd.pathLength <= gMaxBounces; pd.pathLength++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -128,6 +133,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout PathData pd)
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         //Scene miss (eval env map)
         if (!hit.isValid()) {
+            //TODO add env map to reservoir
             if (kUseEnvMap && pd.pathLength > 0)
                 outColor += gScene.envMap.eval(ray.Direction) * pd.thp;
             return outColor;
@@ -141,8 +147,24 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout PathData pd)
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
 
-        //Ray hits emissive (only used after 2nd bounce, as RTXDI handles direct light)
-        if (any(bsdfProperties.emission > 0) && pd.pathLength > 0) {
+        //Check if reuse or sample surface can be set
+        bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        if (!validReservoir && hitIsDiffuse) {
+            //If last and current hit is diffuse it is a valid reservoir
+            if (pd.lastHitWasDiffuse) {
+                reservoir.sampleSurface = hit.getData();
+                validReservoir = true;
+            }
+            else //Set new reuse surface if last hit was specular
+                reservoir.reuseSurface = hit.getData();
+        }
+
+        //TODO stopped here. Add emissive and NEE to reservoir
+        //TODO first surface is probably always the sample surface 
+
+        // Ray hits emissive (only used after 2nd bounce, as RTXDI handles direct light)
+        bool hitEmissive = any(bsdfProperties.emission > 0);
+        if (hitEmissive && pd.pathLength > 0) {
             //Get hit in light collection representation
             TriangleHit triangleHit = hit.getTriangleHit();
             TriangleLightHit lightHit;
@@ -159,8 +181,8 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout PathData pd)
             outColor += misWeight * bsdfProperties.emission * pd.thp;
         }
 
-        // Scatter ray should be traced for the current iteration
-        if (pd.pathLength >= gMaxBounces)
+        // Scatter ray should be traced for the current iteration. Additionally, emissive reflections are undefined
+        if (pd.pathLength >= gMaxBounces || hitEmissive)
             break;
 
         // Sample light (NEE)
@@ -222,6 +244,7 @@ void rayGen()
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     float3 viewDir = -gView[pixel].xyz;
     float3 outColor = float3(0);
+    ReservoirPT reservoir = ReservoirPT();
 
     if (hitInfo.isValid()) {
         // Set RTXDI data
@@ -237,13 +260,17 @@ void rayGen()
 
         // Prepare for the first ray
         PathData pd = PathData();
+        pd.lastHitWasDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        if (pd.lastHitWasDiffuse)
+            reservoir.reuseSurface = hitInfo.getData();
+
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
         float3 thp = float3(1.0);
 
         if (sampleNewRay(sd, mi, sg, pd, ray))
-            outColor = tracePath(ray, sg, pd);
+            outColor = tracePath(ray, sg, pd, reservoir);
 
     } else
     {
@@ -251,5 +278,6 @@ void rayGen()
         gRTXDI.setInvalidSurfaceData(pixel);
     }
 
+    gReservoir[index2Dto1D(pixel, dispatchDims.x)] = reservoir;
     gColorOut[pixel] = float4(outColor, 1);
 }
