@@ -101,6 +101,9 @@ void ReSTIR_PT_Test::setScene(RenderContext* pRenderContext, const ref<Scene>& p
 
     //Reset RenderPasses
     resetRenderPasses();
+
+    mpEmissiveLightSampler = nullptr;
+    mpEnvMapSampler = nullptr;
 }
 
 void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
@@ -228,7 +231,28 @@ void ReSTIR_PT_Test::prepareLightingStructure(RenderContext* pRenderContext)
 
     if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->update(pRenderContext);
-    
+
+    //EnvMap sampler
+    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::EnvMapChanged))
+    {
+        mpEnvMapSampler = nullptr;
+    }
+
+    if (mpScene->useEnvLight())
+    {
+        if (!mpEnvMapSampler)
+        {
+            mpEnvMapSampler = std::make_unique<EnvMapSampler>(mpDevice, mpScene->getEnvMap());
+        }
+    }
+    else
+    {
+        if (mpEnvMapSampler)
+        {
+            mpEnvMapSampler = nullptr;
+            resetRenderPasses();
+        }
+    }
 }
 
 void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const RenderData& renderData)
@@ -286,8 +310,9 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     mTracePathPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTracePathPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mTracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
-    mTracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
     mTracePathPass.pProgram->addDefines(mpRTXDI->getDefines());
+    if (mpEmissiveLightSampler)
+        mTracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
     if (!mTracePathPass.pVars)
@@ -297,10 +322,19 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     auto var = mTracePathPass.pVars->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var);
     mpRTXDI->setShaderData(var);
-    mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    if (mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    if (mpEnvMapSampler)
+        mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
+
+    //Calc nee light type select probability (currently equal probability)
+    float3 neeLightSelectProb =
+        float3(mpScene->useEmissiveLights() ? 1.f : 0.f, mpScene->useAnalyticLights() ? 1.f : 0.f, mpScene->useEnvLight() ? 1.f : 0.f);
+    neeLightSelectProb /= neeLightSelectProb.x + neeLightSelectProb.y + neeLightSelectProb.z;
 
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gNeeLightTypeSelectProbability"] = neeLightSelectProb;
     var["CB"]["gMaxBounces"] = mPTBounces;
 
     // Input Resources

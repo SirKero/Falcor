@@ -31,6 +31,7 @@
 #include "Rendering/RTXDI/RTXDI.h"
 #include "Rendering/Lights/EmissiveLightSampler.h"
 #include "Rendering/Lights/LightBVHSampler.h"
+#include "Rendering/Lights/EnvMapSampler.h"
 
 using namespace Falcor;
 
@@ -84,6 +85,7 @@ private:
     EmissiveLightSamplerType mEmissiveLightSamplerType = EmissiveLightSamplerType::LightBVH;
     LightBVHSampler::Options mLightBVHOptions;
     bool mRebuildLightSampler = false;
+    std::unique_ptr<EnvMapSampler> mpEnvMapSampler;
 
     //
     // Parameters

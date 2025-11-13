@@ -8,17 +8,21 @@ import Utils.Color.ColorHelpers;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
+import Rendering.Lights.EnvMapSampler;
 import Rendering.RTXDI.RTXDI;
 import SharedStructsAndFunctions;
 
 cbuffer CB
 {
-    uint gFrameCount;   //Current FrameCount for RNG
+    uint gFrameCount; // Current FrameCount for RNG
+    float3 gNeeLightTypeSelectProbability; //Emissive, Analytic, EnvMap
     uint gMaxBounces;   //Max path length
+
 }
 
 cbuffer Light {
     EmissiveLightSampler gEmissiveSampler;
+    EnvMapSampler gEnvMapSampler;
 }
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -33,6 +37,10 @@ static const bool kUseEnvMap = USE_ENV_BACKROUND;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+
+static const uint kNeeLightTypeEmissive = 0;
+static const uint kNeeLightTypeAnalytic = 1;
+static const uint kNeeLightTypeEnvMap = 2;
 
 struct RayPayload
 {
@@ -61,6 +69,32 @@ struct PathData {
         scatterPdf = 0;
         lastHitWasDiffuse = false;
         pathLength = 0;
+    }
+}
+
+// Nee light sample
+struct LightSample {
+    uint type;
+    float3 Li;
+    float pdf;
+    float3 position;
+    float3 dir;
+    float distance;
+    float3 faceN;
+    uint _pad;
+}
+
+struct NeeSampleSurface {
+    float3 posW;
+    bool isValid;
+    float3 faceN;
+    float jacobianDeterminant;
+
+    __init() {
+        posW = float3(0);
+        isValid = false;
+        faceN = float3(0);
+        jacobianDeterminant = -1;
     }
 }
 
@@ -95,25 +129,83 @@ float evalMIS(float n0, float p0, float n1, float p1)
     return q0 / (q0 + q1);
 }
 
-float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, out TriangleLightSample tls , inout SampleGenerator sg)
+bool generateEmissiveSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls)
 {
-    tls = {};
+    TriangleLightSample tls = {};
     if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
+        return false;
+
+    ls.pdf *= tls.pdf;
+    ls.Li = tls.pdf > 0.f ? tls.Le / tls.pdf : float3(0);
+    ls.position = tls.posW;
+    ls.faceN = tls.normalW;
+    ls.distance = tls.distance;
+    ls.dir = tls.dir;
+
+    return true;
+}
+
+bool generateAnalyticSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls) {
+    //TODO
+    return false;
+}
+
+bool generateEnvMapSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls) {
+    // TODO
+    return false;
+}
+
+bool selectLightType(out uint lightType, out float pdf, float u)
+{
+    float3 p = gNeeLightTypeSelectProbability;
+    //[unroll]
+    for (lightType = 0; lightType < 3; ++lightType)
+    {
+        if (u < p[lightType])
+        {
+            pdf = p[lightType];
+            return true;
+        }
+        u -= p[lightType];
+    }
+
+    lightType = {};
+    pdf = {};
+
+    return false;
+}
+
+float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, out LightSample ls , inout SampleGenerator sg)
+{
+    ls = {};
+    if (!selectLightType(ls.type, ls.pdf, sampleNext1D(sg)))
         return float3(0);
 
-    float3 bsdf = mi.eval(sd, tls.dir, sg);
+    bool valid = false;
+    if (ls.type == kNeeLightTypeEmissive)
+        valid = generateEmissiveSample(sd, sg, ls);
+    if (ls.type == kNeeLightTypeAnalytic)
+        valid = generateAnalyticSample(sd, sg, ls);
+    if (ls.type == kNeeLightTypeEnvMap)
+        valid = generateEnvMapSample(sd, sg, ls);
 
-    if (all(bsdf <= 0) || tls.pdf <= 0)
+    if (!valid)
+        return float3(0);
+
+    float3 bsdf = mi.eval(sd, ls.dir, sg);
+
+    if (all(bsdf <= 0) || ls.pdf <= 0)
         return float3(0);
 
     // Shadow Ray
-    if (!dispatchShadowRay(sd, tls.dir, tls.distance))
+    if (!dispatchShadowRay(sd, ls.dir, ls.distance))
         return float3(0);
 
-    float scatterPdf = mi.evalPdf(sd, tls.dir);
-    float misWeight = evalMIS(1.0, tls.pdf, 1.0, scatterPdf);
+    //TODO adjust MIS
+    float scatterPdf = mi.evalPdf(sd, ls.dir);
+    float misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
 
-    return misWeight * bsdf * tls.Le / tls.pdf;
+    return misWeight * bsdf * ls.Li;
 }
 
 bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 sampleRadiance)
@@ -128,8 +220,6 @@ bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 sample
     return selectOther;
 }
 
-//TODO add a separate sample generator for BSDF samples
-//TODO Add more light types (analytic & envmaps)
 float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayDirSg, inout PathData pd, inout ReservoirPT reservoir)
 {
     float3 outColor = float3(0);
@@ -141,10 +231,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
     bool validReservoir = false; //If the reservoir is valid, the reuse surface does not need to be replaced
 
     // For special case first diffuse -> nee selected
-    float3 neeSamplePosW = float3(0);
-    bool sampleSurfaceIsNeeSample = false;
-    float3 neeSampleFaceN = float3(0);
-    float neeSampleJacobian = -1;
+    NeeSampleSurface neeSampleSurface = NeeSampleSurface();
 
     for (pd.pathLength = 1 ; pd.pathLength <= gMaxBounces; pd.pathLength++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -153,8 +240,9 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         //Scene miss (eval env map)
         if (!hit.isValid()) {
             if (kUseEnvMap && pd.pathLength > 1) {
+                //TODO add MIS
                 float3 envMapContribution = gScene.envMap.eval(ray.Direction) * pd.thp;
-                sampleSurfaceIsNeeSample = !addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution);
+                neeSampleSurface.isValid = !addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution);
                 outColor += envMapContribution;
             }
             break;
@@ -197,14 +285,15 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             lightHit.posW = sd.posW;
             lightHit.normalW = sd.getOrientedFaceNormal();
 
-            // Evaluate nee pdf
-            float neePDF = gEmissiveSampler.evalPdf(lastOrigin, lastFaceNormal, true, lightHit);
+            // MIS
             float misWeight = 1;
-            if (pd.lastHitWasDiffuse)
+            if (pd.lastHitWasDiffuse) {
+                float neePDF = gNeeLightTypeSelectProbability[kNeeLightTypeEmissive] * gEmissiveSampler.evalPdf(lastOrigin, lastFaceNormal, true, lightHit);
                 misWeight = evalMIS(1.0, pd.scatterPdf, 1.0, neePDF);
-
+            }
+                
             float3 emissiveRadiance = misWeight * bsdfProperties.emission * pd.thp; // Is also w, as primary path space is used (pdf == 1)
-            sampleSurfaceIsNeeSample = !addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance);
+            neeSampleSurface.isValid = !addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance);
 
             outColor += emissiveRadiance;
         }
@@ -216,17 +305,17 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         // Sample light (NEE)
         bool currentIsDelta = bsdfProperties.roughness <= kDeltaRoughnessThreshold;
         if (!currentIsDelta) {
-            TriangleLightSample tls;
-            float3 nee = nextEventEstimation(sd, mi, tls, sg) * pd.thp;
+            LightSample ls;
+            float3 nee = nextEventEstimation(sd, mi, ls, sg) * pd.thp;
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee))
             {
-                if (!validReservoir) {
-                    neeSamplePosW = tls.posW;
-                    sampleSurfaceIsNeeSample = true;
-                    neeSampleFaceN = tls.normalW;
-                    neeSampleJacobian = dot(neeSampleFaceN, -tls.dir) / (tls.distance * tls.distance); // Reconnection jacobian determinant
+                if (ls.type == kNeeLightTypeEmissive && !validReservoir) {
+                    neeSampleSurface.posW = ls.position;
+                    neeSampleSurface.isValid = true;
+                    neeSampleSurface.faceN = ls.faceN;
+                    neeSampleSurface.jacobianDeterminant = dot(neeSampleSurface.faceN, -ls.dir) / (ls.distance * ls.distance); // Reconnection jacobian determinant
                 } else {
-                    sampleSurfaceIsNeeSample = false;
+                    neeSampleSurface.isValid = false;
                 }
             }
             outColor += nee;
@@ -241,10 +330,10 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             break;
     }
 
-    if (sampleSurfaceIsNeeSample) {
-        reservoir.samplePosW = neeSamplePosW;
-        reservoir.sampleFaceN = neeSampleFaceN;
-        reservoir.jacobianDeterminant = neeSampleJacobian;
+    if (neeSampleSurface.isValid) {
+        reservoir.samplePosW = neeSampleSurface.posW;
+        reservoir.sampleFaceN = neeSampleSurface.faceN;
+        reservoir.jacobianDeterminant = neeSampleSurface.jacobianDeterminant;
     }
 
     // Finalize Reservoir
