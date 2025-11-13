@@ -14,29 +14,32 @@ static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kM
 // Structs
 //
 
-// Reservoir; Size: 80 Byte (20 floats)
+// Reservoir; Size: 88 Byte (22 floats)
 struct ReservoirPT
 {
-    PackedHitInfo reuseSurface;     //(Packed) Surface which reuses the sample
-    PackedHitInfo sampleSurface;    //(Packed) Surface info for the sample
+    PackedHitInfo reconnectionSurface; //(Packed) Surface which reuses the sample
+    float3 samplePosW;                 // Sample PosW
+    float jacobianDeterminant;         //(stored) jacobian determinant
+
+    float3 sampleFaceN;              // Sample Face Normal
+    float targetFunction;            //(stored) target Function
 
     float3 sampleRadiance;          //Radiance at the sample point
     uint rngSeed;                   //RNG seed used to create this sample
 
-    float3 sampleIncomingDirection; //Incoming direction of the sample
+    float3 reconnectionSurfaceIncomingDir; //Incoming direction for the reconnection surface
     uint pathLength;                //Path length until the connectable surface is reached
 
     float wSum;                     //Unbiased contribution weight
     uint c;                         //Confidence weight
-    float jacobianDeterminant;      //(stored) jacobian determinant
-    float targetFunction;           //(stored) target Function
 
     __init() {
-        reuseSurface = {};
-        sampleSurface = {};
+        reconnectionSurface = {};
+        samplePosW = float3(0);
+        sampleFaceN = float3(0);
         sampleRadiance = float3(0);
         rngSeed = 0;
-        sampleIncomingDirection = float3(0);
+        reconnectionSurfaceIncomingDir = float3(0);
         pathLength = 0;
         wSum = 0.0;
         c = 1;

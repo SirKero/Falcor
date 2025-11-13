@@ -9,6 +9,7 @@ import SharedStructsAndFunctions;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
+StructuredBuffer<ReservoirPT> gReservoir;
 
 RWTexture2D<float4> gOutColor;
 
@@ -58,9 +59,12 @@ void main(uint2 pixel: SV_DispatchThreadID)
             outColor += mi.eval(sd, dir, sg) * Li;
         }
 
+        ReservoirPT ptReservoir = gReservoir[index2Dto1D(pixel, gFrameDim.x)];
+        outColor += ptReservoir.wSum * ptReservoir.sampleRadiance;
+
     } else {
         outColor = gScene.envMap.eval(viewDir);
     }
 
-    gOutColor[pixel] += float4(outColor, 1.0);
+    gOutColor[pixel] = float4(outColor, 1.0);
 }

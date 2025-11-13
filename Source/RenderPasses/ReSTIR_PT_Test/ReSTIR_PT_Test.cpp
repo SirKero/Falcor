@@ -245,7 +245,7 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpReservoirPT[i])
         {
             mpReservoirPT[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint) * 16, mScreenRes.x * mScreenRes.y,
+                mpDevice, sizeof(uint) * 22, mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpReservoirPT[i]->setName("ReservoirPT_" + std::to_string(i));
@@ -356,6 +356,7 @@ void ReSTIR_PT_Test::evalReservoirPass(RenderContext* pRenderContext, const Rend
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gView"] = renderData[kInputView]->asTexture();
+    var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
 
     // Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
