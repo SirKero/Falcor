@@ -34,6 +34,7 @@ RWTexture2D<float4> gColorOut;
 static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
 static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
+static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
@@ -136,23 +137,43 @@ bool generateEmissiveSample(ShadingData sd, inout SampleGenerator sg, inout Ligh
         return false;
 
     ls.pdf *= tls.pdf;
-    ls.Li = tls.pdf > 0.f ? tls.Le / tls.pdf : float3(0);
+    ls.Li = ls.pdf > 0.f ? tls.Le / ls.pdf : float3(0);
     ls.position = tls.posW;
     ls.faceN = tls.normalW;
     ls.distance = tls.distance;
     ls.dir = tls.dir;
 
-    return true;
+    return any(ls.Li > 0);
 }
 
 bool generateAnalyticSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls) {
-    //TODO
-    return false;
+    uint lightCount = gScene.getLightCount();
+    if (lightCount == 0) return false;
+
+    uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
+    // Sample local light source.
+    AnalyticLightSample analyticSample;
+    if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, analyticSample)) return false;
+
+    ls.Li = ls.pdf > 0 ? (analyticSample.Li * lightCount) / ls.pdf : float3(0); // analytic sample is already divided by the pdf
+    ls.distance = analyticSample.distance;
+    ls.dir = analyticSample.dir;
+    //analytic pdf not needed, as no MIS is performed with analytic lights anyway
+
+    return any(ls.Li > 0);
 }
 
 bool generateEnvMapSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls) {
-    // TODO
-    return false;
+    // Sample environment map.
+    EnvMapSample envSample;
+    if (!gEnvMapSampler.sample(sampleNext2D(sg), envSample)) return false;
+
+    ls.pdf *= envSample.pdf;
+    ls.Li = ls.pdf > 0.f ? envSample.Le / ls.pdf : float3(0);
+    ls.distance = FLT_MAX;
+    ls.dir = envSample.dir;
+
+    return any(ls.Li > 0);
 }
 
 bool selectLightType(out uint lightType, out float pdf, float u)
@@ -201,10 +222,12 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, out LightSample
     if (!dispatchShadowRay(sd, ls.dir, ls.distance))
         return float3(0);
 
-    //TODO adjust MIS
-    float scatterPdf = mi.evalPdf(sd, ls.dir);
-    float misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
-
+    float misWeight = 1.0;
+    if (ls.type != kNeeLightTypeAnalytic) {
+        float scatterPdf = mi.evalPdf(sd, ls.dir);
+        misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
+    }
+  
     return misWeight * bsdf * ls.Li;
 }
 
@@ -240,8 +263,13 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         //Scene miss (eval env map)
         if (!hit.isValid()) {
             if (kUseEnvMap && pd.pathLength > 1) {
-                //TODO add MIS
-                float3 envMapContribution = gScene.envMap.eval(ray.Direction) * pd.thp;
+                // MIS
+                float misWeight = 1.0;
+                if (kUseEnvLight && pd.lastHitWasDiffuse) {
+                    float lightPdf = gNeeLightTypeSelectProbability[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
+                    misWeight = evalMIS(1, pd.scatterPdf, 1, lightPdf);
+                }
+                float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * pd.thp;
                 neeSampleSurface.isValid = !addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution);
                 outColor += envMapContribution;
             }
