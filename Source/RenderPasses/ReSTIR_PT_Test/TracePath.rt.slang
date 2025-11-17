@@ -59,17 +59,22 @@ struct PathData {
     float3 thp;
     float pathPdf;
 
-    float scatterPdf;
+    float3 reconThp;        //thp for reconnect
+    float scatterPdf;       //Last pdf (used for MIS)
+
+    bool reconnectIsSet;
     bool isDiffuse;
     bool lastHitWasDiffuse;
     uint pathLength;
 
     __init() {
         thp = float3(1.0);
+        reconThp = float3(1.0);
         pathPdf = 1.0;
         scatterPdf = 0;
         lastHitWasDiffuse = false;
         pathLength = 0;
+        reconnectIsSet = false;
     }
 }
 
@@ -107,12 +112,15 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
-        pd.thp *= bsdfSample.weight;
+        if (pd.reconnectIsSet)
+            pd.reconThp *= bsdfSample.weight;
+        else
+            pd.thp *= bsdfSample.weight;
         pd.scatterPdf = bsdfSample.pdf;
         pd.pathPdf *= pd.scatterPdf;
     }
 
-    return validSample && any(pd.thp > 0);
+    return validSample && any((pd.thp * pd.reconThp) > 0);
 }
 
 /* Evaluate MIS weight
@@ -231,14 +239,15 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, out LightSample
     return misWeight * bsdf * ls.Li;
 }
 
-bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 sampleRadiance)
+bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 sampleRadiance, float3 reconnectThp)
 {
-    float w = luminance(sampleRadiance); 
+    float w = luminance(sampleRadiance * reconnectThp);
     reservoir.wSum += w;
     bool selectOther = rand * reservoir.wSum <= w;
     if (selectOther) {
         reservoir.targetFunction = w;
         reservoir.sampleRadiance = sampleRadiance;
+        reservoir.reconnectionThp = reconnectThp;
     }
     return selectOther;
 }
@@ -251,7 +260,6 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
     // Used for scatter MIS (at pathLength > 0)
     float3 lastOrigin = ray.Origin;
     float3 lastFaceNormal = float3(0, 1, 0);
-    bool validReservoir = false; //If the reservoir is valid, the reuse surface does not need to be replaced
 
     // For special case first diffuse -> nee selected
     NeeSampleSurface neeSampleSurface = NeeSampleSurface();
@@ -269,9 +277,9 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                     float lightPdf = gNeeLightTypeSelectProbability[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
                     misWeight = evalMIS(1, pd.scatterPdf, 1, lightPdf);
                 }
-                float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * pd.thp;
-                neeSampleSurface.isValid = !addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution);
-                outColor += envMapContribution;
+                float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * pd.reconThp;
+                neeSampleSurface.isValid = !addSampleToReservoir( reservoir, sampleNext1D(sg), envMapContribution, pd.thp);
+                outColor += envMapContribution * pd.thp;
             }
             break;
         }
@@ -286,14 +294,14 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
 
         //Check if reuse or sample surface can be set
         bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        if (!validReservoir && hitIsDiffuse) {
+        if (!pd.reconnectIsSet && hitIsDiffuse) {
             // If last and current hit is diffuse it is a valid reservoir
             if (pd.lastHitWasDiffuse) {
                 reservoir.samplePosW = sd.posW;
                 reservoir.sampleFaceN = sd.getOrientedFaceNormal();
                 float rayDist = distance(ray.Origin, sd.posW);
                 reservoir.jacobianDeterminant = dot(sd.faceN, -ray.Direction) / (rayDist * rayDist); // Reconnection jacobian determinant
-                validReservoir = true;
+                pd.reconnectIsSet = true;
             }
             else // Set new reconnection surface if last hit was specular
             {
@@ -319,9 +327,9 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 float neePDF = gNeeLightTypeSelectProbability[kNeeLightTypeEmissive] * gEmissiveSampler.evalPdf(lastOrigin, lastFaceNormal, true, lightHit);
                 misWeight = evalMIS(1.0, pd.scatterPdf, 1.0, neePDF);
             }
-                
-            float3 emissiveRadiance = misWeight * bsdfProperties.emission * pd.thp; // Is also w, as primary path space is used (pdf == 1)
-            neeSampleSurface.isValid = !addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance);
+
+            float3 emissiveRadiance = misWeight * bsdfProperties.emission * pd.reconThp; // Is also w, as primary path space is used (pdf == 1)
+            neeSampleSurface.isValid = !addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance, pd.thp);
 
             outColor += emissiveRadiance;
         }
@@ -334,10 +342,10 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         bool currentIsDelta = bsdfProperties.roughness <= kDeltaRoughnessThreshold;
         if (!currentIsDelta) {
             LightSample ls;
-            float3 nee = nextEventEstimation(sd, mi, ls, sg) * pd.thp;
-            if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee))
+            float3 nee = nextEventEstimation(sd, mi, ls, sg) * pd.reconThp;
+            if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp))
             {
-                if (ls.type == kNeeLightTypeEmissive && !validReservoir) {
+                if (ls.type == kNeeLightTypeEmissive && !pd.reconnectIsSet) {
                     neeSampleSurface.posW = ls.position;
                     neeSampleSurface.isValid = true;
                     neeSampleSurface.faceN = ls.faceN;
@@ -437,7 +445,6 @@ void rayGen()
             reservoir.reconnectionSurfaceIncomingDir = sd.V;
         }
             
-        
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;

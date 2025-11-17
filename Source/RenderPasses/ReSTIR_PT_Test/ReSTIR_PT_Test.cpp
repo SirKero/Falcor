@@ -269,7 +269,7 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpReservoirPT[i])
         {
             mpReservoirPT[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint) * 22, mScreenRes.x * mScreenRes.y,
+                mpDevice, sizeof(uint) * 24, mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpReservoirPT[i]->setName("ReservoirPT_" + std::to_string(i));

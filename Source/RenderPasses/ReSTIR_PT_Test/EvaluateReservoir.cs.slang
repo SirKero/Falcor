@@ -60,7 +60,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
 
         ReservoirPT ptReservoir = gReservoir[index2Dto1D(pixel, gFrameDim.x)];
-        outColor += ptReservoir.wSum * ptReservoir.sampleRadiance;
+        outColor += ptReservoir.wSum * ptReservoir.sampleRadiance * ptReservoir.reconnectionThp;
 
     } else {
         outColor = gScene.envMap.eval(viewDir);

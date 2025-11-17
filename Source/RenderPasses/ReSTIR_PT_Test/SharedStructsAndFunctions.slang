@@ -14,10 +14,11 @@ static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kM
 // Structs
 //
 
-// Reservoir; Size: 88 Byte (22 floats)
+// Reservoir; Size: 96 Byte (24 floats)
 struct ReservoirPT
 {
     PackedHitInfo reconnectionSurface; //(Packed) Surface which reuses the sample
+
     float3 samplePosW;                 // Sample PosW
     float jacobianDeterminant;         //(stored) jacobian determinant
 
@@ -27,11 +28,11 @@ struct ReservoirPT
     float3 sampleRadiance;          //Radiance at the sample point
     uint rngSeed;                   //RNG seed used to create this sample
 
-    float3 reconnectionSurfaceIncomingDir; //Incoming direction for the reconnection surface
-    uint pathLength;                //Path length until the connectable surface is reached
+    float3 reconnectionSurfaceIncomingDir; // Incoming direction for the reconnection surface
+    uint cAndPathLength;                //Path length until the connectable surface is reached
 
+    float3 reconnectionThp;         //Thp until reconnection 
     float wSum;                     //Unbiased contribution weight
-    uint c;                         //Confidence weight
 
     __init() {
         reconnectionSurface = {};
@@ -40,15 +41,31 @@ struct ReservoirPT
         sampleRadiance = float3(0);
         rngSeed = 0;
         reconnectionSurfaceIncomingDir = float3(0);
-        pathLength = 0;
+        reconnectionThp = float3(1);
+        cAndPathLength = 1;
         wSum = 0.0;
-        c = 1;
         jacobianDeterminant = -1;
         targetFunction = 0;
     }
 
     bool isValid() {
         return jacobianDeterminant > 0;
+    }
+
+    property uint c {
+        get { return cAndPathLength & 0xFFFF; }
+        set {
+            cAndPathLength &= 0xFFFF0000; //Clear lower bits
+            cAndPathLength |= (newValue & 0xFFFF);
+        }
+    }
+
+    property uint pathLength {
+        get { return (cAndPathLength >> 16) & 0xFFFF; }
+        set {
+            cAndPathLength &= 0xFFFF; // Clear upper bits
+            cAndPathLength |= (newValue & 0xFFFF) << 16;
+        }
     }
 }
 
