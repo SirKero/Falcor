@@ -23,7 +23,7 @@ struct ReservoirPT
     float jacobianDeterminant;         //(stored) jacobian determinant
 
     float3 sampleFaceN;              // Sample Face Normal
-    float targetFunction;            //(stored) target Function
+    uint rngPixelPacked;             //rng generator start pixel
 
     float3 sampleRadiance;          //Radiance at the sample point
     uint rngSeed;                   //RNG seed used to create this sample
@@ -45,11 +45,19 @@ struct ReservoirPT
         cAndPathLength = 1;
         wSum = 0.0;
         jacobianDeterminant = -1;
-        targetFunction = 0;
+        rngPixelPacked = 0;
     }
 
     bool isValid() {
         return jacobianDeterminant > 0;
+    }
+
+    property uint2 rngPixel {
+        get { return uint2(rngPixelPacked & 0xFFFF, (rngPixelPacked >> 16) & 0xFFFF); }
+        set {
+            rngPixelPacked = newValue.x & 0xFFFF;
+            rngPixelPacked |= (newValue.y & 0xFFFF) << 16;
+        }
     }
 
     property uint c {

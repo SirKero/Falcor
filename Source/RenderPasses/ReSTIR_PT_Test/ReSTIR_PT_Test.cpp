@@ -35,7 +35,8 @@ namespace
 {
     const std::string kShaderFolder = "RenderPasses/ReSTIR_PT_Test/";
     const std::string kShaderTracePath = kShaderFolder + "TracePath.rt.slang";
-    const std::string kShaderEvalReseroir = kShaderFolder + "EvaluateReservoir.cs.slang";
+    const std::string kShaderEvalReservoir = kShaderFolder + "EvaluateReservoir.cs.slang";
+    const std::string kShaderResampling = kShaderFolder + "Resample.rt.slang";
     const std::string kShaderModel = "6_5";
 
     // Render Pass inputs and outputs
@@ -170,11 +171,15 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
+    if (mResamplingValid)
+        resamplingPass(pRenderContext, renderData);
+
     evalReservoirPass(pRenderContext, renderData);
 
     mpRTXDI->endFrame(pRenderContext);
 
     mFrameCount++;
+    mResamplingValid = true;
 }
 
 void ReSTIR_PT_Test::resetRenderPasses()
@@ -262,6 +267,7 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
         mpReservoirPT[0].reset();
         mpReservoirPT[1].reset();
         mScreenRes = renderData.getDefaultTextureDims();
+        mResamplingValid = false;
     }
 
     for (uint i = 0; i < 2; i++)
@@ -351,6 +357,61 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     pRenderContext->uavBarrier(renderData[kOutputColor]->asTexture().get());
 }
 
+ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData)
+ {
+     FALCOR_PROFILE(pRenderContext, "Resampling");
+     // Init Shader
+     if (!mResamplePass.pProgram)
+     {
+         RtProgram::Desc desc;
+         desc.addShaderModules(mpScene->getShaderModules());
+         desc.addShaderLibrary(kShaderResampling);
+         desc.setMaxPayloadSize(sizeof(float) * 4);
+         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+         desc.setMaxTraceRecursionDepth(1);
+         if (!mpScene->hasProceduralGeometry())
+             desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+         mResamplePass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+         auto& sbt = mResamplePass.pBindingTable;
+         sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+         sbt->setMiss(0, desc.addMiss("miss"));
+
+         if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+         {
+             sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+         }
+         mResamplePass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+     }
+
+     // Runtime defines
+     mResamplePass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
+
+     // Program Vars
+     if (!mResamplePass.pVars)
+         mResamplePass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+
+     FALCOR_ASSERT(mResamplePass.pVars);
+     auto var = mResamplePass.pVars->getRootVar();
+     mpScene->setRaytracingShaderData(pRenderContext, var);
+
+     //Constant Buffer
+     var["CB"]["gFrameCount"] = mFrameCount;
+     var["CB"]["gMaxBounces"] = mPTBounces;
+
+     // Input Resources
+     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+     var["gView"] = renderData[kInputView]->asTexture();
+     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+     var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
+
+     var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
+
+     // Dispatch Shader
+     mpScene->raytrace(pRenderContext, mResamplePass.pProgram.get(), mResamplePass.pVars, uint3(mScreenRes, 1));
+
+ }
+
 void ReSTIR_PT_Test::evalReservoirPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "EvaluateReservoir");
@@ -360,7 +421,7 @@ void ReSTIR_PT_Test::evalReservoirPass(RenderContext* pRenderContext, const Rend
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderEvalReseroir).csEntry("main").setShaderModel(kShaderModel);
+        desc.addShaderLibrary(kShaderEvalReservoir).csEntry("main").setShaderModel(kShaderModel);
         desc.addTypeConformances(mpScene->getTypeConformances());
 
         DefineList defines;

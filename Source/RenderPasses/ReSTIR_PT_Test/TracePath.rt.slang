@@ -245,7 +245,6 @@ bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 sample
     reservoir.wSum += w;
     bool selectOther = rand * reservoir.wSum <= w;
     if (selectOther) {
-        reservoir.targetFunction = w;
         reservoir.sampleRadiance = sampleRadiance;
         reservoir.reconnectionThp = reconnectThp;
     }
@@ -373,8 +372,8 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
     }
 
     // Finalize Reservoir
-    if (reservoir.targetFunction > 0) {
-        reservoir.wSum /= reservoir.targetFunction;
+    if (any(reservoir.sampleRadiance > 0)) {
+        reservoir.wSum /= luminance(reservoir.sampleRadiance * reservoir.reconnectionThp);
     }
 
     return outColor;
@@ -427,6 +426,7 @@ void rayGen()
         // Set RTXDI data
         let lod = ExplicitLodTextureSampler(0);
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 1);
+        reservoir.rngPixel = pixel;
         reservoir.rngSeed = gFrameCount * 5 + 2;
         SampleGenerator rayDirSg = SampleGenerator(pixel, reservoir.rngSeed); //Seperate sample generator for ray directions (used in random replay)
 

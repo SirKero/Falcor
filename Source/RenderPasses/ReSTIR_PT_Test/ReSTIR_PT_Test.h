@@ -70,6 +70,9 @@ private:
     // Traces the initial Path
     void tracePathPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Resampling pass
+    void resamplingPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     //Evaluates the Reservoirs
     void evalReservoirPass(RenderContext* pRenderContest, const RenderData& renderData);
 
@@ -97,6 +100,8 @@ private:
 
     uint mPTBounces = 10;
     float mRoughnessThreshold = 0.25f;  //Threshold for reuse
+
+    bool mResamplingValid = false;
     //
     // Resources
     //
@@ -125,6 +130,7 @@ private:
     };
 
     RayTraceProgramHelper mTracePathPass; //Traces the initial Paths (1SPP Path Tracer)
+    RayTraceProgramHelper mResamplePass;    //Resampling
     ref<ComputePass> mpEvalReservoirPass;   //Evaluates the reservoirs
 };
 
