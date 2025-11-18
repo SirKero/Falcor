@@ -14,7 +14,7 @@ static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kM
 // Structs
 //
 
-// Reservoir; Size: 96 Byte (24 floats)
+// Reservoir; Size: 104 Byte (26 floats)
 struct ReservoirPT
 {
     PackedHitInfo reconnectionSurface; //(Packed) Surface which reuses the sample
@@ -23,16 +23,18 @@ struct ReservoirPT
     float jacobianDeterminant;         //(stored) jacobian determinant
 
     float3 sampleFaceN;              // Sample Face Normal
-    uint rngPixelPacked;             //rng generator start pixel
+    uint pathLength;             //rng generator start pixel
 
     float3 sampleRadiance;          //Radiance at the sample point
     uint rngSeed;                   //RNG seed used to create this sample
 
     float3 reconnectionSurfaceIncomingDir; // Incoming direction for the reconnection surface
-    uint cAndPathLength;                //Path length until the connectable surface is reached
+    uint c;                //Path length until the connectable surface is reached
 
     float3 reconnectionThp;         //Thp until reconnection 
     float wSum;                     //Unbiased contribution weight
+
+    uint2 rngPixel;
 
     __init() {
         reconnectionSurface = {};
@@ -42,16 +44,18 @@ struct ReservoirPT
         rngSeed = 0;
         reconnectionSurfaceIncomingDir = float3(0);
         reconnectionThp = float3(1);
-        cAndPathLength = 1;
+        c = 1;
+        pathLength = 0;
         wSum = 0.0;
         jacobianDeterminant = -1;
-        rngPixelPacked = 0;
+        rngPixel = uint2(0);
     }
 
     bool isValid() {
         return jacobianDeterminant > 0;
     }
 
+    /*
     property uint2 rngPixel {
         get { return uint2(rngPixelPacked & 0xFFFF, (rngPixelPacked >> 16) & 0xFFFF); }
         set {
@@ -75,6 +79,7 @@ struct ReservoirPT
             cAndPathLength |= (newValue & 0xFFFF) << 16;
         }
     }
+    */
 }
 
 //

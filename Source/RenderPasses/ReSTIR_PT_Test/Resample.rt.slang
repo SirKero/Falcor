@@ -11,7 +11,11 @@ import SharedStructsAndFunctions;
 cbuffer CB
 {
     uint gFrameCount; // Current FrameCount for RNG
-    uint gMaxBounces; //Max indirections
+    uint gMaxBounces; // Max indirections
+    uint gConfidenceCap;
+    uint gSpatialSamples;
+
+    float gSpatialSampleRadius;
 }
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -19,10 +23,12 @@ Texture2D<float4> gView;
 Texture2D<float2> gMVec;
 StructuredBuffer<ReservoirPT> gReservoirPrev;
 RWStructuredBuffer<ReservoirPT> gReservoir;
+RWTexture2D<float4> gDebug;
 
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+
 
 struct RayPayload
 {
@@ -50,7 +56,7 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
     return validSample && any(thp > 0);
 }
 
-bool resampleReservoir(int2 pixel, uint2 dispatchDims, inout ReservoirPT reservoir, ShadingData sd, inout SampleGenerator sg)
+bool resampleReservoir(int2 pixel, uint2 dispatchDims, inout ReservoirPT reservoir, HitInfo hit, float3 viewDir, inout SampleGenerator sg)
 {
     // Check if reservoir is inside the screen.
     if (any(pixel < 0) || any(pixel >= dispatchDims))
@@ -58,39 +64,45 @@ bool resampleReservoir(int2 pixel, uint2 dispatchDims, inout ReservoirPT reservo
 
     // Fetch the (spatio)temporal reservoir
     ReservoirPT temporalR = gReservoirPrev[index2Dto1D(pixel, dispatchDims.x)];
-    if (temporalR.wSum <= 0)
+    if (temporalR.wSum <= 0 || temporalR.pathLength >= gMaxBounces)
         return false;
 
     RayDesc ray = {};
     ray.TMin = 0;
     ray.TMax = FLT_MAX;
     ray.Origin = gScene.camera.getPosition();
-    ray.Direction = sd.V;
+    ray.Direction = viewDir;
     SampleGenerator pathSg = SampleGenerator(temporalR.rngPixel, temporalR.rngSeed);
     let lod = ExplicitLodTextureSampler(0);
 
-    float3 thp = float3(0);
+    float3 thp = float3(1);
     bool validTemporalReservoir = false;
     // Retrace temporal path
-    for (uint pathLength = 0; pathLength >= temporalR.pathLength; pathLength++)
+    
+    for (uint pathLength = 0; pathLength <= temporalR.pathLength; pathLength++)
     {
         //Trace ray
         if (pathLength > 0) {
             RayPayload rayPayload = RayPayload();
-            TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
-            HitInfo hit = HitInfo(rayPayload.packedHitInfo);
-            if (!hit.isValid()) {
-                // TODO handle properly, can be valid if the original hit was delta -> envMap
-                break;
-            }
-            sd = loadShadingData(hit, ray.Direction, lod);
+            TraceRay(gScene.rtAccel, 0 , 0xff , 0 , rayTypeCount, 0, ray, rayPayload);
+            hit = HitInfo(rayPayload.packedHitInfo);
+            
         }
+
+        if (!hit.isValid()) {
+            // TODO handle properly, can be valid if the original hit was delta -> envMap
+            break;
+        }
+
+        ShadingData sd = loadShadingData(hit, ray.Direction, lod);
 
         //Load shading structs
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
         bool surfaceIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold); // Either diffuse surface or emissive hit
         bool surfaceIsEmissive = any(bsdfProperties.emission > 0);
+
+        
         // Reconnect surface
         if (pathLength == temporalR.pathLength && (surfaceIsDiffuse || surfaceIsEmissive))
         {
@@ -110,22 +122,39 @@ bool resampleReservoir(int2 pixel, uint2 dispatchDims, inout ReservoirPT reservo
 
             temporalR.wSum *= luminance(bsdf * temporalR.sampleRadiance * jacobianDeterminant);
             temporalR.jacobianDeterminant = jacobianDeterminantFromNew;
-            // temporalR.reconnectionSurface = //TODO
+            temporalR.reconnectionSurface = hit.getData();
             temporalR.reconnectionSurfaceIncomingDir = sd.V;
             temporalR.reconnectionThp = bsdf;
-
-            //validTemporalReservoir = true;
+            validTemporalReservoir = temporalR.wSum > 0;
         }
         //Or sample ray for next iteration
         else if (pathLength < temporalR.pathLength) {
             sampleNewRay(sd, mi, pathSg, thp, ray);
         }
+
     }
 
+    uint cSum = reservoir.c + temporalR.c;
     if (validTemporalReservoir) {
         // Prepare current reservoir for resampling (W -> w)
-        reservoir.wSum *= luminance(reservoir.sampleRadiance * reservoir.reconnectionThp);
+        float mis = float(reservoir.c) / float(cSum);
+        reservoir.wSum *= mis * luminance(reservoir.sampleRadiance * reservoir.reconnectionThp);
+        mis = float(temporalR.c) / float(cSum);
+        temporalR.wSum *= mis;
+
+        float wSum = reservoir.wSum + temporalR.wSum;
+        bool selectOtherSample = (sampleNext1D(sg) * reservoir.wSum) <= temporalR.wSum;
+        if (selectOtherSample) {
+            reservoir = temporalR;
+        }
+        
+        if(any(reservoir.sampleRadiance > 0))
+            reservoir.wSum = wSum / luminance(reservoir.sampleRadiance * reservoir.reconnectionThp);
+        else
+            reservoir.wSum = 0;
     }
+    cSum = min(cSum, gConfidenceCap);
+    reservoir.c = cSum;
 
     return true;
 }
@@ -171,13 +200,9 @@ void rayGen()
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     float3 viewDir = -gView[pixel].xyz;
     ReservoirPT reservoir = ReservoirPT();
-
     if (hitInfo.isValid()) {
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3);
         reservoir = gReservoir[index2Dto1D(pixel, dispatchDims.x)];
-
-        let lod = ExplicitLodTextureSampler(0);
-        ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
 
         //
         // Temporal Resampling
@@ -190,6 +215,9 @@ void rayGen()
         prevPixelF += rndOffset;
         int2 prevPixel = int2(prevPixelF);
 
+        resampleReservoir(pixel, dispatchDims, reservoir, hitInfo, viewDir, sg);
+
+        //TODO Spatial Resampling
 
     }
 

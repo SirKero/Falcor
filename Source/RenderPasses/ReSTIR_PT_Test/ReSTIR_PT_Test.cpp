@@ -122,7 +122,11 @@ void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
             }
         }
         changed |= group.var("Reuse Roughness Threshold", mRoughnessThreshold, 0.f, 1.f, 0.001f);
-        
+
+        changed |= group.checkbox("Enable Resampling", mEnableResampling);
+        changed |= group.var("ConfidenceCap", mConfidenceCap, 1u, UINT_MAX, 1u);
+        changed |= group.var("SpatialSamples", mSpatialSamples, 0u, 32u, 1u);
+        changed |= group.var("SpatialRadius", mSpatialSampleRadius, 1.f, FLT_MAX, 0.1f);        
     }
 
     if (auto group = widget.group("RTXDI"))
@@ -154,6 +158,9 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
         mOptionsChanged = false;
     }
 
+    //TODO remove if not needed
+    pRenderContext->clearTexture(renderData[kOutputDebug]->asTexture().get(), float4(0,0,0,1));
+
     // Init ReSTIR DI
     const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
     if (!mpRTXDI)
@@ -171,7 +178,7 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
-    if (mResamplingValid)
+    if (mResamplingValid && mEnableResampling)
         resamplingPass(pRenderContext, renderData);
 
     evalReservoirPass(pRenderContext, renderData);
@@ -275,7 +282,7 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpReservoirPT[i])
         {
             mpReservoirPT[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint) * 24, mScreenRes.x * mScreenRes.y,
+                mpDevice, sizeof(uint) * 26, mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpReservoirPT[i]->setName("ReservoirPT_" + std::to_string(i));
@@ -398,6 +405,9 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      //Constant Buffer
      var["CB"]["gFrameCount"] = mFrameCount;
      var["CB"]["gMaxBounces"] = mPTBounces;
+     var["CB"]["gConfidenceCap"] = mConfidenceCap;
+     var["CB"]["gSpatialSamples"] = mSpatialSamples;
+     var["CB"]["gSpatialSampleRadius"] = mSpatialSampleRadius;
 
      // Input Resources
      var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -406,6 +416,8 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
 
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
+          
+     var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResamplePass.pProgram.get(), mResamplePass.pVars, uint3(mScreenRes, 1));

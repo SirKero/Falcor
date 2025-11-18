@@ -54,6 +54,7 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
+
     //
     // Functions
     //
@@ -100,6 +101,11 @@ private:
 
     uint mPTBounces = 10;
     float mRoughnessThreshold = 0.25f;  //Threshold for reuse
+
+    bool mEnableResampling = true;
+    uint mConfidenceCap = 20;
+    uint mSpatialSamples = 0;
+    float mSpatialSampleRadius = 20.f;
 
     bool mResamplingValid = false;
     //
