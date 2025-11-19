@@ -14,72 +14,70 @@ static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kM
 // Structs
 //
 
-// Reservoir; Size: 104 Byte (26 floats)
+struct ReservoirFlags {
+    uint flags;
+
+    __init() {
+        flags = 0;
+    }
+
+    property uint pathLength {
+        get { return flags & 0xFF; }
+        set {
+            flags &= ~0xFF; // Clear upper bits
+            flags |= (newValue & 0xFF);
+        }
+    }
+
+    property bool endIsNee {
+        get { return (flags & (1 << 9)) > 0; }
+        set {
+            flags &= ~(1 << 9); // Clear bit
+            flags |= (newValue ? 1 : 0) << 9;
+        }
+    }
+}
+
+// Reservoir; Size: 96 Byte (24 floats)
 struct ReservoirPT
 {
-    PackedHitInfo reconnectionSurface; //(Packed) Surface which reuses the sample
+    SampleGenerator sgPathDirections; //Sample Generator for random direction (float4)
+
+    SampleGenerator sgRCNee;    //For replaying NEE decisions
 
     float3 samplePosW;                 // Sample PosW
     float jacobianDeterminant;         //(stored) jacobian determinant
 
-    float3 sampleFaceN;              // Sample Face Normal
-    uint pathLength;             //rng generator start pixel
+    float3 sampleFaceN;   // Sample Face Normal
+    ReservoirFlags flags;                //path length and flags
 
-    float3 sampleRadiance;          //Radiance at the sample point
-    uint rngSeed;                   //RNG seed used to create this sample
+    float3 F;                       //Radiance of the sample
+    uint c;                         //Confidence Weight
 
-    float3 reconnectionSurfaceIncomingDir; // Incoming direction for the reconnection surface
-    uint c;                //Path length until the connectable surface is reached
-
-    float3 reconnectionThp;         //Thp until reconnection 
-    float wSum;                     //Unbiased contribution weight
-
-    uint2 rngPixel;
+    float3 rcThp;                   //Thp until reconnection surface
+    float weight;                   //Unbiased contribution weight
 
     __init() {
-        reconnectionSurface = {};
+        sgPathDirections = SampleGenerator(uint2(0), 0);
+        sgRCNee = SampleGenerator(uint2(0), 0);
         samplePosW = float3(0);
-        sampleFaceN = float3(0);
-        sampleRadiance = float3(0);
-        rngSeed = 0;
-        reconnectionSurfaceIncomingDir = float3(0);
-        reconnectionThp = float3(1);
-        c = 1;
-        pathLength = 0;
-        wSum = 0.0;
         jacobianDeterminant = -1;
-        rngPixel = uint2(0);
+        sampleFaceN = float3(0);
+        flags = ReservoirFlags();
+        F = float3(0);
+        c = 1;
+        rcThp = float3(1);
+        weight = 0.0;
     }
 
     bool isValid() {
         return jacobianDeterminant > 0;
     }
-
-    /*
-    property uint2 rngPixel {
-        get { return uint2(rngPixelPacked & 0xFFFF, (rngPixelPacked >> 16) & 0xFFFF); }
-        set {
-            rngPixelPacked = newValue.x & 0xFFFF;
-            rngPixelPacked |= (newValue.y & 0xFFFF) << 16;
-        }
-    }
-
-    property uint c {
-        get { return cAndPathLength & 0xFFFF; }
-        set {
-            cAndPathLength &= 0xFFFF0000; //Clear lower bits
-            cAndPathLength |= (newValue & 0xFFFF);
-        }
-    }
-
+       
     property uint pathLength {
-        get { return (cAndPathLength >> 16) & 0xFFFF; }
-        set {
-            cAndPathLength &= 0xFFFF; // Clear upper bits
-            cAndPathLength |= (newValue & 0xFFFF) << 16;
-        }
+        get { return flags.pathLength; }
+        set { flags.pathLength = newValue;}
     }
-    */
 }
 
 //

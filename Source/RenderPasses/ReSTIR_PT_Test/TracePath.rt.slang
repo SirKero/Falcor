@@ -63,7 +63,7 @@ struct PathData {
     float scatterPdf;       //Last pdf (used for MIS)
 
     bool reconnectIsSet;
-    bool isDiffuse;
+    bool lastVertexIsNee;
     bool lastHitWasDiffuse;
     uint pathLength;
 
@@ -73,6 +73,7 @@ struct PathData {
         pathPdf = 1.0;
         scatterPdf = 0;
         lastHitWasDiffuse = false;
+        lastVertexIsNee = false;
         pathLength = 0;
         reconnectIsSet = false;
     }
@@ -88,20 +89,6 @@ struct LightSample {
     float distance;
     float3 faceN;
     uint _pad;
-}
-
-struct NeeSampleSurface {
-    float3 posW;
-    bool isValid;
-    float3 faceN;
-    float jacobianDeterminant;
-
-    __init() {
-        posW = float3(0);
-        isValid = false;
-        faceN = float3(0);
-        jacobianDeterminant = -1;
-    }
 }
 
 bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout PathData pd, inout RayDesc ray)
@@ -242,11 +229,11 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, out LightSample
 bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 sampleRadiance, float3 reconnectThp)
 {
     float w = luminance(sampleRadiance * reconnectThp);
-    reservoir.wSum += w;
-    bool selectOther = rand * reservoir.wSum <= w;
+    reservoir.weight += w;
+    bool selectOther = rand * reservoir.weight <= w;
     if (selectOther) {
-        reservoir.sampleRadiance = sampleRadiance;
-        reservoir.reconnectionThp = reconnectThp;
+        reservoir.F = sampleRadiance;
+        reservoir.rcThp = reconnectThp;
     }
     return selectOther;
 }
@@ -259,9 +246,6 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
     // Used for scatter MIS (at pathLength > 0)
     float3 lastOrigin = ray.Origin;
     float3 lastFaceNormal = float3(0, 1, 0);
-
-    // For special case first diffuse -> nee selected
-    NeeSampleSurface neeSampleSurface = NeeSampleSurface();
 
     for (pd.pathLength = 1 ; pd.pathLength <= gMaxBounces; pd.pathLength++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -277,7 +261,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                     misWeight = evalMIS(1, pd.scatterPdf, 1, lightPdf);
                 }
                 float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * pd.reconThp;
-                neeSampleSurface.isValid = !addSampleToReservoir( reservoir, sampleNext1D(sg), envMapContribution, pd.thp);
+                pd.lastVertexIsNee &= addSampleToReservoir( reservoir, sampleNext1D(sg), envMapContribution, pd.thp);
                 outColor += envMapContribution * pd.thp;
             }
             break;
@@ -293,7 +277,8 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
 
         //Check if reuse or sample surface can be set
         bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        if (!pd.reconnectIsSet && hitIsDiffuse) {
+        bool hitEmissive = any(bsdfProperties.emission > 0);
+        if (!pd.reconnectIsSet && hitIsDiffuse && !hitEmissive) {
             // If last and current hit is diffuse it is a valid reservoir
             if (pd.lastHitWasDiffuse) {
                 reservoir.samplePosW = sd.posW;
@@ -304,14 +289,12 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             }
             else // Set new reconnection surface if last hit was specular
             {
-                reservoir.reconnectionSurface = hit.getData();
-                reservoir.reconnectionSurfaceIncomingDir = sd.V;
                 reservoir.pathLength = pd.pathLength;
             }
         }
 
         // Ray hits emissive (only used after 2nd bounce, as RTXDI handles direct light)
-        bool hitEmissive = any(bsdfProperties.emission > 0);
+        
         if (hitEmissive && pd.pathLength > 1) {
             //Get hit in light collection representation
             TriangleHit triangleHit = hit.getTriangleHit();
@@ -328,7 +311,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             }
 
             float3 emissiveRadiance = misWeight * bsdfProperties.emission * pd.reconThp; // Is also w, as primary path space is used (pdf == 1)
-            neeSampleSurface.isValid = !addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance, pd.thp);
+            pd.lastVertexIsNee &= !addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance, pd.thp);
 
             outColor += emissiveRadiance;
         }
@@ -341,17 +324,12 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         bool currentIsDelta = bsdfProperties.roughness <= kDeltaRoughnessThreshold;
         if (!currentIsDelta) {
             LightSample ls;
+            SampleGenerator neeSgState = sg; //Cache sampleGenerator state
             float3 nee = nextEventEstimation(sd, mi, ls, sg) * pd.reconThp;
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp))
             {
-                if (ls.type == kNeeLightTypeEmissive && !pd.reconnectIsSet) {
-                    neeSampleSurface.posW = ls.position;
-                    neeSampleSurface.isValid = true;
-                    neeSampleSurface.faceN = ls.faceN;
-                    neeSampleSurface.jacobianDeterminant = dot(neeSampleSurface.faceN, -ls.dir) / (ls.distance * ls.distance); // Reconnection jacobian determinant
-                } else {
-                    neeSampleSurface.isValid = false;
-                }
+                pd.lastVertexIsNee = !pd.reconnectIsSet;
+                reservoir.sgRCNee = neeSgState;
             }
             outColor += nee;
         }
@@ -365,15 +343,11 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             break;
     }
 
-    if (neeSampleSurface.isValid) {
-        reservoir.samplePosW = neeSampleSurface.posW;
-        reservoir.sampleFaceN = neeSampleSurface.faceN;
-        reservoir.jacobianDeterminant = neeSampleSurface.jacobianDeterminant;
-    }
+    reservoir.flags.endIsNee = pd.lastVertexIsNee;
 
     // Finalize Reservoir
-    if (any(reservoir.sampleRadiance > 0)) {
-        reservoir.wSum /= luminance(reservoir.sampleRadiance * reservoir.reconnectionThp);
+    if (any(reservoir.F > 0)) {
+        reservoir.weight /= luminance(reservoir.F * reservoir.rcThp);
     }
 
     return outColor;
@@ -426,9 +400,8 @@ void rayGen()
         // Set RTXDI data
         let lod = ExplicitLodTextureSampler(0);
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 1);
-        reservoir.rngPixel = pixel;
-        reservoir.rngSeed = gFrameCount * 5 + 2;
-        SampleGenerator rayDirSg = SampleGenerator(pixel, reservoir.rngSeed); //Seperate sample generator for ray directions (used in random replay)
+        SampleGenerator rayDirSg = SampleGenerator( pixel, gFrameCount * 5 + 2); // Seperate sample generator for ray directions (used in random replay)
+        reservoir.sgPathDirections = rayDirSg; //Store state of sample generator
 
         ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
@@ -440,11 +413,7 @@ void rayGen()
         // Prepare for the first ray
         PathData pd = PathData();
         pd.lastHitWasDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        if (pd.lastHitWasDiffuse) {
-            reservoir.reconnectionSurface = hitInfo.getData();
-            reservoir.reconnectionSurfaceIncomingDir = sd.V;
-        }
-            
+             
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;

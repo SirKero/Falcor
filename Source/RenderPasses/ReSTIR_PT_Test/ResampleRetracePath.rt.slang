@@ -23,7 +23,6 @@ Texture2D<float4> gView;
 Texture2D<float2> gMVec;
 StructuredBuffer<ReservoirPT> gReservoirPrev;
 RWStructuredBuffer<ReservoirPT> gReservoir;
-RWTexture2D<float4> gDebug;
 
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;

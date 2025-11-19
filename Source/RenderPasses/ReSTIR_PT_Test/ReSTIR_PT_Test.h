@@ -71,7 +71,10 @@ private:
     // Traces the initial Path
     void tracePathPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Resampling pass
+    //Resampling Retrace Path pass
+    void resamplingRetracePathPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Resampling Pass
     void resamplingPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Evaluates the Reservoirs
@@ -112,6 +115,8 @@ private:
     // Resources
     //
     ref<Buffer> mpReservoirPT[2];   //Path Reservoir
+    ref<Texture> mpViewPrev;        //Previous frame View Vector
+    ref<Texture> mpVBufferPrev;     //Previous frame VBuffer
 
 
     //
@@ -136,7 +141,8 @@ private:
     };
 
     RayTraceProgramHelper mTracePathPass; //Traces the initial Paths (1SPP Path Tracer)
-    RayTraceProgramHelper mResamplePass;    //Resampling
+    RayTraceProgramHelper mResampleRetracePathPass;    //Resampling
+    ref<ComputePass> mpResamplePass;                 // Resampling
     ref<ComputePass> mpEvalReservoirPass;   //Evaluates the reservoirs
 };
 

@@ -36,7 +36,8 @@ namespace
     const std::string kShaderFolder = "RenderPasses/ReSTIR_PT_Test/";
     const std::string kShaderTracePath = kShaderFolder + "TracePath.rt.slang";
     const std::string kShaderEvalReservoir = kShaderFolder + "EvaluateReservoir.cs.slang";
-    const std::string kShaderResampling = kShaderFolder + "Resample.rt.slang";
+    const std::string kShaderResamplingRetracePath = kShaderFolder + "ResampleRetracePath.rt.slang";
+    const std::string kShaderResampling = kShaderFolder + "Resample.cs.slang";
     const std::string kShaderModel = "6_5";
 
     // Render Pass inputs and outputs
@@ -179,8 +180,12 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
     if (mResamplingValid && mEnableResampling)
-        resamplingPass(pRenderContext, renderData);
+    {
+        //resamplingRetracePathPass(pRenderContext, renderData);
 
+        resamplingPass(pRenderContext, renderData);
+    }
+        
     evalReservoirPass(pRenderContext, renderData);
 
     mpRTXDI->endFrame(pRenderContext);
@@ -271,8 +276,10 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
 {
     if (any(mScreenRes != renderData.getDefaultTextureDims()))
     {
-        mpReservoirPT[0].reset();
-        mpReservoirPT[1].reset();
+        mpReservoirPT[0] = nullptr;
+        mpReservoirPT[1] = nullptr;
+        mpViewPrev = nullptr;
+        mpVBufferPrev = nullptr;
         mScreenRes = renderData.getDefaultTextureDims();
         mResamplingValid = false;
     }
@@ -282,11 +289,31 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpReservoirPT[i])
         {
             mpReservoirPT[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint) * 26, mScreenRes.x * mScreenRes.y,
+                mpDevice, sizeof(uint) * 24, mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpReservoirPT[i]->setName("ReservoirPT_" + std::to_string(i));
         }
+    }
+
+    if (!mpViewPrev)
+    {
+        auto viewTex = renderData[kInputView]->asTexture();
+        mpViewPrev = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, viewTex->getFormat(), 1u, 1u, nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mpViewPrev->setName("ViewPrevious");
+    }
+
+    if (!mpVBufferPrev)
+    {
+        auto vbufferTex = renderData[kInputVBuffer]->asTexture();
+        mpVBufferPrev = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, vbufferTex->getFormat(), 1u, 1u, nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mpVBufferPrev->setName("VBufferPrevious");
     }
 }
 
@@ -364,23 +391,23 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     pRenderContext->uavBarrier(renderData[kOutputColor]->asTexture().get());
 }
 
- void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData)
+ void ReSTIR_PT_Test::resamplingRetracePathPass(RenderContext* pRenderContext, const RenderData& renderData)
  {
-     FALCOR_PROFILE(pRenderContext, "Resampling");
+     FALCOR_PROFILE(pRenderContext, "ResamplingRetrace");
      // Init Shader
-     if (!mResamplePass.pProgram)
+     if (!mResampleRetracePathPass.pProgram)
      {
          RtProgram::Desc desc;
          desc.addShaderModules(mpScene->getShaderModules());
-         desc.addShaderLibrary(kShaderResampling);
+         desc.addShaderLibrary(kShaderResamplingRetracePath);
          desc.setMaxPayloadSize(sizeof(float) * 4);
          desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
          desc.setMaxTraceRecursionDepth(1);
          if (!mpScene->hasProceduralGeometry())
              desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
 
-         mResamplePass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-         auto& sbt = mResamplePass.pBindingTable;
+         mResampleRetracePathPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+         auto& sbt = mResampleRetracePathPass.pBindingTable;
          sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
          sbt->setMiss(0, desc.addMiss("miss"));
 
@@ -388,18 +415,18 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
          {
              sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
          }
-         mResamplePass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+         mResampleRetracePathPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
      }
 
      // Runtime defines
-     mResamplePass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
+     mResampleRetracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
 
      // Program Vars
-     if (!mResamplePass.pVars)
-         mResamplePass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+     if (!mResampleRetracePathPass.pVars)
+         mResampleRetracePathPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
 
-     FALCOR_ASSERT(mResamplePass.pVars);
-     auto var = mResamplePass.pVars->getRootVar();
+     FALCOR_ASSERT(mResampleRetracePathPass.pVars);
+     auto var = mResampleRetracePathPass.pVars->getRootVar();
      mpScene->setRaytracingShaderData(pRenderContext, var);
 
      //Constant Buffer
@@ -416,13 +443,54 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
 
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
-          
-     var["gDebug"] = renderData[kOutputDebug]->asTexture();
-
+        
      // Dispatch Shader
-     mpScene->raytrace(pRenderContext, mResamplePass.pProgram.get(), mResamplePass.pVars, uint3(mScreenRes, 1));
+     mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
 
  }
+
+void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData) {
+    FALCOR_PROFILE(pRenderContext, "Resample");
+    // Initialize compute pass
+    if (!mpResamplePass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderResampling).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+
+        mpResamplePass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpResamplePass);
+
+    auto var = mpResamplePass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gConfidenceCap"] = mConfidenceCap;
+
+    // Input
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gView"] = renderData[kInputView]->asTexture();
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gViewPrev"] = mpViewPrev;
+    var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+    var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
+
+    var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
+
+    // Execute
+    FALCOR_ASSERT(mScreenRes.x > 0 && mScreenRes.y > 0);
+    mpResamplePass->execute(pRenderContext, uint3(mScreenRes, 1));
+}
 
 void ReSTIR_PT_Test::evalReservoirPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
@@ -468,6 +536,8 @@ void ReSTIR_PT_Test::evalReservoirPass(RenderContext* pRenderContext, const Rend
 
     // Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
+    var["gViewPrev"] = mpViewPrev;
+    var["gVBufferPrev"] = mpVBufferPrev;
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

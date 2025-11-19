@@ -4,7 +4,8 @@ target_sources(ReSTIR_PT_Test PRIVATE
     ReSTIR_PT_Test.cpp
     ReSTIR_PT_Test.h
 	TracePath.rt.slang
-    Resample.rt.slang
+    ResampleRetracePath.rt.slang
+    Resample.cs.slang
 	EvaluateReservoir.cs.slang
 	SharedStructsAndFunctions.slang
 )

@@ -12,6 +12,8 @@ Texture2D<float4> gView;
 StructuredBuffer<ReservoirPT> gReservoir;
 
 RWTexture2D<float4> gOutColor;
+RWTexture2D<PackedHitInfo> gVBufferPrev;
+RWTexture2D<float4> gViewPrev;
 
 cbuffer CB
 {
@@ -28,16 +30,21 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (any(pixel >= gFrameDim))
         return;
 
-    HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
-    float3 viewDir = -gView[pixel].xyz;
+    PackedHitInfo packedHit = gVBuffer[pixel];
+    HitInfo hitInfo = HitInfo(packedHit);
+    float3 viewDir = gView[pixel].xyz;
+
+    // Copy VBuffer and View data
+    gVBufferPrev[pixel] = packedHit;
+    gViewPrev[pixel] = float4(viewDir, 1.0);
 
     float3 outColor = float3(0);
     if (hitInfo.isValid()) {
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 4);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 5);
         let lod = ExplicitLodTextureSampler(0.f);
 
         // Get Material properties
-        ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
+        ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
 
@@ -60,7 +67,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
 
         ReservoirPT ptReservoir = gReservoir[index2Dto1D(pixel, gFrameDim.x)];
-        outColor += ptReservoir.wSum * ptReservoir.sampleRadiance * ptReservoir.reconnectionThp;
+        outColor += ptReservoir.weight * ptReservoir.F * ptReservoir.rcThp;
 
     } else {
         outColor = gScene.envMap.eval(viewDir);
