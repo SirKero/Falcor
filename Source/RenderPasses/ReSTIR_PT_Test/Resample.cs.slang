@@ -69,6 +69,8 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
     if (temporal.pathLength > 0 || reservoir.pathLength > 0)
         return false;
 
+
+
     // Needed reservoir variables
     let lod = ExplicitLodTextureSampler(0);
     float w_0, w_1 = 0;
@@ -83,9 +85,11 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
         wSum += w_0;
     }
 
-    float3 rcThpTemporal = float3(0); // only needed for path lenght == 0
+    float3 thpTemporal = float3(1); // only needed for path lenght == 0
+    float3 Ftemporal = float3(0);
     float jacobianTemporal = 0;
-    if (temporal.weight > 0) {
+    bool temporalCanBeSelected = temporal.weight > 0;
+    if (temporalCanBeSelected) {
         ShadingData sdOther = loadShadingData(firstHit, -gView[pixel].xyz, lod);
         let miOther = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
         float mis = generalizedBalanceHeuristic(temporal, sdOther, miOther, reservoir.c, sg);
@@ -98,28 +102,29 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
         
         if (jacobian > 0) {
             if (dispatchShadowRay(sdOther, toSample, distToSample)) {
-                rcThpTemporal = miOther.eval(sdOther, toSample, sg);
+                thpTemporal = miOther.eval(sdOther, toSample, sg);
             }
         }
 
-        gDebug[pixel] = float4(rcThpTemporal, 1.0);
-        w_1 = mis * luminance(temporal.F * rcThpTemporal) * temporal.weight * jacobian;
+        gDebug[pixel] = float4(temporal.rcThp, 1.0);
+        Ftemporal = temporal.rcThp * thpTemporal;
+        w_1 = mis * luminance(Ftemporal) * temporal.weight * jacobian;
         wSum += w_1;
     }
 
     uint cSum = min(reservoir.c + temporal.c, gConfidenceCap);
-    bool selectOtherSample = (sampleNext1D(sg) * wSum) <= w_1;
+    bool selectOtherSample = (sampleNext1D(sg) * wSum) <= w_1 && temporalCanBeSelected;
     if (selectOtherSample) {
         reservoir = temporal;
         reservoir.jacobianDeterminant = jacobianTemporal;
-        reservoir.rcThp = rcThpTemporal;
-        reservoir.F *= jacobianTemporal;
+        reservoir.thp = thpTemporal;
+        reservoir.F = Ftemporal;
     }
 
     reservoir.weight = wSum;
     reservoir.c = cSum;
 
-    float sampleRad = luminance(reservoir.F * reservoir.rcThp);
+    float sampleRad = luminance(reservoir.F);
     if (reservoir.weight > 0 && sampleRad > 0)
         reservoir.weight /= sampleRad;
     else

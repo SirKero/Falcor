@@ -278,6 +278,8 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
     {
         mpReservoirPT[0] = nullptr;
         mpReservoirPT[1] = nullptr;
+        mpRetraceSurfaceBuffer[0] = nullptr;
+        mpRetraceSurfaceBuffer[1] = nullptr;
         mpViewPrev = nullptr;
         mpVBufferPrev = nullptr;
         mScreenRes = renderData.getDefaultTextureDims();
@@ -289,10 +291,19 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpReservoirPT[i])
         {
             mpReservoirPT[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint) * 24, mScreenRes.x * mScreenRes.y,
+                mpDevice, sizeof(uint) * 28, mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpReservoirPT[i]->setName("ReservoirPT_" + std::to_string(i));
+        }
+
+        if (!mpRetraceSurfaceBuffer[i])
+        {
+            mpRetraceSurfaceBuffer[i] = Buffer::createStructured(
+                mpDevice, sizeof(uint) * 12, mScreenRes.x * mScreenRes.y,
+                ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
+            );
+            mpRetraceSurfaceBuffer[i]->setName("RetraceSurfaceBuffer_" + std::to_string(i));
         }
     }
 
@@ -369,13 +380,13 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
         mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
 
     //Calc nee light type select probability (currently equal probability)
-    float3 neeLightSelectProb =
+    mNeeLightSelectProb =
         float3(mpScene->useEmissiveLights() ? 1.f : 0.f, mpScene->useAnalyticLights() ? 1.f : 0.f, mpScene->useEnvLight() ? 1.f : 0.f);
-    neeLightSelectProb /= neeLightSelectProb.x + neeLightSelectProb.y + neeLightSelectProb.z;
+    mNeeLightSelectProb /= mNeeLightSelectProb.x + mNeeLightSelectProb.y + mNeeLightSelectProb.z;
 
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gNeeLightTypeSelectProbability"] = neeLightSelectProb;
+    var["CB"]["gNeeLightTypeSelectProbability"] = mNeeLightSelectProb;
     var["CB"]["gMaxBounces"] = mPTBounces;
 
     // Input Resources
@@ -419,7 +430,13 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      }
 
      // Runtime defines
+     mResampleRetracePathPass.pProgram->addDefine("USE_ANALYTIC_LIGHT", mpScene->useAnalyticLights() ? "1" : "0");
+     mResampleRetracePathPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
+     mResampleRetracePathPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+     mResampleRetracePathPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
      mResampleRetracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
+     if (mpEmissiveLightSampler)
+         mResampleRetracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
      // Program Vars
      if (!mResampleRetracePathPass.pVars)
@@ -428,22 +445,29 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      FALCOR_ASSERT(mResampleRetracePathPass.pVars);
      auto var = mResampleRetracePathPass.pVars->getRootVar();
      mpScene->setRaytracingShaderData(pRenderContext, var);
+     if (mpEmissiveLightSampler)
+         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+     if (mpEnvMapSampler)
+         mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
 
      //Constant Buffer
      var["CB"]["gFrameCount"] = mFrameCount;
      var["CB"]["gMaxBounces"] = mPTBounces;
-     var["CB"]["gConfidenceCap"] = mConfidenceCap;
-     var["CB"]["gSpatialSamples"] = mSpatialSamples;
-     var["CB"]["gSpatialSampleRadius"] = mSpatialSampleRadius;
+     var["CB"]["gNeeLightTypeSelectProbability"] = mNeeLightSelectProb;
+
 
      // Input Resources
      var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
      var["gView"] = renderData[kInputView]->asTexture();
+     var["gVBufferPrev"] = mpVBufferPrev;
+     var["gViewPrev"] = mpViewPrev;
+
      var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
      var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
+     var["gRetraceSurfacePrev"] = mpRetraceSurfaceBuffer[(mFrameCount + 1) % 2];
 
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
-        
+     var["gRetraceSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];        
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
 

@@ -38,7 +38,7 @@ struct ReservoirFlags {
     }
 }
 
-// Reservoir; Size: 96 Byte (24 floats)
+// Reservoir; Size: 112 Byte (28 floats)
 struct ReservoirPT
 {
     SampleGenerator sgPathDirections; //Sample Generator for random direction (float4)
@@ -48,15 +48,18 @@ struct ReservoirPT
     float3 samplePosW;                 // Sample PosW
     float jacobianDeterminant;         //(stored) jacobian determinant
 
-    float3 sampleFaceN;   // Sample Face Normal
-    ReservoirFlags flags;                //path length and flags
+    float3 sampleFaceN;             // Sample Face Normal
+    ReservoirFlags flags;           //path length and flags
 
-    float3 F;                       //Radiance of the sample
+    float3 F;                       //Complete radiance of the path
     uint c;                         //Confidence Weight
 
-    float3 rcThp;                   //Thp until reconnection surface
+    float3 rcThp;                   //THP after reconnection
     float weight;                   //Unbiased contribution weight
 
+    float3 thp;                     // Thp until the reconnection surface
+    uint _pad;                      //Pading
+        
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
         sgRCNee = SampleGenerator(uint2(0), 0);
@@ -66,8 +69,10 @@ struct ReservoirPT
         flags = ReservoirFlags();
         F = float3(0);
         c = 1;
-        rcThp = float3(1);
+        rcThp = float3(0);
+        thp = float3(1);
         weight = 0.0;
+        _pad = 0;
     }
 
     bool isValid() {
@@ -77,6 +82,23 @@ struct ReservoirPT
     property uint pathLength {
         get { return flags.pathLength; }
         set { flags.pathLength = newValue;}
+    }
+}
+
+// Retraced Surface Struct 48 Byte (12 floats)
+struct RetracedSurface {
+    PackedHitInfo rcSurface;    // Suface to reconnect to the reservoir sample
+    float3 rcViewDir;           // View direction at the reconnection surface
+    uint _pad;
+    float3 thp; // Thp until the reconnection surface
+    uint _pad2;
+
+    __init() {
+        rcSurface = {};
+        rcViewDir = float3(0);
+        _pad = 0;
+        thp = float3(1);
+        _pad2 = 0;
     }
 }
 

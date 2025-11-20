@@ -67,6 +67,8 @@ struct PathData {
     bool lastHitWasDiffuse;
     uint pathLength;
 
+    uint rcPathLength;
+
     __init() {
         thp = float3(1.0);
         reconThp = float3(1.0);
@@ -76,6 +78,7 @@ struct PathData {
         lastVertexIsNee = false;
         pathLength = 0;
         reconnectIsSet = false;
+        rcPathLength = 0;
     }
 }
 
@@ -226,14 +229,22 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, out LightSample
     return misWeight * bsdf * ls.Li;
 }
 
-bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 sampleRadiance, float3 reconnectThp)
+/* Add sample to reservoir
+    \param[inout] reservoir Reservoir to add the sample to.
+    \param[in] rand Random number in [0,1).
+    \param[in] rcThp Throughput after reconnection to light source.
+    \param[in] thp Throughput until the reconnection surface.
+*/
+bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 rcThp, float3 thp)
 {
-    float w = luminance(sampleRadiance * reconnectThp);
+    float3 F = rcThp * thp;
+    float w = luminance(F);
     reservoir.weight += w;
     bool selectOther = rand * reservoir.weight <= w;
     if (selectOther) {
-        reservoir.F = sampleRadiance;
-        reservoir.rcThp = reconnectThp;
+        reservoir.F = F;
+        reservoir.rcThp = rcThp;
+        reservoir.thp = thp;
     }
     return selectOther;
 }
@@ -261,7 +272,12 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                     misWeight = evalMIS(1, pd.scatterPdf, 1, lightPdf);
                 }
                 float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * pd.reconThp;
-                pd.lastVertexIsNee &= addSampleToReservoir( reservoir, sampleNext1D(sg), envMapContribution, pd.thp);
+                if (addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution, pd.thp)) {
+                    pd.lastVertexIsNee = false;
+                    if (!pd.reconnectIsSet)
+                        reservoir.pathLength = pd.pathLength;
+                }
+                
                 outColor += envMapContribution * pd.thp;
             }
             break;
@@ -311,7 +327,12 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             }
 
             float3 emissiveRadiance = misWeight * bsdfProperties.emission * pd.reconThp; // Is also w, as primary path space is used (pdf == 1)
-            pd.lastVertexIsNee &= !addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance, pd.thp);
+            if (addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance, pd.thp))
+            {
+                pd.lastVertexIsNee = false;
+                if (!pd.reconnectIsSet)
+                    reservoir.pathLength = pd.pathLength;
+            }
 
             outColor += emissiveRadiance;
         }
@@ -347,7 +368,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
 
     // Finalize Reservoir
     if (any(reservoir.F > 0)) {
-        reservoir.weight /= luminance(reservoir.F * reservoir.rcThp);
+        reservoir.weight /= luminance(reservoir.F);
     }
 
     return outColor;

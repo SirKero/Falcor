@@ -10,19 +10,26 @@ import SharedStructsAndFunctions;
 
 cbuffer CB
 {
-    uint gFrameCount; // Current FrameCount for RNG
+    uint gFrameCount;                      // Current FrameCount for RNG
+    float3 gNeeLightTypeSelectProbability; // Emissive, Analytic, EnvMap
     uint gMaxBounces; // Max indirections
-    uint gConfidenceCap;
-    uint gSpatialSamples;
+}
 
-    float gSpatialSampleRadius;
+cbuffer Light {
+    EmissiveLightSampler gEmissiveSampler;
+    EnvMapSampler gEnvMapSampler;
 }
 
 Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<PackedHitInfo> gVBufferPrev;
 Texture2D<float4> gView;
+Texture2D<float4> gViewPrev;
 Texture2D<float2> gMVec;
+
 StructuredBuffer<ReservoirPT> gReservoirPrev;
+StructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
 RWStructuredBuffer<ReservoirPT> gReservoir;
+RWStructuredBuffer<RetracedSurface> gRetraceSurface;
 
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -55,7 +62,7 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
     return validSample && any(thp > 0);
 }
 
-bool resampleReservoir(int2 pixel, uint2 dispatchDims, inout ReservoirPT reservoir, HitInfo hit, float3 viewDir, inout SampleGenerator sg)
+bool randomReplay(int2 pixel, uint2 dispatchDims, inout ReservoirPT reservoir, HitInfo hit, float3 viewDir, inout SampleGenerator sg)
 {
     // Check if reservoir is inside the screen.
     if (any(pixel < 0) || any(pixel >= dispatchDims))
@@ -208,28 +215,48 @@ void rayGen()
     uint2 dispatchDims = DispatchRaysDimensions().xy;
 
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
-    float3 viewDir = -gView[pixel].xyz;
-    ReservoirPT reservoir = ReservoirPT();
+
     if (hitInfo.isValid()) {
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3);
-        reservoir = gReservoir[index2Dto1D(pixel, dispatchDims.x)];
-
-        //
-        // Temporal Resampling
-        //
-
-        // Reproject to the previous pixel using the motion vectors
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3); //TODO get a good offset scheme that works with multiple passes
+        //Get pixel from last frame using motion vectors
         float2 motionOffset = gMVec[pixel] * float2(dispatchDims);
         float2 prevPixelF = motionOffset + float2(pixel) + float2(0.5);
-        float2 rndOffset = sampleNext2D(sg) - 0.5;
+        float2 rndOffset = sampleNext2D(sg) - 0.5; // TODO use the same random number as in the resample pass
         prevPixelF += rndOffset;
         int2 prevPixel = int2(prevPixelF);
 
-        resampleReservoir(pixel, dispatchDims, reservoir, hitInfo, viewDir, sg);
+        // Check if previous pixel is inside the screen
+        if(any(prevPixel < 0) || any(prevPixel >= dispatchDims))
+        {
+            return;
+        }
 
-        //TODO Spatial Resampling
+        // Get current reservoir
+        let lod = ExplicitLodTextureSampler(0);
+        const uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
+        ReservoirPT reservoir = gReservoir[reservoirIndex];
+        if (reservoir.pathLength > 0) {
+            RetracedSurface retraceSurface = RetracedSurface();
+            // Get starting surface for temporal retrace
+            HitInfo prevHit = HitInfo(gVBufferPrev[prevPixel]);
+            float3 prevViewDir = gViewPrev[prevPixel].xyz;
+            ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
+            //Perform random replay TODO
+
+
+            gRetraceSurface[reservoirIndex] = retraceSurface;
+        }
+
+        ReservoirPT resampleReservoir = gReservoirPrev[index2Dto1D(prevPixel, dispatchDims.x)];
+        if (resampleReservoir.pathLength > 0) {
+            RetracedSurface retraceSurface = RetracedSurface();
+            float3 viewDir = gView[pixel].xyz;
+            ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
+
+            // Perform random replay TODO
+
+            gRetraceSurface[reservoirIndex] = retraceSurface;
+        }
     }
-
-    gReservoir[index2Dto1D(pixel, dispatchDims.x)] = reservoir;
 }

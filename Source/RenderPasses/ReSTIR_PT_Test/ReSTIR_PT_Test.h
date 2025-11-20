@@ -103,6 +103,7 @@ private:
     bool mOptionsChanged = false;
 
     uint mPTBounces = 10;
+    float3 mNeeLightSelectProb = float3(0.33f); //Light selection probability for NEE samples (Emissive, Analytic, EnvMap)
     float mRoughnessThreshold = 0.25f;  //Threshold for reuse
 
     bool mEnableResampling = true;
@@ -115,6 +116,7 @@ private:
     // Resources
     //
     ref<Buffer> mpReservoirPT[2];   //Path Reservoir
+    ref<Buffer> mpRetraceSurfaceBuffer[2];  //Retrace Surface Data Buffer 
     ref<Texture> mpViewPrev;        //Previous frame View Vector
     ref<Texture> mpVBufferPrev;     //Previous frame VBuffer
 
