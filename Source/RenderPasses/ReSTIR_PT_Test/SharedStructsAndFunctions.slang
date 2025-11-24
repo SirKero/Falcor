@@ -10,9 +10,19 @@ import Rendering.Materials.Fresnel;
 static const float kShadowRayEpsilon = 0.98f;
 static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kMinGGXAlpha. Everything under this value is considered a delta event
 
+
 //
 // Structs
 //
+
+enum ReservoirPathFlags : uint {
+    endIsNee = 0x100,                   //1<<9
+    isNee = 0x200,                      // 1<<10
+    isScatter = 0x400,                  // 1<<11
+    isEnvMapMiss = 0x800,               // 1<<12
+    hasNoReconnectionSurface = 0x1000,  //1<<13
+    isReconnectionPath = 0x2000,        //1<<14
+}
 
 struct ReservoirFlags {
     uint flags;
@@ -21,19 +31,58 @@ struct ReservoirFlags {
         flags = 0;
     }
 
+    //Replaces path flag. Assumes that it is already or'ed
+    [mutating]
+    void setReservoirPathFlags(uint pathFlag) {
+        flags &= ~0xFF00; // Clear all flag bits
+        flags |= pathFlag;
+    }
+
     property uint pathLength {
         get { return flags & 0xFF; }
         set {
-            flags &= ~0xFF; // Clear upper bits
+            flags &= ~0xFF; // Clear lower bits
             flags |= (newValue & 0xFF);
         }
     }
 
     property bool endIsNee {
-        get { return (flags & (1 << 9)) > 0; }
+        get { return (flags & (uint)ReservoirPathFlags::endIsNee) > 0; }
         set {
-            flags &= ~(1 << 9); // Clear bit
-            flags |= (newValue ? 1 : 0) << 9;
+            flags &= ~ (uint)ReservoirPathFlags::endIsNee; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::endIsNee : 0);
+        }
+    }
+
+    property bool isNee {
+        get { return (flags & (uint)ReservoirPathFlags::isNee) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isNee; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isNee : 0);
+        }
+    }
+
+    property bool isScatter {
+        get { return (flags & (uint)ReservoirPathFlags::isScatter) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isScatter; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isScatter : 0);
+        }
+    }
+
+    property bool isEnvMapMiss {
+        get { return (flags & (uint)ReservoirPathFlags::isEnvMapMiss) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isEnvMapMiss; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isEnvMapMiss : 0);
+        }
+    }
+
+    property bool hasNoReconnectionSurface {
+        get { return (flags & (uint)ReservoirPathFlags::hasNoReconnectionSurface) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::hasNoReconnectionSurface; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::hasNoReconnectionSurface : 0);
         }
     }
 }
@@ -89,16 +138,20 @@ struct ReservoirPT
 struct RetracedSurface {
     PackedHitInfo rcSurface;    // Suface to reconnect to the reservoir sample
     float3 rcViewDir;           // View direction at the reconnection surface
-    uint _pad;
+    uint pathFlags;
     float3 thp; // Thp until the reconnection surface
-    uint _pad2;
+    uint _pad;
 
     __init() {
         rcSurface = {};
         rcViewDir = float3(0);
-        _pad = 0;
+        pathFlags = 0;
         thp = float3(1);
-        _pad2 = 0;
+        _pad = 0;
+    }
+
+    bool isValid() {
+        return pathFlags > 0;
     }
 }
 
@@ -133,4 +186,23 @@ bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
     SceneRayQuery<1> rayQuery;
     const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.f, distanceToLight * kShadowRayEpsilon);
     return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
+}
+
+/* Evaluate MIS weight
+   \param[in] n0 Number of samples taken from the first sampling strategy.
+    \param[in] p0 Pdf for the first sampling strategy.
+    \param[in] n1 Number of samples taken from the second sampling strategy.
+    \param[in] p1 Pdf for the second sampling strategy.
+    \return Weight for the contribution from the first strategy (p0).
+*/
+float evalMIS(float n0, float p0, float n1, float p1)
+{
+    // Currently only balance heuristic
+    float q0 = n0 * p0;
+    float q1 = n1 * p1;
+    float sum = (q0 + q1);
+    if(sum > 0)
+        return q0 / (q0 + q1);
+    else
+        return 0;
 }

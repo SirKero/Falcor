@@ -6,18 +6,15 @@ import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Rendering.Lights.LightHelpers;
+import Rendering.Lights.EmissiveLightSampler;
 import SharedStructsAndFunctions;
+import NextEventEstimationHelper;
 
 cbuffer CB
 {
     uint gFrameCount;                      // Current FrameCount for RNG
     float3 gNeeLightTypeSelectProbability; // Emissive, Analytic, EnvMap
     uint gMaxBounces; // Max indirections
-}
-
-cbuffer Light {
-    EmissiveLightSampler gEmissiveSampler;
-    EnvMapSampler gEnvMapSampler;
 }
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -27,10 +24,14 @@ Texture2D<float4> gViewPrev;
 Texture2D<float2> gMVec;
 
 StructuredBuffer<ReservoirPT> gReservoirPrev;
-StructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
-RWStructuredBuffer<ReservoirPT> gReservoir;
+RWStructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
+StructuredBuffer<ReservoirPT> gReservoir;
 RWStructuredBuffer<RetracedSurface> gRetraceSurface;
 
+static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
+static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
+static const bool kUseEnvMap = USE_ENV_BACKROUND;
+static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
@@ -48,7 +49,25 @@ struct RayPayload
     }
 }
 
-bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, float3 thp, inout RayDesc ray)
+struct RetracePathData {
+    float3 thp;
+    float scatterPdf;
+    float3 lastOrigin;
+    bool surfaceIsSet;
+    float3 lastFaceN;
+    bool lastSurfaceIsDiffuse;
+
+    __init() {
+        thp = float3(1);
+        scatterPdf = 1;
+        lastOrigin = float3(0);
+        lastFaceN = float3(0);
+        surfaceIsSet = false;
+        lastSurfaceIsDiffuse = false;
+    }
+}
+
+bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout RetracePathData rpd, inout RayDesc ray)
 {
     BSDFSample bsdfSample;
     bool validSample = mi.sample(sd, sg, bsdfSample, true);
@@ -56,124 +75,127 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
-        thp *= bsdfSample.weight;
+        rpd.thp *= bsdfSample.weight;
+        rpd.scatterPdf = bsdfSample.pdf;
     }
 
-    return validSample && any(thp > 0);
+    return validSample && any(rpd.thp > 0);
 }
 
-bool randomReplay(int2 pixel, uint2 dispatchDims, inout ReservoirPT reservoir, HitInfo hit, float3 viewDir, inout SampleGenerator sg)
+bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurface retracedSurface)
 {
-    // Check if reservoir is inside the screen.
-    if (any(pixel < 0) || any(pixel >= dispatchDims))
-        return false;
+    let lod = ExplicitLodTextureSampler(0);
+    const uint2 dispatchDims = DispatchRaysDimensions().xy;
 
-    // Fetch the (spatio)temporal reservoir
-    ReservoirPT temporalR = gReservoirPrev[index2Dto1D(pixel, dispatchDims.x)];
-    if (temporalR.wSum <= 0 || temporalR.pathLength >= gMaxBounces)
-        return false;
-
+    //Init needed path data
+    SampleGenerator rayDirSg = reservoir.sgPathDirections;
+    RetracePathData rpd = RetracePathData();
+    
+    //Get starting ray
     RayDesc ray = {};
     ray.TMin = 0;
     ray.TMax = FLT_MAX;
-    ray.Origin = gScene.camera.getPosition();
-    ray.Direction = viewDir;
-    SampleGenerator pathSg = SampleGenerator(temporalR.rngPixel, temporalR.rngSeed);
-    let lod = ExplicitLodTextureSampler(0);
+    let primMI = gScene.materials.getMaterialInstance(primSD, lod, kMIHints);
 
-    float3 thp = float3(1);
-    bool validTemporalReservoir = false;
-    // Retrace temporal path
-    
-    for (uint pathLength = 0; pathLength <= temporalR.pathLength; pathLength++)
+    if (!sampleNewRay(primSD, primMI, rayDirSg, rpd, ray))
+        return false;
+
+    let primProperties = primMI.getProperties(primSD);
+    RayPayload rayPayload = RayPayload();
+    rpd.lastSurfaceIsDiffuse = primProperties.roughness > kRoughnessThreshold;
+    for (uint pathLength = 1; pathLength <= reservoir.pathLength; pathLength++)
     {
-        //Trace ray
-        if (pathLength > 0) {
-            RayPayload rayPayload = RayPayload();
-            TraceRay(gScene.rtAccel, 0 , 0xff , 0 , rayTypeCount, 0, ray, rayPayload);
-            hit = HitInfo(rayPayload.packedHitInfo);
-            
-        }
+        TraceRay(gScene.rtAccel, 0 , 0xff , 0 , rayTypeCount, 0, ray, rayPayload);
+        HitInfo hit = HitInfo(rayPayload.packedHitInfo);
 
         if (!hit.isValid()) {
-            if (temporalR.jacobianDeterminant < 0 && pathLength == temporalR.pathLength) {
-                temporalR.sampleRadiance = gScene.envMap.eval(ray.Direction);
-                temporalR.wSum *= luminance(thp * temporalR.sampleRadiance);
-                temporalR.reconnectionThp = thp;
-                validTemporalReservoir = temporalR.wSum > 0;
+            if (reservoir.flags.isEnvMapMiss && pathLength == reservoir.pathLength) {
+                float misWeight = 1.0;
+                if (kUseEnvLight && rpd.lastSurfaceIsDiffuse) {
+                    float lightPdf = gNeeLightTypeSelectProbability[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
+                    misWeight = evalMIS(1, rpd.scatterPdf, 1, lightPdf);
+                }
+                float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * rpd.thp;
+                retracedSurface.pathFlags = (uint)ReservoirPathFlags::isEnvMapMiss;
+                retracedSurface.rcViewDir = ray.Direction;
+                retracedSurface.thp = envMapContribution;
+                rpd.surfaceIsSet = true;
             }
             break;
         }
 
+        // Load shading structs
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
-
-        //Load shading structs
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
         bool surfaceIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold); // Either diffuse surface or emissive hit
         bool surfaceIsEmissive = any(bsdfProperties.emission > 0);
-                
-        // Reconnect surface
-        if (pathLength == temporalR.pathLength && (surfaceIsDiffuse || surfaceIsEmissive))
-        {
-            float3 reconnectionThp = float3(0);
-            float updatedJacobianDeterminant = -1;
-            float jacobianDeterminant = 1;
-            if (surfaceIsEmissive && temporalR.jacobianDeterminant < 0)
-            {
-                temporalR.sampleRadiance = bsdfProperties.emission;
-                reconnectionThp = thp;
-            } else if (surfaceIsDiffuse && temporalR.jacobianDeterminant > 0) {
-                // TODO MIS?
 
-                float3 toSample = temporalR.samplePosW - sd.posW;
-                float distToSample = length(toSample);
-                toSample /= distToSample;
-                reconnectionThp = mi.eval(sd, toSample, sg) * thp;
-                updatedJacobianDeterminant = dot(temporalR.sampleFaceN, -toSample) / (distToSample * distToSample);
-                jacobianDeterminant = updatedJacobianDeterminant / temporalR.jacobianDeterminant;
-                temporalR.reconnectionSurface = hit.getData();
-                temporalR.reconnectionSurfaceIncomingDir = sd.V;
+        // Reconnect surface
+        if (pathLength == reservoir.pathLength && (surfaceIsDiffuse || surfaceIsEmissive))
+        {                
+            // The 3 cases (scatter hit, reconnection surface, nee without reconnection surface)
+            if (surfaceIsEmissive && reservoir.flags.isScatter) //Scatter Hit (Path hits emissive surface)
+            {
+                // MIS
+                float misWeight = 1;
+                if (rpd.lastSurfaceIsDiffuse) {
+                    // Get hit in light collection representation
+                    TriangleHit triangleHit = hit.getTriangleHit();
+                    TriangleLightHit lightHit;
+                    lightHit.triangleIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+                    lightHit.posW = sd.posW;
+                    lightHit.normalW = sd.getOrientedFaceNormal();
+
+                    float neePDF = gNeeLightTypeSelectProbability[kNeeLightTypeEmissive] * gEmissiveSampler.evalPdf(rpd.lastOrigin, rpd.lastFaceN, true, lightHit);
+                    misWeight = evalMIS(1.0, rpd.scatterPdf, 1.0, neePDF);
+                }
+
+                float3 emissiveRadiance = misWeight * bsdfProperties.emission * rpd.thp;
+                retracedSurface.pathFlags = (uint)ReservoirPathFlags::isScatter;
+                retracedSurface.thp = emissiveRadiance;
+                rpd.surfaceIsSet = true;
+            } else if (surfaceIsDiffuse && !reservoir.flags.hasNoReconnectionSurface) //Reconnection surface
+            {
+               
+                retracedSurface.pathFlags = (uint)ReservoirPathFlags::isReconnectionPath;
+                retracedSurface.thp = rpd.thp;
+                rpd.surfaceIsSet = true;
+            } else if (surfaceIsDiffuse && reservoir.flags.endIsNee) //Nee without reconnection surface (Delta -> diffuse)
+            {
+                // Replay Nee decisions
+                SampleGenerator neeSG = reservoir.sgRCNee;
+                LightSample ls;
+                float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability, ls, neeSG) * rpd.thp;
+                retracedSurface.pathFlags = (uint)ReservoirPathFlags::endIsNee;
+                retracedSurface.thp = nee;
+                rpd.surfaceIsSet = true;
             }
 
-            temporalR.wSum *= luminance(reconnectionThp * temporalR.sampleRadiance * jacobianDeterminant);
-            temporalR.reconnectionThp = reconnectionThp;
-            temporalR.jacobianDeterminant = updatedJacobianDeterminant;
-            validTemporalReservoir = temporalR.wSum > 0;
-        }
-        else if (surfaceIsEmissive) {
+            //Set hit data
+            if (rpd.surfaceIsSet) {
+                retracedSurface.rcViewDir = sd.V;
+                retracedSurface.rcSurface = hit.getData();
+            }
+        }else if (surfaceIsEmissive) //Surfaces from emissive surfaces are undefined
+        {
             break;
-        }            
-        //Or sample ray for next iteration
-        else if (pathLength < temporalR.pathLength) {
-            sampleNewRay(sd, mi, pathSg, thp, ray);
+        }
+
+        //Update reconnect path data
+        rpd.lastSurfaceIsDiffuse = surfaceIsDiffuse;
+        rpd.lastOrigin = sd.posW;
+        rpd.lastFaceN = sd.getOrientedFaceNormal();
+        //Sample ray for next iteration
+        if (pathLength < reservoir.pathLength) {
+            if (!sampleNewRay(sd, mi, rayDirSg, rpd, ray)) {
+                break;
+            }
+                
         }
     }
 
-    uint cSum = reservoir.c + temporalR.c;
-    if (validTemporalReservoir) {
-        // Prepare current reservoir for resampling (W -> w)
-        float mis = float(reservoir.c) / float(cSum);
-        reservoir.wSum *= mis * luminance(reservoir.sampleRadiance * reservoir.reconnectionThp);
-        mis = float(temporalR.c) / float(cSum);
-        temporalR.wSum *= mis;
-
-        float wSum = reservoir.wSum + temporalR.wSum;
-        bool selectOtherSample = (sampleNext1D(sg) * reservoir.wSum) <= temporalR.wSum;
-        if (selectOtherSample) {
-            reservoir = temporalR;
-        }
-        
-        if(any(reservoir.sampleRadiance > 0))
-            reservoir.wSum = wSum / luminance(reservoir.sampleRadiance * reservoir.reconnectionThp);
-        else
-            reservoir.wSum = 0;
-            
-    cSum = min(cSum, gConfidenceCap);
-    reservoir.c = cSum;
-    }
-
-    return true;
+    return rpd.surfaceIsSet;
 }
 
 [shader("miss")]
@@ -225,7 +247,7 @@ void rayGen()
         prevPixelF += rndOffset;
         int2 prevPixel = int2(prevPixelF);
 
-        // Check if previous pixel is inside the screen
+        // Check if previous pixel is inside the screen, if not, reservoir cannot be selected
         if(any(prevPixel < 0) || any(prevPixel >= dispatchDims))
         {
             return;
@@ -235,16 +257,14 @@ void rayGen()
         let lod = ExplicitLodTextureSampler(0);
         const uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
         ReservoirPT reservoir = gReservoir[reservoirIndex];
-        if (reservoir.pathLength > 0) {
+        if (reservoir.pathLength > 0 && reservoir.weight > 0 && any(reservoir.F > 0)) {
             RetracedSurface retraceSurface = RetracedSurface();
             // Get starting surface for temporal retrace
             HitInfo prevHit = HitInfo(gVBufferPrev[prevPixel]);
             float3 prevViewDir = gViewPrev[prevPixel].xyz;
             ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
-            //Perform random replay TODO
-
-
+            bool valid = randomReplay(sd, reservoir, retraceSurface);
             gRetraceSurface[reservoirIndex] = retraceSurface;
         }
 
@@ -254,9 +274,9 @@ void rayGen()
             float3 viewDir = gView[pixel].xyz;
             ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
 
-            // Perform random replay TODO
+            randomReplay(sd, resampleReservoir, retraceSurface);
 
-            gRetraceSurface[reservoirIndex] = retraceSurface;
+            gRetraceSurfacePrev[reservoirIndex] = retraceSurface;
         }
     }
 }

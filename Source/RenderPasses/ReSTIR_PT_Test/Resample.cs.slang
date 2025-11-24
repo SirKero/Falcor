@@ -12,9 +12,10 @@ Texture2D<float4> gView;
 Texture2D<float4> gViewPrev;
 Texture2D<float2> gMVec;
 StructuredBuffer<ReservoirPT> gReservoirPrev;
+StructuredBuffer<RetracedSurface> gRetracedSurface;
+StructuredBuffer<RetracedSurface> gRetracedSurfacePrev;
 
 RWStructuredBuffer<ReservoirPT> gReservoir;
-RWTexture2D<float4> gDebug;
 
 cbuffer CB
 {
@@ -27,12 +28,21 @@ cbuffer CB
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 //static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 
-float generalizedBalanceHeuristic(ReservoirPT r, ShadingData sdOther, IMaterialInstance miOther, uint otherConfidence, inout SampleGenerator sg)
+bool loadRetraceSurface(uint index, inout RetracedSurface retracedSurface, bool isPrev) {
+    if (isPrev)
+        retracedSurface = gRetracedSurfacePrev[index];
+    else
+        retracedSurface = gRetracedSurface[index];
+    return retracedSurface.isValid();
+}
+
+float reconnectSurface(ReservoirPT r, ShadingData sdOther, float3 thp, uint otherConfidence, inout SampleGenerator sg)
 {
-    // TODO currently path lengh == 0 can be assumed, else the proxy surface needs to be loaded
-    float p0 = luminance(r.F) * r.c;
+    float p0 = luminance(r.F);
 
     // Calc p1
+    let lod = ExplicitLodTextureSampler(0);
+    let miOther = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
     float p1 = 0;
     float3 toSample = r.samplePosW - sdOther.posW;
     float distToSample = length(toSample);
@@ -40,17 +50,12 @@ float generalizedBalanceHeuristic(ReservoirPT r, ShadingData sdOther, IMaterialI
     float jacobian = dot(r.sampleFaceN, -toSample) / (distToSample * distToSample);
     jacobian /= r.jacobianDeterminant;
     if (jacobian > 0) {
-        if(dispatchShadowRay(sdOther, toSample, distToSample)){
-            p1 = luminance(miOther.eval(sdOther, toSample, sg) * jacobian * r.F);
+        if (dispatchShadowRay(sdOther, toSample, distToSample)) {
+            p1 = luminance(miOther.eval(sdOther, toSample, sg) * jacobian * r.rcThp * thp);
         }
     }
-    p1 *= otherConfidence;
 
-    float sum = (p0 + p1);
-    if (sum > 0)
-        return p0 / sum;
-    else
-        return 0;
+    return evalMIS(r.c, p0, otherConfidence, p1);
 }
 
 bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout ReservoirPT reservoir, inout SampleGenerator sg)
@@ -65,50 +70,97 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
     if (!temporalHit.isValid())
         return false;
 
-    //TODO handle hybrid (random replay)
-    if (temporal.pathLength > 0 || reservoir.pathLength > 0)
-        return false;
-
-
-
     // Needed reservoir variables
     let lod = ExplicitLodTextureSampler(0);
     float w_0, w_1 = 0;
     float wSum = 0;
+    const uint retraceSurfaceIndex = index2Dto1D(pixel, gFrameDim.x);
 
-    //Reservoir will onyl contribute if weight > 0
-    if (reservoir.weight > 0) {
-        ShadingData sdOther = loadShadingData(temporalHit, -gViewPrev[reservoirPixel].xyz, lod);
-        let miOther = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
-        float mis = generalizedBalanceHeuristic(reservoir, sdOther, miOther, temporal.c,sg);
-        w_0 = mis * luminance(reservoir.F * reservoir.rcThp) * reservoir.weight;
+    // Reservoir will only contribute if weight > 0 and F > 0
+    bool reservoirContributes = reservoir.weight > 0 && any(reservoir.F > 0);
+    RetracedSurface retracedSurface = RetracedSurface();
+    bool retracedSurfaceValid = true; //If the surface is not valid MIS is skipped
+    if (reservoirContributes && reservoir.pathLength > 0)
+        retracedSurfaceValid = loadRetraceSurface(retraceSurfaceIndex, retracedSurface, false);
+
+    if (reservoirContributes) {
+        //Get MIS weight
+        float mis = 1.0;
+        if (reservoir.flags.hasNoReconnectionSurface) {
+            if (retracedSurfaceValid)
+                mis = evalMIS(reservoir.c, luminance(reservoir.F), temporal.c, luminance(retracedSurface.thp));
+        } else //Reconnect Surface
+        {
+            ShadingData sdOther = {};
+            float3 thpOther = float3(1);
+
+            // Load retraced surface
+            if (reservoir.pathLength == 0) {
+                sdOther = loadShadingData(temporalHit, -gViewPrev[reservoirPixel].xyz, lod);
+            } else if (retracedSurfaceValid) {
+                sdOther = loadShadingData(HitInfo(retracedSurface.rcSurface), retracedSurface.rcViewDir, lod);
+                thpOther = retracedSurface.thp;
+            }
+            if (retracedSurfaceValid)
+                mis = reconnectSurface(reservoir, sdOther, thpOther, temporal.c, sg);
+        }
+        w_0 = mis * luminance(reservoir.F) * reservoir.weight;
         wSum += w_0;
     }
 
+    //Temporal Reservoir
+
     float3 thpTemporal = float3(1); // only needed for path lenght == 0
     float3 Ftemporal = float3(0);
-    float jacobianTemporal = 0;
+    float jacobianTemporal = 1;
     bool temporalCanBeSelected = temporal.weight > 0;
-    if (temporalCanBeSelected) {
-        ShadingData sdOther = loadShadingData(firstHit, -gView[pixel].xyz, lod);
-        let miOther = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
-        float mis = generalizedBalanceHeuristic(temporal, sdOther, miOther, reservoir.c, sg);
+    //Load retraced surface for temporal reservoir
+    retracedSurface = RetracedSurface();
+    retracedSurfaceValid = true; // If the surface is not valid MIS is skipped
+    if (temporalCanBeSelected && temporal.pathLength > 0)
+        retracedSurfaceValid = loadRetraceSurface(retraceSurfaceIndex, retracedSurface, true);
 
-        float3 toSample = temporal.samplePosW - sdOther.posW;
-        float distToSample = length(toSample);
-        toSample /= distToSample;
-        jacobianTemporal = dot(temporal.sampleFaceN, -toSample) / (distToSample * distToSample);
-        float jacobian = jacobianTemporal / temporal.jacobianDeterminant;
-        
-        if (jacobian > 0) {
-            if (dispatchShadowRay(sdOther, toSample, distToSample)) {
-                thpTemporal = miOther.eval(sdOther, toSample, sg);
+    if (temporalCanBeSelected) {
+        float mis = 1.0;
+        float jacobianDeterminant = 1.0;
+        if (temporal.flags.hasNoReconnectionSurface) {
+            if (retracedSurfaceValid) {
+                Ftemporal = retracedSurface.thp;
             }
+        } else //Reconnect surface
+        {
+            ShadingData sdOther = {};
+            float3 thpOther = float3(1);
+
+            // Load retraced surface
+            if (reservoir.pathLength == 0) {
+                sdOther = loadShadingData(firstHit, -gView[pixel].xyz, lod);
+            } else if (retracedSurfaceValid) {
+                sdOther = loadShadingData(HitInfo(retracedSurface.rcSurface), retracedSurface.rcViewDir, lod);
+                thpOther = retracedSurface.thp;
+            }
+
+            //Reconnect
+            if (retracedSurfaceValid) {
+                let miOther = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
+                float3 toSample = temporal.samplePosW - sdOther.posW;
+                float distToSample = length(toSample);
+                toSample /= distToSample;
+                jacobianTemporal = dot(temporal.sampleFaceN, -toSample) / (distToSample * distToSample);
+                jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
+
+                if (jacobianDeterminant > 0) {
+                    if (dispatchShadowRay(sdOther, toSample, distToSample)) {
+                        thpTemporal *= miOther.eval(sdOther, toSample, sg);
+                    }
+
+                    Ftemporal = temporal.rcThp * thpTemporal;
+                }
+            }           
         }
 
-        gDebug[pixel] = float4(temporal.rcThp, 1.0);
-        Ftemporal = temporal.rcThp * thpTemporal;
-        w_1 = mis * luminance(Ftemporal) * temporal.weight * jacobian;
+        mis = evalMIS(temporal.c, luminance(temporal.F), reservoir.c, luminance(Ftemporal) * jacobianDeterminant);
+        w_1 = mis * luminance(Ftemporal) * temporal.weight * jacobianDeterminant;
         wSum += w_1;
     }
 

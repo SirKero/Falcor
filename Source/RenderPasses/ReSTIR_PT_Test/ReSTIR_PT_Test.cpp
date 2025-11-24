@@ -181,7 +181,7 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
 
     if (mResamplingValid && mEnableResampling)
     {
-        //resamplingRetracePathPass(pRenderContext, renderData);
+        resamplingRetracePathPass(pRenderContext, renderData);
 
         resamplingPass(pRenderContext, renderData);
     }
@@ -467,7 +467,8 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["gRetraceSurfacePrev"] = mpRetraceSurfaceBuffer[(mFrameCount + 1) % 2];
 
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
-     var["gRetraceSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];        
+     var["gRetraceSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
+
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
 
@@ -507,9 +508,10 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["gViewPrev"] = mpViewPrev;
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
     var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
+    var["gRetracedSurfacePrev"] = mpRetraceSurfaceBuffer[(mFrameCount + 1) % 2];
+    var["gRetracedSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
 
     var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute
     FALCOR_ASSERT(mScreenRes.x > 0 && mScreenRes.y > 0);

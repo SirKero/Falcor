@@ -8,6 +8,7 @@ target_sources(ReSTIR_PT_Test PRIVATE
     Resample.cs.slang
 	EvaluateReservoir.cs.slang
 	SharedStructsAndFunctions.slang
+	NextEventEstimationHelper.slang
 )
 
 target_copy_shaders(ReSTIR_PT_Test RenderPasses/ReSTIR_PT_Test)

@@ -7,10 +7,9 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
-import Rendering.Lights.EmissiveLightSamplerHelpers;
-import Rendering.Lights.EnvMapSampler;
 import Rendering.RTXDI.RTXDI;
 import SharedStructsAndFunctions;
+import NextEventEstimationHelper;
 
 cbuffer CB
 {
@@ -18,11 +17,6 @@ cbuffer CB
     float3 gNeeLightTypeSelectProbability; //Emissive, Analytic, EnvMap
     uint gMaxBounces;   //Max path length
 
-}
-
-cbuffer Light {
-    EmissiveLightSampler gEmissiveSampler;
-    EnvMapSampler gEnvMapSampler;
 }
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -38,10 +32,6 @@ static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-
-static const uint kNeeLightTypeEmissive = 0;
-static const uint kNeeLightTypeAnalytic = 1;
-static const uint kNeeLightTypeEnvMap = 2;
 
 struct RayPayload
 {
@@ -63,10 +53,8 @@ struct PathData {
     float scatterPdf;       //Last pdf (used for MIS)
 
     bool reconnectIsSet;
-    bool lastVertexIsNee;
     bool lastHitWasDiffuse;
     uint pathLength;
-
     uint rcPathLength;
 
     __init() {
@@ -75,23 +63,10 @@ struct PathData {
         pathPdf = 1.0;
         scatterPdf = 0;
         lastHitWasDiffuse = false;
-        lastVertexIsNee = false;
         pathLength = 0;
         reconnectIsSet = false;
         rcPathLength = 0;
     }
-}
-
-// Nee light sample
-struct LightSample {
-    uint type;
-    float3 Li;
-    float pdf;
-    float3 position;
-    float3 dir;
-    float distance;
-    float3 faceN;
-    uint _pad;
 }
 
 bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout PathData pd, inout RayDesc ray)
@@ -111,122 +86,6 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
     }
 
     return validSample && any((pd.thp * pd.reconThp) > 0);
-}
-
-/* Evaluate MIS weight
-   \param[in] n0 Number of samples taken from the first sampling strategy.
-    \param[in] p0 Pdf for the first sampling strategy.
-    \param[in] n1 Number of samples taken from the second sampling strategy.
-    \param[in] p1 Pdf for the second sampling strategy.
-    \return Weight for the contribution from the first strategy (p0).
-*/
-float evalMIS(float n0, float p0, float n1, float p1)
-{
-    // Currently only balance heuristic
-    float q0 = n0 * p0;
-    float q1 = n1 * p1;
-    return q0 / (q0 + q1);
-}
-
-bool generateEmissiveSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls)
-{
-    TriangleLightSample tls = {};
-    if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
-        return false;
-
-    ls.pdf *= tls.pdf;
-    ls.Li = ls.pdf > 0.f ? tls.Le / ls.pdf : float3(0);
-    ls.position = tls.posW;
-    ls.faceN = tls.normalW;
-    ls.distance = tls.distance;
-    ls.dir = tls.dir;
-
-    return any(ls.Li > 0);
-}
-
-bool generateAnalyticSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls) {
-    uint lightCount = gScene.getLightCount();
-    if (lightCount == 0) return false;
-
-    uint lightIndex = min(uint(sampleNext1D(sg) * lightCount), lightCount - 1);
-    // Sample local light source.
-    AnalyticLightSample analyticSample;
-    if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, analyticSample)) return false;
-
-    ls.Li = ls.pdf > 0 ? (analyticSample.Li * lightCount) / ls.pdf : float3(0); // analytic sample is already divided by the pdf
-    ls.distance = analyticSample.distance;
-    ls.dir = analyticSample.dir;
-    //analytic pdf not needed, as no MIS is performed with analytic lights anyway
-
-    return any(ls.Li > 0);
-}
-
-bool generateEnvMapSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls) {
-    // Sample environment map.
-    EnvMapSample envSample;
-    if (!gEnvMapSampler.sample(sampleNext2D(sg), envSample)) return false;
-
-    ls.pdf *= envSample.pdf;
-    ls.Li = ls.pdf > 0.f ? envSample.Le / ls.pdf : float3(0);
-    ls.distance = FLT_MAX;
-    ls.dir = envSample.dir;
-
-    return any(ls.Li > 0);
-}
-
-bool selectLightType(out uint lightType, out float pdf, float u)
-{
-    float3 p = gNeeLightTypeSelectProbability;
-    //[unroll]
-    for (lightType = 0; lightType < 3; ++lightType)
-    {
-        if (u < p[lightType])
-        {
-            pdf = p[lightType];
-            return true;
-        }
-        u -= p[lightType];
-    }
-
-    lightType = {};
-    pdf = {};
-
-    return false;
-}
-
-float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, out LightSample ls , inout SampleGenerator sg)
-{
-    ls = {};
-    if (!selectLightType(ls.type, ls.pdf, sampleNext1D(sg)))
-        return float3(0);
-
-    bool valid = false;
-    if (ls.type == kNeeLightTypeEmissive)
-        valid = generateEmissiveSample(sd, sg, ls);
-    if (ls.type == kNeeLightTypeAnalytic)
-        valid = generateAnalyticSample(sd, sg, ls);
-    if (ls.type == kNeeLightTypeEnvMap)
-        valid = generateEnvMapSample(sd, sg, ls);
-
-    if (!valid)
-        return float3(0);
-
-    float3 bsdf = mi.eval(sd, ls.dir, sg);
-
-    if (all(bsdf <= 0) || ls.pdf <= 0)
-        return float3(0);
-
-    // Shadow Ray
-    if (!dispatchShadowRay(sd, ls.dir, ls.distance))
-        return float3(0);
-
-    float misWeight = 1.0;
-    if (ls.type != kNeeLightTypeAnalytic) {
-        float scatterPdf = mi.evalPdf(sd, ls.dir);
-        misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
-    }
-  
-    return misWeight * bsdf * ls.Li;
 }
 
 /* Add sample to reservoir
@@ -273,9 +132,13 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 }
                 float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * pd.reconThp;
                 if (addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution, pd.thp)) {
-                    pd.lastVertexIsNee = false;
-                    if (!pd.reconnectIsSet)
+                    uint pathFlags = (uint)ReservoirPathFlags::isEnvMapMiss;
+                    if (!pd.reconnectIsSet) {
                         reservoir.pathLength = pd.pathLength;
+                        pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
+                    }
+                    reservoir.flags.setReservoirPathFlags(pathFlags);
+                        
                 }
                 
                 outColor += envMapContribution * pd.thp;
@@ -329,9 +192,12 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             float3 emissiveRadiance = misWeight * bsdfProperties.emission * pd.reconThp; // Is also w, as primary path space is used (pdf == 1)
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance, pd.thp))
             {
-                pd.lastVertexIsNee = false;
-                if (!pd.reconnectIsSet)
+                uint pathFlags = (uint)ReservoirPathFlags::isScatter;
+                if (!pd.reconnectIsSet) {
                     reservoir.pathLength = pd.pathLength;
+                    pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
+                }
+                reservoir.flags.setReservoirPathFlags(pathFlags);
             }
 
             outColor += emissiveRadiance;
@@ -346,11 +212,17 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         if (!currentIsDelta) {
             LightSample ls;
             SampleGenerator neeSgState = sg; //Cache sampleGenerator state
-            float3 nee = nextEventEstimation(sd, mi, ls, sg) * pd.reconThp;
+            float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability , ls, sg) * pd.reconThp;
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp))
             {
-                pd.lastVertexIsNee = !pd.reconnectIsSet;
                 reservoir.sgRCNee = neeSgState;
+                uint pathFlags = (uint)ReservoirPathFlags::isNee;
+                if (!pd.reconnectIsSet) {
+                    reservoir.pathLength = pd.pathLength;
+                    pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
+                    pathFlags |= (uint)ReservoirPathFlags::endIsNee;
+                }
+                reservoir.flags.setReservoirPathFlags(pathFlags);
             }
             outColor += nee;
         }
@@ -363,8 +235,6 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         if (!sampleNewRay(sd, mi, rayDirSg, pd, ray))
             break;
     }
-
-    reservoir.flags.endIsNee = pd.lastVertexIsNee;
 
     // Finalize Reservoir
     if (any(reservoir.F > 0)) {
