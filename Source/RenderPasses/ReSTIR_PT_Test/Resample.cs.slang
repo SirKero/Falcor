@@ -152,6 +152,8 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
                 if (jacobianDeterminant > 0) {
                     if (dispatchShadowRay(sdOther, toSample, distToSample)) {
                         thpTemporal *= miOther.eval(sdOther, toSample, sg);
+                    } else {
+                        thpTemporal = float3(0);
                     }
 
                     Ftemporal = temporal.rcThp * thpTemporal;
@@ -195,7 +197,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     ReservoirPT reservoir = ReservoirPT();
     if (hitInfo.isValid())
     {
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 4);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3);
         reservoir = gReservoir[index2Dto1D(pixel, gFrameDim.x)];
 
         //
