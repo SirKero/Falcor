@@ -7,6 +7,7 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
+import Utils.Math.MathHelpers;
 import SharedStructsAndFunctions;
 import NextEventEstimationHelper;
 
@@ -15,6 +16,8 @@ cbuffer CB
     uint gFrameCount;                      // Current FrameCount for RNG
     float3 gNeeLightTypeSelectProbability; // Emissive, Analytic, EnvMap
     uint gMaxBounces; // Max indirections
+    uint gRNGNumPass; // Identifier for the pass used to initialize the RNG
+    float gSpatialSampleRadius; // Spatial resampling radius
 }
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -35,6 +38,7 @@ static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 
 struct RayPayload
@@ -239,12 +243,21 @@ void rayGen()
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
 
     if (hitInfo.isValid()) {
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3); //TODO get a good offset scheme that works with multiple passes
-        //Get pixel from last frame using motion vectors
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (2 + gRNGNumPass));
+
+        // Get pixel for the reservoir. This is either the reprojected pixel (with motion vectors) or a random sample in a disc around it.
+        bool isSpatial = gRNGNumPass > 0;
         float2 motionOffset = gMVec[pixel] * float2(dispatchDims);
         float2 prevPixelF = motionOffset + float2(pixel) + float2(0.5);
-        float2 rndOffset = sampleNext2D(sg) - 0.5; // TODO use the same random number as in the resample pass
-        prevPixelF += rndOffset;
+        float2 u = sampleNext2D(sg);
+        if (isSpatial) {
+            float2 spatialOffset = gSpatialSampleRadius * sample_disk_concentric(u);
+            prevPixelF += spatialOffset;
+        } else // Temporal; Add subpixel offset
+        {
+            prevPixelF += u - 0.5; // [-0.5, 0.5]
+        }
+        
         int2 prevPixel = int2(prevPixelF);
 
         // Check if previous pixel is inside the screen, if not, reservoir cannot be selected

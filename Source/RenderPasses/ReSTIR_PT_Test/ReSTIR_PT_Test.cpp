@@ -162,6 +162,9 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
     //TODO remove if not needed
     pRenderContext->clearTexture(renderData[kOutputDebug]->asTexture().get(), float4(0,0,0,1));
 
+    //Update RNG start index
+    mRNGGenNumberRenderPasses = 4 + mSpatialSamples;
+
     // Init ReSTIR DI
     const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
     if (!mpRTXDI)
@@ -181,9 +184,13 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
 
     if (mResamplingValid && mEnableResampling)
     {
-        resamplingRetracePathPass(pRenderContext, renderData);
+        const uint numResamplingPasses = 1 + mSpatialSamples;
+        for (uint i = 0; i < numResamplingPasses; i++)
+        {
+            resamplingRetracePathPass(pRenderContext, renderData, i);
 
-        resamplingPass(pRenderContext, renderData);
+            resamplingPass(pRenderContext, renderData, i);
+        }        
     }
         
     evalReservoirPass(pRenderContext, renderData);
@@ -361,6 +368,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     mTracePathPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTracePathPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mTracePathPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
+    mTracePathPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
     mTracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
     mTracePathPass.pProgram->addDefines(mpRTXDI->getDefines());
     if (mpEmissiveLightSampler)
@@ -402,9 +410,11 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     pRenderContext->uavBarrier(renderData[kOutputColor]->asTexture().get());
 }
 
- void ReSTIR_PT_Test::resamplingRetracePathPass(RenderContext* pRenderContext, const RenderData& renderData)
+ void ReSTIR_PT_Test::resamplingRetracePathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numResamplingIndex)
  {
-     FALCOR_PROFILE(pRenderContext, "ResamplingRetrace");
+     std::string profilerName =
+         "ResamplingRetrace" + numResamplingIndex > 0 ? "_Spatial_" + std::to_string(numResamplingIndex) : "_Temporal";
+     FALCOR_PROFILE(pRenderContext, profilerName);
      // Init Shader
      if (!mResampleRetracePathPass.pProgram)
      {
@@ -435,6 +445,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      mResampleRetracePathPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
      mResampleRetracePathPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
      mResampleRetracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
+     mResampleRetracePathPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
      if (mpEmissiveLightSampler)
          mResampleRetracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -454,7 +465,8 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["CB"]["gFrameCount"] = mFrameCount;
      var["CB"]["gMaxBounces"] = mPTBounces;
      var["CB"]["gNeeLightTypeSelectProbability"] = mNeeLightSelectProb;
-
+     var["CB"]["gRNGNumPass"] = numResamplingIndex; 
+     var["CB"]["gSpatialSampleRadius"] = mSpatialSampleRadius;
 
      // Input Resources
      var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -474,7 +486,10 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
 
  }
 
-void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData) {
+void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData, uint numResamplingIndex)
+ {
+    std::string profilerName =
+        "Resample" + numResamplingIndex > 0 ? "_Spatial_" + std::to_string(numResamplingIndex) : "_Temporal";
     FALCOR_PROFILE(pRenderContext, "Resample");
     // Initialize compute pass
     if (!mpResamplePass)
@@ -487,10 +502,13 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
 
         mpResamplePass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResamplePass);
+
+    mpResamplePass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
 
     auto var = mpResamplePass->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
@@ -500,6 +518,8 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
     var["CB"]["gConfidenceCap"] = mConfidenceCap;
+    var["CB"]["gRNGNumPass"] = numResamplingIndex;
+    var["CB"]["gSpatialSampleRadius"] = mSpatialSampleRadius;
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -535,6 +555,7 @@ void ReSTIR_PT_Test::evalReservoirPass(RenderContext* pRenderContext, const Rend
         defines.add(mpSampleGenerator->getDefines());
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
 
         mpEvalReservoirPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -542,6 +563,7 @@ void ReSTIR_PT_Test::evalReservoirPass(RenderContext* pRenderContext, const Rend
 
     mpEvalReservoirPass->getProgram()->addDefines(mpRTXDI->getDefines());
     mpEvalReservoirPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mpEvalReservoirPass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
 
     // Set variables
     auto var = mpEvalReservoirPass->getRootVar();

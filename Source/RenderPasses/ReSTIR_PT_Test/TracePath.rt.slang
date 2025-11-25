@@ -32,6 +32,7 @@ static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 struct RayPayload
 {
@@ -290,8 +291,8 @@ void rayGen()
     if (hitInfo.isValid()) {
         // Set RTXDI data
         let lod = ExplicitLodTextureSampler(0);
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 1);
-        SampleGenerator rayDirSg = SampleGenerator( pixel, gFrameCount * 5 + 2); // Seperate sample generator for ray directions (used in random replay)
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
+        SampleGenerator rayDirSg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1); // Seperate sample generator for ray directions (used in random replay)
         reservoir.sgPathDirections = rayDirSg; //Store state of sample generator
 
         ShadingData sd = loadShadingData(hitInfo, viewDir, lod);

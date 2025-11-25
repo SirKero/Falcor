@@ -4,6 +4,7 @@
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
 import SharedStructsAndFunctions;
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -22,11 +23,12 @@ cbuffer CB
     uint gFrameCount;           // Current it for sample gen
     uint2 gFrameDim;            // Frame Dimensions for camera dir
     uint gConfidenceCap;
+    uint gRNGNumPass;           // Identifier for the pass used to initialize the RNG
+    float gSpatialSampleRadius; // Spatial resampling radius
 }
 
-//static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-//static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 bool loadRetraceSurface(uint index, inout RetracedSurface retracedSurface, bool isPrev) {
     if (isPrev)
@@ -69,6 +71,8 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
 
     if (!temporalHit.isValid())
         return false;
+
+    //TODO add jacobian check (maybe also to retracing)
 
     // Needed reservoir variables
     let lod = ExplicitLodTextureSampler(0);
@@ -197,18 +201,22 @@ void main(uint2 pixel: SV_DispatchThreadID)
     ReservoirPT reservoir = ReservoirPT();
     if (hitInfo.isValid())
     {
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (2 + gRNGNumPass));
         reservoir = gReservoir[index2Dto1D(pixel, gFrameDim.x)];
 
-        //
-        // Temporal Resampling
-        //
-
         // Reproject to the previous pixel using the motion vectors
+        // Get pixel for the reservoir. This is either the reprojected pixel (with motion vectors) or a random sample in a disc around it.
+        bool isSpatial = gRNGNumPass > 0;
         float2 motionOffset = gMVec[pixel] * float2(gFrameDim);
         float2 prevPixelF = motionOffset + float2(pixel) + float2(0.5);
-        float2 rndOffset = sampleNext2D(sg) - 0.5;
-        prevPixelF += rndOffset;
+        float2 u = sampleNext2D(sg);
+        if (isSpatial) {
+            float2 spatialOffset = gSpatialSampleRadius * sample_disk_concentric(u);
+            prevPixelF += spatialOffset;
+        } else // Temporal; Add subpixel offset
+        {
+            prevPixelF += u - 0.5; // [-0.5, 0.5]
+        }
         int2 prevPixel = int2(prevPixelF);
 
         resampleReservoir(pixel, prevPixel, hitInfo, reservoir, sg);

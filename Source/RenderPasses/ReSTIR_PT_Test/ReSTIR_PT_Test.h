@@ -72,10 +72,10 @@ private:
     void tracePathPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Resampling Retrace Path pass
-    void resamplingRetracePathPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void resamplingRetracePathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numResamplingIndex);
 
     //Resampling Pass
-    void resamplingPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void resamplingPass(RenderContext* pRenderContext, const RenderData& renderData, uint numResamplingIndex);
 
     //Evaluates the Reservoirs
     void evalReservoirPass(RenderContext* pRenderContest, const RenderData& renderData);
@@ -101,6 +101,7 @@ private:
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
+    uint mRNGGenNumberRenderPasses = 4;   //Needed for the RNG
 
     uint mPTBounces = 10;
     float3 mNeeLightSelectProb = float3(0.33f); //Light selection probability for NEE samples (Emissive, Analytic, EnvMap)

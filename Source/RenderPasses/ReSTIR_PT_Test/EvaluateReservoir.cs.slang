@@ -23,6 +23,7 @@ cbuffer CB
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
@@ -40,7 +41,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     float3 outColor = float3(0);
     if (hitInfo.isValid()) {
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 5);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 1));
         let lod = ExplicitLodTextureSampler(0.f);
 
         // Get Material properties
