@@ -27,7 +27,7 @@ struct LightSample {
     float3 dir;
     float distance;
     float3 faceN;
-    uint _pad;
+    bool isInfiniteDistance;
 }
 
 bool generateEmissiveSample(ShadingData sd, inout SampleGenerator sg, inout LightSample ls)
@@ -42,6 +42,7 @@ bool generateEmissiveSample(ShadingData sd, inout SampleGenerator sg, inout Ligh
     ls.faceN = tls.normalW;
     ls.distance = tls.distance;
     ls.dir = tls.dir;
+    ls.isInfiniteDistance = false;
 
     return any(ls.Li > 0);
 }
@@ -55,10 +56,13 @@ bool generateAnalyticSample(ShadingData sd, inout SampleGenerator sg, inout Ligh
     AnalyticLightSample analyticSample;
     if (!sampleLight(sd.posW, gScene.getLight(lightIndex), sg, analyticSample)) return false;
 
-    ls.Li = ls.pdf > 0 ? (analyticSample.Li * lightCount) / ls.pdf : float3(0); // analytic sample is already divided by the pdf
+    ls.Li = ls.pdf > 0 ? (analyticSample.Li * lightCount) / ls.pdf : float3(0); // analyticSample.Li is already divided by the pdf
+    ls.isInfiniteDistance = ls.distance == kMaxLightDistance;
+    if(!ls.isInfiniteDistance)
+        ls.pdf *= analyticSample.pdf;           //Update pdf afterwards (used for jacobian)
     ls.distance = analyticSample.distance;
     ls.dir = analyticSample.dir;
-    // analytic pdf not needed, as no MIS is performed with analytic lights anyway
+    ls.position = analyticSample.posW;
 
     return any(ls.Li > 0);
 }
@@ -72,6 +76,7 @@ bool generateEnvMapSample(ShadingData sd, inout SampleGenerator sg, inout LightS
     ls.Li = ls.pdf > 0.f ? envSample.Le / ls.pdf : float3(0);
     ls.distance = FLT_MAX;
     ls.dir = envSample.dir;
+    ls.isInfiniteDistance = true;
 
     return any(ls.Li > 0);
 }

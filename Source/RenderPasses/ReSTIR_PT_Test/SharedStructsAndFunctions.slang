@@ -4,6 +4,7 @@
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
 import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.Fresnel;
 
@@ -22,6 +23,7 @@ enum ReservoirPathFlags : uint {
     isEnvMapMiss = 0x800,               // 1<<12
     hasNoReconnectionSurface = 0x1000,  //1<<13
     isReconnectionPath = 0x2000,        //1<<14
+    isNeeAfterReconnection = 0x4000,    //1<<15
 }
 
 struct ReservoirFlags {
@@ -85,6 +87,14 @@ struct ReservoirFlags {
             flags |= (newValue ? (uint)ReservoirPathFlags::hasNoReconnectionSurface : 0);
         }
     }
+
+    property bool isNeeAfterReconnection {
+        get { return (flags & (uint)ReservoirPathFlags::isNeeAfterReconnection) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isNeeAfterReconnection; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isNeeAfterReconnection : 0);
+        }
+    }
 }
 
 // Reservoir; Size: 112 Byte (28 floats)
@@ -94,11 +104,11 @@ struct ReservoirPT
 
     SampleGenerator sgRCNee;    //For replaying NEE decisions
 
-    float3 samplePosW;                 // Sample PosW
-    float jacobianDeterminant;         //(stored) jacobian determinant
+    PackedHitInfo packedSampleSurface;      // (Packed) Sample Surface
 
-    float3 sampleFaceN;             // Sample Face Normal
-    ReservoirFlags flags;           //path length and flags
+    float jacobianDeterminant;       //(stored) jacobian determinant (at rc vertex)
+    ReservoirFlags flags;            // path length and flags
+    float2 packedSampleWo;                
 
     float3 F;                       //Complete radiance of the path
     uint c;                         //Confidence Weight
@@ -107,30 +117,35 @@ struct ReservoirPT
     float weight;                   //Unbiased contribution weight
 
     float3 thp;                     // Thp until the reconnection surface
-    uint _pad;                      //Pading
+    float jacobianOutgoing;         //Jacobian outgoing (next hit from sample)
         
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
         sgRCNee = SampleGenerator(uint2(0), 0);
-        samplePosW = float3(0);
+        packedSampleSurface = {};
         jacobianDeterminant = -1;
-        sampleFaceN = float3(0);
+        packedSampleWo = float2(0);
         flags = ReservoirFlags();
         F = float3(0);
         c = 1;
         rcThp = float3(0);
         thp = float3(1);
         weight = 0.0;
-        _pad = 0;
+        jacobianOutgoing = 1;
     }
 
     bool isValid() {
-        return jacobianDeterminant > 0;
+        return weight > 0 &&jacobianDeterminant > 0 && jacobianDeterminant > 0;
     }
        
     property uint pathLength {
         get { return flags.pathLength; }
         set { flags.pathLength = newValue;}
+    }
+
+    property float3 sampleWo {
+        get { return oct_to_ndir_snorm(packedSampleWo);}
+        set { packedSampleWo = ndir_to_oct_snorm(newValue);}
     }
 }
 
@@ -140,14 +155,14 @@ struct RetracedSurface {
     float3 rcViewDir;           // View direction at the reconnection surface
     uint pathFlags;
     float3 thp; // Thp until the reconnection surface
-    uint _pad;
+    float jacobianDeterminant;
 
     __init() {
         rcSurface = {};
         rcViewDir = float3(0);
         pathFlags = 0;
         thp = float3(1);
-        _pad = 0;
+        jacobianDeterminant = 1;
     }
 
     bool isValid() {
@@ -176,6 +191,18 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     VertexData v = gScene.getVertexData(triangleHit);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+
+    return sd;
+}
+
+// Load in shading data from hit and previous hit position
+ShadingData loadShadingDataWithPrevHit(const HitInfo hit, const float3 prevPosW, const ITextureSampler lod)
+{
+    const TriangleHit triangleHit = hit.getTriangleHit();
+    VertexData v = gScene.getVertexData(triangleHit);
+    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+    float3 dir = normalize(prevPosW - v.posW);
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, dir, lod);
 
     return sd;
 }

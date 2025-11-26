@@ -38,7 +38,9 @@ static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const float kJacobianDistanceThreshold = JACOBIAN_DISTANCE_THRESHOLD;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 
 
 struct RayPayload
@@ -56,10 +58,14 @@ struct RayPayload
 struct RetracePathData {
     float3 thp;
     float scatterPdf;
+
     float3 lastOrigin;
     bool surfaceIsSet;
+
     float3 lastFaceN;
     bool lastSurfaceIsDiffuse;
+
+    float pathPdf;
 
     __init() {
         thp = float3(1);
@@ -68,6 +74,7 @@ struct RetracePathData {
         lastFaceN = float3(0);
         surfaceIsSet = false;
         lastSurfaceIsDiffuse = false;
+        pathPdf = 1.0;
     }
 }
 
@@ -77,10 +84,12 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
     bool validSample = mi.sample(sd, sg, bsdfSample, true);
     if (validSample) {
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+        bool disableDeltaPdf = bsdfSample.isLobe(LobeType::Delta) && !kEvalDeltaPdfs; // If true uses 1 for pdf
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
         rpd.thp *= bsdfSample.weight;
-        rpd.scatterPdf = bsdfSample.pdf;
+        rpd.scatterPdf = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
+        rpd.pathPdf *= rpd.scatterPdf;
     }
 
     return validSample && any(rpd.thp > 0);
@@ -122,6 +131,7 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
                 float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * rpd.thp;
                 retracedSurface.pathFlags = (uint)ReservoirPathFlags::isEnvMapMiss;
                 retracedSurface.rcViewDir = ray.Direction;
+                retracedSurface.jacobianDeterminant = rpd.scatterPdf;
                 retracedSurface.thp = envMapContribution;
                 rpd.surfaceIsSet = true;
             }
@@ -157,11 +167,12 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
 
                 float3 emissiveRadiance = misWeight * bsdfProperties.emission * rpd.thp;
                 retracedSurface.pathFlags = (uint)ReservoirPathFlags::isScatter;
+                float distToSample = distance(rpd.lastOrigin, sd.posW);
+                retracedSurface.jacobianDeterminant = rpd.scatterPdf * dot(rpd.lastFaceN, ray.Direction) / (distToSample * distToSample);
                 retracedSurface.thp = emissiveRadiance;
                 rpd.surfaceIsSet = true;
             } else if (surfaceIsDiffuse && !reservoir.flags.hasNoReconnectionSurface) //Reconnection surface
             {
-               
                 retracedSurface.pathFlags = (uint)ReservoirPathFlags::isReconnectionPath;
                 retracedSurface.thp = rpd.thp;
                 rpd.surfaceIsSet = true;
@@ -173,6 +184,9 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
                 float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability, ls, neeSG) * rpd.thp;
                 retracedSurface.pathFlags = (uint)ReservoirPathFlags::endIsNee;
                 retracedSurface.thp = nee;
+                retracedSurface.jacobianDeterminant = ls.pdf;
+                if (!ls.isInfiniteDistance)
+                    retracedSurface.jacobianDeterminant *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
                 rpd.surfaceIsSet = true;
             }
 

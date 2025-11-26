@@ -123,6 +123,9 @@ void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
             }
         }
         changed |= group.var("Reuse Roughness Threshold", mRoughnessThreshold, 0.f, 1.f, 0.001f);
+        changed |= group.var("Jacobian Distance Threshold", mJacobianDistanceThreshold, 0.f, FLT_MAX, 0.000001f, false, "%.6f");
+        changed |= group.checkbox("Eval Delta Pdf", mEvalDeltaPDFs);
+        group.tooltip("If disabled set pdfs of delta reflections (roughness < 0.07) to 1. Else, resampling of some paths will be impossible");
 
         changed |= group.checkbox("Enable Resampling", mEnableResampling);
         changed |= group.var("ConfidenceCap", mConfidenceCap, 1u, UINT_MAX, 1u);
@@ -370,7 +373,9 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     mTracePathPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mTracePathPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
     mTracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
+    mTracePathPass.pProgram->addDefine("JACOBIAN_DISTANCE_THRESHOLD", std::to_string(mJacobianDistanceThreshold));
     mTracePathPass.pProgram->addDefines(mpRTXDI->getDefines());
+    mTracePathPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPDFs ? "1" : "0");
     if (mpEmissiveLightSampler)
         mTracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -412,9 +417,12 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
 
  void ReSTIR_PT_Test::resamplingRetracePathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numResamplingIndex)
  {
-     std::string profilerName =
-         "ResamplingRetrace" + numResamplingIndex > 0 ? "_Spatial_" + std::to_string(numResamplingIndex) : "_Temporal";
-     FALCOR_PROFILE(pRenderContext, profilerName);
+     std::string profilerName = "ResamplingRetrace";
+     if (numResamplingIndex > 0)
+         profilerName += "_Spatial_" + std::to_string(numResamplingIndex);
+     else
+         profilerName  += "_Temporal";
+     FALCOR_PROFILE(pRenderContext, profilerName.c_str());
      // Init Shader
      if (!mResampleRetracePathPass.pProgram)
      {
@@ -445,7 +453,9 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      mResampleRetracePathPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
      mResampleRetracePathPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
      mResampleRetracePathPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mRoughnessThreshold));
+     mResampleRetracePathPass.pProgram->addDefine("JACOBIAN_DISTANCE_THRESHOLD", std::to_string(mJacobianDistanceThreshold));
      mResampleRetracePathPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
+     mResampleRetracePathPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPDFs ? "1" : "0");
      if (mpEmissiveLightSampler)
          mResampleRetracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -488,9 +498,12 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
 
 void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderData& renderData, uint numResamplingIndex)
  {
-    std::string profilerName =
-        "Resample" + numResamplingIndex > 0 ? "_Spatial_" + std::to_string(numResamplingIndex) : "_Temporal";
-    FALCOR_PROFILE(pRenderContext, "Resample");
+    std::string profilerName = "Resample";
+    if (numResamplingIndex > 0)
+        profilerName += "_Spatial_" + std::to_string(numResamplingIndex);
+    else
+        profilerName += "_Temporal";
+    FALCOR_PROFILE(pRenderContext, profilerName.c_str());
     // Initialize compute pass
     if (!mpResamplePass)
     {
@@ -503,12 +516,14 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
+        defines.add("JACOBIAN_DISTANCE_THRESHOLD", std::to_string(mJacobianDistanceThreshold));
 
         mpResamplePass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResamplePass);
 
     mpResamplePass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
+    mpResamplePass->getProgram()->addDefine("JACOBIAN_DISTANCE_THRESHOLD", std::to_string(mJacobianDistanceThreshold));
 
     auto var = mpResamplePass->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data

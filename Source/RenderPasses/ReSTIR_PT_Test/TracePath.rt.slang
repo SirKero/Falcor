@@ -5,6 +5,7 @@ import Scene.Raytracing;
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.RTXDI.RTXDI;
@@ -32,7 +33,9 @@ static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kAlphaTest = true;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const float kJacobianDistanceThreshold = JACOBIAN_DISTANCE_THRESHOLD;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 
 struct RayPayload
 {
@@ -48,7 +51,7 @@ struct RayPayload
 
 struct PathData {
     float3 thp;
-    float pathPdf;
+    float outgoingJacobianPdf;  //Jacobian with scatter event after reconnection surface
 
     float3 reconThp;        //thp for reconnect
     float scatterPdf;       //Last pdf (used for MIS)
@@ -58,15 +61,18 @@ struct PathData {
     uint pathLength;
     uint rcPathLength;
 
+    float2 packedSampleWo;  //Packed sample Wo for jacobian after resampling surface
+
     __init() {
         thp = float3(1.0);
         reconThp = float3(1.0);
-        pathPdf = 1.0;
+        outgoingJacobianPdf = 1;
         scatterPdf = 0;
         lastHitWasDiffuse = false;
         pathLength = 0;
         reconnectIsSet = false;
-        rcPathLength = 0;
+        rcPathLength = UINT32_MAX;
+        packedSampleWo = float2(0);
     }
 }
 
@@ -76,14 +82,19 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
     bool validSample = mi.sample(sd, sg, bsdfSample, true);
     if (validSample) {
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+        bool disableDeltaPdf = bsdfSample.isLobe(LobeType::Delta) && !kEvalDeltaPdfs; //If true uses 1 for pdf
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
+
         if (pd.reconnectIsSet)
             pd.reconThp *= bsdfSample.weight;
         else
-            pd.thp *= bsdfSample.weight;
-        pd.scatterPdf = bsdfSample.pdf;
-        pd.pathPdf *= pd.scatterPdf;
+            pd.thp *= bsdfSample.weight; pd.scatterPdf = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
+        if (pd.pathLength == pd.rcPathLength) {
+            pd.outgoingJacobianPdf = bsdfSample.pdf;
+            pd.packedSampleWo = ndir_to_oct_snorm(bsdfSample.wo);
+        }
+            
     }
 
     return validSample && any((pd.thp * pd.reconThp) > 0);
@@ -135,11 +146,13 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 if (addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution, pd.thp)) {
                     uint pathFlags = (uint)ReservoirPathFlags::isEnvMapMiss;
                     if (!pd.reconnectIsSet) {
+                        reservoir.jacobianDeterminant = pd.scatterPdf;
                         reservoir.pathLength = pd.pathLength;
                         pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                     }
+                    reservoir.jacobianOutgoing = pd.outgoingJacobianPdf;
                     reservoir.flags.setReservoirPathFlags(pathFlags);
-                        
+                      
                 }
                 
                 outColor += envMapContribution * pd.thp;
@@ -160,12 +173,15 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         bool hitEmissive = any(bsdfProperties.emission > 0);
         if (!pd.reconnectIsSet && hitIsDiffuse && !hitEmissive) {
             // If last and current hit is diffuse it is a valid reservoir
-            if (pd.lastHitWasDiffuse) {
-                reservoir.samplePosW = sd.posW;
-                reservoir.sampleFaceN = sd.getOrientedFaceNormal();
-                float rayDist = distance(ray.Origin, sd.posW);
-                reservoir.jacobianDeterminant = dot(sd.faceN, -ray.Direction) / (rayDist * rayDist); // Reconnection jacobian determinant
+            float rayDist = distance(ray.Origin, sd.posW);
+            bool jacobianDistanceCheck = rayDist > kJacobianDistanceThreshold;
+            if (pd.lastHitWasDiffuse && jacobianDistanceCheck) {
+                reservoir.packedSampleSurface = rayPayload.packedHitInfo;
+                
+                reservoir.jacobianDeterminant = pd.scatterPdf * dot(sd.faceN, -ray.Direction) / (rayDist * rayDist); // Reconnection jacobian determinant
+                reservoir.packedSampleWo = pd.packedSampleWo;
                 pd.reconnectIsSet = true;
+                pd.rcPathLength = pd.pathLength; //used to set certain values for the reservoir
             }
             else // Set new reconnection surface if last hit was specular
             {
@@ -195,9 +211,13 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             {
                 uint pathFlags = (uint)ReservoirPathFlags::isScatter;
                 if (!pd.reconnectIsSet) {
+                    float distToSample = distance(lastOrigin, sd.posW);
+                    reservoir.jacobianDeterminant = pd.scatterPdf * dot(lastFaceNormal, ray.Direction) / (distToSample * distToSample);
                     reservoir.pathLength = pd.pathLength;
                     pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                 }
+                reservoir.jacobianOutgoing = pd.outgoingJacobianPdf;
+                reservoir.packedSampleWo = pd.packedSampleWo;
                 reservoir.flags.setReservoirPathFlags(pathFlags);
             }
 
@@ -212,7 +232,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         bool currentIsDelta = bsdfProperties.roughness <= kDeltaRoughnessThreshold;
         if (!currentIsDelta) {
             LightSample ls;
-            SampleGenerator neeSgState = sg; //Cache sampleGenerator state
+            SampleGenerator neeSgState = sg; // Cache sampleGenerator state
             float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability , ls, sg) * pd.reconThp;
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp))
             {
@@ -220,9 +240,21 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 uint pathFlags = (uint)ReservoirPathFlags::isNee;
                 if (!pd.reconnectIsSet) {
                     reservoir.pathLength = pd.pathLength;
+                    reservoir.jacobianDeterminant = ls.pdf;
+                    if (!ls.isInfiniteDistance) {
+                        reservoir.jacobianDeterminant *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
+                    }
                     pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                     pathFlags |= (uint)ReservoirPathFlags::endIsNee;
                 }
+                if (pd.pathLength == pd.rcPathLength) {
+                    pathFlags |= (uint)ReservoirPathFlags::isNeeAfterReconnection;
+                    pd.outgoingJacobianPdf = 1; //ls.pdf; //TODO should be fine, as nee does not depend on wi
+                    pd.packedSampleWo = ndir_to_oct_snorm(ls.dir);
+                }
+
+                reservoir.jacobianOutgoing = pd.outgoingJacobianPdf; // This is set every time a sample is accepted
+                reservoir.packedSampleWo = pd.packedSampleWo;
                 reservoir.flags.setReservoirPathFlags(pathFlags);
             }
             outColor += nee;
@@ -235,6 +267,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         pd.lastHitWasDiffuse = !currentIsDelta;
         if (!sampleNewRay(sd, mi, rayDirSg, pd, ray))
             break;
+
     }
 
     // Finalize Reservoir

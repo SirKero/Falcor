@@ -29,6 +29,7 @@ cbuffer CB
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const float kJacobianDistanceThreshold = JACOBIAN_DISTANCE_THRESHOLD;
 
 bool loadRetraceSurface(uint index, inout RetracedSurface retracedSurface, bool isPrev) {
     if (isPrev)
@@ -38,20 +39,27 @@ bool loadRetraceSurface(uint index, inout RetracedSurface retracedSurface, bool 
     return retracedSurface.isValid();
 }
 
-float reconnectSurface(ReservoirPT r, ShadingData sdOther, float3 thp, uint otherConfidence, inout SampleGenerator sg)
+float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleSurface ,float3 thp, uint otherConfidence, inout SampleGenerator sg)
 {
     float p0 = luminance(r.F);
 
     // Calc p1
     let lod = ExplicitLodTextureSampler(0);
     let miOther = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
+    let miSampleSurface = gScene.materials.getMaterialInstance(sdSampleSurface, lod, kMIHints);
     float p1 = 0;
-    float3 toSample = r.samplePosW - sdOther.posW;
+    float3 toSample = sdSampleSurface.posW - sdOther.posW;
     float distToSample = length(toSample);
     toSample /= distToSample;
-    float jacobian = dot(r.sampleFaceN, -toSample) / (distToSample * distToSample);
+    //Jacobian to Sample
+    float jacobian = dot(sdSampleSurface.getOrientedFaceNormal(), -toSample) / (distToSample * distToSample);
+    jacobian *= miOther.evalPdf(sdOther, toSample);
     jacobian /= r.jacobianDeterminant;
-    if (jacobian > 0) {
+    // Add Jacobian from sample
+    if(!r.flags.isNeeAfterReconnection)
+        jacobian *= miSampleSurface.evalPdf(sdSampleSurface, r.sampleWo) / r.jacobianOutgoing;
+
+    if (jacobian > 0 && (distToSample > kJacobianDistanceThreshold)) {
         if (dispatchShadowRay(sdOther, toSample, distToSample)) {
             p1 = luminance(miOther.eval(sdOther, toSample, sg) * jacobian * r.rcThp * thp);
         }
@@ -81,7 +89,7 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
     const uint retraceSurfaceIndex = index2Dto1D(pixel, gFrameDim.x);
 
     // Reservoir will only contribute if weight > 0 and F > 0
-    bool reservoirContributes = reservoir.weight > 0 && any(reservoir.F > 0);
+    bool reservoirContributes = reservoir.isValid();
     RetracedSurface retracedSurface = RetracedSurface();
     bool retracedSurfaceValid = true; //If the surface is not valid MIS is skipped
     if (reservoirContributes && reservoir.pathLength > 0)
@@ -91,8 +99,10 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
         //Get MIS weight
         float mis = 1.0;
         if (reservoir.flags.hasNoReconnectionSurface) {
-            if (retracedSurfaceValid)
-                mis = evalMIS(reservoir.c, luminance(reservoir.F), temporal.c, luminance(retracedSurface.thp));
+            if (retracedSurfaceValid) {
+                float3 retracedF = retracedSurface.thp * (retracedSurface.jacobianDeterminant / reservoir.jacobianDeterminant);
+                mis = evalMIS(reservoir.c, luminance(reservoir.F), temporal.c, luminance(retracedF));
+            }
         } else //Reconnect Surface
         {
             ShadingData sdOther = {};
@@ -105,8 +115,11 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
                 sdOther = loadShadingData(HitInfo(retracedSurface.rcSurface), retracedSurface.rcViewDir, lod);
                 thpOther = retracedSurface.thp;
             }
-            if (retracedSurfaceValid)
-                mis = reconnectSurface(reservoir, sdOther, thpOther, temporal.c, sg);
+
+            if (retracedSurfaceValid) {
+                ShadingData sdSampleSurface = loadShadingDataWithPrevHit(HitInfo(reservoir.packedSampleSurface), sdOther.posW, lod);
+                mis = reconnectSurface(reservoir, sdOther, sdSampleSurface, thpOther, temporal.c, sg);
+            }
         }
         w_0 = mis * luminance(reservoir.F) * reservoir.weight;
         wSum += w_0;
@@ -117,7 +130,8 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
     float3 thpTemporal = float3(1); // only needed for path lenght == 0
     float3 Ftemporal = float3(0);
     float jacobianTemporal = 1;
-    bool temporalCanBeSelected = temporal.weight > 0;
+    float jacobianSampleOut = 1;
+    bool temporalCanBeSelected = temporal.isValid();
     //Load retraced surface for temporal reservoir
     retracedSurface = RetracedSurface();
     retracedSurfaceValid = true; // If the surface is not valid MIS is skipped
@@ -129,6 +143,8 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
         float jacobianDeterminant = 1.0;
         if (temporal.flags.hasNoReconnectionSurface) {
             if (retracedSurfaceValid) {
+                jacobianTemporal = retracedSurface.jacobianDeterminant;
+                jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
                 Ftemporal = retracedSurface.thp;
             }
         } else //Reconnect surface
@@ -146,14 +162,23 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
 
             //Reconnect
             if (retracedSurfaceValid) {
+                ShadingData sdSampleSurface = loadShadingDataWithPrevHit(HitInfo(temporal.packedSampleSurface), sdOther.posW, lod);
                 let miOther = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
-                float3 toSample = temporal.samplePosW - sdOther.posW;
+                let miSampleSurface = gScene.materials.getMaterialInstance(sdSampleSurface, lod, kMIHints);
+                float3 toSample = sdSampleSurface.posW - sdOther.posW;
                 float distToSample = length(toSample);
                 toSample /= distToSample;
-                jacobianTemporal = dot(temporal.sampleFaceN, -toSample) / (distToSample * distToSample);
+                //Jacobian from reconnect surface to other sample
+                jacobianTemporal = miOther.evalPdf(sdOther, toSample);
+                jacobianTemporal *= dot(sdSampleSurface.getOrientedFaceNormal(), -toSample) / (distToSample * distToSample);
                 jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
+                // Jacobian from sample outgoing
+                if (!temporal.flags.isNeeAfterReconnection) {
+                    jacobianSampleOut = miSampleSurface.evalPdf(sdSampleSurface, temporal.sampleWo) / temporal.jacobianOutgoing;
+                    jacobianDeterminant *= jacobianSampleOut;
+                }
 
-                if (jacobianDeterminant > 0) {
+                if (jacobianDeterminant > 0 && (distToSample > kJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdOther, toSample, distToSample)) {
                         thpTemporal *= miOther.eval(sdOther, toSample, sg);
                     } else {
@@ -165,8 +190,9 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
             }           
         }
 
-        mis = evalMIS(temporal.c, luminance(temporal.F), reservoir.c, luminance(Ftemporal) * jacobianDeterminant);
-        w_1 = mis * luminance(Ftemporal) * temporal.weight * jacobianDeterminant;
+        float estFTemporal = luminance(Ftemporal) * jacobianDeterminant;
+        mis = evalMIS(temporal.c, luminance(temporal.F), reservoir.c, estFTemporal);
+        w_1 = mis * estFTemporal * temporal.weight;
         wSum += w_1;
     }
 
@@ -175,6 +201,7 @@ bool resampleReservoir(int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout 
     if (selectOtherSample) {
         reservoir = temporal;
         reservoir.jacobianDeterminant = jacobianTemporal;
+        reservoir.jacobianOutgoing = jacobianSampleOut;
         reservoir.thp = thpTemporal;
         reservoir.F = Ftemporal;
     }
