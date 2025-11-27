@@ -491,6 +491,8 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
      var["gRetraceSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
 
+     var["gDebug"] = renderData[kOutputDebug]->asTexture(); //TODO Remove
+
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
 
@@ -547,6 +549,8 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["gRetracedSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
 
     var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
+    
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();//TODO Remove
 
     // Execute
     FALCOR_ASSERT(mScreenRes.x > 0 && mScreenRes.y > 0);

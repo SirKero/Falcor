@@ -31,6 +31,8 @@ RWStructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
 StructuredBuffer<ReservoirPT> gReservoir;
 RWStructuredBuffer<RetracedSurface> gRetraceSurface;
 
+RWTexture2D<float4> gDebug;
+
 static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
 static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
@@ -292,6 +294,7 @@ void rayGen()
             ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
             bool valid = randomReplay(sd, reservoir, retraceSurface);
+           
             gRetraceSurface[reservoirIndex] = retraceSurface;
         }
 
@@ -301,8 +304,8 @@ void rayGen()
             float3 viewDir = gView[pixel].xyz;
             ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
 
-            randomReplay(sd, resampleReservoir, retraceSurface);
-
+            bool valid = randomReplay(sd, resampleReservoir, retraceSurface);
+                   
             gRetraceSurfacePrev[reservoirIndex] = retraceSurface;
         }
     }

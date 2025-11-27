@@ -61,7 +61,8 @@ struct PathData {
     uint pathLength;
     uint rcPathLength;
 
-    float2 packedSampleWo;  //Packed sample Wo for jacobian after resampling surface
+    float2 packedSampleWo; // Packed sample Wo for jacobian after resampling surface
+    float jacobianRc;   //Jacobian from rc to sample
 
     __init() {
         thp = float3(1.0);
@@ -73,6 +74,7 @@ struct PathData {
         reconnectIsSet = false;
         rcPathLength = UINT32_MAX;
         packedSampleWo = float2(0);
+        jacobianRc = 1;
     }
 }
 
@@ -146,10 +148,11 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 if (addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution, pd.thp)) {
                     uint pathFlags = (uint)ReservoirPathFlags::isEnvMapMiss;
                     if (!pd.reconnectIsSet) {
-                        reservoir.jacobianDeterminant = pd.scatterPdf;
+                        pd.jacobianRc = pd.scatterPdf;
                         reservoir.pathLength = pd.pathLength;
                         pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                     }
+                    reservoir.jacobianDeterminant = pd.jacobianRc;
                     reservoir.jacobianOutgoing = pd.outgoingJacobianPdf;
                     reservoir.flags.setReservoirPathFlags(pathFlags);
                       
@@ -177,8 +180,8 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             bool jacobianDistanceCheck = rayDist > kJacobianDistanceThreshold;
             if (pd.lastHitWasDiffuse && jacobianDistanceCheck) {
                 reservoir.packedSampleSurface = rayPayload.packedHitInfo;
-                
-                reservoir.jacobianDeterminant = pd.scatterPdf * dot(sd.faceN, -ray.Direction) / (rayDist * rayDist); // Reconnection jacobian determinant
+
+                pd.jacobianRc = pd.scatterPdf * dot(sd.faceN, -ray.Direction) / (rayDist * rayDist); // Reconnection jacobian determinant
                 reservoir.packedSampleWo = pd.packedSampleWo;
                 pd.reconnectIsSet = true;
                 pd.rcPathLength = pd.pathLength; //used to set certain values for the reservoir
@@ -212,10 +215,11 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 uint pathFlags = (uint)ReservoirPathFlags::isScatter;
                 if (!pd.reconnectIsSet) {
                     float distToSample = distance(lastOrigin, sd.posW);
-                    reservoir.jacobianDeterminant = pd.scatterPdf * dot(lastFaceNormal, ray.Direction) / (distToSample * distToSample);
+                    pd.jacobianRc = pd.scatterPdf * dot(lastFaceNormal, ray.Direction) / (distToSample * distToSample);
                     reservoir.pathLength = pd.pathLength;
                     pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                 }
+                reservoir.jacobianDeterminant = pd.jacobianRc;
                 reservoir.jacobianOutgoing = pd.outgoingJacobianPdf;
                 reservoir.packedSampleWo = pd.packedSampleWo;
                 reservoir.flags.setReservoirPathFlags(pathFlags);
@@ -240,9 +244,9 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 uint pathFlags = (uint)ReservoirPathFlags::isNee;
                 if (!pd.reconnectIsSet) {
                     reservoir.pathLength = pd.pathLength;
-                    reservoir.jacobianDeterminant = ls.pdf;
+                    pd.jacobianRc = ls.pdf;
                     if (!ls.isInfiniteDistance) {
-                        reservoir.jacobianDeterminant *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
+                        pd.jacobianRc *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
                     }
                     pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                     pathFlags |= (uint)ReservoirPathFlags::endIsNee;
@@ -253,6 +257,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                     pd.packedSampleWo = ndir_to_oct_snorm(ls.dir);
                 }
 
+                reservoir.jacobianDeterminant = pd.jacobianRc;
                 reservoir.jacobianOutgoing = pd.outgoingJacobianPdf; // This is set every time a sample is accepted
                 reservoir.packedSampleWo = pd.packedSampleWo;
                 reservoir.flags.setReservoirPathFlags(pathFlags);
