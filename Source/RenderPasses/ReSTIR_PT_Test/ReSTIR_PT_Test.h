@@ -111,7 +111,7 @@ private:
 
     bool mEnableResampling = true;
     uint mConfidenceCap = 20;
-    uint mSpatialSamples = 0;
+    uint mSpatialSamples = 1;
     float mSpatialSampleRadius = 20.f;
 
     bool mResamplingValid = false;

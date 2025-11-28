@@ -64,7 +64,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
         if (rtxdiValid)
         {
-            //outColor += mi.eval(sd, dir, sg) * Li;
+            outColor += mi.eval(sd, dir, sg) * Li;
         }
 
         ReservoirPT ptReservoir = gReservoir[index2Dto1D(pixel, gFrameDim.x)];
