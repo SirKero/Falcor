@@ -31,8 +31,6 @@ RWStructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
 StructuredBuffer<ReservoirPT> gReservoir;
 RWStructuredBuffer<RetracedSurface> gRetraceSurface;
 
-RWTexture2D<float4> gDebug;
-
 static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
 static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
