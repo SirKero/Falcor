@@ -549,6 +549,7 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["gRetracedSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
 
     var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute
     FALCOR_ASSERT(mScreenRes.x > 0 && mScreenRes.y > 0);

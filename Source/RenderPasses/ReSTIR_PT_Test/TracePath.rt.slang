@@ -239,7 +239,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             SampleGenerator neeSgState = sg; // Cache sampleGenerator state
             float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability , ls, sg) * pd.reconThp;
             //TODO use endIsNEE case if sample is below the distance threshold? 
-            if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp))
+            if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp) && any(nee > 0))
             {
                 reservoir.sgRCNee = neeSgState;
                 uint pathFlags = (uint)ReservoirPathFlags::isNee;

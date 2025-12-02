@@ -17,6 +17,7 @@ StructuredBuffer<RetracedSurface> gRetracedSurface;
 StructuredBuffer<RetracedSurface> gRetracedSurfacePrev;
 
 RWStructuredBuffer<ReservoirPT> gReservoir;
+RWTexture2D<float4> gDebug;
 
 cbuffer CB
 {
@@ -169,6 +170,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
                 jacobianTemporal = retracedSurface.jacobianDeterminant;
                 jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
                 Ftemporal = retracedSurface.thp;
+                //gDebug[pixel] = float4(1, 0, 0, 1);                
             }
         } else //Reconnect surface
         {
