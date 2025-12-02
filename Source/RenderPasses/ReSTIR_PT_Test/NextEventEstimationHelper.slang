@@ -59,7 +59,8 @@ bool generateAnalyticSample(ShadingData sd, inout SampleGenerator sg, inout Ligh
     ls.Li = ls.pdf > 0 ? (analyticSample.Li * lightCount) / ls.pdf : float3(0); // analyticSample.Li is already divided by the pdf
     ls.isInfiniteDistance = ls.distance == kMaxLightDistance;
     if(!ls.isInfiniteDistance)
-        ls.pdf *= analyticSample.pdf;           //Update pdf afterwards (used for jacobian)
+        ls.pdf *= analyticSample.pdf; // Update pdf afterwards (used for jacobian)
+    ls.pdf /= lightCount;
     ls.distance = analyticSample.distance;
     ls.dir = analyticSample.dir;
     ls.position = analyticSample.posW;

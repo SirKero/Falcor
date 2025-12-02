@@ -31,6 +31,8 @@ RWStructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
 StructuredBuffer<ReservoirPT> gReservoir;
 RWStructuredBuffer<RetracedSurface> gRetraceSurface;
 
+RWTexture2D<float4> gDebug;
+
 static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
 static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
@@ -109,13 +111,15 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
     ray.TMin = 0;
     ray.TMax = FLT_MAX;
     let primMI = gScene.materials.getMaterialInstance(primSD, lod, kMIHints);
-
-    if (!sampleNewRay(primSD, primMI, rayDirSg, rpd, ray))
-        return false;
-
     let primProperties = primMI.getProperties(primSD);
     RayPayload rayPayload = RayPayload();
     rpd.lastSurfaceIsDiffuse = primProperties.roughness > kRoughnessThreshold;
+
+    if ((reservoir.flags.firstHitIsDelta && rpd.lastSurfaceIsDiffuse) || (!reservoir.flags.firstHitIsDelta && !rpd.lastSurfaceIsDiffuse))
+        return false;
+
+    if (!sampleNewRay(primSD, primMI, rayDirSg, rpd, ray))
+        return false;
     for (uint pathLength = 1; pathLength <= reservoir.pathLength; pathLength++)
     {
         TraceRay(gScene.rtAccel, 0 , 0xff , 0 , rayTypeCount, 0, ray, rayPayload);
@@ -144,7 +148,9 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
         let bsdfProperties = mi.getProperties(sd);
         bool surfaceIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold); // Either diffuse surface or emissive hit
         bool surfaceIsEmissive = any(bsdfProperties.emission > 0);
-
+        float rayDist = distance(ray.Origin, sd.posW);
+        bool isReconnectionSurface = surfaceIsDiffuse && rpd.lastSurfaceIsDiffuse;
+        isReconnectionSurface &= rayDist > kJacobianDistanceThreshold;
         // Reconnect surface
         if (pathLength == reservoir.pathLength && (surfaceIsDiffuse || surfaceIsEmissive))
         {                
@@ -181,13 +187,15 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
                 // Replay Nee decisions
                 SampleGenerator neeSG = reservoir.sgRCNee;
                 LightSample ls;
-                float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability, ls, neeSG) * rpd.thp;
-                retracedSurface.pathFlags = (uint)ReservoirPathFlags::endIsNee;
-                retracedSurface.thp = nee;
-                retracedSurface.jacobianDeterminant = ls.pdf;
-                if (!ls.isInfiniteDistance)
-                    retracedSurface.jacobianDeterminant *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
-                rpd.surfaceIsSet = true;
+                float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability, ls, neeSG);
+                if (any(nee > 0) && ls.pdf > 0 && ls.distance > kJacobianDistanceThreshold) {
+                    retracedSurface.pathFlags = (uint)ReservoirPathFlags::endIsNee;
+                    retracedSurface.thp = nee * rpd.thp;
+                    retracedSurface.jacobianDeterminant = ls.pdf;
+                    if (!ls.isInfiniteDistance)
+                        retracedSurface.jacobianDeterminant *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
+                    rpd.surfaceIsSet = true;
+                }
             }
 
             //Set hit data
@@ -195,7 +203,7 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
                 retracedSurface.rcViewDir = sd.V;
                 retracedSurface.rcSurface = hit.getData();
             }
-        }else if (surfaceIsEmissive) //Surfaces from emissive surfaces are undefined
+        } else if (surfaceIsEmissive || isReconnectionSurface) //Surfaces from emissive surfaces are undefined and reconnection surfaces are not allowed on the way.
         {
             break;
         }
@@ -209,7 +217,6 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
             if (!sampleNewRay(sd, mi, rayDirSg, rpd, ray)) {
                 break;
             }
-                
         }
     }
 
@@ -292,7 +299,10 @@ void rayGen()
             ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
             bool valid = randomReplay(sd, reservoir, retraceSurface);
-           
+            if (valid) {
+                //gDebug[DispatchRaysIndex().xy] = float4(retraceSurface.pathFlags == )
+            }
+
             gRetraceSurface[reservoirIndex] = retraceSurface;
         }
 

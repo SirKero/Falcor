@@ -17,13 +17,14 @@ static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kM
 //
 
 enum ReservoirPathFlags : uint {
-    endIsNee = 0x100,                   //1<<9
-    isNee = 0x200,                      // 1<<10
-    isScatter = 0x400,                  // 1<<11
-    isEnvMapMiss = 0x800,               // 1<<12
-    hasNoReconnectionSurface = 0x1000,  //1<<13
-    isReconnectionPath = 0x2000,        //1<<14
-    isNeeAfterReconnection = 0x4000,    //1<<15
+    endIsNee = 0x100,                   //1<<8
+    isNee = 0x200,                      // 1<<9
+    isScatter = 0x400,                  // 1<<10
+    isEnvMapMiss = 0x800,               // 1<<11
+    hasNoReconnectionSurface = 0x1000,  //1<<12
+    isReconnectionPath = 0x2000,        //1<<13
+    isNeeAfterReconnection = 0x4000,    // 1<<14
+    firstHitIsDelta = 0x8000            // 1<<15
 }
 
 struct ReservoirFlags {
@@ -93,6 +94,14 @@ struct ReservoirFlags {
         set {
             flags &= ~(uint)ReservoirPathFlags::isNeeAfterReconnection; // Clear bit
             flags |= (newValue ? (uint)ReservoirPathFlags::isNeeAfterReconnection : 0);
+        }
+    }
+
+    property bool firstHitIsDelta {
+        get { return (flags & (uint)ReservoirPathFlags::firstHitIsDelta) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::firstHitIsDelta; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::firstHitIsDelta : 0);
         }
     }
 }

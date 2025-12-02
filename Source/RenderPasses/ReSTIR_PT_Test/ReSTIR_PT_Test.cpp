@@ -491,6 +491,8 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
      var["gRetraceSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
 
+     var["gDebug"] = renderData[kOutputDebug]->asTexture();
+
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
 

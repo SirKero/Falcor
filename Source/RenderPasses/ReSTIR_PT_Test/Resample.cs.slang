@@ -206,7 +206,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
                         thpTemporal = float3(0);
                     }
 
-                    Ftemporal = temporal.rcThp * thpTemporal;
+                    Ftemporal = temporal.rcThp * thpTemporal * thpOther;
                 }
             }
         }
@@ -214,6 +214,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
         float estFTemporal = luminance(Ftemporal) * jacobianDeterminant;
         mis = evalMIS(temporal.c, luminance(temporal.F), current.c, estFTemporal);
         w_1 = mis * estFTemporal * temporal.weight;
+       
         wSum += w_1;
     }
 

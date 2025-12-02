@@ -238,6 +238,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             LightSample ls;
             SampleGenerator neeSgState = sg; // Cache sampleGenerator state
             float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability , ls, sg) * pd.reconThp;
+            //TODO use endIsNEE case if sample is below the distance threshold? 
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp))
             {
                 reservoir.sgRCNee = neeSgState;
@@ -343,7 +344,8 @@ void rayGen()
         // Prepare for the first ray
         PathData pd = PathData();
         pd.lastHitWasDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-             
+        bool firstHitIsDelta = !pd.lastHitWasDiffuse;
+
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
@@ -351,6 +353,9 @@ void rayGen()
 
         if (sampleNewRay(sd, mi, rayDirSg, pd, ray))
             outColor = tracePath(ray, sg, rayDirSg, pd, reservoir);
+
+        //Set reservoir flag
+        reservoir.flags.firstHitIsDelta = firstHitIsDelta;
 
     } else
     {
