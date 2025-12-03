@@ -97,6 +97,7 @@ private:
     // Material Settings
     bool mUseLambertianDiffuse = true;          // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
     float mSpecularRoughnessThreshold = 0.25f;  // Any material below this is considered specular
+    bool mEvaluateDeltaPDFs = false;            // If set on true, delta pdfs are evaluated (always 0), else they are set to 1
 
     // Light
     bool mHasLights = false;           // True if the scene has any light sources
@@ -122,7 +123,7 @@ private:
     float3 mTemporalCameraPosition = float3(0);
     float3 mTemporalCameraForward = float3(0);
     float mNormalizedPixelArea = 1.0; //For light trace
-    bool mEnableLightTraceSplatting = true;
+    bool mEnableLightTraceSplatting = false;
 
     //Photon Distribution
     uint mPhotonMaxBounces = 10;                        // Number of photon bounces
@@ -148,9 +149,8 @@ private:
     ref<Buffer> mpPhotonData[2];            // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;            // Photon Counter
     ref<Buffer> mpPhotonCounterCPU;         // CPU copy of counter for readback
-    ref<Buffer> mpFinalGatherReservoir[2];  // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];      // Reservoir for the Caustic sample
-    ref<Texture> mpEmission;                // Emission for paths that travel through highly specular materials
+    ref<Buffer> mpPathReservoir[2];         // Reservoir storing the path in primary path space
 
     ref<Texture> mpLightTraceHeadCounter;   //Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;     //Linked List for light tracing

@@ -3,6 +3,7 @@
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
 import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.Fresnel;
 
@@ -34,6 +35,129 @@ enum class PhotonType // : uint32_t
     Global = 0,
     Caustic = 1
 };
+
+enum ReservoirPathFlags : uint {
+    firstHitIsDelta = 0x100,               // 1<<8
+    hasNoReconnectionSurface = 0x200,      // 1<<9
+    isFinalGather = 0x400,                 // 1<<10
+    isEmissiveHit = 0x800,                 // 1<<11
+    isEnvMapHit = 0x1000,                  // 1<<12
+}
+
+struct ReservoirFlags {
+    uint flags;
+
+    __init() {
+        flags = 0;
+    }
+
+    // Replaces path flag. Assumes that it is already or'ed
+    [mutating]
+    void setReservoirPathFlags(uint pathFlag) {
+        flags &= ~0xFF00; // Clear all flag bits
+        flags |= pathFlag;
+    }
+
+    property uint pathLength {
+        get { return flags & 0xFF; }
+        set {
+            flags &= ~0xFF; // Clear lower bits
+            flags |= (newValue & 0xFF);
+        }
+    }
+
+    property bool firstHitIsDelta {
+        get { return (flags & (uint)ReservoirPathFlags::firstHitIsDelta) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::firstHitIsDelta; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::firstHitIsDelta : 0);
+        }
+    }
+
+    property bool hasNoReconnectionSurface {
+        get { return (flags & (uint)ReservoirPathFlags::hasNoReconnectionSurface) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::hasNoReconnectionSurface; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::hasNoReconnectionSurface : 0);
+        }
+    }
+
+    property bool isFinalGather {
+        get { return (flags & (uint)ReservoirPathFlags::isFinalGather) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isFinalGather; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isFinalGather : 0);
+        }
+    }
+
+    property bool isEmissiveHit {
+        get { return (flags & (uint)ReservoirPathFlags::isEmissiveHit) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isEmissiveHit; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isEmissiveHit : 0);
+        }
+    }
+
+    property bool isEnvMapHit {
+        get { return (flags & (uint)ReservoirPathFlags::isEnvMapHit) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isEnvMapHit; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isEnvMapHit : 0);
+        }
+    }
+}
+
+//Path Reservoir; Size: 96 Byte (24 floats)
+struct PathReservoir {
+    SampleGenerator sgPathDirections; // Sample Generator for random direction (float4)
+
+    //SampleGenerator sgRCNee; // For replaying NEE decisions
+
+    PackedHitInfo packedSampleSurface; // (Packed) Sample Surface
+
+    float jacobianDeterminant; //(stored) jacobian determinant (at rc vertex to sample)
+    ReservoirFlags flags;      // path length and flags
+    float2 packedSampleWo;
+
+    float3 F; // Complete radiance of the path
+    uint c;   // Confidence Weight
+
+    float3 rcRadiance;      // Radiance after reconnection
+    float weight;           // Unbiased contribution weight
+
+    float3 thp;             // Thp until the reconnection surface
+    float jacobianOutgoing; // Jacobian outgoing (next hit from sample)
+
+    __init() {
+        sgPathDirections = SampleGenerator(uint2(0), 0);
+        //sgRCNee = SampleGenerator(uint2(0), 0);
+        packedSampleSurface = {};
+        jacobianDeterminant = -1;
+        packedSampleWo = float2(0);
+        flags = ReservoirFlags();
+        F = float3(0);
+        c = 1;
+        rcRadiance = float3(0);
+        thp = float3(1);
+        weight = 0.0;
+        jacobianOutgoing = 1;
+    }
+
+    bool isValid() {
+        return weight > 0 && jacobianDeterminant > 0 && any(F > 0);
+    }
+
+    property uint pathLength {
+        get { return flags.pathLength; }
+        set { flags.pathLength = newValue;}
+    }
+
+    property float3 sampleWo {
+        get { return oct_to_ndir_snorm(packedSampleWo);}
+        set { packedSampleWo = ndir_to_oct_snorm(newValue);}
+    }
+
+}
 
 //Data for the FG sample 64B
 struct FGSampleData {

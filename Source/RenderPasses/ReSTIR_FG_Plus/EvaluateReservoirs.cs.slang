@@ -7,9 +7,7 @@ import Rendering.RTXDI.RTXDI;
 import StructsAndHelpers;
 
 Texture2D<PackedHitInfo> gVBuffer;
-StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
-StructuredBuffer<ReservoirCaustic> gCausticReservoir;
-Texture2D<float4> gEmission;
+StructuredBuffer<PathReservoir> gPathReservoir;
 
 RWTexture2D<float4> gOutColor;
 
@@ -24,52 +22,6 @@ static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
-float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
-    float3 outColor = float3(0);
-    ReservoirFG fgReservoir = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
-    if (!fgReservoir.isValid())
-        return outColor;
-
-    // Get surface and shading data
-    HitInfo hitInfo = HitInfo(fgReservoir.sampleSurface);
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = loadShadingData(hitInfo, -fgReservoir.sampleData.sampleView, lod);
-    let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
-    let bsdfProperties = mi.getProperties(sd);
-    outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
-    outColor *= fgReservoir.thp * fgReservoir.wSum;
-
-    return outColor;
-}
-
-float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
-    float3 outColor = float3(0);
-    ReservoirCaustic causticReservoir = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
-    if (!causticReservoir.isValid())
-        return outColor;
-
-    // Get surface and shading data
-    HitInfo hitInfo = HitInfo(causticReservoir.sampleSurface);
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData sd = loadShadingData(hitInfo, causticReservoir.sampleSurfaceView, lod);
-    let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
-    let bsdfProperties = mi.getProperties(sd);
-
-    // Light Trace
-    if (kEnableLightTrace && causticReservoir.pathLength == 0) {
-        float3 directionToCamera = normalize(gScene.camera.getPosition() - sd.posW);
-        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg);
-    } else {
-        float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
-        if (NdotL > 0) {
-            outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
-            outColor /= NdotL;
-            outColor *= causticReservoir.thp;
-        }
-    }
-
-    return outColor;
-}
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
@@ -109,9 +61,9 @@ void main(uint2 pixel: SV_DispatchThreadID)
             outColor += mi.eval(sd, dir, sg) * Li;
         }
 
-        outColor += evaluateFinalGatherReservoir(pixel, sg);
-        outColor += evaluateCausticReservoir(pixel, sg);
-        outColor += gEmission[pixel].xyz;
+        // Evaluate Path Reservoir
+        PathReservoir pathReservoir = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
+        outColor += pathReservoir.F * pathReservoir.weight;
     }else{
         outColor = gScene.envMap.eval(viewDir);
     }

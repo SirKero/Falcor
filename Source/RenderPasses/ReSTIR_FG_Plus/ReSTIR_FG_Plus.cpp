@@ -296,9 +296,9 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     }
 
     //Spatiotemporal resampling for final gather samples and caustics
-    resampleReservoirFGPass(pRenderContext, renderData);
+    //resampleReservoirFGPass(pRenderContext, renderData);
 
-    resampleReservoirCausticPass(pRenderContext, renderData);
+    //resampleReservoirCausticPass(pRenderContext, renderData);
 
     //Finalize Reservoirs
     evaluateReservoirsPass(pRenderContext, renderData);
@@ -392,15 +392,6 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
         }
-        if (!mpFinalGatherReservoir[i] || mResetScreenTex)
-        {
-            mCanResample = false;
-            mpFinalGatherReservoir[i] = Buffer::createStructured(
-                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-                Buffer::CpuAccess::None, nullptr, false
-            );
-            mpFinalGatherReservoir[i]->setName("FinalGatherReservoir" + std::to_string(i));
-        }
         if (!mpCausticReservoir[i] || mResetScreenTex)
         {
             mCanResample = false;
@@ -409,6 +400,15 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
+        }
+        if (!mpPathReservoir[i] || mResetScreenTex)
+        {
+            mCanResample = false;
+            mpPathReservoir[i] = Buffer::createStructured(
+                mpDevice, 96u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPathReservoir[i]->setName("PathReservoir_" + std::to_string(i));
         }
     }
 
@@ -425,15 +425,6 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
             mpDevice, sizeof(uint), 2, ResourceBindFlags::None, Buffer::CpuAccess::Read, nullptr, false
         );
         mpPhotonCounterCPU->setName("PhotonCounterCPU");
-    }
-
-    //Emission Texture
-    if (!mpEmission || mResetScreenTex)
-    {
-        mpEmission = Texture::create2D(
-            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-        );
-        mpEmission->setName("EmissionTexture");
     }
 
     //Light Trace resources
@@ -733,6 +724,8 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mGenerateInitialSamplesPass.pProgram->addDefines(getMaterialDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvaluateDeltaPDFs ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
 
     //Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -759,9 +752,8 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     }
 
     //Output Resources
-    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
-    var["gEmission"] = mpEmission;
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
 
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
@@ -770,7 +762,7 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
 
     //Reservoir barrier
-    pRenderContext->uavBarrier(mpFinalGatherReservoir[mFrameCount % 2].get());
+    pRenderContext->uavBarrier(mpPathReservoir[mFrameCount % 2].get());
     pRenderContext->uavBarrier(mpCausticReservoir[mFrameCount % 2].get());
 }
 
@@ -907,6 +899,7 @@ void ReSTIR_FG_Plus::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
 
 void ReSTIR_FG_Plus::resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    return; //TODO
     FALCOR_PROFILE(pRenderContext, "Resampling Final Gather");
     //Initialize compute pass
     if (!mpResampleReservoirFGPass)
@@ -951,11 +944,11 @@ void ReSTIR_FG_Plus::resampleReservoirFGPass(RenderContext* pRenderContext, cons
     var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
 
     // Input Resources
-    var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount +1) % 2];
+    //var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount +1) % 2];
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
 
     // In-/Output Resources
-    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    //var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
 
     // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -965,6 +958,7 @@ void ReSTIR_FG_Plus::resampleReservoirFGPass(RenderContext* pRenderContext, cons
 
 void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
+    return; //TODO
     FALCOR_PROFILE(pRenderContext, "Resampling Caustics");
     // Initialize compute pass
     if (!mpResampleReservoirCausticPass)
@@ -1074,9 +1068,7 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
 
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
-    var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
-    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
-    var["gEmission"] = mpEmission;
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
 
     //Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
