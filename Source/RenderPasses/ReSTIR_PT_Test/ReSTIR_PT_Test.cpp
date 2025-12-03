@@ -145,6 +145,11 @@ void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
         }
     }
 
+    if (auto group = widget.group("Debug"))
+    {
+        widget.checkbox("Clear Debug", mClearDebug);
+    }
+
     mOptionsChanged = changed;
 }
 
@@ -162,8 +167,9 @@ void ReSTIR_PT_Test::execute(RenderContext* pRenderContext, const RenderData& re
         mOptionsChanged = false;
     }
 
-    //TODO remove if not needed
-    pRenderContext->clearTexture(renderData[kOutputDebug]->asTexture().get(), float4(0,0,0,1));
+    //Debug clear
+    if (mClearDebug)
+        pRenderContext->clearTexture(renderData[kOutputDebug]->asTexture().get(), float4(0,0,0,1));
 
     //Update RNG start index
     mRNGGenNumberRenderPasses = 4 + mSpatialSamples;
@@ -491,8 +497,6 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
      var["gRetraceSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
 
-     var["gDebug"] = renderData[kOutputDebug]->asTexture();
-
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
 
@@ -549,7 +553,6 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["gRetracedSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
 
     var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute
     FALCOR_ASSERT(mScreenRes.x > 0 && mScreenRes.y > 0);

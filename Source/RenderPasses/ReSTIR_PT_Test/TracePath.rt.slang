@@ -181,7 +181,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             if (pd.lastHitWasDiffuse && jacobianDistanceCheck) {
                 reservoir.packedSampleSurface = rayPayload.packedHitInfo;
 
-                pd.jacobianRc = pd.scatterPdf * dot(sd.faceN, -ray.Direction) / (rayDist * rayDist); // Reconnection jacobian determinant
+                pd.jacobianRc = pd.scatterPdf * abs(dot(sd.faceN, -ray.Direction)) / (rayDist * rayDist); // Reconnection jacobian determinant
                 reservoir.packedSampleWo = pd.packedSampleWo;
                 pd.reconnectIsSet = true;
                 pd.rcPathLength = pd.pathLength; //used to set certain values for the reservoir
@@ -215,7 +215,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 uint pathFlags = (uint)ReservoirPathFlags::isScatter;
                 if (!pd.reconnectIsSet) {
                     float distToSample = distance(lastOrigin, sd.posW);
-                    pd.jacobianRc = pd.scatterPdf * dot(lastFaceNormal, ray.Direction) / (distToSample * distToSample);
+                    pd.jacobianRc = pd.scatterPdf * abs(dot(lastFaceNormal, ray.Direction)) / (distToSample * distToSample);
                     reservoir.pathLength = pd.pathLength;
                     pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                 }
@@ -247,7 +247,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                     reservoir.pathLength = pd.pathLength;
                     pd.jacobianRc = ls.pdf;
                     if (!ls.isInfiniteDistance) {
-                        pd.jacobianRc *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
+                        pd.jacobianRc *= abs(dot(sd.faceN, ls.dir)) / (ls.distance * ls.distance);
                     }
                     pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                     pathFlags |= (uint)ReservoirPathFlags::endIsNee;
@@ -267,7 +267,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         }
        
         lastOrigin = sd.posW;
-        lastFaceNormal = sd.getOrientedFaceNormal();
+        lastFaceNormal = sd.faceN;
 
         // New ray
         pd.lastHitWasDiffuse = !currentIsDelta;

@@ -115,6 +115,8 @@ private:
     float mSpatialSampleRadius = 20.f;
 
     bool mResamplingValid = false;
+
+    bool mClearDebug = false;
     //
     // Resources
     //

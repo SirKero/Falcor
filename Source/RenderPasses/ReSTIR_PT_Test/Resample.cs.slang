@@ -17,7 +17,6 @@ StructuredBuffer<RetracedSurface> gRetracedSurface;
 StructuredBuffer<RetracedSurface> gRetracedSurfacePrev;
 
 RWStructuredBuffer<ReservoirPT> gReservoir;
-RWTexture2D<float4> gDebug;
 
 cbuffer CB
 {
@@ -53,7 +52,7 @@ float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleS
     float distToSample = length(toSample);
     toSample /= distToSample;
     //Jacobian to Sample
-    float jacobianNew = dot(sdSampleSurface.getOrientedFaceNormal(), -toSample) / (distToSample * distToSample);
+    float jacobianNew = abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
     jacobianNew *= miOther.evalPdf(sdOther, toSample);
     float jacobian = jacobianNew / r.jacobianDeterminant;
     // Add Jacobian from sample
@@ -94,8 +93,8 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
     if (isSpatialResampling) {
         const float3 cameraPos = gScene.camera.getPosition();
         float currentDepth = distance(cameraPos, sdCurrent.posW);
-        float temporalDepth = distance(cameraPos , sdTemporal.posW);
-        bool normalThreshold = dot(sdCurrent.getOrientedFaceNormal(), sdTemporal.getOrientedFaceNormal()) < 0.5; // TODO do not hardcode this
+        float temporalDepth = distance(cameraPos, sdTemporal.posW);
+        bool normalThreshold = abs(dot(sdCurrent.getOrientedFaceNormal(), sdTemporal.getOrientedFaceNormal())) < 0.5; // TODO do not hardcode this
         bool depthThreshold = abs(currentDepth - temporalDepth) > 0.1 * currentDepth;
 
         if (normalThreshold || depthThreshold)
@@ -169,8 +168,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
             if (retracedSurfaceValid) {
                 jacobianTemporal = retracedSurface.jacobianDeterminant;
                 jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
-                Ftemporal = retracedSurface.thp;
-                //gDebug[pixel] = float4(1, 0, 0, 1);                
+                Ftemporal = retracedSurface.thp;            
             }
         } else //Reconnect surface
         {
@@ -192,7 +190,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
                 toSample /= distToSample;
                 // Jacobian from reconnect surface to other sample
                 jacobianTemporal = miOther.evalPdf(sdCurrent, toSample);
-                jacobianTemporal *= dot(sdSampleSurface.getOrientedFaceNormal(), -toSample) / (distToSample * distToSample);
+                jacobianTemporal *= abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
                 jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
 
                 // Jacobian from sample outgoing

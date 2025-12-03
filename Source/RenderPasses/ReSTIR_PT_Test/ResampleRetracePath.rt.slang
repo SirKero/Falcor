@@ -31,8 +31,6 @@ RWStructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
 StructuredBuffer<ReservoirPT> gReservoir;
 RWStructuredBuffer<RetracedSurface> gRetraceSurface;
 
-RWTexture2D<float4> gDebug;
-
 static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
 static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
@@ -174,7 +172,7 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
                 float3 emissiveRadiance = misWeight * bsdfProperties.emission * rpd.thp;
                 retracedSurface.pathFlags = (uint)ReservoirPathFlags::isScatter;
                 float distToSample = distance(rpd.lastOrigin, sd.posW);
-                retracedSurface.jacobianDeterminant = rpd.scatterPdf * dot(rpd.lastFaceN, ray.Direction) / (distToSample * distToSample);
+                retracedSurface.jacobianDeterminant = rpd.scatterPdf * abs(dot(rpd.lastFaceN, ray.Direction)) / (distToSample * distToSample);
                 retracedSurface.thp = emissiveRadiance;
                 rpd.surfaceIsSet = true;
             } else if (surfaceIsDiffuse && !reservoir.flags.hasNoReconnectionSurface) //Reconnection surface
@@ -193,7 +191,7 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
                     retracedSurface.thp = nee * rpd.thp;
                     retracedSurface.jacobianDeterminant = ls.pdf;
                     if (!ls.isInfiniteDistance)
-                        retracedSurface.jacobianDeterminant *= dot(sd.faceN, ls.dir) / (ls.distance * ls.distance);
+                        retracedSurface.jacobianDeterminant *= abs(dot(sd.faceN, ls.dir)) / (ls.distance * ls.distance);
                     rpd.surfaceIsSet = true;
                 }
             }
@@ -211,7 +209,7 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
         //Update reconnect path data
         rpd.lastSurfaceIsDiffuse = surfaceIsDiffuse;
         rpd.lastOrigin = sd.posW;
-        rpd.lastFaceN = sd.getOrientedFaceNormal();
+        rpd.lastFaceN = sd.faceN;
         //Sample ray for next iteration
         if (pathLength < reservoir.pathLength) {
             if (!sampleNewRay(sd, mi, rayDirSg, rpd, ray)) {
@@ -298,10 +296,7 @@ void rayGen()
             float3 prevViewDir = gViewPrev[prevPixel].xyz;
             ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
-            bool valid = randomReplay(sd, reservoir, retraceSurface);
-            if (valid) {
-                //gDebug[DispatchRaysIndex().xy] = float4(retraceSurface.pathFlags == )
-            }
+            randomReplay(sd, reservoir, retraceSurface);
 
             gRetraceSurface[reservoirIndex] = retraceSurface;
         }
@@ -312,8 +307,8 @@ void rayGen()
             float3 viewDir = gView[pixel].xyz;
             ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
 
-            bool valid = randomReplay(sd, resampleReservoir, retraceSurface);
-                   
+            randomReplay(sd, resampleReservoir, retraceSurface);
+
             gRetraceSurfacePrev[reservoirIndex] = retraceSurface;
         }
     }
