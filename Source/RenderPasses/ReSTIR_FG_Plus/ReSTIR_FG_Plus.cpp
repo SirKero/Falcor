@@ -319,7 +319,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     //Spatiotemporal resampling for final gather samples and caustics
     //resampleReservoirFGPass(pRenderContext, renderData);
 
-    //resampleReservoirCausticPass(pRenderContext, renderData);
+    resampleReservoirCausticPass(pRenderContext, renderData);
 
     //Finalize Reservoirs
     evaluateReservoirsPass(pRenderContext, renderData);
@@ -1076,7 +1076,6 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
 
 void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    return; //TODO
     FALCOR_PROFILE(pRenderContext, "Resampling Caustics");
     // Initialize compute pass
     if (!mpResampleReservoirCausticPass)
@@ -1188,6 +1187,7 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gView"] = renderData[kInputView]->asTexture();
     var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
 
     //Output
     var["gVBufferPrev"] = mpVBufferPrev;

@@ -80,65 +80,6 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
     return dot(radiusTest, radiusTest) < radius * radius;
 }
 
-void selectFGSample(inout ReservoirFG r , float pdf,ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
-    float3 collectedRadiance = float3(0);
-    // Prepare ray
-    RayDesc ray;
-    ray.Origin = sd.posW;
-    ray.Direction = sd.faceN;
-    ray.TMin = 0;
-    ray.TMax = kPhotonCollectTMax;
-
-    let bsdfProperties = mi.getProperties(sd);
-
-    RayQuery<RAY_FLAG_NONE> rayQuery;
-
-    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
-    while (rayQuery.Proceed()) {
-
-        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
-            continue;
-        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
-        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
-
-        // Check if ray is inside photon radius
-        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
-        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
-        if (!hitSphere(photonAABB.center(), radius, sd.posW))
-            continue;
-
-        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
-        float NdotL = dot(photonData.dir, N);
-        // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
-            continue;
-
-        float targetFunction = 0;
-        float3 radianceOut = float3(0);
-        if (NdotL > 0) {
-            float3 bsdf = mi.eval(sd, photonData.dir, sg);
-            radianceOut = (photonData.flux * bsdf) / NdotL;
-            targetFunction = luminance(radianceOut);
-        }
-        float photonDenom = M_PI * radius * radius * pdf;
-        float w = targetFunction / photonDenom;
-
-        r.wSum += w;
-        bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
-        if (selectNew) {
-            r.targetFunction = targetFunction;
-            r.sampleData.radianceOut = radianceOut;
-        }
-    }
-
-    // Finalize Reservoir
-    if (r.targetFunction > 0) {
-        r.wSum /= r.targetFunction;
-    }
-    else
-        r.wSum = 0;
-}
-
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg, bool collectOnlyDirectGlobal = false) {
     float3 collectedRadiance = float3(0);
     //Prepare ray
@@ -302,6 +243,74 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         pathReservoir.weight = 1.0;
 }
 
+//
+//Caustics
+//
+
+void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collectGlobalDirect, inout ReservoirCaustic causticReservoir, inout SampleGenerator sg) {
+    // Prepare ray
+    RayDesc ray;
+    ray.Origin = sd.posW;
+    ray.Direction = sd.faceN;
+    ray.TMin = 0;
+    ray.TMax = kPhotonCollectTMax;
+
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+    uint instanceMask = collectGlobalDirect ? 0xFF : 2; // 2 is caustic only
+
+    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
+    while (rayQuery.Proceed()) {
+
+        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
+            continue;
+        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
+        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
+        PhotonType type = (PhotonType)instanceIdx;
+        // Check if ray is inside photon radius
+        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
+        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
+        float3 center = photonAABB.center();
+        if (!hitSphere(center, radius, sd.posW))
+            continue;
+
+        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
+
+        // If direct global photons should be collected and the photon is global, check the path length
+        if (collectGlobalDirect && (type == PhotonType::Global)) {
+            if (photonData.pathLenght > 0)
+                continue;
+        }
+
+        float NdotL = dot(photonData.dir, bsdfProperties.guideNormal);
+        // Check for diffent surfaces (e.g. corners)
+        if ((dot(photonData.normalW, sd.getOrientedFaceNormal()) < 0.6) || (NdotL <= 0))
+            continue;
+
+        float targetFunction = 0;
+        if (NdotL > 0)
+            targetFunction = evalApproximateBRDFPhoton(sd, bsdfProperties, photonData.dir) * luminance(photonData.flux);
+        float photonDenom = M_PI * radius * radius;
+        float w = targetFunction / photonDenom;
+
+        causticReservoir.wSum += w;
+        bool selectNew = (sampleNext1D(sg) * causticReservoir.wSum) < w;
+        if (selectNew) {
+            causticReservoir.photonPosW = center;
+            causticReservoir.photonDir = photonData.dir;
+            causticReservoir.photonRadiance = photonData.flux;
+            causticReservoir.targetFunction = targetFunction;
+        }
+    }
+
+    // Finalize Reservoir
+    if (causticReservoir.targetFunction > 0) {
+        causticReservoir.wSum /= causticReservoir.targetFunction;
+    }
+    else
+        causticReservoir.wSum = 0;
+    causticReservoir.c = 1;
+}
+
 void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGenerator sg)
 {
     float3 outColor = float3(0);
@@ -340,7 +349,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGe
         bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
         if (selectNew) {
             r.sampleSurface = photonData.hitInfo;
-            r.sampleSurfaceView = -photonData.dir;
+            r.sampleSurfaceView = photonData.dir;
             r.photonPosW = sd.posW;
             r.photonDir = photonData.dir;
             r.photonRadiance = photonData.flux;
@@ -426,16 +435,14 @@ void rayGen()
         pd.lastHitDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
         // Init Caustic reservoir if photons can be collected at the current surface
         if (pd.lastHitDiffuse) {
-            /*
             causticReservoir.sampleSurface = hitInfo.getData();
-            causticReservoir.sampleSurfaceView = -viewDir;
+            causticReservoir.sampleSurfaceView = viewDir;
             if (kEnableLightTrace)
                 lightTraceResampling(pixel, causticReservoir, sg);
-            */
-            //TODO remove from here and add to caustic reservoir
-            pathReservoir.F += collectPhotons(sd, mi, bsdfProperties.guideNormal, kCausticInstanceMask, sg);
-            pathReservoir.flags.hasNoReconnectionSurface = true;    //In case the rest of the reservoir is invalid
+            else
+                photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
         }
+
         pathReservoir.flags.firstHitIsDelta = !pd.lastHitDiffuse;
         pd.specularPath &= pd.lastHitDiffuse;
         pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08;

@@ -335,7 +335,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     let currentBsdfProperties = currentMi.getProperties(currentSD);
 
     //Either photon or light trace resample
-    if (kEnableLightTrace && current.pathLength == 0)
+    if (kEnableLightTrace)
         reservoirSplatting(current, pixel, currentSD, currentMi, currentBsdfProperties, sg);
     else
         resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
