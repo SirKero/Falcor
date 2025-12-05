@@ -43,6 +43,7 @@ enum ReservoirPathFlags : uint {
     isEmissiveHit = 0x800,                 // 1<<11
     isEnvMapHit = 0x1000,                  // 1<<12
     isRadianceEstimate = 0x2000,           // 1<<13
+    hasTwoCollectionPoints = 0x4000,       // 1<<14
 }
 
 struct ReservoirFlags {
@@ -114,6 +115,14 @@ struct ReservoirFlags {
             flags |= (newValue ? (uint)ReservoirPathFlags::isRadianceEstimate : 0);
         }
     }
+
+    property bool hasTwoCollectionPoints {
+        get { return (flags & (uint)ReservoirPathFlags::hasTwoCollectionPoints) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::hasTwoCollectionPoints; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0);
+        }
+    }
 }
 
 //Path Reservoir; Size: 96 Byte (24 floats)
@@ -174,6 +183,40 @@ struct PathReservoir {
         set { packedSampleWo = ndir_to_oct_snorm(newValue);}
     }
 
+}
+
+//Infos on retraced path 64byte (16 floats)
+struct ReservoirRetracePath
+{
+    float3 F;
+    float jacobianFirstHit;
+
+    float jacobianSecondHit;
+    float3 rcThp;
+
+    PackedHitInfo rcSurface;
+
+    float3 rcViewDir;
+    uint flags;
+
+    __init()
+    {
+        F = float3(0);
+        jacobianFirstHit = 1;
+        jacobianSecondHit = 1;
+        rcThp = float3(0);
+        rcSurface = {};
+        rcViewDir = float3(0);
+        flags = 0;
+    }
+
+    [mutating]
+    void addJacobian(float jacobian, bool isFirstSample) {
+        if (isFirstSample)
+            jacobianFirstHit = jacobian;
+        else
+            jacobianSecondHit = jacobian;
+    }
 }
 
 //Data for the FG sample 64B
@@ -287,7 +330,7 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     const TriangleHit triangleHit = hit.getTriangleHit();
     VertexData v = gScene.getVertexData(triangleHit);
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, -rayDir, lod);
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, rayDir, lod);
     
     return sd;
 }

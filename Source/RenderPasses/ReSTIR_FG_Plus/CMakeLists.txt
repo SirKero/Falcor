@@ -9,6 +9,7 @@ target_sources(ReSTIR_FG_Plus PRIVATE
     ResampleReservoirCaustic.cs.slang
     StructsAndHelpers.slang
     GenerateInitialSamples.rt.slang
+    RetraceReservoirs.rt.slang
     TracePhotons.rt.slang
     SortSplatReservoirs.cs.slang
     TemporalSplatReservoir.cs.slang

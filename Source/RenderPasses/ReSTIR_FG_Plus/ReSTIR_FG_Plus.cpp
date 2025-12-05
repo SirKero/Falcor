@@ -12,6 +12,7 @@ namespace
     const std::string kShaderFolder = "RenderPasses/ReSTIR_FG_Plus/";
     const std::string kShaderTracePhotons = kShaderFolder + "TracePhotons.rt.slang";
     const std::string kShaderGenInitialSamples = kShaderFolder + "GenerateInitialSamples.rt.slang";
+    const std::string kShaderRetraceReservoirs = kShaderFolder + "RetraceReservoirs.rt.slang";
     const std::string kShaderResamplingReservoirFG = kShaderFolder + "ResampleReservoirFG.cs.slang";
     const std::string kShaderResamplingReservoirCaustic = kShaderFolder + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderEvaluateReservoirs = kShaderFolder + "EvaluateReservoirs.cs.slang";
@@ -22,18 +23,23 @@ namespace
 
     // Render Pass inputs and outputs
     const std::string kInputVBuffer = "vbuffer";
+    const std::string kInputView = "view";
     const std::string kInputMotionVectors = "mvec";
 
     const Falcor::ChannelList kInputChannels{
         {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
-        {kInputMotionVectors, "gMotionVectors", "Motion vector buffer (float format)", true /* optional */},
+        {kInputView, "gView", "View Vector from camera perspective"},
+        {kInputMotionVectors, "gMotionVectors", "Motion vector buffer (float format)"},
     };
 
     //Outputs
     const std::string kOutputColor = "color";
+    const std::string kOutputDebug = "debug";
 
-    const Falcor::ChannelList kOutputChannels{
-        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float}
+    const Falcor::ChannelList kOutputChannels
+    {
+        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputDebug, "gDebug", "Debug Texture", false, ResourceFormat::RGBA32Float}
     };
 
 }; // namespace
@@ -205,6 +211,11 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
         group.var("##RoughnessThreshold", mSpecularRoughnessThreshold, 0.f, 1.f, 0.001f);
         group.indent(-10.f);
     }
+
+    if (auto group = widget.group("Debug"))
+    {
+        group.checkbox("Clear Debug Texture", mClearDebugTexture);
+    }
 }
 
 void ReSTIR_FG_Plus::setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) {
@@ -220,7 +231,8 @@ void ReSTIR_FG_Plus::setScene(RenderContext* pRenderContext, const ref<Scene>& p
 
     mTracePhotonPass = RayTraceProgramHelper::create();
     mGenerateInitialSamplesPass = RayTraceProgramHelper::create();
-    mpResampleReservoirFGPass.reset();
+    mRetracePathReservoirsPass = RayTraceProgramHelper::create();
+    mpResampleReservoirPass.reset();
     mpResampleReservoirCausticPass.reset();
     mpEvaluateReservoirsPass.reset();
 
@@ -247,6 +259,12 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     {
         dict[Falcor::kRenderPassRefreshFlags] = flags | Falcor::RenderPassRefreshFlags::RenderOptionsChanged;
         mOptionsChanged = false;
+    }
+
+    if (mClearDebugTexture)
+    {
+        auto pDebugTex = renderData[kOutputDebug]->asTexture();
+        pRenderContext->clearTexture(pDebugTex.get());
     }
 
     //Disables Resampling for the frame
@@ -294,6 +312,9 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
 
         sortSplattedReservoirsPass(pRenderContext, renderData);
     }
+
+    //Retrace
+    retraceReservoirPass(pRenderContext, renderData);
 
     //Spatiotemporal resampling for final gather samples and caustics
     //resampleReservoirFGPass(pRenderContext, renderData);
@@ -410,6 +431,14 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
             );
             mpPathReservoir[i]->setName("PathReservoir_" + std::to_string(i));
         }
+        if (!mpReservoirRetrace[i] || mResetScreenTex)
+        {
+            mpReservoirRetrace[i] = Buffer::createStructured(
+                mpDevice, sizeof(uint) * 16, mScreenRes.x * mScreenRes.y,
+                ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
+            );
+            mpReservoirRetrace[i]->setName("ReservoirRetrace" + std::to_string(i));
+        }
     }
 
     //Photon Counters
@@ -493,6 +522,26 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         mpSplattingSortedReservoirs->setName("SplattingSortedReservoirs");
     }
 
+    //Copy of surface from last frame
+    if (!mpVBufferPrev || mResetScreenTex)
+    {
+        auto pVBuffer = renderData[kInputVBuffer]->asTexture();
+        mpVBufferPrev = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, pVBuffer->getFormat(), 1u, 1u, nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mpVBufferPrev->setName("VBufferPrev");
+    }
+
+    if (!mpViewPrev || mResetScreenTex)
+    {
+        auto pView = renderData[kInputView]->asTexture();
+        mpViewPrev = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, pView->getFormat(), 1u, 1u, nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mpViewPrev->setName("ViewPrev");
+    }
 
     mResetScreenTex = false;
 }
@@ -744,6 +793,7 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
 
     //Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gView"] = renderData[kInputView]->asTexture();
     mpPhotonAS->bindTlas(var, "gPhotonAS");
     for (uint32_t i = 0; i < 2; i++)
     {
@@ -760,10 +810,6 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
 
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
-
-    //Reservoir barrier
-    pRenderContext->uavBarrier(mpPathReservoir[mFrameCount % 2].get());
-    pRenderContext->uavBarrier(mpCausticReservoir[mFrameCount % 2].get());
 }
 
 void ReSTIR_FG_Plus::splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -897,12 +943,84 @@ void ReSTIR_FG_Plus::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
     }
 }
 
-void ReSTIR_FG_Plus::resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData)
+void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Retrace Reservoir");
+    // Init Shader
+    if (!mRetracePathReservoirsPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderRetraceReservoirs);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mRetracePathReservoirsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mRetracePathReservoirsPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        mRetracePathReservoirsPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+    }
+
+    // Defines that can change on runtime
+    mRetracePathReservoirsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mRetracePathReservoirsPass.pProgram->addDefines(getMaterialDefines());
+    mRetracePathReservoirsPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
+    mRetracePathReservoirsPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvaluateDeltaPDFs ? "1" : "0");
+    mRetracePathReservoirsPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+
+    // Program Vars
+    if (!mRetracePathReservoirsPass.pVars)
+        mRetracePathReservoirsPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+
+    FALCOR_ASSERT(mRetracePathReservoirsPass.pVars);
+    auto var = mRetracePathReservoirsPass.pVars->getRootVar();
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+
+    // Input Resources
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gView"] = renderData[kInputView]->asTexture();
+    var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gViewPrev"] = mpViewPrev;
+
+    mpPhotonAS->bindTlas(var, "gPhotonAS");
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
+    }
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
+
+    // Output Resources
+    var["gRetraceReservoirPath"] = mpReservoirRetrace[0];
+    var["gRetraceReservoirPathPrev"] = mpReservoirRetrace[1];
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
+
+    // Dispatch Shader
+    mpScene->raytrace(pRenderContext, mRetracePathReservoirsPass.pProgram.get(), mRetracePathReservoirsPass.pVars, uint3(mScreenRes, 1));
+}
+
+void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     return; //TODO
-    FALCOR_PROFILE(pRenderContext, "Resampling Final Gather");
+    FALCOR_PROFILE(pRenderContext, "Resampling Path Reservoirs");
     //Initialize compute pass
-    if (!mpResampleReservoirFGPass)
+    if (!mpResampleReservoirPass)
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
@@ -916,10 +1034,10 @@ void ReSTIR_FG_Plus::resampleReservoirFGPass(RenderContext* pRenderContext, cons
         defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
 
-        mpResampleReservoirFGPass = ComputePass::create(mpDevice, desc, defines, true);
+        mpResampleReservoirPass = ComputePass::create(mpDevice, desc, defines, true);
     }
-    FALCOR_ASSERT(mpResampleReservoirFGPass);
-    mpResampleReservoirFGPass->getProgram()->addDefines(getMaterialDefines()); //Runtime define
+    FALCOR_ASSERT(mpResampleReservoirPass);
+    mpResampleReservoirPass->getProgram()->addDefines(getMaterialDefines()); // Runtime define
 
     //Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsFG.enable)
@@ -928,7 +1046,7 @@ void ReSTIR_FG_Plus::resampleReservoirFGPass(RenderContext* pRenderContext, cons
     }
 
     // Set variables
-    auto var = mpResampleReservoirFGPass->getRootVar();
+    auto var = mpResampleReservoirPass->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
     mpSampleGenerator->setShaderData(var);                 // Sample generator
 
@@ -953,7 +1071,7 @@ void ReSTIR_FG_Plus::resampleReservoirFGPass(RenderContext* pRenderContext, cons
     // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
-    mpResampleReservoirFGPass->execute(pRenderContext, uint3(targetDim, 1));
+    mpResampleReservoirPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
 void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1068,9 +1186,12 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
 
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gView"] = renderData[kInputView]->asTexture();
     var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
 
     //Output
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gViewPrev"] = mpViewPrev;
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
 
     // Execute

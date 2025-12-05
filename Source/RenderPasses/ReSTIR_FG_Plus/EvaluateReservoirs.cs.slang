@@ -7,8 +7,12 @@ import Rendering.RTXDI.RTXDI;
 import StructsAndHelpers;
 
 Texture2D<PackedHitInfo> gVBuffer;
+Texture2D<float4> gView;
+
 StructuredBuffer<PathReservoir> gPathReservoir;
 
+RWTexture2D<PackedHitInfo> gVBufferPrev;
+RWTexture2D<float4> gViewPrev;
 RWTexture2D<float4> gOutColor;
 
 cbuffer CB
@@ -30,7 +34,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         return;
 
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
-    float3 viewDir = gScene.camera.computeRayPinhole(pixel, gFrameDim).dir;
+    float3 viewDir = gView[pixel].xyz;
 
     float3 outColor = float3(0);
     if(hitInfo.isValid()){
@@ -68,5 +72,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         outColor = gScene.envMap.eval(viewDir);
     }
 
+    gVBufferPrev[pixel] = hitInfo.getData();
+    gViewPrev[pixel] = float4(viewDir, 1);
     gOutColor[pixel] = float4(outColor, 1.0);
 }

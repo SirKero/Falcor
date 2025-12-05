@@ -11,6 +11,7 @@ def render_graph_ReSTIR_FG_Plus():
     g.add_edge('VBufferRT.mvec', 'ReSTIR_FG_Plus.mvec')
     g.add_edge('ReSTIR_FG_Plus.color', 'AccumulatePass.input')
     g.add_edge('AccumulatePass.output', 'ToneMapper.src')
+    g.add_edge('VBufferRT.viewW', 'ReSTIR_FG_Plus.view')
     g.mark_output('ToneMapper.dst')
     g.mark_output('AccumulatePass.output')
     return g

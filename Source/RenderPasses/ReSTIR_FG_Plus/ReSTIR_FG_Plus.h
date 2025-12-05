@@ -60,8 +60,11 @@ private:
     //Sort the splatted reservoirs so they can be used in the resampling pass
     void sortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Reservoir Resampling for Final Gather Samples
-    void resampleReservoirFGPass(RenderContext* pRenderContext, const RenderData& renderData);
+    //Retrace Path Reservoirs with Path Length > 0 (or if final gather sample should be updated)
+    void retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Reservoir Resampling for Path Reservoirs
+    void resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Reservoir Resampling for Caustic Samples
     void resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -142,15 +145,21 @@ private:
     float mPhotonDynamicGuardPercentage = 0.08f;        // Determines how much space of the buffer is used to guard against buffer overflows
     float mPhotonDynamicChangePercentage = 0.04f;       // The percentage the buffer is increased/decreased per frame
 
+    //Debug
+    bool mClearDebugTexture = true; 
+
     //
     // Resources
     //
+    ref<Texture> mpVBufferPrev;             // VBuffer Hit from last frame
+    ref<Texture> mpViewPrev;                // Camera View from last frame
     ref<Buffer> mpPhotonAABB[2];            // Photon AABBs for Acceleration Structure building
     ref<Buffer> mpPhotonData[2];            // Additional Photon data (flux, dir)
     ref<Buffer> mpPhotonCounter;            // Photon Counter
     ref<Buffer> mpPhotonCounterCPU;         // CPU copy of counter for readback
     ref<Buffer> mpCausticReservoir[2];      // Reservoir for the Caustic sample
     ref<Buffer> mpPathReservoir[2];         // Reservoir storing the path in primary path space
+    ref<Buffer> mpReservoirRetrace[2];      // Buffer storing the retrace reservoir data
 
     ref<Texture> mpLightTraceHeadCounter;   //Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;     //Linked List for light tracing
@@ -185,8 +194,9 @@ private:
 
     RayTraceProgramHelper mTracePhotonPass;             // Trace Photons and build AS
     RayTraceProgramHelper mGenerateInitialSamplesPass;  // Trace Final Gather rays and collect photons
+    RayTraceProgramHelper mRetracePathReservoirsPass;   // Retrace the path Reservoirs needed for GRIS MIS
 
-    ref<ComputePass> mpResampleReservoirFGPass;         // Resampling Pass for Final Gather Reservoirs
+    ref<ComputePass> mpResampleReservoirPass;           // Resampling Pass for the Path Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass;    // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;          // Evaluates ReSTIR DI and FG reservoirs
 
