@@ -59,6 +59,7 @@ struct PathData {
 
     bool lastHitDiffuse;
     bool specularPath;      //True if the full path is specular
+    bool firstHitIsDelta;     //True if the first hit is delta (less roughness than threshold)
 
     __init() {
         thp = float3(1);
@@ -67,6 +68,7 @@ struct PathData {
         pathLength = 0;
         lastHitDiffuse = true;
         specularPath = true;
+        firstHitIsDelta = false;
     }
 }
 
@@ -203,17 +205,19 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
     RayPayload rayPayload = RayPayload();
     bool firstHitDiffuse = pd.lastHitDiffuse;
     bool triedToSetFGSurface = false;
+    bool isFirstCollectionSurface = true;
 
     for (pd.pathLength = 1; pd.pathLength <= gFGRayMaxPathLength; pd.pathLength++)
     {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
         // Get surface hit info
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
-        //Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI
+        // Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI except the primary hit is delta
         if (!hit.isValid()) {
-            if (kUseEnvMap && pd.pathLength > 1) {
+            if ((kUseEnvMap && pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
                 float3 envMapContribution = gScene.envMap.eval(ray.Direction) * pd.thp;
                 pathReservoir.F += envMapContribution;
+                pathReservoir.addJacobian(pd.scatterPDF, isFirstCollectionSurface);
                 uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEnvMapHit;
                 flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                 pathReservoir.flags.setReservoirPathFlags(flags);
@@ -229,9 +233,12 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
 
-        // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI
-        if (pd.pathLength > 1 && pd.specularPath) {
+        // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI except the primary hit is delta
+        if ((pd.pathLength > 1 && pd.specularPath) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
             pathReservoir.F += bsdfProperties.emission * pd.thp;
+            float rayDist = distance(ray.Origin, sd.posW);
+            float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist);
+            pathReservoir.addJacobian(jacobian, isFirstCollectionSurface);
             uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::firstHitIsDelta | (uint)ReservoirPathFlags::isEmissiveHit;
             pathReservoir.flags.setReservoirPathFlags(flags);
             pathReservoir.pathLength = pd.pathLength;
@@ -243,20 +250,34 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
 
         // If surface is diffuse do radiance estimate (photon types are depended on the current path state)
         if (hitIsDiffuse) {
-            bool isFinalGather = pd.lastHitDiffuse;
-            pathReservoir.F += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !isFinalGather) * pd.thp;
-            
+            bool isFinalGather = pd.lastHitDiffuse && !triedToSetFGSurface;
+            float3 radianceEstimate = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !isFinalGather);
+            pathReservoir.F += radianceEstimate * pd.thp;
+            float rayDist = distance(ray.Origin, sd.posW);
+            float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // TODO for second hit another jacobian could be needed
+            pathReservoir.addJacobian(jacobian, isFirstCollectionSurface);
             // We stop after final gather
             if (isFinalGather) {
                 uint flags = (uint)ReservoirPathFlags::isFinalGather;
                 flags |= firstHitDiffuse ?  0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                 pathReservoir.flags.setReservoirPathFlags(flags);
                 pathReservoir.pathLength = pd.pathLength;
+                pathReservoir.fgRadiance = radianceEstimate;
                 pathReservoir.packedSampleSurface = hit.getData();
                 break;
             }
+            else if (triedToSetFGSurface) {
+                uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
+                flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                pathReservoir.flags.setReservoirPathFlags(flags);
+                pathReservoir.pathLength = pd.pathLength;
+                break;
+            }
+
+            isFirstCollectionSurface = false;
         }
 
+        triedToSetFGSurface |= pd.lastHitDiffuse;    //If 1 diffuse surface was encountered, it was tried to set the Final Gather surface
         pd.lastHitDiffuse = hitIsDiffuse;
         pd.specularPath &= !hitIsDiffuse;
 
@@ -498,8 +519,8 @@ void rayGen()
         }
         pathReservoir.flags.firstHitIsDelta = !pd.lastHitDiffuse;
         pd.specularPath &= pd.lastHitDiffuse;
+        pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08;
 
-        //Trace path
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;

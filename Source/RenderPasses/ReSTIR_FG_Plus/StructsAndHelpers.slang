@@ -42,6 +42,7 @@ enum ReservoirPathFlags : uint {
     isFinalGather = 0x400,                 // 1<<10
     isEmissiveHit = 0x800,                 // 1<<11
     isEnvMapHit = 0x1000,                  // 1<<12
+    isRadianceEstimate = 0x2000,           // 1<<13
 }
 
 struct ReservoirFlags {
@@ -105,6 +106,14 @@ struct ReservoirFlags {
             flags |= (newValue ? (uint)ReservoirPathFlags::isEnvMapHit : 0);
         }
     }
+
+    property bool isRadianceEstimate {
+        get { return (flags & (uint)ReservoirPathFlags::isRadianceEstimate) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isRadianceEstimate; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isRadianceEstimate : 0);
+        }
+    }
 }
 
 //Path Reservoir; Size: 96 Byte (24 floats)
@@ -115,36 +124,44 @@ struct PathReservoir {
 
     PackedHitInfo packedSampleSurface; // (Packed) Sample Surface
 
-    float jacobianDeterminant; //(stored) jacobian determinant (at rc vertex to sample)
+    float jacobianFirstHit;    //(stored) jacobian determinant at the first hit
     ReservoirFlags flags;      // path length and flags
     float2 packedSampleWo;
 
     float3 F; // Complete radiance of the path
     uint c;   // Confidence Weight
 
-    float3 rcRadiance;      // Radiance after reconnection
+    float3 fgRadiance;      // Radiance estimate for the final gather point. Can be reused
     float weight;           // Unbiased contribution weight
 
-    float3 thp;             // Thp until the reconnection surface
-    float jacobianOutgoing; // Jacobian outgoing (next hit from sample)
+    float3 thp;             // Thp until the reconnection surface (possibly not needed)
+    float jacobianSecondHit; // Jacobian for the second hit
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
         //sgRCNee = SampleGenerator(uint2(0), 0);
         packedSampleSurface = {};
-        jacobianDeterminant = -1;
+        jacobianFirstHit = 1;
         packedSampleWo = float2(0);
         flags = ReservoirFlags();
         F = float3(0);
         c = 1;
-        rcRadiance = float3(0);
+        fgRadiance = float3(0);
         thp = float3(1);
         weight = 0.0;
-        jacobianOutgoing = 1;
+        jacobianSecondHit = 1;
     }
 
     bool isValid() {
-        return weight > 0 && jacobianDeterminant > 0 && any(F > 0);
+        return weight > 0 && jacobianFirstHit > 0 && jacobianSecondHit > 0 && any(F > 0);
+    }
+
+    [mutating]
+    void addJacobian(float jacobian, bool isFirstSample) {
+        if (isFirstSample)
+            jacobianFirstHit = jacobian;
+        else
+            jacobianSecondHit = jacobian;
     }
 
     property uint pathLength {
