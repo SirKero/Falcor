@@ -133,7 +133,7 @@ struct PathReservoir {
 
     PackedHitInfo packedSampleSurface; // (Packed) Sample Surface
 
-    float jacobianFirstHit;    //(stored) jacobian determinant at the first hit
+    float jacobianRc;    //(stored) jacobian determinant at the first hit
     ReservoirFlags flags;      // path length and flags
     float2 packedSampleWo;
 
@@ -143,14 +143,14 @@ struct PathReservoir {
     float3 fgRadiance;      // Radiance estimate for the final gather point. Can be reused
     float weight;           // Unbiased contribution weight
 
-    float3 thp;             // Thp until the reconnection surface (possibly not needed)
-    float jacobianSecondHit; // Jacobian for the second hit
+    float3 thp;         // Thp until the reconnection surface (possibly not needed)
+    float jacobianPath; // Jacobian for the second hit
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
         //sgRCNee = SampleGenerator(uint2(0), 0);
         packedSampleSurface = {};
-        jacobianFirstHit = 1;
+        jacobianRc = 1;
         packedSampleWo = float2(0);
         flags = ReservoirFlags();
         F = float3(0);
@@ -158,19 +158,11 @@ struct PathReservoir {
         fgRadiance = float3(0);
         thp = float3(1);
         weight = 0.0;
-        jacobianSecondHit = 1;
+        jacobianPath = 1;
     }
 
     bool isValid() {
-        return weight > 0 && jacobianFirstHit > 0 && jacobianSecondHit > 0 && any(F > 0);
-    }
-
-    [mutating]
-    void addJacobian(float jacobian, bool isFirstSample) {
-        if (isFirstSample)
-            jacobianFirstHit = jacobian;
-        else
-            jacobianSecondHit = jacobian;
+        return weight > 0 && jacobianRc > 0 && jacobianPath > 0 && any(F > 0);
     }
 
     property uint pathLength {
@@ -186,12 +178,12 @@ struct PathReservoir {
 }
 
 //Infos on retraced path 64byte (16 floats)
-struct ReservoirRetracePath
+struct RetracedPath
 {
     float3 F;
-    float jacobianFirstHit;
+    float jacobianRc;
 
-    float jacobianSecondHit;
+    float jacobianPath;
     float3 rcThp;
 
     PackedHitInfo rcSurface;
@@ -202,8 +194,8 @@ struct ReservoirRetracePath
     __init()
     {
         F = float3(0);
-        jacobianFirstHit = 1;
-        jacobianSecondHit = 1;
+        jacobianRc = 1;
+        jacobianPath = 1;
         rcThp = float3(0);
         rcSurface = {};
         rcViewDir = float3(0);
@@ -213,9 +205,9 @@ struct ReservoirRetracePath
     [mutating]
     void addJacobian(float jacobian, bool isFirstSample) {
         if (isFirstSample)
-            jacobianFirstHit = jacobian;
+            jacobianRc = jacobian;
         else
-            jacobianSecondHit = jacobian;
+            jacobianPath = jacobian;
     }
 }
 

@@ -808,6 +808,8 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
 
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
+
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
 }

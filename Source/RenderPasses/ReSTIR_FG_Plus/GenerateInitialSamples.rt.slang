@@ -20,6 +20,8 @@ RWStructuredBuffer<PathReservoir> gPathReservoir;
 RWTexture2D<int> gLightTraceHeadCounter;
 StructuredBuffer<int> gLightTraceLinkedList; // next pointer
 
+RWTexture2D<float4> gDebug;
+
 static const float kPhotonCollectTMax = 1e-7;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kCausticInstanceMask = 2;
@@ -58,6 +60,7 @@ struct PathData {
     float3 F;               //Accumulated path radiance
     uint pathLength;        //Current path length
 
+    float jacobianPath;     //Jacobian for the path until the RC Surface / Sample
     bool lastHitDiffuse;
     bool specularPath;      //True if the full path is specular
     bool firstHitIsDelta;     //True if the first hit is delta (less roughness than threshold)
@@ -67,6 +70,7 @@ struct PathData {
         scatterPDF = 0;
         F = float3(0);
         pathLength = 0;
+        jacobianPath = 1.0;
         lastHitDiffuse = true;
         specularPath = true;
         firstHitIsDelta = false;
@@ -159,7 +163,7 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
             if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
                 float3 envMapContribution = kUseEnvMap ? gScene.envMap.eval(ray.Direction) * pd.thp : float3(0);
                 pathReservoir.F += envMapContribution;
-                pathReservoir.addJacobian(pd.scatterPDF, isFirstCollectionSurface);
+                pathReservoir.jacobianPath = pd.jacobianPath * pd.scatterPDF;
                 uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEnvMapHit;
                 flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                 flags |= isFirstCollectionSurface ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0;
@@ -175,12 +179,13 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         let bsdfProperties = mi.getProperties(sd);
         bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
+        float rayDist = distance(ray.Origin, sd.posW);
+        float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); //Jacobian for this iteration
 
         // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI except the primary hit is delta
         if ((pd.pathLength > 1 && pd.specularPath) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
             pathReservoir.F += bsdfProperties.emission * pd.thp;
-            float rayDist = distance(ray.Origin, sd.posW);
-            pathReservoir.jacobianFirstHit = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist);
+            pathReservoir.jacobianPath = jacobian; //Jacobian Path == 1, as all hits are delta/specular
             uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::firstHitIsDelta | (uint)ReservoirPathFlags::isEmissiveHit;
             pathReservoir.flags.setReservoirPathFlags(flags);
             pathReservoir.pathLength = pd.pathLength;
@@ -195,9 +200,7 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
             bool isFinalGather = pd.lastHitDiffuse && !triedToSetFGSurface;
             float3 radianceEstimate = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !isFinalGather);
             pathReservoir.F += radianceEstimate * pd.thp;
-            float rayDist = distance(ray.Origin, sd.posW);
-            float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // TODO for second hit another jacobian could be needed
-            pathReservoir.addJacobian(jacobian, isFirstCollectionSurface);
+            pathReservoir.jacobianPath = pd.jacobianPath;
             pathReservoir.pathLength = pd.pathLength;
             // We stop after final gather
             if (isFinalGather) {
@@ -208,9 +211,11 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
                 pathReservoir.pathLength = pd.pathLength - 1; //Reconnection surface is used as a stopping point
                 pathReservoir.fgRadiance = radianceEstimate;
                 pathReservoir.packedSampleSurface = hit.getData();
+                pathReservoir.jacobianRc = jacobian;
                 break;
             }
             else if (triedToSetFGSurface) {
+                pathReservoir.jacobianPath *= jacobian;
                 uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
                 flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                 flags |= isFirstCollectionSurface ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0;
@@ -225,6 +230,14 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         pd.lastHitDiffuse = hitIsDiffuse;
         pd.specularPath &= !hitIsDiffuse;
 
+        // Update path jacobian
+        if (!isFirstCollectionSurface)
+            pd.jacobianPath *= jacobian;
+
+        //TODO disable geometry term for delta, as it can get very very small
+        if (pd.pathLength == 1)
+            gDebug[DispatchRaysIndex().xy] = float4(jacobian, abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist), pd.scatterPDF, 1);
+
         // Calc new ray direction
         if (!sampleNewDirection(sd, mi, rayDirectionSG, pd, ray)) {
             //Check if the reservoir was valid
@@ -235,7 +248,6 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
             }
             break;
         }
-            
     }
 
     //Finalize Reservoir

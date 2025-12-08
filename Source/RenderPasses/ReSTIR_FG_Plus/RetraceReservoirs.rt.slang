@@ -19,8 +19,8 @@ RaytracingAccelerationStructure gPhotonAS;
 StructuredBuffer<PathReservoir> gPathReservoir;
 StructuredBuffer<PathReservoir> gPathReservoirPrev;
 
-RWStructuredBuffer<ReservoirRetracePath> gRetraceReservoirPath;         //Retraced path for the current sample
-RWStructuredBuffer<ReservoirRetracePath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
+RWStructuredBuffer<RetracedPath> gRetraceReservoirPath;         //Retraced path for the current sample
+RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
 
 RWTexture2D<float4> gDebug;
 
@@ -62,9 +62,9 @@ struct RetracePathData {
     float3 F;               //Accumulated path radiance
     uint pathLength;        //Current path length
 
+    float jacobianPath;     //Jacobian for the path 
     bool lastHitDiffuse;
     bool specularPath;      //True if the full path is specular
-    bool firstHitIsDelta;   // True if the first hit is delta (less roughness than threshold)
     bool retraceSuccessful; // True if the retraced path matches the one used to generate the reservoir
 
     __init() {
@@ -72,9 +72,9 @@ struct RetracePathData {
         scatterPDF = 0;
         F = float3(0);
         pathLength = 0;
+        jacobianPath = 1;
         lastHitDiffuse = true;
         specularPath = true;
-        firstHitIsDelta = false;
         retraceSuccessful = false;
     }
 }
@@ -148,7 +148,7 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
     return validSample;
 }
 
-bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGenerator sg , inout ReservoirRetracePath retracedPath)
+bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGenerator sg , inout RetracedPath retracedPath)
 {
     let lod = ExplicitLodTextureSampler(0);
     const uint2 dispatchDims = DispatchRaysDimensions().xy;
@@ -166,7 +166,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
     RayPayload rayPayload = RayPayload();
     rpd.lastHitDiffuse = primProperties.roughness > kRoughnessThreshold;
     rpd.specularPath &= !rpd.lastHitDiffuse;
-    rpd.firstHitIsDelta = primProperties.roughness < 0.08;
+    bool firstHitIsDelta = primProperties.roughness < 0.08;
 
     if ((reservoir.flags.firstHitIsDelta && rpd.lastHitDiffuse) || (!reservoir.flags.firstHitIsDelta && !rpd.lastHitDiffuse))
         return false;
@@ -185,12 +185,12 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         //Scene Miss
         if (!hit.isValid()) {
             bool validEnvSample = reservoir.flags.isEnvMapHit && pathLength == reservoir.pathLength;
-            validEnvSample &= reservoir.pathLength > 1 || (pathLength == 1 && rpd.firstHitIsDelta);
+            validEnvSample &= reservoir.pathLength > 1 || (pathLength == 1 && firstHitIsDelta);
             if (validEnvSample) {
                 float3 envMapContribution = gScene.envMap.eval(ray.Direction) * rpd.thp;
                 retracedPath.flags = (uint)ReservoirPathFlags::isEnvMapHit;
                 retracedPath.rcViewDir = ray.Direction;
-                retracedPath.addJacobian(rpd.scatterPDF, isFirstCollectionSurface);
+                retracedPath.jacobianPath = rpd.jacobianPath * rpd.scatterPDF;
                 retracedPath.F += envMapContribution;
                 rpd.retraceSuccessful = true;
             }
@@ -203,13 +203,14 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         let bsdfProperties = mi.getProperties(sd);
         bool hitIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold); // Either diffuse surface or emissive hit
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
+        float rayDist = distance(ray.Origin, sd.posW);
+        float jacobian = rpd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); //Jacobian for this iteration
 
         // Delta -> Emissive case
         if (reservoir.flags.isEmissiveHit && pathLength == reservoir.pathLength && rpd.specularPath && hitIsEmissive)
         {
             retracedPath.F += bsdfProperties.emission * rpd.thp;
-            float rayDist = distance(ray.Origin, sd.posW);
-            retracedPath.jacobianFirstHit = rpd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist);
+            retracedPath.jacobianPath = jacobian; // Jacobian Path == 1, as all hits are delta/specular
             retracedPath.flags = (uint)ReservoirPathFlags::isEmissiveHit;
             rpd.retraceSuccessful = true;
             break;
@@ -221,12 +222,17 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
 
         // Collect photons or set reconnection surface
         if (hitIsDiffuse) {
+            //Jacobian and Radiance estimate
+            retracedPath.jacobianPath = rpd.jacobianPath * jacobian;
+            retracedPath.F += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, true) * rpd.thp;
+
             //Reconnection surface
             if (pathLength == reservoir.pathLength && reservoir.flags.isFinalGather) {
                 if (reservoir.flags.hasTwoCollectionPoints != isFirstCollectionSurface) {
                     retracedPath.rcThp = rpd.thp;
                     retracedPath.rcSurface = hit.getData();
                     retracedPath.rcViewDir = -ray.Direction;
+                    retracedPath.flags = (uint)ReservoirPathFlags::isFinalGather;
                     rpd.retraceSuccessful = true;
                 }
                 break;
@@ -235,13 +241,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
             //If the reservoir has only 1 sample point and that is not radiance estimat, the path is invalid
             if (!reservoir.flags.hasTwoCollectionPoints && !reservoir.flags.isRadianceEstimate)
                 break;
-
-            // Radiance estimate
-            retracedPath.F += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, true) * rpd.thp;
-            float rayDist = distance(ray.Origin, sd.posW);
-            float jacobian = rpd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // TODO for second hit another jacobian could be needed
-            retracedPath.addJacobian(jacobian, isFirstCollectionSurface);
-
+                           
             isFirstCollectionSurface = false;
             if ((pathLength == reservoir.pathLength) && reservoir.flags.isRadianceEstimate) {
                 retracedPath.flags = (uint)ReservoirPathFlags::isRadianceEstimate;
@@ -254,6 +254,9 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         triedToSetFGSurface |= rpd.lastHitDiffuse; // If 1 diffuse surface was encountered, it was tried to set the Final Gather surface
         rpd.lastHitDiffuse = hitIsDiffuse;
         rpd.specularPath &= !hitIsDiffuse;
+
+        if (!isFirstCollectionSurface)
+            rpd.jacobianPath *= jacobian;
 
         if (!sampleNewDirection(sd, mi, rayDirSg, rpd, ray))
             break;    
@@ -323,7 +326,7 @@ void rayGen()
         const uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
         PathReservoir reservoir = gPathReservoir[reservoirIndex];
         if (reservoir.pathLength > 0 && reservoir.isValid()) {
-            ReservoirRetracePath retraceSurface = ReservoirRetracePath();
+            RetracedPath retraceSurface = RetracedPath();
             // Get starting surface for temporal retrace
             HitInfo prevHit = HitInfo(gVBufferPrev[prevPixel]);
             float3 prevViewDir = gViewPrev[prevPixel].xyz;
@@ -331,8 +334,7 @@ void rayGen()
 
             if (!randomReplay(sd, reservoir, sg, retraceSurface)) {
                 retraceSurface.F = float3(0);
-                retraceSurface.jacobianFirstHit = 0;
-                retraceSurface.jacobianSecondHit = 0;
+                retraceSurface.flags = 0;
             } 
 
             gRetraceReservoirPath[reservoirIndex] = retraceSurface;
@@ -340,14 +342,12 @@ void rayGen()
 
         PathReservoir resampleReservoir = gPathReservoirPrev[index2Dto1D(prevPixel, dispatchDims.x)];
         if (resampleReservoir.pathLength > 0) {
-            ReservoirRetracePath retraceSurface = ReservoirRetracePath();
+            RetracedPath retraceSurface = RetracedPath();
             float3 viewDir = gView[pixel].xyz;
             ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
 
             if (!randomReplay(sd, resampleReservoir, sg, retraceSurface)) {
                 retraceSurface.F = float3(0);
-                retraceSurface.jacobianFirstHit = 0;
-                retraceSurface.jacobianSecondHit = 0;
                 retraceSurface.flags = 0;
             }
 
