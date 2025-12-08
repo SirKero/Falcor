@@ -5,7 +5,7 @@ target_sources(ReSTIR_FG_Plus PRIVATE
     ReSTIR_FG_Plus.h
     
     EvaluateReservoirs.cs.slang
-    ResampleReservoirFG.cs.slang
+    ResamplePathReservoir.cs.slang
     ResampleReservoirCaustic.cs.slang
     StructsAndHelpers.slang
     GenerateInitialSamples.rt.slang

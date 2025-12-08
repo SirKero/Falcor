@@ -335,6 +335,17 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     return sd;
 }
 
+ShadingData loadShadingDataWithPrevHit(const HitInfo hit, const float3 prevPosW, const ITextureSampler lod)
+{
+    const TriangleHit triangleHit = hit.getTriangleHit();
+    VertexData v = gScene.getVertexData(triangleHit);
+    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
+    float3 dir = normalize(v.posW - prevPosW);
+    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, dir, lod);
+
+    return sd;
+}
+
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
 }

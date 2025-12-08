@@ -348,6 +348,7 @@ void rayGen()
                 retraceSurface.F = float3(0);
                 retraceSurface.jacobianFirstHit = 0;
                 retraceSurface.jacobianSecondHit = 0;
+                retraceSurface.flags = 0;
             }
 
             gRetraceReservoirPathPrev[reservoirIndex] = retraceSurface;

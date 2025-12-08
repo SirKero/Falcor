@@ -13,7 +13,7 @@ namespace
     const std::string kShaderTracePhotons = kShaderFolder + "TracePhotons.rt.slang";
     const std::string kShaderGenInitialSamples = kShaderFolder + "GenerateInitialSamples.rt.slang";
     const std::string kShaderRetraceReservoirs = kShaderFolder + "RetraceReservoirs.rt.slang";
-    const std::string kShaderResamplingReservoirFG = kShaderFolder + "ResampleReservoirFG.cs.slang";
+    const std::string kShaderResamplingPathReservoir = kShaderFolder + "ResamplePathReservoir.cs.slang";
     const std::string kShaderResamplingReservoirCaustic = kShaderFolder + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderEvaluateReservoirs = kShaderFolder + "EvaluateReservoirs.cs.slang";
     const std::string kShaderTemporalSplatReservoirs = kShaderFolder + "TemporalSplatReservoir.cs.slang";
@@ -317,7 +317,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     retraceReservoirPass(pRenderContext, renderData);
 
     //Spatiotemporal resampling for final gather samples and caustics
-    //resampleReservoirFGPass(pRenderContext, renderData);
+    resampleReservoirsPass(pRenderContext, renderData);
 
     resampleReservoirCausticPass(pRenderContext, renderData);
 
@@ -1017,14 +1017,13 @@ void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const R
 
 void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    return; //TODO
     FALCOR_PROFILE(pRenderContext, "Resampling Path Reservoirs");
     //Initialize compute pass
     if (!mpResampleReservoirPass)
     {
         Program::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderResamplingReservoirFG).csEntry("main").setShaderModel(kShaderModel);
+        desc.addShaderLibrary(kShaderResamplingPathReservoir).csEntry("main").setShaderModel(kShaderModel);
         desc.addTypeConformances(mpScene->getTypeConformances());
 
         DefineList defines;
@@ -1062,11 +1061,19 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
     var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
 
     // Input Resources
-    //var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount +1) % 2];
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gView"] = renderData[kInputView]->asTexture();
+    var["gViewPrev"] = mpViewPrev;
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
+    var["gRetracedPath"] = mpReservoirRetrace[0];
+    var["gRetracedPathPrev"] = mpReservoirRetrace[1];
 
     // In-/Output Resources
-    //var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();
