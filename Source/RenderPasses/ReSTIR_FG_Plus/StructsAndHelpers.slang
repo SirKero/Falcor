@@ -131,38 +131,35 @@ struct PathReservoir {
 
     //SampleGenerator sgRCNee; // For replaying NEE decisions
 
-    PackedHitInfo packedSampleSurface; // (Packed) Sample Surface
+    float3 samplePosW;      // Sample Position
+    float sampleRadius;     //For radiance estimate
 
-    float jacobianRc;    //(stored) jacobian determinant at the first hit
+    float jacobian;    //(stored) jacobian determinant at the first hit
     ReservoirFlags flags;      // path length and flags
-    float2 packedSampleWo;
+    float2 packedSampleNormal;
 
     float3 F; // Complete radiance of the path
     uint c;   // Confidence Weight
 
     float3 fgRadiance;      // Radiance estimate for the final gather point. Can be reused
-    float weight;           // Unbiased contribution weight
-
-    float3 thp;         // Thp until the reconnection surface (possibly not needed)
-    float jacobianPath; // Jacobian for the second hit
+    float weight;           // Unbiased contribution weight  
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
-        //sgRCNee = SampleGenerator(uint2(0), 0);
-        packedSampleSurface = {};
-        jacobianRc = 1;
-        packedSampleWo = float2(0);
+        // sgRCNee = SampleGenerator(uint2(0), 0);
+        samplePosW = float3(0);
+        sampleRadius = 0;
+        jacobian = 1;
+        packedSampleNormal = float2(0);
         flags = ReservoirFlags();
         F = float3(0);
         c = 1;
         fgRadiance = float3(0);
-        thp = float3(1);
         weight = 0.0;
-        jacobianPath = 1;
     }
 
     bool isValid() {
-        return weight > 0 && jacobianRc > 0 && jacobianPath > 0 && any(F > 0);
+        return weight > 0 && jacobian > 0 && any(F > 0);
     }
 
     property uint pathLength {
@@ -170,9 +167,9 @@ struct PathReservoir {
         set { flags.pathLength = newValue;}
     }
 
-    property float3 sampleWo {
-        get { return oct_to_ndir_snorm(packedSampleWo);}
-        set { packedSampleWo = ndir_to_oct_snorm(newValue);}
+    property float3 sampleNormal {
+        get { return oct_to_ndir_snorm(packedSampleNormal);}
+        set { packedSampleNormal = ndir_to_oct_snorm(newValue);}
     }
 
 }
@@ -181,10 +178,10 @@ struct PathReservoir {
 struct RetracedPath
 {
     float3 F;
-    float jacobianRc;
+    float jacobian;
 
-    float jacobianPath;
     float3 rcThp;
+    uint _pad;
 
     PackedHitInfo rcSurface;
 
@@ -194,20 +191,12 @@ struct RetracedPath
     __init()
     {
         F = float3(0);
-        jacobianRc = 1;
-        jacobianPath = 1;
+        jacobian = 1;
         rcThp = float3(0);
         rcSurface = {};
         rcViewDir = float3(0);
         flags = 0;
-    }
-
-    [mutating]
-    void addJacobian(float jacobian, bool isFirstSample) {
-        if (isFirstSample)
-            jacobianRc = jacobian;
-        else
-            jacobianPath = jacobian;
+        _pad = 0;
     }
 }
 

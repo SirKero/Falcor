@@ -5,16 +5,13 @@ import Scene.Raytracing;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import StructsAndHelpers;
+import PhotonHelper;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 Texture2D<float2> gMVec;
 Texture2D<PackedHitInfo> gVBufferPrev;
 Texture2D<float4> gViewPrev;
-
-StructuredBuffer<PhotonData> gPhotonData[2];
-StructuredBuffer<AABB> gPhotonAABB[2];
-RaytracingAccelerationStructure gPhotonAS;
 
 StructuredBuffer<PathReservoir> gPathReservoir;
 StructuredBuffer<PathReservoir> gPathReservoirPrev;
@@ -24,7 +21,6 @@ RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path 
 
 RWTexture2D<float4> gDebug;
 
-static const float kPhotonCollectTMax = 1e-7;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kCausticInstanceMask = 2;
 static const uint kAllPhotonInstanceMask = 0xFF;
@@ -62,7 +58,6 @@ struct RetracePathData {
     float3 F;               //Accumulated path radiance
     uint pathLength;        //Current path length
 
-    float jacobianPath;     //Jacobian for the path 
     bool lastHitDiffuse;
     bool specularPath;      //True if the full path is specular
     bool retraceSuccessful; // True if the retraced path matches the one used to generate the reservoir
@@ -72,63 +67,10 @@ struct RetracePathData {
         scatterPDF = 0;
         F = float3(0);
         pathLength = 0;
-        jacobianPath = 1;
         lastHitDiffuse = true;
         specularPath = true;
         retraceSuccessful = false;
     }
-}
-
-// Checks if the ray start point is inside the sphere.
-bool hitSphere(const float3 center, const float radius, const float3 p)
-{
-    float3 radiusTest = p - center;
-    return dot(radiusTest, radiusTest) < radius * radius;
-}
-
-float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg, bool collectOnlyDirectGlobal = false) {
-    float3 collectedRadiance = float3(0);
-    //Prepare ray
-    RayDesc ray;
-    ray.Origin = sd.posW;
-    ray.Direction = sd.faceN;
-    ray.TMin = 0;
-    ray.TMax = kPhotonCollectTMax;
-
-    RayQuery<RAY_FLAG_NONE> rayQuery;
-
-    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
-    while (rayQuery.Proceed()) {
-        
-        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
-            continue;
-        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
-        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
-
-        //Check if ray is inside photon radius
-        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
-        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
-        if (!hitSphere(photonAABB.center(), radius, sd.posW))
-            continue;
-
-        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
-
-        // If direct global photons should be collected and the photon is global, check the path length
-        if (collectOnlyDirectGlobal)
-        {
-            if (((PhotonType)instanceIdx == PhotonType::Global) && (photonData.pathLenght > 0))
-                continue;
-        }
-
-        float NdotL = dot(photonData.dir, N);
-        // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
-            continue;
-
-        float3 bsdf = mi.eval(sd, photonData.dir, sg); 
-        collectedRadiance += max(0, (photonData.flux * bsdf) / (M_PI * radius * radius * NdotL)); //NdotL needs to be taken out of the bsdf for Photon Mapping
-    }
-    return collectedRadiance;
 }
 
 bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout RetracePathData pd, inout RayDesc ray) {
@@ -190,8 +132,8 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
                 float3 envMapContribution = gScene.envMap.eval(ray.Direction) * rpd.thp;
                 retracedPath.flags = (uint)ReservoirPathFlags::isEnvMapHit;
                 retracedPath.rcViewDir = ray.Direction;
-                retracedPath.jacobianPath = rpd.jacobianPath * rpd.scatterPDF;
-                retracedPath.F += envMapContribution;
+                retracedPath.jacobian = rpd.scatterPDF;
+                retracedPath.F = envMapContribution;
                 rpd.retraceSuccessful = true;
             }
             break;
@@ -209,8 +151,8 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         // Delta -> Emissive case
         if (reservoir.flags.isEmissiveHit && pathLength == reservoir.pathLength && rpd.specularPath && hitIsEmissive)
         {
-            retracedPath.F += bsdfProperties.emission * rpd.thp;
-            retracedPath.jacobianPath = jacobian; // Jacobian Path == 1, as all hits are delta/specular
+            retracedPath.F = bsdfProperties.emission * rpd.thp;
+            retracedPath.jacobian = jacobian; // Jacobian Path == 1, as all hits are delta/specular
             retracedPath.flags = (uint)ReservoirPathFlags::isEmissiveHit;
             rpd.retraceSuccessful = true;
             break;
@@ -221,42 +163,31 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
             break;
 
         // Collect photons or set reconnection surface
-        if (hitIsDiffuse) {
-            //Jacobian and Radiance estimate
-            retracedPath.jacobianPath = rpd.jacobianPath * jacobian;
-            retracedPath.F += collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, true) * rpd.thp;
-
-            //Reconnection surface
-            if (pathLength == reservoir.pathLength && reservoir.flags.isFinalGather) {
-                if (reservoir.flags.hasTwoCollectionPoints != isFirstCollectionSurface) {
-                    retracedPath.rcThp = rpd.thp;
-                    retracedPath.rcSurface = hit.getData();
-                    retracedPath.rcViewDir = -ray.Direction;
-                    retracedPath.flags = (uint)ReservoirPathFlags::isFinalGather;
-                    rpd.retraceSuccessful = true;
-                }
-                break;
-            }
-
-            //If the reservoir has only 1 sample point and that is not radiance estimat, the path is invalid
-            if (!reservoir.flags.hasTwoCollectionPoints && !reservoir.flags.isRadianceEstimate)
-                break;
-                           
-            isFirstCollectionSurface = false;
-            if ((pathLength == reservoir.pathLength) && reservoir.flags.isRadianceEstimate) {
-                retracedPath.flags = (uint)ReservoirPathFlags::isRadianceEstimate;
+        if (hitIsDiffuse && pathLength == reservoir.pathLength) {
+            retracedPath.jacobian = jacobian;
+            if (reservoir.flags.isFinalGather)
+            {
+                retracedPath.rcThp = rpd.thp;
+                retracedPath.rcSurface = hit.getData();
+                retracedPath.rcViewDir = -ray.Direction;
+                retracedPath.flags = (uint)ReservoirPathFlags::isFinalGather;
                 rpd.retraceSuccessful = true;
-                break;
+            } else if (reservoir.flags.isRadianceEstimate)
+            {
+                // retracedPath.F = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !triedToSetFGSurface) * rpd.thp;
+                bool isReconnectable = distance(reservoir.samplePosW, sd.posW) < reservoir.sampleRadius;
+                retracedPath.F = reservoir.fgRadiance * rpd.thp;
+                retracedPath.flags = isReconnectable ? (uint)ReservoirPathFlags::isRadianceEstimate : 0;
+                rpd.retraceSuccessful = isReconnectable;
             }
+
+            break;
         }
 
         // Sample new ray
         triedToSetFGSurface |= rpd.lastHitDiffuse; // If 1 diffuse surface was encountered, it was tried to set the Final Gather surface
         rpd.lastHitDiffuse = hitIsDiffuse;
         rpd.specularPath &= !hitIsDiffuse;
-
-        if (!isFirstCollectionSurface)
-            rpd.jacobianPath *= jacobian;
 
         if (!sampleNewDirection(sd, mi, rayDirSg, rpd, ray))
             break;    

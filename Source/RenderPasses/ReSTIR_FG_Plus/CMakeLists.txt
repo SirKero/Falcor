@@ -13,6 +13,7 @@ target_sources(ReSTIR_FG_Plus PRIVATE
     TracePhotons.rt.slang
     SortSplatReservoirs.cs.slang
     TemporalSplatReservoir.cs.slang
+	PhotonHelper.slang
 )
 
 target_copy_shaders(ReSTIR_FG_Plus RenderPasses/ReSTIR_FG_Plus)

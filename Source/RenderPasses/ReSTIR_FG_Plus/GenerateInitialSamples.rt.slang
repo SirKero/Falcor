@@ -1,3 +1,4 @@
+#pragma once
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -6,13 +7,10 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Rendering.RTXDI.RTXDI;
 import StructsAndHelpers;
+import PhotonHelper;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
-
-StructuredBuffer<PhotonData> gPhotonData[2];
-StructuredBuffer<AABB> gPhotonAABB[2];
-RaytracingAccelerationStructure gPhotonAS;
 
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 RWStructuredBuffer<PathReservoir> gPathReservoir;
@@ -22,7 +20,6 @@ StructuredBuffer<int> gLightTraceLinkedList; // next pointer
 
 RWTexture2D<float4> gDebug;
 
-static const float kPhotonCollectTMax = 1e-7;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kCausticInstanceMask = 2;
 static const uint kAllPhotonInstanceMask = 0xFF;
@@ -60,7 +57,6 @@ struct PathData {
     float3 F;               //Accumulated path radiance
     uint pathLength;        //Current path length
 
-    float jacobianPath;     //Jacobian for the path until the RC Surface / Sample
     bool lastHitDiffuse;
     bool specularPath;      //True if the full path is specular
     bool firstHitIsDelta;     //True if the first hit is delta (less roughness than threshold)
@@ -70,64 +66,12 @@ struct PathData {
         scatterPDF = 0;
         F = float3(0);
         pathLength = 0;
-        jacobianPath = 1.0;
         lastHitDiffuse = true;
         specularPath = true;
         firstHitIsDelta = false;
     }
 }
 
-// Checks if the ray start point is inside the sphere.
-bool hitSphere(const float3 center, const float radius, const float3 p)
-{
-    float3 radiusTest = p - center;
-    return dot(radiusTest, radiusTest) < radius * radius;
-}
-
-float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg, bool collectOnlyDirectGlobal = false) {
-    float3 collectedRadiance = float3(0);
-    //Prepare ray
-    RayDesc ray;
-    ray.Origin = sd.posW;
-    ray.Direction = sd.faceN;
-    ray.TMin = 0;
-    ray.TMax = kPhotonCollectTMax;
-
-    RayQuery<RAY_FLAG_NONE> rayQuery;
-
-    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
-    while (rayQuery.Proceed()) {
-        
-        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
-            continue;
-        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
-        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
-
-        //Check if ray is inside photon radius
-        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
-        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
-        if (!hitSphere(photonAABB.center(), radius, sd.posW))
-            continue;
-
-        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
-
-        // If direct global photons should be collected and the photon is global, check the path length
-        if (collectOnlyDirectGlobal)
-        {
-            if (((PhotonType)instanceIdx == PhotonType::Global) && (photonData.pathLenght > 0))
-                continue;
-        }
-
-        float NdotL = dot(photonData.dir, N);
-        // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
-            continue;
-
-        float3 bsdf = mi.eval(sd, photonData.dir, sg); 
-        collectedRadiance += max(0, (photonData.flux * bsdf) / (M_PI * radius * radius * NdotL)); //NdotL needs to be taken out of the bsdf for Photon Mapping
-    }
-    return collectedRadiance;
-}
 
 bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout PathData pd, inout RayDesc ray) {
     // Photon Bounce for next iteration
@@ -146,6 +90,25 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
     return validSample;
 }
 
+/* Add sample to reservoir
+    \param[inout] reservoir Reservoir to add the sample to.
+    \param[in] rand Random number in [0,1).
+    \param[in] rcThp Throughput after reconnection to light source.
+    \param[in] thp Throughput until the reconnection surface.
+*/
+bool addSampleToReservoir(inout PathReservoir reservoir, float rand, float3 radiance, float3 thp)
+{
+    float3 F = radiance * thp;
+    float w = luminance(F);
+    reservoir.weight += w;
+    bool selectOther = rand * reservoir.weight <= w;
+    if (selectOther) {
+        reservoir.F = F;
+        reservoir.fgRadiance = radiance;
+    }
+    return selectOther;
+}
+
 void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayDirectionSG, inout PathData pd, inout PathReservoir pathReservoir)
 {
     RayPayload rayPayload = RayPayload();
@@ -161,13 +124,15 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         // Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI except the primary hit is delta
         if (!hit.isValid()) {
             if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
-                float3 envMapContribution = kUseEnvMap ? gScene.envMap.eval(ray.Direction) * pd.thp : float3(0);
-                pathReservoir.F += envMapContribution;
-                pathReservoir.jacobianPath = pd.jacobianPath * pd.scatterPDF;
-                uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEnvMapHit;
-                flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                flags |= isFirstCollectionSurface ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0;
-                pathReservoir.flags.setReservoirPathFlags(flags);
+                float3 envMapContribution = kUseEnvMap ? gScene.envMap.eval(ray.Direction) : float3(0);
+                if (addSampleToReservoir(pathReservoir, sampleNext1D(sg), envMapContribution, pd.thp))
+                {
+                    pathReservoir.jacobian = pd.scatterPDF;
+                    uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEnvMapHit;
+                    flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                    //flags |= isFirstCollectionSurface ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0;
+                    pathReservoir.flags.setReservoirPathFlags(flags);
+                }
             }
             break;
         }
@@ -184,11 +149,13 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
 
         // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI except the primary hit is delta
         if ((pd.pathLength > 1 && pd.specularPath) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
-            pathReservoir.F += bsdfProperties.emission * pd.thp;
-            pathReservoir.jacobianPath = jacobian; //Jacobian Path == 1, as all hits are delta/specular
-            uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::firstHitIsDelta | (uint)ReservoirPathFlags::isEmissiveHit;
-            pathReservoir.flags.setReservoirPathFlags(flags);
-            pathReservoir.pathLength = pd.pathLength;
+            if (addSampleToReservoir(pathReservoir, sampleNext1D(sg), bsdfProperties.emission, pd.thp))
+            {
+                pathReservoir.jacobian = jacobian; // Jacobian Path == 1, as all hits are delta/specular
+                uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::firstHitIsDelta | (uint)ReservoirPathFlags::isEmissiveHit;
+                pathReservoir.flags.setReservoirPathFlags(flags);
+                pathReservoir.pathLength = pd.pathLength;
+            }
         }
 
         //Bounces on emissive materials are undefined
@@ -198,30 +165,34 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         // If surface is diffuse do radiance estimate (photon types are depended on the current path state)
         if (hitIsDiffuse) {
             bool isFinalGather = pd.lastHitDiffuse && !triedToSetFGSurface;
-            float3 radianceEstimate = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !isFinalGather);
-            pathReservoir.F += radianceEstimate * pd.thp;
-            pathReservoir.jacobianPath = pd.jacobianPath;
-            pathReservoir.pathLength = pd.pathLength;
-            // We stop after final gather
-            if (isFinalGather) {
-                uint flags = (uint)ReservoirPathFlags::isFinalGather;
+            PhotonSample photonSample;
+            photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, photonSample, !isFinalGather && !triedToSetFGSurface);
+            // float3 radianceEstimate = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !isFinalGather && !triedToSetFGSurface);
+            float3 radianceEstimate = photonSample.radiance * photonSample.weight;
+            if (addSampleToReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
+                pathReservoir.pathLength = isFinalGather ? pd.pathLength - 1 : pd.pathLength;
+                pathReservoir.jacobian = jacobian;
+                uint flags = 0;
+                if (isFinalGather) {
+                    flags |= (uint)ReservoirPathFlags::isFinalGather;
+                    pathReservoir.fgRadiance = radianceEstimate;
+                    pathReservoir.samplePosW = sd.posW;
+                    pathReservoir.sampleNormal = sd.faceN;
+                }
+                else {
+                    flags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
+                    pathReservoir.fgRadiance = radianceEstimate;
+                    pathReservoir.samplePosW = photonSample.posW;
+                    pathReservoir.sampleNormal = photonSample.normal;
+                    pathReservoir.sampleRadius = photonSample.radius;
+                }
                 flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                flags |= isFirstCollectionSurface ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0;
                 pathReservoir.flags.setReservoirPathFlags(flags);
-                pathReservoir.pathLength = pd.pathLength - 1; //Reconnection surface is used as a stopping point
-                pathReservoir.fgRadiance = radianceEstimate;
-                pathReservoir.packedSampleSurface = hit.getData();
-                pathReservoir.jacobianRc = jacobian;
-                break;
             }
-            else if (triedToSetFGSurface) {
-                pathReservoir.jacobianPath *= jacobian;
-                uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
-                flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                flags |= isFirstCollectionSurface ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0;
-                pathReservoir.flags.setReservoirPathFlags(flags);
+
+            //We always stop at this point
+            if (isFinalGather || triedToSetFGSurface)
                 break;
-            }
 
             isFirstCollectionSurface = false;
         }
@@ -230,29 +201,15 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         pd.lastHitDiffuse = hitIsDiffuse;
         pd.specularPath &= !hitIsDiffuse;
 
-        // Update path jacobian
-        if (!isFirstCollectionSurface)
-            pd.jacobianPath *= jacobian;
-
-        //TODO disable geometry term for delta, as it can get very very small
-        if (pd.pathLength == 1)
-            gDebug[DispatchRaysIndex().xy] = float4(jacobian, abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist), pd.scatterPDF, 1);
-
         // Calc new ray direction
-        if (!sampleNewDirection(sd, mi, rayDirectionSG, pd, ray)) {
-            //Check if the reservoir was valid
-            if (any(pathReservoir.F > 0)) {
-                uint flags = (uint)ReservoirPathFlags::isRadianceEstimate | (uint)ReservoirPathFlags::hasNoReconnectionSurface;
-                flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                pathReservoir.flags.setReservoirPathFlags(flags); 
-            }
+        if (!sampleNewDirection(sd, mi, rayDirectionSG, pd, ray)) {            
             break;
         }
     }
 
     //Finalize Reservoir
     if (any(pathReservoir.F > 0))
-        pathReservoir.weight = 1.0;
+        pathReservoir.weight /= luminance(pathReservoir.F);
 }
 
 //

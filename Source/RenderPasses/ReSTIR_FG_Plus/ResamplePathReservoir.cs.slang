@@ -95,8 +95,9 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         //Calc MIS weight
         float mis = 1;
         if (rCurr.flags.hasNoReconnectionSurface) {
-            float3 retracedF = retracedPath.F * (retracedPath.jacobianPath / rCurr.jacobianPath);
+            float3 retracedF = retracedPath.F * (retracedPath.jacobian / rCurr.jacobian);
             mis = evalMIS(rCurr.c, luminance(rCurr.F), rPrev.c, luminance(retracedF));
+            
         }else
         {
             float3 thpOther = float3(1);
@@ -108,24 +109,18 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
             }
 
             if (retracedPathValid) {
-                ShadingData sdSampleSurface = loadShadingDataWithPrevHit(HitInfo(rCurr.packedSampleSurface), sdPrev.posW, lod);
                 float p0 = luminance(rCurr.F);
 
                 let miPrev = gScene.materials.getMaterialInstance(sdPrev, lod, kMIHints);
-                let miSampleSurface = gScene.materials.getMaterialInstance(sdSampleSurface, lod, kMIHints);
                 float p1 = 0;
-                float3 toSample = sdSampleSurface.posW - sdPrev.posW;
+                float3 toSample = rCurr.samplePosW - sdPrev.posW;
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian to Sample
-                float jacobianNew = abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
+                float jacobianNew = abs(dot(rCurr.sampleNormal, -toSample)) / (distToSample * distToSample);
                 jacobianNew *= miPrev.evalPdf(sdPrev, toSample);
-                float jacobian = jacobianNew / rCurr.jacobianRc;
+                float jacobian = jacobianNew / rCurr.jacobian;
                 float3 pathRadiance = float3(0);
-                if (rCurr.pathLength > 0) {
-                    jacobian *= retracedPath.jacobianPath / rPrev.jacobianPath;
-                    pathRadiance += retracedPath.F;
-                }
 
                 if (jacobian > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdPrev, toSample, distToSample)) {
@@ -147,8 +142,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     
     // Temporal Reservoir
     float3 Fprev = float3(0);
-    float jacobianRcPrev = 1;
-    float jacobianPathPrev = 1;
+    float jacobianPrev = 1;
     bool prevCanBeSelected = rPrev.isValid();
     prevCanBeSelected &= !isnan(rPrev.weight) && !isinf(rPrev.weight);
     // Load retraced surface for temporal reservoir
@@ -161,14 +155,12 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
     if (prevCanBeSelected)
     {
-        float mis = 1;
         float jacobianDeterminant = 1.0;
         if (rPrev.flags.hasNoReconnectionSurface) {
             if (retracedPathValid) {
-                jacobianPathPrev = retracedPath.jacobianPath;
-                jacobianDeterminant = (jacobianPathPrev / rPrev.jacobianPath);
+                jacobianPrev = retracedPath.jacobian;
+                jacobianDeterminant = (jacobianPrev / rPrev.jacobian);
                 Fprev = retracedPath.F;
-                //gDebug[pixel] = float4(jacobianPathPrev, rPrev.jacobianPath, jacobianDeterminant, 1);
             }
         } else
         {
@@ -181,36 +173,30 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
             // Reconnect
             if (retracedPathValid) {
-                ShadingData sdSampleSurface = loadShadingDataWithPrevHit(HitInfo(rPrev.packedSampleSurface), sdCurrent.posW, lod);
                 let miPrev = gScene.materials.getMaterialInstance(sdCurrent, lod, kMIHints);
-                let miSampleSurface = gScene.materials.getMaterialInstance(sdSampleSurface, lod, kMIHints);
-                float3 toSample = sdSampleSurface.posW - sdCurrent.posW;
+                float3 toSample = rPrev.samplePosW - sdCurrent.posW;
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian from reconnect surface to other sample
-                jacobianRcPrev = miPrev.evalPdf(sdCurrent, toSample);
-                jacobianRcPrev *= abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
-                jacobianDeterminant = jacobianRcPrev / rPrev.jacobianRc;
+                jacobianPrev = miPrev.evalPdf(sdCurrent, toSample);
+                jacobianPrev *= abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
+                jacobianDeterminant = jacobianPrev / rPrev.jacobian;
 
-                if (rPrev.pathLength > 0) {
-                    jacobianPathPrev = retracedPath.jacobianPath;
-                    jacobianDeterminant *= jacobianPathPrev / rPrev.jacobianPath;
-                    Fprev += retracedPath.F;
-                }
-
+                gDebug[pixel] = float4(jacobianPrev, rPrev.jacobian, jacobianDeterminant , 1);
+  
                 float3 bsdf = float3(0);
                 if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
                         bsdf = miPrev.eval(sdCurrent, toSample, sg);
                     }
-                    Fprev += rPrev.fgRadiance * bsdf * thpPrev;
+                    Fprev = rPrev.fgRadiance * bsdf * thpPrev;
                 }
 
             }
         }
 
         float estFprev = luminance(Fprev) * jacobianDeterminant;
-        mis = evalMIS(rPrev.c, luminance(rPrev.F), rCurr.c, estFprev);
+        float mis = evalMIS(rPrev.c, luminance(rPrev.F), rCurr.c, estFprev);
         w_1 = mis * estFprev * rPrev.weight;
         
         wSum += w_1;
@@ -221,8 +207,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && prevCanBeSelected;
     if (selectOtherSample) {
         reservoir = rPrev;
-        reservoir.jacobianRc = jacobianRcPrev;
-        reservoir.jacobianPath = jacobianPathPrev;
+        reservoir.jacobian = jacobianPrev;
         reservoir.F = Fprev;
     }
     
