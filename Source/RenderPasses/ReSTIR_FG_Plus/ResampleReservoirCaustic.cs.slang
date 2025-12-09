@@ -40,6 +40,7 @@ StructuredBuffer<uint> gCellCounters; // Number of reservoirs per pixel
 StructuredBuffer<uint> gCellOffsets;  // Initial offset for the sorted reservoir buffer
 StructuredBuffer<uint2> gSortedReservoirs;   // Buffer of splatted reservoirs
 
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
@@ -319,7 +320,7 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 2));
 
     ReservoirCaustic current = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
     HitInfo currentHit = HitInfo(current.sampleSurface);

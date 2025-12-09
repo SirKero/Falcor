@@ -34,6 +34,7 @@ cbuffer CB
 }
 
 static const bool kAlphaTest = true;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
@@ -387,8 +388,8 @@ void rayGen()
     if (hitInfo.isValid()) {
         //Set RTXDI data
         let lod = ExplicitLodTextureSampler(0);
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 1);
-        SampleGenerator pathDirSG = SampleGenerator(pixel, gFrameCount * 5 + 2); // Sample generator for sampling new directions
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 2);
+        SampleGenerator pathDirSG = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 3); // Sample generator for sampling new directions
         pathReservoir.sgPathDirections = pathDirSG;
 
         ShadingData sd = loadShadingData(hitInfo, viewDir, lod);

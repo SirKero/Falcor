@@ -21,22 +21,23 @@ RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path 
 
 RWTexture2D<float4> gDebug;
 
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kCausticInstanceMask = 2;
 static const uint kAllPhotonInstanceMask = 0xFF;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
+static const bool kAlphaTest = true;
+static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
     uint gFGRayMaxPathLength; // Max path length for a Final Gather sample
-    float gNormalizedPixelArea; //Pixel area at distance 1 used in light trace
+    float gNormalizedPixelArea; // Pixel area at distance 1 used in light trace
+    uint gNumResamplingPass;
 }
-
-static const bool kAlphaTest = true;
-static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
 struct RayPayload
 {
@@ -236,12 +237,13 @@ void rayGen()
 
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     if (hitInfo.isValid()) {
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3); // Sample generator for sampling new directions
+        SampleGenerator sgPixelOffset = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sampe generator for the pixel offset (search region)
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 1); // Sample generator for bsdf evaluation
 
         //Reprojection with motion vectors
         float2 motionOffset = gMVec[pixel] * float2(dispatchDims);
         float2 prevPixelF = motionOffset + float2(pixel) + float2(0.5);
-        float2 u = sampleNext2D(sg);
+        float2 u = sampleNext2D(sgPixelOffset);
         prevPixelF += u - 0.5; // [-0.5, 0.5]
 
         int2 prevPixel = int2(prevPixelF);

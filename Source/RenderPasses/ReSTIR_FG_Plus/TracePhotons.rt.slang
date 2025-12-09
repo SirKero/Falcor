@@ -39,6 +39,7 @@ RWTexture2D<int> gLightTraceHeadCounter;
 RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
 
 static const bool kAlphaTest = true;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = true; // TODO as option
@@ -225,7 +226,8 @@ void rayGen()
 
     const float invRejection = 1.f / gGlobalRejectionProb;
 
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5);
+    uint rngOffset = gUseAnalyticLights ? 1 : 0;
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + rngOffset);
     RayDesc ray;
     PhotonLightSample pls;
 

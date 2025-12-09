@@ -23,6 +23,7 @@ cbuffer CB
     float gNormalizedPixelArea;
 }
 
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
@@ -66,8 +67,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
     float3 viewDir = gView[pixel].xyz;
 
     float3 outColor = float3(0);
-    if(hitInfo.isValid()){
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 4);
+    if (hitInfo.isValid()) {
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 1));
         let lod = ExplicitLodTextureSampler(0.f);
 
         // Get Material properties

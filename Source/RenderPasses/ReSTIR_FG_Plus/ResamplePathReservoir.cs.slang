@@ -19,8 +19,9 @@ cbuffer CB
     float gNormalThreshold; // Normal Threshold
 
     float gJacobianDistanceThreshold; // Jacobian distance threshold
-    bool gUsePathThreshold; //Enables and disables path threshold
-    uint2 _pad;
+    bool gUsePathThreshold;           // Enables and disables path threshold
+    uint gNumResamplingPass;
+    uint _pad;
 }
 
 Texture2D<PackedHitInfo> gVBuffer;
@@ -36,6 +37,7 @@ RWStructuredBuffer<PathReservoir> gPathReservoir;
 
 RWTexture2D<float4> gDebug;
 
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
 /* Evaluate MIS weight
@@ -234,12 +236,14 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     if (hit.isValid()) {
         let lod = ExplicitLodTextureSampler(0.f);
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 4);
+        SampleGenerator sgPixelOffset = SampleGenerator( pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sample generator for the pixel offset (search region) same as RetraceReservoirs
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 2); // Sample generator for bsdf evaluation
+
         PathReservoir rCurr = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
 
         float2 motionOffset = gMVec[pixel] * float2(gFrameDim);
         float2 prevPixelF = motionOffset + float2(pixel) + 0.5;
-        float2 u = sampleNext2D(sg);
+        float2 u = sampleNext2D(sgPixelOffset);
         prevPixelF += u - 0.5;
 
         int2 prevPixel = int2(prevPixelF);

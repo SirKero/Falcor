@@ -108,7 +108,7 @@ private:
     bool mMixedLights = false;         // True if analytic and emissive lights are in the scene
 
     //ReSTIR-FG Reservoirs
-    ResamplingSettings mResampleSettingsFG = {};
+    ResamplingSettings mResampleSettingsPath = {};
     ResamplingSettings mResampleSettingsCaustic = {};
 
     uint mFGRayMaxPathLength = 10;                      // Max path length for the final gather ray
@@ -120,6 +120,7 @@ private:
     float mJacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
     bool mUsePathThreshold = false;                     // Enable resampling only if path length are the same
     bool mUsePhotonsForDirectLightInReflections = true; // Uses photons for direct light in reflections, else the final gather sample is used
+    uint mRNGNumPasses = 12;                             // Offset for RNG generator
 
     //Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();

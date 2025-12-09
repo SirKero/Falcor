@@ -180,7 +180,7 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
 
         if (auto group2 = group.group("Resampling FG options"))
         {
-            resampleUI(mResampleSettingsFG, group2);
+            resampleUI(mResampleSettingsPath, group2);
         }
         if (auto group2 = group.group("Resampling Caustic options"))
         {
@@ -273,6 +273,9 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
         mCanResample = false;
         mClearReservoir = false;
     }
+
+    //Update RNG constants
+    mRNGNumPasses = 6 + 3 * (1 + mResampleSettingsPath.spatialSamples);
 
     //Init ReSTIR DI
     const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
@@ -607,6 +610,7 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mTracePhotonPass.pProgram->addDefines(getMaterialDefines());
     if (mpEmissiveLightSampler)
         mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
@@ -775,6 +779,7 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvaluateDeltaPDFs ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
     //Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -841,7 +846,7 @@ void ReSTIR_FG_Plus::splatTemporalReservoirsPass(RenderContext* pRenderContext, 
     mpTemporalSplatReservoirs->getProgram()->addDefines(getMaterialDefines()); // Runtime define
 
     // Return early if there is no previous reservoir or resampling is disabled
-    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    if ((!mCanResample) || !mResampleSettingsPath.enable)
     {
         return;
     }
@@ -903,7 +908,7 @@ void ReSTIR_FG_Plus::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
     mpSplatSortCellData->getProgram()->addDefines(getMaterialDefines()); // Runtime define
 
     // Return early if there is no previous reservoir or resampling is disabled
-    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    if ((!mCanResample) || !mResampleSettingsPath.enable)
     {
         return;
     }
@@ -979,6 +984,7 @@ void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const R
     mRetracePathReservoirsPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
     mRetracePathReservoirsPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvaluateDeltaPDFs ? "1" : "0");
     mRetracePathReservoirsPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mRetracePathReservoirsPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
     // Program Vars
     if (!mRetracePathReservoirsPass.pVars)
@@ -991,6 +997,7 @@ void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const R
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+    var["CB"]["gNumResamplingPass"] = 0; //Current path iteration starting from 0 (temporal)
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -1032,16 +1039,17 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-        defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
         mpResampleReservoirPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirPass);
     mpResampleReservoirPass->getProgram()->addDefines(getMaterialDefines()); // Runtime define
+    mpResampleReservoirPass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses)); // Runtime define
 
     //Return early if there is no previous reservoir or resampling is disabled
-    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    if ((!mCanResample) || !mResampleSettingsPath.enable)
     {
         return;
     }
@@ -1054,13 +1062,14 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
-    var["CB"]["gConfidenceLimit"] = mResampleSettingsFG.confidenceCap;
-    var["CB"]["gSpatialRadius"] = mResampleSettingsFG.samplingRadius;
-    var["CB"]["gSpatialSamples"] = mResampleSettingsFG.spatialSamples;
-    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsFG.disocclusionBoostExtraSamples;
+    var["CB"]["gConfidenceLimit"] = mResampleSettingsPath.confidenceCap;
+    var["CB"]["gSpatialRadius"] = mResampleSettingsPath.samplingRadius;
+    var["CB"]["gSpatialSamples"] = mResampleSettingsPath.spatialSamples;
+    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsPath.disocclusionBoostExtraSamples;
     var["CB"]["gNormalThreshold"] = mNormalThreshold;
     var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
     var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
+    var["CB"]["gNumResamplingPass"] = 0u;
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -1100,12 +1109,14 @@ void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext,
         defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
         defines.add("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirCausticPass);
     mpResampleReservoirCausticPass->getProgram()->addDefines(getMaterialDefines()); //Runtime define
     mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
+    mpResampleReservoirCausticPass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsCaustic.enable)
@@ -1168,6 +1179,7 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
         defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
         defines.add("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -1178,6 +1190,7 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
     mpEvaluateReservoirsPass->getProgram()->addDefines(getMaterialDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
+    mpEvaluateReservoirsPass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();
