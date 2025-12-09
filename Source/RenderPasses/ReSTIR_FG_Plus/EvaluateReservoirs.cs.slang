@@ -91,11 +91,11 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
         if (rtxdiValid)
         {
-          //  outColor += mi.eval(sd, dir, sg) * Li;
+            outColor += mi.eval(sd, dir, sg) * Li;
         }
 
         //Evaluate directly visible caustics
-        //outColor += evaluateCausticReservoir(pixel, sg);
+        outColor += evaluateCausticReservoir(pixel, sg);
 
         // Evaluate Path Reservoir
         PathReservoir pathReservoir = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];

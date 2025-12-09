@@ -241,10 +241,17 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
         PathReservoir rCurr = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
 
+        bool isSpatial = gNumResamplingPass > 0;
         float2 motionOffset = gMVec[pixel] * float2(gFrameDim);
         float2 prevPixelF = motionOffset + float2(pixel) + 0.5;
         float2 u = sampleNext2D(sgPixelOffset);
-        prevPixelF += u - 0.5;
+        if (isSpatial) {
+            float2 spatialOffset = gSpatialRadius * sample_disk_concentric(u);
+            prevPixelF += spatialOffset;
+        } else // Temporal; Add subpixel offset
+        {
+            prevPixelF += u - 0.5; // [-0.5, 0.5]
+        }
 
         int2 prevPixel = int2(prevPixelF);
 

@@ -4,6 +4,7 @@
 import Scene.Raytracing;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
 import StructsAndHelpers;
 import PhotonHelper;
 
@@ -34,8 +35,8 @@ static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
-    uint gFGRayMaxPathLength; // Max path length for a Final Gather sample
-    float gNormalizedPixelArea; // Pixel area at distance 1 used in light trace
+    uint gFGRayMaxPathLength;   // Max path length for a Final Gather sample
+    float gSpatialSampleRadius; // Pixel area at distance 1 used in light trace
     uint gNumResamplingPass;
 }
 
@@ -240,11 +241,18 @@ void rayGen()
         SampleGenerator sgPixelOffset = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sampe generator for the pixel offset (search region)
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 1); // Sample generator for bsdf evaluation
 
-        //Reprojection with motion vectors
+        // Reprojection with motion vectors
+        bool isSpatial = gNumResamplingPass > 0;
         float2 motionOffset = gMVec[pixel] * float2(dispatchDims);
         float2 prevPixelF = motionOffset + float2(pixel) + float2(0.5);
         float2 u = sampleNext2D(sgPixelOffset);
-        prevPixelF += u - 0.5; // [-0.5, 0.5]
+        if (isSpatial) {
+            float2 spatialOffset = gSpatialSampleRadius * sample_disk_concentric(u);
+            prevPixelF += spatialOffset;
+        } else // Temporal; Add subpixel offset
+        {
+            prevPixelF += u - 0.5; // [-0.5, 0.5]
+        }
 
         int2 prevPixel = int2(prevPixelF);
 

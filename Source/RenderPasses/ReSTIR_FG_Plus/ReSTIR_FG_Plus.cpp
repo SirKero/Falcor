@@ -316,11 +316,15 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
         sortSplattedReservoirsPass(pRenderContext, renderData);
     }
 
-    //Retrace
-    retraceReservoirPass(pRenderContext, renderData);
+    uint resampleIterations = 1 + mResampleSettingsPath.spatialSamples;
+    for (uint i = 0; i < resampleIterations; i++)
+    {
+        // Retrace
+        retraceReservoirPass(pRenderContext, renderData, i);
 
-    //Spatiotemporal resampling for final gather samples and caustics
-    resampleReservoirsPass(pRenderContext, renderData);
+        // Spatiotemporal resampling for final gather samples and caustics
+        resampleReservoirsPass(pRenderContext, renderData, i);
+    }   
 
     resampleReservoirCausticPass(pRenderContext, renderData);
 
@@ -950,7 +954,7 @@ void ReSTIR_FG_Plus::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
     }
 }
 
-void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData)
+void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
     FALCOR_PROFILE(pRenderContext, "Retrace Reservoir");
     // Init Shader
@@ -996,8 +1000,8 @@ void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const R
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
-    var["CB"]["gNumResamplingPass"] = 0; //Current path iteration starting from 0 (temporal)
+    var["CB"]["gNumResamplingPass"] = numPass; //Current path iteration starting from 0 (temporal)
+    var["CB"]["gSpatialSampleRadius"] = mResampleSettingsPath.samplingRadius;
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -1024,7 +1028,7 @@ void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const R
     mpScene->raytrace(pRenderContext, mRetracePathReservoirsPass.pProgram.get(), mRetracePathReservoirsPass.pVars, uint3(mScreenRes, 1));
 }
 
-void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
     FALCOR_PROFILE(pRenderContext, "Resampling Path Reservoirs");
     //Initialize compute pass
@@ -1069,7 +1073,7 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
     var["CB"]["gNormalThreshold"] = mNormalThreshold;
     var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
     var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
-    var["CB"]["gNumResamplingPass"] = 0u;
+    var["CB"]["gNumResamplingPass"] = numPass;
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();

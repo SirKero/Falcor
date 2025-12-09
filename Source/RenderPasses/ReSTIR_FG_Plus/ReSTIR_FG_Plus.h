@@ -61,10 +61,10 @@ private:
     void sortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Retrace Path Reservoirs with Path Length > 0 (or if final gather sample should be updated)
-    void retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
     //Reservoir Resampling for Path Reservoirs
-    void resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
     //Reservoir Resampling for Caustic Samples
     void resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
