@@ -9,8 +9,10 @@ import Utils.Color.ColorHelpers;
 import Rendering.RTXDI.RTXDI;
 
 Texture2D<PackedHitInfo> gVBuffer;
-StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 StructuredBuffer<ReservoirCaustic> gCausticReservoir;
+StructuredBuffer<PathReservoir> gPathReservoir;
+
+StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 Texture2D<float4> gEmission;
 
 RWTexture2D<uint> gGuidingCounter;
@@ -163,9 +165,16 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
 
         float3 indirectLight = float3(0);
+    #if ENABLE_RANDOM_REPLAY
+        PathReservoir pathReservoir = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
+        indirectLight += pathReservoir.F * pathReservoir.weight;
+        addToGuidingTexture(pathReservoir.lightIndex, pathReservoir.guidingPixels, luminance(indirectLight), pathReservoir.c);
+    #else
         indirectLight += evaluateFinalGatherReservoir(pixel, sg);
-        indirectLight += evaluateCausticReservoir(pixel, sg);
         indirectLight += gEmission[pixel].xyz;
+    #endif
+
+        indirectLight += evaluateCausticReservoir(pixel, sg);
         if (!kDisableIndirectLight)
             outColor += indirectLight;
        

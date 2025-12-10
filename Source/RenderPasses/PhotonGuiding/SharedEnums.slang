@@ -11,11 +11,13 @@ enum class PhotonRenderMode : uint32_t
     PhotonMapping = 0,
     FinalGathering = 1,
     ReSTIR_FG = 2,
+    ReSTIR_PathPhoton = 3,
 };
 FALCOR_ENUM_INFO(PhotonRenderMode, {
     { PhotonRenderMode::PhotonMapping, "PhotonMapping" },
     { PhotonRenderMode::FinalGathering, "FinalGathering" },
-    { PhotonRenderMode::ReSTIR_FG, "ReSTIR FG" }
+    { PhotonRenderMode::ReSTIR_FG, "ReSTIR FG" },
+    { PhotonRenderMode::ReSTIR_PathPhoton, "ReSTIR PathPhoton" },
 });
 FALCOR_ENUM_REGISTER(PhotonRenderMode);
 

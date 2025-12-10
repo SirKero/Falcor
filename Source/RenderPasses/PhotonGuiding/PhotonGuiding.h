@@ -109,6 +109,12 @@ private:
     //ReSTIR resample final gather reservoirs pass
     void reSTIRResampleFGPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Retraces the paths
+    void reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Resamples paths
+    void reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     //ReSTIR resample caustic reservoirs pass
     void reSTIRResampleCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -267,6 +273,8 @@ private:
     ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample
     ref<Texture> mpEmission;                                   // Emission for paths that travel through highly specular materials (ReSTIR FG)
     ref<Texture> mpResampleMVec;                               // Motion vectors for resampling (includes reflections and refractions)
+    ref<Buffer> mpPathReservoir[2];                            // Reservoir storing a path
+    ref<Buffer> mpRetracedPath[2];                             // Buffer for retracing a path
     //Caustic ReSTIR Splatting
     ref<Texture> mpLightTraceHeadCounter;                      // Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;                        // Linked List for light tracing
@@ -282,7 +290,7 @@ private:
     ref<Sampler> mpPointSampler;    //Point Sampler
 
     //
-    // Render Passes/Programms
+    // Render Passes/Programs
     //
     struct RayTraceProgramHelper
     {
@@ -313,7 +321,9 @@ private:
 
     //ReSTIR Passes
     RayTraceProgramHelper mGenerateInitialSamplesPass; // Trace Final Gather rays and collect photons
+    RayTraceProgramHelper mRetracePathsPass;         // Retrace Path Reservoirs
     ref<ComputePass> mpResampleReservoirFGPass;      // Resampling Pass for Final Gather Reservoirs
+    ref<ComputePass> mpResampleReservoirPathPass;    // Resampling of the Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass; // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;       // Evaluates ReSTIR DI and FG reservoirs
     //Caustic ReSTIR Splatting passes

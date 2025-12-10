@@ -4,6 +4,7 @@
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Math.MathHelpers;
 import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.Fresnel;
 
@@ -19,7 +20,89 @@ enum class PhotonType // : uint32_t
     Caustic = 1
 };
 
-/* Struct describing a Photon used with VCM MIS
+//Flags for the Path Reservoir
+enum ReservoirPathFlags : uint {
+    firstHitIsDelta = 0x100,          // 1<<8
+    hasNoReconnectionSurface = 0x200, // 1<<9
+    isFinalGather = 0x400,            // 1<<10
+    isEmissiveHit = 0x800,            // 1<<11
+    isEnvMapHit = 0x1000,             // 1<<12
+    isRadianceEstimate = 0x2000,      // 1<<13
+}
+
+//Reservoir flag struct
+struct ReservoirFlags {
+    uint flags;
+
+    __init() {
+        flags = 0;
+    }
+
+    // Replaces path flag. Assumes that it is already or'ed
+    [mutating]
+    void setReservoirPathFlags(uint pathFlag) {
+        flags &= ~0xFF00; // Clear all flag bits
+        flags |= pathFlag;
+    }
+
+    property uint pathLength {
+        get { return flags & 0xFF; }
+        set {
+            flags &= ~0xFF; // Clear lower bits
+            flags |= (newValue & 0xFF);
+        }
+    }
+
+    property bool firstHitIsDelta {
+        get { return (flags & (uint)ReservoirPathFlags::firstHitIsDelta) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::firstHitIsDelta; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::firstHitIsDelta : 0);
+        }
+    }
+
+    property bool hasNoReconnectionSurface {
+        get { return (flags & (uint)ReservoirPathFlags::hasNoReconnectionSurface) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::hasNoReconnectionSurface; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::hasNoReconnectionSurface : 0);
+        }
+    }
+
+    property bool isFinalGather {
+        get { return (flags & (uint)ReservoirPathFlags::isFinalGather) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isFinalGather; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isFinalGather : 0);
+        }
+    }
+
+    property bool isEmissiveHit {
+        get { return (flags & (uint)ReservoirPathFlags::isEmissiveHit) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isEmissiveHit; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isEmissiveHit : 0);
+        }
+    }
+
+    property bool isEnvMapHit {
+        get { return (flags & (uint)ReservoirPathFlags::isEnvMapHit) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isEnvMapHit; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isEnvMapHit : 0);
+        }
+    }
+
+    property bool isRadianceEstimate {
+        get { return (flags & (uint)ReservoirPathFlags::isRadianceEstimate) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isRadianceEstimate; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isRadianceEstimate : 0);
+        }
+    }
+}
+
+/* Struct describing a Photon 
 flux - the energy of the photon
 pathLength - Which bounce the photon is on the light path. 0 is the first surface hit (direct light from camera)
 dir - incoming direction
@@ -179,7 +262,7 @@ struct ReservoirCaustic {
         c = 0;
         pathLength = 0;
         subPixelJacobian = 0;
-        lightIndex = 0-1;
+        lightIndex = -1;
         guidingPixels = uint2(-1);
         guidingPdf = 0;
     }
@@ -208,6 +291,85 @@ struct ReservoirCaustic {
     // Valid check
     bool isValid() {
         return any(photonRadiance > 0);
+    }
+}
+
+// Path Reservoir
+// Path Reservoir; Size: 112 Byte (28 floats)
+struct PathReservoir {
+    SampleGenerator sgPathDirections; // Sample Generator for random direction (float4)
+
+    float3 samplePosW;  // Sample Position
+    float sampleRadius; // For radiance estimate
+
+    float jacobian;       //(stored) jacobian determinant at the first hit
+    ReservoirFlags flags; // path length and flags
+    float2 packedSampleNormal;
+
+    float3 F; // Complete radiance of the path
+    uint c;   // Confidence Weight
+
+    float3 fgRadiance; // Radiance estimate for the final gather point. Can be reused
+    float weight;      // Unbiased contribution weight
+
+    int lightIndex;         // Guiding
+    int2 guidingPixels;     // Pixel for the guiding texture
+    float guidingPdf;       // Pdf for guiding
+
+    __init() {
+        sgPathDirections = SampleGenerator(uint2(0), 0);
+        samplePosW = float3(0);
+        sampleRadius = 0;
+        jacobian = 1;
+        packedSampleNormal = float2(0);
+        flags = ReservoirFlags();
+        F = float3(0);
+        c = 1;
+        fgRadiance = float3(0);
+        weight = 0.0;
+        lightIndex = -1;
+        guidingPixels = uint2(-1);
+        guidingPdf = 0;
+    }
+
+    bool isValid() {
+        return weight > 0 && jacobian > 0 && any(F > 0);
+    }
+
+    property uint pathLength {
+        get { return flags.pathLength; }
+        set { flags.pathLength = newValue;}
+    }
+
+    property float3 sampleNormal {
+        get { return oct_to_ndir_snorm(packedSampleNormal);}
+        set { packedSampleNormal = ndir_to_oct_snorm(newValue);}
+    }
+}
+
+// Infos on retraced path 64byte (16 floats)
+struct RetracedPath
+{
+    float3 F;
+    float jacobian;
+
+    float3 rcThp;
+    uint _pad;
+
+    PackedHitInfo rcSurface;
+
+    float3 rcViewDir;
+    uint flags;
+
+    __init()
+    {
+        F = float3(0);
+        jacobian = 1;
+        rcThp = float3(0);
+        rcSurface = {};
+        rcViewDir = float3(0);
+        flags = 0;
+        _pad = 0;
     }
 }
 

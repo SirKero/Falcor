@@ -12,10 +12,13 @@ target_sources(PhotonGuiding PRIVATE
     Debug.cs.slang
     StructsAndHelpers.slang
     SharedEnums.slang
+    PhotonHelper.slang
     ReSTIR_FG/EvaluateReservoirs.cs.slang
     ReSTIR_FG/GenerateInitialSamples.rt.slang
     ReSTIR_FG/ResampleReservoirCaustic.cs.slang
     ReSTIR_FG/ResampleReservoirFG.cs.slang
+    ReSTIR_FG/ResampleReservoirPath.cs.slang
+    ReSTIR_FG/RetracePath.rt.slang
     ReSTIR_FG/TemporalSplatReservoir.cs.slang
     ReSTIR_FG/SortSplatReservoirs.cs.slang
 	

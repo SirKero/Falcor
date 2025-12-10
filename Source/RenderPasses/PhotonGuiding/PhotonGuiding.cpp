@@ -49,6 +49,8 @@ namespace
     const std::string kShaderFolderReSTIR = kShaderFolder + "/ReSTIR_FG/";
     const std::string kShaderReSTIRInitialSamples = kShaderFolderReSTIR + "GenerateInitialSamples.rt.slang";
     const std::string kShaderReSTIRResampleFG = kShaderFolderReSTIR + "ResampleReservoirFG.cs.slang";
+    const std::string kShaderReSTIRRetracePath = kShaderFolderReSTIR + "RetracePath.rt.slang";
+    const std::string kShaderReSTIRResamplePath = kShaderFolderReSTIR + "ResampleReservoirPath.cs.slang";
     const std::string kShaderReSTIRResampleCaustic = kShaderFolderReSTIR + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderReSTIREvalReservoirs = kShaderFolderReSTIR + "EvaluateReservoirs.cs.slang";
     const std::string kShaderReSTIRTemporalSplatReservoirs = kShaderFolderReSTIR + "TemporalSplatReservoir.cs.slang";
@@ -173,6 +175,7 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
         break;
     }
     case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_FG:
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton:
     {
         if (!mpRTXDI)
             mpRTXDI = std::make_unique<RTXDI>(mpScene, mRTXDIOptions);
@@ -195,7 +198,15 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
         mpRTXDI->update(pRenderContext, pMotionVectors);
 
         // Spatiotemporal resampling for final gather samples and caustics
-        reSTIRResampleFGPass(pRenderContext, renderData);
+        if (mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_FG)
+            reSTIRResampleFGPass(pRenderContext, renderData);
+        else
+        {
+            reSTIRRetracePathsPass(pRenderContext, renderData);
+
+            reSTIRResamplePathsPass(pRenderContext, renderData);
+        }
+            
 
         reSTIRResampleCausticPass(pRenderContext, renderData);
 
@@ -208,7 +219,6 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
         break;
     }
     }
-    
 
     if (mDebugShowGuidingTexture)
         debugPass(pRenderContext, renderData);
@@ -706,6 +716,25 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
+        }
+        if (!mpPathReservoir[i] || mResetScreenTex)
+        {
+            mCanResample = false;
+            mpPathReservoir[i] = Buffer::createStructured(
+                mpDevice, 24 * sizeof(uint), mScreenRes.x * mScreenRes.y,
+                ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPathReservoir[i]->setName("PathReservoir" + std::to_string(i));
+        }
+
+        if (!mpRetracedPath[i] || mResetScreenTex)
+        {
+            mCanResample = false;
+            mpRetracedPath[i] = Buffer::createStructured(
+                mpDevice, 16 * sizeof(uint), mScreenRes.x * mScreenRes.y,
+                ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
+            );
+            mpRetracedPath[i]->setName("RetracePath" + std::to_string(i));
         }
     }
 
@@ -1654,11 +1683,16 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
 
     // Defines that can change on runtime
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
+    mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     mGenerateInitialSamplesPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+    mGenerateInitialSamplesPass.pProgram->addDefine(
+        "ENABLE_RANDOM_REPLAY", mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0"
+    );
+    mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
 
     // Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -1672,7 +1706,6 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
-    var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
 
     // RTXDI Resources
     mpRTXDI->setShaderData(var);
@@ -1692,6 +1725,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
 
     // Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
     var["gResamplingMVec"] = mpResampleMVec;
@@ -1773,6 +1807,19 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpResampleReservoirFGPass->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Retrace Paths");
+
+}
+
+void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "Resample Paths");
+
+
 }
 
 void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1857,6 +1904,23 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
 {
     FALCOR_PROFILE(pRenderContext, "EvaluateReservoirs");
 
+    //Runtime defines
+    auto getRuntimeDefines = [&]() {
+        DefineList defines;
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(mpRTXDI->getDefines());
+        defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+        defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
+        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
+        defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+        defines.add("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));
+        defines.add("DEBUG_DISABLE_INDIRECT_LIGHT", std::to_string(mDebugDisableIndirectLight));
+        defines.add(
+            "ENABLE_RANDOM_REPLAY", mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0"
+        );
+        return defines;
+    };
+
     // Create compute pass
     if (!mpEvaluateReservoirsPass)
     {
@@ -1868,28 +1932,14 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-        defines.add(mpRTXDI->getDefines());
-        defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-        defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
-        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-        defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
-        defines.add("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));
-        defines.add("DEBUG_DISABLE_INDIRECT_LIGHT", std::to_string(mDebugDisableIndirectLight));
-
+        defines.add(getRuntimeDefines());
+       
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpEvaluateReservoirsPass);
 
     // Runtime Defines
-    mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
-    mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-    mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-    mpEvaluateReservoirsPass->getProgram()->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
-    mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-    mpEvaluateReservoirsPass->getProgram()->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
-    mpEvaluateReservoirsPass->getProgram()->addDefine("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));
-    mpEvaluateReservoirsPass->getProgram()->addDefine("DEBUG_DISABLE_INDIRECT_LIGHT", std::to_string(mDebugDisableIndirectLight));
+    mpEvaluateReservoirsPass->getProgram()->addDefines(getRuntimeDefines());
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();
@@ -1910,6 +1960,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
 
     // Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
