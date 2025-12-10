@@ -414,7 +414,7 @@ void rayGen()
         }
 
         pathReservoir.flags.firstHitIsDelta = !pd.lastHitDiffuse;
-        pd.specularPath &= pd.lastHitDiffuse;
+        pd.specularPath &= !pd.lastHitDiffuse;
         pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08;
 
         RayDesc ray = {};
