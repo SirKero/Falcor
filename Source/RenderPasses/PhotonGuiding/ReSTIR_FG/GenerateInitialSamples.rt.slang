@@ -38,7 +38,8 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kEnableRandomReplay = ENABLE_RANDOM_REPLAY;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
-static const bool kEvalDeltaPdfs = false; //TODO set
+static const bool kEvalDeltaPdfs = false; // TODO set
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 struct RayPayload
 {
@@ -423,7 +424,7 @@ void rayGen()
     if (hitInfo.isValid()) {
         //Set RTXDI data
         let lod = ExplicitLodTextureSampler(0);
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 1);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1);
 
         ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -454,8 +455,8 @@ void rayGen()
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
 
-    #if ENABLE_RANDOM_REPLAY
-        SampleGenerator pathDirSG = SampleGenerator(pixel, gFrameCount * 5 + 2); // Sample generator for sampling new directions
+#if ENABLE_RANDOM_REPLAY
+        SampleGenerator pathDirSG = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 2); // Sample generator for sampling new directions
         if (sampleNewDirection(sd, mi, pathDirSG, pd, ray))
             tracePath(ray, sg, pathDirSG, pd, pathReservoir);
     #else //"Old" ReSTIR FG

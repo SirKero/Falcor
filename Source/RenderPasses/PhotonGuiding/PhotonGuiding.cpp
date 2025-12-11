@@ -164,6 +164,8 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
 
     updateGuidingTextures(pRenderContext, renderData);
 
+    updateNumberOfRNGPasses();
+
     tracePhotonPass(pRenderContext, renderData);
 
     switch (mPhotonRenderMode)
@@ -202,12 +204,14 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
             reSTIRResampleFGPass(pRenderContext, renderData);
         else
         {
-            reSTIRRetracePathsPass(pRenderContext, renderData);
+            for (uint i = 0; i < mResampleSettingsFG.spatialSamples + 1; i++)
+            {
+                reSTIRRetracePathsPass(pRenderContext, renderData,i);
 
-            reSTIRResamplePathsPass(pRenderContext, renderData);
+                reSTIRResamplePathsPass(pRenderContext, renderData, i);
+            }
         }
             
-
         reSTIRResampleCausticPass(pRenderContext, renderData);
 
         // Finalize Reservoirs
@@ -590,7 +594,27 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
         }
     }
-    
+
+    //Prev VBuffer and View
+    if (!mpVBufferPrev || mResetScreenTex)
+    {
+        auto vBuffer = renderData[kInputVBuffer]->asTexture();
+        mpVBufferPrev = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, vBuffer->getFormat(), 1u, 1u, nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mpVBufferPrev->setName("PreviousVBuffer");
+    }
+
+    if (!mpViewPrev || mResetScreenTex)
+    {
+        auto view = renderData[kInputView]->asTexture();
+        mpViewPrev = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, view->getFormat(), 1u, 1u, nullptr,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
+        );
+        mpViewPrev->setName("PreviousView");
+    }
 
     if (!mpPhotonCounter)
     {
@@ -1341,18 +1365,12 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
             sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
         }
         DefineList defines;
-        defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
         defines.add(mpScene->getSceneDefines());
-        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
-        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-        defines.add("USE_FIXED_PHOTON_GUIDING", mUseFixedGuidingDispatch ? "1" : "0");
-        defines.add("FIXED_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
-        defines.add("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
-        defines.add("TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
     // Defines
+    mTracePhotonPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
@@ -1364,6 +1382,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("FIXED_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
     mTracePhotonPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
     mTracePhotonPass.pProgram->addDefine("TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
+    mTracePhotonPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -1477,6 +1496,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     mTraceCameraPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     mTraceCameraPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mTraceCameraPass.pProgram->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+    mTraceCameraPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -1693,6 +1713,8 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
         "ENABLE_RANDOM_REPLAY", mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0"
     );
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
+    mGenerateInitialSamplesPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+
 
     // Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -1746,6 +1768,16 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
 void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Resampling Final Gather");
+
+    auto getRuntimeDefines = [&]() {
+        DefineList defines;
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add(mpRTXDI->getDefines());
+        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        return defines;
+    };
+
     // Initialize compute pass
     if (!mpResampleReservoirFGPass)
     {
@@ -1757,16 +1789,14 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-        defines.add(mpRTXDI->getDefines());
-        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
+        defines.add(getRuntimeDefines());
 
         mpResampleReservoirFGPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirFGPass);
 
     //Runtime defines
-    mpResampleReservoirFGPass->getProgram()->addDefine("ENABLE_GUIDING_JACOBIAN",mReSTIREnableGuidingJacobian ? "1" : "0");
+    mpResampleReservoirFGPass->getProgram()->addDefines(getRuntimeDefines());
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsFG.enable)
@@ -1809,22 +1839,171 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
     mpResampleReservoirFGPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
-void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData)
+void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
     FALCOR_PROFILE(pRenderContext, "Retrace Paths");
 
+    // Init Shader
+    if (!mRetracePathsPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRRetracePath);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mRetracePathsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mRetracePathsPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        mRetracePathsPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+    }
+
+    // Defines that can change on runtime
+    mRetracePathsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    //mRetracePathsPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvaluateDeltaPDFs ? "1" : "0");
+    mRetracePathsPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mRetracePathsPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+    mRetracePathsPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+    mRetracePathsPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
+    mRetracePathsPass.pProgram->addDefine(
+        "GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor)
+    );
+    mRetracePathsPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
+
+    // Program Vars
+    if (!mRetracePathsPass.pVars)
+        mRetracePathsPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+    FALCOR_ASSERT(mRetracePathsPass.pVars);
+
+    if (!mCanResample || !mResampleSettingsFG.enable)
+        return;
+
+    auto var = mRetracePathsPass.pVars->getRootVar();
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
+    var["CB"]["gNumResamplingPass"] = numPass; // Current path iteration starting from 0 (temporal)
+    var["CB"]["gSpatialSampleRadius"] = mResampleSettingsFG.samplingRadius;
+
+    // Input Resources
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gView"] = renderData[kInputView]->asTexture();
+    var["gMVec"] = renderData[kInputMVec]->asTexture();
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gViewPrev"] = mpViewPrev;
+
+    mpPhotonAS->bindTlas(var, "gPhotonAS");
+    for (uint32_t i = 0; i < 2; i++)
+    {
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
+    }
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
+
+    // Output Resources
+    var["gRetraceReservoirPath"] = mpRetracedPath[0];
+    var["gRetraceReservoirPathPrev"] = mpRetracedPath[1];
+
+    // Dispatch Shader
+    mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));
 }
 
-void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData)
+void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
     FALCOR_PROFILE(pRenderContext, "Resample Paths");
 
+    auto getRuntimeDefines = [&](){
+        DefineList defines;
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        return defines;
+    };
 
+    // Initialize compute pass
+    if (!mpResampleReservoirPathPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRResamplePath).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(getRuntimeDefines());
+
+        mpResampleReservoirPathPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpResampleReservoirPass);
+    mpResampleReservoirPathPass->getProgram()->addDefines(getRuntimeDefines());                       // Runtime define
+
+    // Return early if there is no previous reservoir or resampling is disabled
+    if ((!mCanResample) || !mResampleSettingsFG.enable)
+    {
+        return;
+    }
+
+    // Set variables
+    auto var = mpResampleReservoirPathPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    // Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gConfidenceLimit"] = mResampleSettingsFG.confidenceCap;
+    var["CB"]["gSpatialRadius"] = mResampleSettingsFG.samplingRadius;
+    var["CB"]["gSpatialSamples"] = mResampleSettingsFG.spatialSamples;
+    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsFG.disocclusionBoostExtraSamples;
+    var["CB"]["gNormalThreshold"] = mResampleSettingsFG.usePathThreshold;
+    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
+    var["CB"]["gUsePathThreshold"] = mResampleSettingsFG.usePathThreshold;
+    var["CB"]["gNumResamplingPass"] = numPass;
+
+    // Input Resources
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gView"] = renderData[kInputView]->asTexture();
+    var["gViewPrev"] = mpViewPrev;
+    var["gMVec"] = renderData[kInputMVec]->asTexture();
+    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
+    var["gRetracedPath"] = mpRetracedPath[0];
+    var["gRetracedPathPrev"] = mpRetracedPath[1];
+
+    // In-/Output Resources
+    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+
+    // Execute Compute Pass
+    const uint2 targetDim = renderData.getDefaultTextureDims();
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpResampleReservoirPathPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
 void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "Resampling Caustics");
+
+    auto getRuntimeDefines = [&]() {
+        DefineList defines;
+        defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
+        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
+        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        return defines;
+    };
+
     // Initialize compute pass
     if (!mpResampleReservoirCausticPass)
     {
@@ -1836,18 +2015,14 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add(mpRTXDI->getDefines());
-        defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
-        defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
+        defines.add(getRuntimeDefines());
+       
 
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirCausticPass);
     //Runtime defines
-    mpResampleReservoirCausticPass->getProgram()->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
-    mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-    mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_GUIDING_JACOBIAN",mReSTIREnableGuidingJacobian ? "1" : "0"); 
+    mpResampleReservoirCausticPass->getProgram()->addDefines(getRuntimeDefines());
 
     // Return early if there is no previous reservoir or resampling is disabled
     if ((!mCanResample) || !mResampleSettingsCaustic.enable)
@@ -1918,6 +2093,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add(
             "ENABLE_RANDOM_REPLAY", mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0"
         );
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         return defines;
     };
 
@@ -1964,6 +2140,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
 
     // Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gViewPrev"] = mpViewPrev;
 
     // Guiding textures
     var["gGuidingCounter"] = mpRecordGuidingAtlas;
@@ -2114,5 +2292,24 @@ void PhotonGuiding::reSTIRSortSplattedReservoirsPass(RenderContext* pRenderConte
         const uint targetDim = mScreenRes.x * mScreenRes.y;
         FALCOR_ASSERT(targetDim > 0);
         mpSplatSortCellData->execute(pRenderContext, uint3(targetDim, 1, 1));
+    }
+}
+
+void PhotonGuiding::updateNumberOfRNGPasses()
+{
+    switch (mPhotonRenderMode)
+    {
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::PhotonMapping:
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::FinalGathering:
+        mRNGNumPasses = 2;
+        break;
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_FG:
+        mRNGNumPasses = 5;
+        break;
+    case Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton:
+        mRNGNumPasses = 6 + 3 * (1 + mResampleSettingsFG.spatialSamples);
+        break;
+    default:
+        break;
     }
 }

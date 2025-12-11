@@ -36,7 +36,8 @@ RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEnableGuidingJacobian = ENABLE_GUIDING_JACOBIAN;
-static const bool kGuidingJacobianMISOnly = true;   //Only use for MIS
+static const bool kGuidingJacobianMISOnly = true; // Only use for MIS
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 float getCurrentGuidingPdf(ReservoirFG r) {
     if(r.lightIndex < 0 || any(r.guidingPixels < 0))
@@ -190,7 +191,7 @@ bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFPro
 void main(uint2 pixel: SV_DispatchThreadID)
 {
     let lod = ExplicitLodTextureSampler(0.f);
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 2);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 2);
 
     ReservoirFG current = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
     HitInfo currentHit = HitInfo(current.sampleSurface);

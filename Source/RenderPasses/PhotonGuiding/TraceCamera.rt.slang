@@ -44,6 +44,7 @@ static const uint kRenderMode = RENDER_TECHNIQUE;
 static const uint kGuidingMode = GUIDING_MODE;
 static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 struct RayPayload
 {
@@ -297,7 +298,7 @@ void rayGen()
         
         //Get Material Properties
         let lod = ExplicitLodTextureSampler(0);
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 2 + 1);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1);
 
         ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;

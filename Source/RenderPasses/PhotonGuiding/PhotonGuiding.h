@@ -67,6 +67,8 @@ private:
     //Prepares needed Buffers and Textures and Acceleration Structures
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
 
+    void updateNumberOfRNGPasses();
+
     //Uses Reduce and updates the guiding textures
     void updateGuidingTextures(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -110,10 +112,10 @@ private:
     void reSTIRResampleFGPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Retraces the paths
-    void reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
     //Resamples paths
-    void reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
     //ReSTIR resample caustic reservoirs pass
     void reSTIRResampleCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -146,6 +148,7 @@ private:
     bool mOptionsChanged = false;
     bool mResetClearResources = false;
     uint mNumberLightPaths = 0;
+    uint mRNGNumPasses = 29; //For proper offsets in the RNG 
 
     // Material Settings
     bool mUseLambertianDiffuse = false;         // Enable Lambert Diffuse BRDF instead of Frostbyte
@@ -262,7 +265,7 @@ private:
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     ref<Texture> mpGuidingAtlas[2];                  //Atlas for Guiding Textures for Photon Guiding
     ref<Texture> mpGuidingAtlasPrevUnblurred;   //Atlas Guiding Textures used for the blur (temporal history needs to be retained)
-    ref<Texture> mpGuidingAtlasBlurHelper;           //Gaussian blur helper (seperated)
+    ref<Texture> mpGuidingAtlasBlurHelper;           //Gaussian blur helper (separated)
     ref<Buffer> mpAtlasBlurWeights;                 //Weights for the atlas blur
     ref<Texture> mpRecordGuidingAtlas;            //Atlas texture to record guiding data.
     ref<Texture> mpLightIndexGuidingTexture[2];            //Texture with the size corresponding to the number of lights
@@ -275,6 +278,8 @@ private:
     ref<Texture> mpResampleMVec;                               // Motion vectors for resampling (includes reflections and refractions)
     ref<Buffer> mpPathReservoir[2];                            // Reservoir storing a path
     ref<Buffer> mpRetracedPath[2];                             // Buffer for retracing a path
+    ref<Texture> mpVBufferPrev;                                // VBuffer previous Frame
+    ref<Texture> mpViewPrev;                                   // View Vector previous Frame
     //Caustic ReSTIR Splatting
     ref<Texture> mpLightTraceHeadCounter;                      // Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;                        // Linked List for light tracing

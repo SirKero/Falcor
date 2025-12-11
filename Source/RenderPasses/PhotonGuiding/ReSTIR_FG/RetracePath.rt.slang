@@ -5,8 +5,9 @@ import Scene.Raytracing;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
-import StructsAndHelpers;
-import PhotonHelper;
+import RenderPasses.PhotonGuiding.PhotonHelper;
+import RenderPasses.PhotonGuiding.StructsAndHelpers;
+import RenderPasses.PhotonGuiding.SharedEnums;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
@@ -20,17 +21,14 @@ StructuredBuffer<PathReservoir> gPathReservoirPrev;
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPath;         //Retraced path for the current sample
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
 
-RWTexture2D<float4> gDebug;
-
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kCausticInstanceMask = 2;
 static const uint kAllPhotonInstanceMask = 0xFF;
-static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
+static const bool kEvalDeltaPdfs = false; //EVAL_DELTA_PDFS;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
 cbuffer CB
 {
@@ -142,7 +140,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         }
 
         // Load shading structs
-        ShadingData sd = loadShadingData(hit, -ray.Direction, lod);
+        ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
         bool hitIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold); // Either diffuse surface or emissive hit
@@ -271,7 +269,7 @@ void rayGen()
             // Get starting surface for temporal retrace
             HitInfo prevHit = HitInfo(gVBufferPrev[prevPixel]);
             float3 prevViewDir = gViewPrev[prevPixel].xyz;
-            ShadingData sd = loadShadingData(prevHit, prevViewDir, lod);
+            ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
             if (!randomReplay(sd, reservoir, sg, retraceSurface)) {
                 retraceSurface.F = float3(0);
@@ -285,7 +283,7 @@ void rayGen()
         if (resampleReservoir.pathLength > 0) {
             RetracedPath retraceSurface = RetracedPath();
             float3 viewDir = gView[pixel].xyz;
-            ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
+            ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
 
             if (!randomReplay(sd, resampleReservoir, sg, retraceSurface)) {
                 retraceSurface.F = float3(0);

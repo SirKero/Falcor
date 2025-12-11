@@ -6,7 +6,6 @@ import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
-import Rendering.RTXDI.RTXDI;
 
 cbuffer CB
 {
@@ -55,6 +54,7 @@ static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const bool kEnableGuidingJacobian = ENABLE_GUIDING_JACOBIAN;
 static const bool kGuidingJacobianMISOnly = true; // Only use for MIS
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 float getCurrentGuidingPdf(ReservoirCaustic r) {
     if (r.lightIndex < 0 || any(r.guidingPixels < 0))
@@ -400,7 +400,7 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
 {
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 3);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 2));
 
     ReservoirCaustic current = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
     HitInfo currentHit = HitInfo(current.sampleSurface);

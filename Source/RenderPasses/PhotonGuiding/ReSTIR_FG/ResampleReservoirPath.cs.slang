@@ -5,7 +5,8 @@ import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
-import StructsAndHelpers;
+import RenderPasses.PhotonGuiding.StructsAndHelpers;
+//import RenderPasses.PhotonGuiding.SharedEnums;
 
 cbuffer CB
 {
@@ -34,8 +35,6 @@ StructuredBuffer<RetracedPath> gRetracedPath;
 StructuredBuffer<RetracedPath> gRetracedPathPrev;
 
 RWStructuredBuffer<PathReservoir> gPathReservoir;
-
-RWTexture2D<float4> gDebug;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -72,8 +71,8 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
     // Check if primary surfaces are similar (only for spatial resampling)
     let lod = ExplicitLodTextureSampler(0);
-    ShadingData sdCurrent = loadShadingData(firstHit, gView[pixel].xyz, lod);
-    ShadingData sdPrev = loadShadingData(prevHit, gViewPrev[reservoirPixel].xyz, lod);
+    ShadingData sdCurrent = loadShadingData(firstHit, -gView[pixel].xyz, lod);
+    ShadingData sdPrev = loadShadingData(prevHit, -gViewPrev[reservoirPixel].xyz, lod);
 
     // Needed reservoir variables
     float w_0 = 0;
@@ -106,7 +105,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
             // Load other reconnection surface if path length > 0
             if (rCurr.pathLength > 0 && retracedPathValid) {
-                sdPrev = loadShadingData(HitInfo(retracedPath.rcSurface), retracedPath.rcViewDir, lod);
+                sdPrev = loadShadingData(HitInfo(retracedPath.rcSurface), -retracedPath.rcViewDir, lod);
                 thpOther = retracedPath.rcThp;
             }
 
@@ -169,7 +168,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
             float3 thpPrev = float3(1);
             // Load retraced surface
             if (rPrev.pathLength > 0 && retracedPathValid) {
-                sdCurrent = loadShadingData(HitInfo(retracedPath.rcSurface), retracedPath.rcViewDir, lod);
+                sdCurrent = loadShadingData(HitInfo(retracedPath.rcSurface), -retracedPath.rcViewDir, lod);
                 thpPrev = retracedPath.rcThp;
             }
 
@@ -183,9 +182,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 jacobianPrev = miPrev.evalPdf(sdCurrent, toSample);
                 jacobianPrev *= abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
                 jacobianDeterminant = jacobianPrev / rPrev.jacobian;
-
-                gDebug[pixel] = float4(jacobianPrev, rPrev.jacobian, jacobianDeterminant , 1);
-  
+                  
                 float3 bsdf = float3(0);
                 if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {

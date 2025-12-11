@@ -19,6 +19,8 @@ RWTexture2D<uint> gGuidingCounter;
 RWTexture2D<uint> gLightIndexGuidingCounter;
 
 RWTexture2D<float4> gOutColor;
+RWTexture2D<PackedHitInfo> gVBufferPrev;
+RWTexture2D<float4> gViewPrev;
 
 cbuffer CB
 {
@@ -36,6 +38,7 @@ static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 static const bool kDisableDirectLight = DEBUG_DISABLE_DIRECT_LIGHT;
 static const bool kDisableIndirectLight = DEBUG_DISABLE_INDIRECT_LIGHT;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 void addToGuidingTexture(int lightIndex, int2 guidingPixel, float emission, uint reservoirConfidence)
 {
@@ -136,8 +139,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
     float3 viewDir = gScene.camera.computeRayPinhole(pixel, gFrameDim).dir;
 
     float3 outColor = float3(0);
-    if(hitInfo.isValid()){
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 4);
+    if (hitInfo.isValid()) {
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 1));
         let lod = ExplicitLodTextureSampler(0.f);
 
         // Get Material properties
@@ -183,4 +186,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
     }
 
     gOutColor[pixel] = float4(outColor, 1.0);
+#if ENABLE_RANDOM_REPLAY
+    gVBufferPrev[pixel] = hitInfo.getData();
+    gViewPrev[pixel] = float4(-viewDir, 1);
+#endif
 }

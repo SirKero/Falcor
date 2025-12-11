@@ -53,6 +53,7 @@ static const bool kUseFixedPhotonGuiding = USE_FIXED_PHOTON_GUIDING; // Photons 
 static const uint kFixedPhotonGuidingMinPhotons = FIXED_GUIDING_MIN_PHOTONS; // Min photons for light guiding
 static const uint kAnalyticLightIdxOffset = ANALYTIC_START_INDEX;
 static const uint kTotalLightCount = TOTAL_LIGHT_COUNT;
+static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 struct RayPayload
 {
@@ -541,7 +542,7 @@ void rayGen()
 
     const float invRejection = 1.f / gGlobalRejectionProb;
 
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 2);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
     RayDesc ray = {};
     PhotonLightSample pls = {};
 
