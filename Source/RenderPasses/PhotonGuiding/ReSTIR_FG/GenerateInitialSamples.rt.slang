@@ -265,13 +265,11 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
                 uint flags = 0;
                 if (isFinalGather) {
                     flags |= (uint)ReservoirPathFlags::isFinalGather;
-                    pathReservoir.fgRadiance = radianceEstimate;
                     pathReservoir.samplePosW = sd.posW;
                     pathReservoir.sampleNormal = sd.faceN;
                 }
                 else {
                     flags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
-                    pathReservoir.fgRadiance = radianceEstimate;
                     pathReservoir.samplePosW = photonSample.posW;
                     pathReservoir.sampleNormal = photonSample.normal;
                     pathReservoir.sampleRadius = photonSample.radius;
@@ -457,6 +455,7 @@ void rayGen()
 
 #if ENABLE_RANDOM_REPLAY
         SampleGenerator pathDirSG = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 2); // Sample generator for sampling new directions
+        pathReservoir.sgPathDirections = pathDirSG;
         if (sampleNewDirection(sd, mi, pathDirSG, pd, ray))
             tracePath(ray, sg, pathDirSG, pd, pathReservoir);
     #else //"Old" ReSTIR FG

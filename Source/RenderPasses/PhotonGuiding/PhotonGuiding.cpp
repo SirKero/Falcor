@@ -381,7 +381,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         mGuidingResetAccumulateCount = group.button("Reset Guiding Textures");
     }
 
-    if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_FG)
+    if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_FG || mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton)
     {
         if (auto group = widget.group("RTXDI"))
         {

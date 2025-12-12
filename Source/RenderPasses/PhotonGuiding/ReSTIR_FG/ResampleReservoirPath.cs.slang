@@ -73,7 +73,8 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     let lod = ExplicitLodTextureSampler(0);
     ShadingData sdCurrent = loadShadingData(firstHit, -gView[pixel].xyz, lod);
     ShadingData sdPrev = loadShadingData(prevHit, -gViewPrev[reservoirPixel].xyz, lod);
-
+    // TODO
+    
     // Needed reservoir variables
     float w_0 = 0;
     float w_1 = 0;
@@ -97,8 +98,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         float mis = 1;
         if (rCurr.flags.hasNoReconnectionSurface) {
             float3 retracedF = retracedPath.F * (retracedPath.jacobian / rCurr.jacobian);
-            mis = evalMIS(rCurr.c, luminance(rCurr.F), rPrev.c, luminance(retracedF));
-            
+            mis = evalMIS(rCurr.c, luminance(rCurr.F), rPrev.c, luminance(retracedF));            
         }else
         {
             float3 thpOther = float3(1);
@@ -118,18 +118,20 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian to Sample
+                float pdf = miPrev.evalPdf(sdPrev, toSample);
                 float jacobianNew = abs(dot(rCurr.sampleNormal, -toSample)) / (distToSample * distToSample);
-                jacobianNew *= miPrev.evalPdf(sdPrev, toSample);
+                jacobianNew *= pdf;
                 float jacobian = jacobianNew / rCurr.jacobian;
-                float3 pathRadiance = float3(0);
 
+                float3 pathRadiance = float3(0);
                 if (jacobian > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdPrev, toSample, distToSample)) {
-                        pathRadiance += miPrev.eval(sdPrev, toSample, sg) * jacobian * rCurr.fgRadiance * thpOther;
+                        float3 bsdf = miPrev.eval(sdPrev, toSample, sg) / pdf;
+                        pathRadiance += bsdf * jacobian * rCurr.fgRadiance * thpOther;
                     }
                 }
-                p1 = luminance(pathRadiance);
 
+                p1 = luminance(pathRadiance);
                 mis = evalMIS(rCurr.c, p0, rPrev.c, p1);
             }
         }
@@ -179,14 +181,15 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian from reconnect surface to other sample
-                jacobianPrev = miPrev.evalPdf(sdCurrent, toSample);
-                jacobianPrev *= abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
+                float pdf = miPrev.evalPdf(sdCurrent, toSample);
+                jacobianPrev = abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
+                jacobianPrev *= pdf;
                 jacobianDeterminant = jacobianPrev / rPrev.jacobian;
                   
                 float3 bsdf = float3(0);
                 if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
-                        bsdf = miPrev.eval(sdCurrent, toSample, sg);
+                        bsdf = miPrev.eval(sdPrev, toSample, sg) / pdf;
                     }
                     Fprev = rPrev.fgRadiance * bsdf * thpPrev;
                 }
@@ -218,7 +221,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         reservoir.weight /= sampleRad;
     else
         reservoir.weight = 0;
-
+    
     return true;
 }
 
@@ -230,7 +233,6 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     HitInfo hit = HitInfo(gVBuffer[pixel]);
     PathReservoir reservoir = PathReservoir();
-
     if (hit.isValid()) {
         let lod = ExplicitLodTextureSampler(0.f);
         SampleGenerator sgPixelOffset = SampleGenerator( pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sample generator for the pixel offset (search region) same as RetraceReservoirs
