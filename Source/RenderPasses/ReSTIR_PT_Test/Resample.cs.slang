@@ -51,9 +51,10 @@ float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleS
     float3 toSample = sdSampleSurface.posW - sdOther.posW;
     float distToSample = length(toSample);
     toSample /= distToSample;
-    //Jacobian to Sample
+    // Jacobian to Sample
+    float pdf = miOther.evalPdf(sdOther, toSample);
     float jacobianNew = abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
-    jacobianNew *= miOther.evalPdf(sdOther, toSample);
+    jacobianNew *= pdf;
     float jacobian = jacobianNew / r.jacobianDeterminant;
     // Add Jacobian from sample
     
@@ -65,7 +66,8 @@ float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleS
 
     if (jacobian > 0 && (distToSample > kJacobianDistanceThreshold)) {
         if (dispatchShadowRay(sdOther, toSample, distToSample)) {
-            p1 = luminance(miOther.eval(sdOther, toSample, sg) * jacobian * r.rcThp * thp);
+            float3 bsdf = miOther.eval(sdOther, toSample, sg) / pdf;
+            p1 = luminance(bsdf * jacobian * r.rcThp * thp);
         }
     }
 
@@ -189,7 +191,8 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian from reconnect surface to other sample
-                jacobianTemporal = miOther.evalPdf(sdCurrent, toSample);
+                float pdf = miOther.evalPdf(sdCurrent, toSample);
+                jacobianTemporal = pdf;
                 jacobianTemporal *= abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
                 jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
 
@@ -201,7 +204,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
 
                 if (jacobianDeterminant > 0 && (distToSample > kJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
-                        thpTemporal *= miOther.eval(sdCurrent, toSample, sg);
+                        thpTemporal *= miOther.eval(sdCurrent, toSample, sg) / pdf;
                     } else {
                         thpTemporal = float3(0);
                     }

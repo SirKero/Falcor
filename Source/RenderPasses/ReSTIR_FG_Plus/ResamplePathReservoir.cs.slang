@@ -119,14 +119,16 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian to Sample
+                float pdf = miPrev.evalPdf(sdPrev, toSample);
                 float jacobianNew = abs(dot(rCurr.sampleNormal, -toSample)) / (distToSample * distToSample);
-                jacobianNew *= miPrev.evalPdf(sdPrev, toSample);
+                jacobianNew *= pdf;
                 float jacobian = jacobianNew / rCurr.jacobian;
                 float3 pathRadiance = float3(0);
 
                 if (jacobian > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdPrev, toSample, distToSample)) {
-                        pathRadiance += miPrev.eval(sdPrev, toSample, sg) * jacobian * rCurr.fgRadiance * thpOther;
+                        float3 bsdf = miPrev.eval(sdPrev, toSample, sg) / pdf;
+                        pathRadiance += bsdf * jacobian * rCurr.fgRadiance * thpOther;
                     }
                 }
                 p1 = luminance(pathRadiance);
@@ -180,8 +182,9 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian from reconnect surface to other sample
-                jacobianPrev = miPrev.evalPdf(sdCurrent, toSample);
-                jacobianPrev *= abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
+                float pdf = miPrev.evalPdf(sdCurrent, toSample);
+                jacobianPrev = abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
+                jacobianPrev *= pdf;
                 jacobianDeterminant = jacobianPrev / rPrev.jacobian;
 
                 gDebug[pixel] = float4(jacobianPrev, rPrev.jacobian, jacobianDeterminant , 1);
@@ -189,7 +192,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 float3 bsdf = float3(0);
                 if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
-                        bsdf = miPrev.eval(sdCurrent, toSample, sg);
+                        bsdf = miPrev.eval(sdCurrent, toSample, sg) / pdf;
                     }
                     Fprev = rPrev.fgRadiance * bsdf * thpPrev;
                 }
