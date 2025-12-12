@@ -460,6 +460,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.tooltip("Threshold when a surface is handled as delta");
         changed |= group.checkbox("Use Diffuse Lambert BRDF", mUseLambertianDiffuse);
         group.tooltip("Enables Lambertian Diffuse BRDS. If disabled the Frostbyte diffuse BRDF (Falcor default) is used");
+        changed |= group.checkbox("Evaluate Delta PDFs", mEvalDeltaPdfs);
+        group.tooltip("If checked, delta PDFs are evaluated (always 0), which will disable some resampling paths. If unchecked they are set to 1.");
     }
 
     if (auto group = widget.group("Debug"))
@@ -1714,7 +1716,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     );
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
     mGenerateInitialSamplesPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
-
+    mGenerateInitialSamplesPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPdfs ? "1" : "0");
 
     // Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -1728,6 +1730,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
 
     // RTXDI Resources
     mpRTXDI->setShaderData(var);
@@ -1870,7 +1873,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
 
     // Defines that can change on runtime
     mRetracePathsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    //mRetracePathsPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvaluateDeltaPDFs ? "1" : "0");
+    mRetracePathsPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPdfs ? "1" : "0");
     mRetracePathsPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
     mRetracePathsPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mRetracePathsPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
@@ -1895,6 +1898,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
     var["CB"]["gNumResamplingPass"] = numPass; // Current path iteration starting from 0 (temporal)
     var["CB"]["gSpatialSampleRadius"] = mResampleSettingsFG.samplingRadius;
+    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -1966,11 +1970,11 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
     var["CB"]["gConfidenceLimit"] = mResampleSettingsFG.confidenceCap;
     var["CB"]["gSpatialRadius"] = mResampleSettingsFG.samplingRadius;
     var["CB"]["gSpatialSamples"] = mResampleSettingsFG.spatialSamples;
-    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsFG.disocclusionBoostExtraSamples;
     var["CB"]["gNormalThreshold"] = mResampleSettingsFG.usePathThreshold;
-    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
+    var["CB"]["gRelativeDepthThreshold"] = mResampleSettingsFG.relativeDepthThreshold;
     var["CB"]["gUsePathThreshold"] = mResampleSettingsFG.usePathThreshold;
     var["CB"]["gNumResamplingPass"] = numPass;
+    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();

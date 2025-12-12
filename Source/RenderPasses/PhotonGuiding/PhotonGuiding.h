@@ -153,6 +153,7 @@ private:
     // Material Settings
     bool mUseLambertianDiffuse = false;         // Enable Lambert Diffuse BRDF instead of Frostbyte
     float mSpecularRoughnessThreshold = 0.25f; // Any material below this is considered specular
+    bool mEvalDeltaPdfs = false;                // If true delta pdfs are properly evaluated (==0), if false they are set to 1.
 
     //
     // Path Tracer

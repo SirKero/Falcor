@@ -15,11 +15,11 @@ cbuffer CB
     uint gConfidenceLimit;  //Confidence Limit
 
     uint gSpatialSamples;                   //Number of spatial samples
-    uint gDisocclusionBoostSpatialSamples;  //How many extra spatial samples if temporal resampling fails
     float gSpatialRadius;   //radius for spatial resampling
     float gNormalThreshold; // Normal Threshold
+    float gRelativeDepthThreshold; // Relative depth threshold
 
-    float gJacobianDistanceThreshold; // Jacobian distance threshold
+    float gJacobianDistanceThreshold;   
     bool gUsePathThreshold;           // Enables and disables path threshold
     uint gNumResamplingPass;
     uint _pad;
@@ -73,7 +73,17 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     let lod = ExplicitLodTextureSampler(0);
     ShadingData sdCurrent = loadShadingData(firstHit, -gView[pixel].xyz, lod);
     ShadingData sdPrev = loadShadingData(prevHit, -gViewPrev[reservoirPixel].xyz, lod);
-    // TODO
+    bool isSpatialResampling = gNumResamplingPass > 0;
+    if (isSpatialResampling) {
+        const float3 cameraPos = gScene.camera.getPosition();
+        float currentDepth = distance(cameraPos, sdCurrent.posW);
+        float temporalDepth = distance(cameraPos, sdPrev.posW);
+        bool normalThreshold = abs(dot(sdCurrent.getOrientedFaceNormal(), sdPrev.getOrientedFaceNormal())) < gNormalThreshold; 
+        bool depthThreshold = abs(currentDepth - temporalDepth) > gRelativeDepthThreshold * currentDepth;
+
+        if (normalThreshold || depthThreshold)
+            return false;
+    }
     
     // Needed reservoir variables
     float w_0 = 0;
@@ -176,12 +186,12 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
             // Reconnect
             if (retracedPathValid) {
-                let miPrev = gScene.materials.getMaterialInstance(sdCurrent, lod, kMIHints);
+                let miCurrent = gScene.materials.getMaterialInstance(sdCurrent, lod, kMIHints);
                 float3 toSample = rPrev.samplePosW - sdCurrent.posW;
                 float distToSample = length(toSample);
                 toSample /= distToSample;
                 // Jacobian from reconnect surface to other sample
-                float pdf = miPrev.evalPdf(sdCurrent, toSample);
+                float pdf = miCurrent.evalPdf(sdCurrent, toSample);
                 jacobianPrev = abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
                 jacobianPrev *= pdf;
                 jacobianDeterminant = jacobianPrev / rPrev.jacobian;
@@ -189,11 +199,10 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 float3 bsdf = float3(0);
                 if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
-                        bsdf = miPrev.eval(sdPrev, toSample, sg) / pdf;
+                        bsdf = miCurrent.eval(sdCurrent, toSample, sg) / pdf;
                     }
                     Fprev = rPrev.fgRadiance * bsdf * thpPrev;
                 }
-
             }
         }
 
@@ -257,6 +266,6 @@ void main(uint2 pixel: SV_DispatchThreadID)
         if (!resampleReservoir(reservoir, rCurr, pixel, prevPixel, hit, sg))
             reservoir = rCurr;
     }
-
+    
     gPathReservoir[index2Dto1D(pixel, gFrameDim.x)] = reservoir;   
 }

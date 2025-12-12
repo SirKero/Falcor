@@ -30,6 +30,8 @@ cbuffer CB
     uint gFGRayMaxPathLength; // Max path length for a Final Gather sample
     uint gNumLightPaths;      // For photon weight
     float gNormalizedPixelArea; // Pixel area at distance 1 used in light trace
+
+    float gJacobianDistanceThreshold;   //Jacobian distance threshold for path ReSTIR FG
 }
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -38,7 +40,7 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kEnableRandomReplay = ENABLE_RANDOM_REPLAY;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
-static const bool kEvalDeltaPdfs = false; // TODO set
+static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
 struct RayPayload
@@ -229,9 +231,10 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
-        bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float rayDist = distance(ray.Origin, sd.posW);
+        bool jacobianDistanceThreshold = rayDist > gJacobianDistanceThreshold;
+        bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold && jacobianDistanceThreshold;
+        bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // Jacobian for this iteration
 
         // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI except the primary hit is delta

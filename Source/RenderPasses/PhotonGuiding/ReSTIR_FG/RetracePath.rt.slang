@@ -25,7 +25,7 @@ static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kCausticInstanceMask = 2;
 static const uint kAllPhotonInstanceMask = 0xFF;
-static const bool kEvalDeltaPdfs = false; //EVAL_DELTA_PDFS;
+static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
@@ -36,6 +36,8 @@ cbuffer CB
     uint gFGRayMaxPathLength;   // Max path length for a Final Gather sample
     float gSpatialSampleRadius; // Pixel area at distance 1 used in light trace
     uint gNumResamplingPass;
+
+    float gJacobianDistanceThreshold;  //Depth threshold for jacobian
 }
 
 struct RayPayload
@@ -131,7 +133,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
             if (validEnvSample) {
                 float3 envMapContribution = gScene.envMap.eval(ray.Direction) * rpd.thp;
                 retracedPath.flags = (uint)ReservoirPathFlags::isEnvMapHit;
-                retracedPath.rcViewDir = ray.Direction;
+                retracedPath.rcViewDir = -ray.Direction;
                 retracedPath.jacobian = rpd.scatterPDF;
                 retracedPath.F = envMapContribution;
                 rpd.retraceSuccessful = true;
@@ -143,9 +145,10 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
-        bool hitIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold); // Either diffuse surface or emissive hit
-        bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float rayDist = distance(ray.Origin, sd.posW);
+        bool jacobianDistanceThreshold = rayDist > gJacobianDistanceThreshold;
+        bool hitIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold) && jacobianDistanceThreshold; // Either diffuse surface or emissive hit
+        bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float jacobian = rpd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); //Jacobian for this iteration
 
         // Delta -> Emissive case
