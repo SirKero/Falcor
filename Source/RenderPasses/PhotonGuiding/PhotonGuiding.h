@@ -212,6 +212,7 @@ private:
     ResamplingSettings mResampleSettingsCaustic = {};
     bool mRebuildReservoirBuffer = false;
     bool mCanResample = false;
+    bool mPathResamplingUseNEEAfterSpecular = true;
 
     // Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();

@@ -47,6 +47,7 @@ static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const bool kUseNEEForPathReservoirs = PATH_RESERVOIR_USE_NEE;
 
 struct RayPayload
 {
@@ -286,9 +287,11 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         if (hitIsDiffuse) {
             bool isFinalGather = pd.lastHitDiffuse && !triedToSetFGSurface;
             PhotonSample photonSample;
-            //photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather && !triedToSetFGSurface); //TODO add this setting as a mode
-            photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02 , gNumLightPaths, sg, photonSample, false);
-            // float3 radianceEstimate = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !isFinalGather && !triedToSetFGSurface);
+            if (kUseNEEForPathReservoirs)
+                photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
+            else
+                photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather && !triedToSetFGSurface);
+
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
                 pathReservoir.pathLength = isFinalGather ? pd.pathLength - 1 : pd.pathLength;
@@ -313,7 +316,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             }
 
             // Next event estimation after specular hits used for direct light
-            if (!isFinalGather) {
+            if (kUseNEEForPathReservoirs && !isFinalGather) {
                 SampleGenerator neeSgState = sg; // Cache sampleGenerator state
                 LightSample ls;
                 float3 nee = nextEventEstimation(sd, mi, gNeeLightSelectProb, ls, sg);

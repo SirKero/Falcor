@@ -394,7 +394,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 group.text("Load a scene for RTXDI options");
             }
         }
-        if (auto group = widget.group("ReSTIR FG"))
+        if (auto group = widget.group("Photon ReSTIR"))
         {
             group.var("Final Gather Path Length", mPTMaxBounces, 1u, 64u, 1u);
             group.tooltip(
@@ -402,14 +402,17 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 "Material Options)"
             );
 
-            auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget, bool isCausticResampling = false)
+            auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget, bool isCausticResampling = false, bool includeDisocclusionSamples = false)
             {
                 widget.checkbox("Enable Resampling", settings.enable);
                 widget.var("Confidence Cap", settings.confidenceCap, 1u, UINT_MAX, 1u);
                 widget.tooltip("Maximum confidence a reservoir can have");
                 widget.var("Spatial Samples", settings.spatialSamples, 0u, 64u, 1u);
-                widget.var("Disocclusion additional spatial samples", settings.disocclusionBoostExtraSamples, 0u, 16u, 1u);
-                widget.tooltip("Extra spatial samples if temporal resampling fails");
+                if (includeDisocclusionSamples) {
+                    widget.var("Disocclusion additional spatial samples", settings.disocclusionBoostExtraSamples, 0u, 16u, 1u);
+                    widget.tooltip("Extra spatial samples if temporal resampling fails");
+
+                }
                 widget.var("Spatial Sample Radius", settings.samplingRadius, 0.f, FLT_MAX, 1.f);
                 widget.var("Normal Rejection Threshold", settings.normalThreshold, 0.f, 1.0f, 0.001f);
                 widget.tooltip("Threshold of dot product between both reservoir face normals");
@@ -423,7 +426,13 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
             if (auto group2 = group.group("Resampling FG options"))
             {
-                resampleUI(mResampleSettingsFG, group2);
+                resampleUI(mResampleSettingsFG, group2, false, mPhotonRenderMode == PhotonRenderMode::ReSTIR_FG);
+                if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton) {
+                    if (group2.checkbox("Use NEE for direct Light after specular hit", mPathResamplingUseNEEAfterSpecular))
+                        mCanResample = false;
+                    group2.tooltip("If enabled, NEE is used for direct light after an specular surface was encountered."
+                        "Else, the radiance estimate for those surfaces includes global photons with a path lenght of 0 (direct light for that surface)");
+                }
             }
             if (auto group2 = group.group("Resampling Caustic options"))
             {
@@ -1749,6 +1758,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mGenerateInitialSamplesPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPdfs ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_USE_NEE", mPathResamplingUseNEEAfterSpecular ? "1" : "0");
     if (mpEmissiveLightSampler)
         mGenerateInitialSamplesPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
