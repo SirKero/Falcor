@@ -28,6 +28,7 @@ enum ReservoirPathFlags : uint {
     isEmissiveHit = 0x800,            // 1<<11
     isEnvMapHit = 0x1000,             // 1<<12
     isRadianceEstimate = 0x2000,      // 1<<13
+    isNEE = 0x4000                    // 1<<14
 }
 
 //Reservoir flag struct
@@ -98,6 +99,14 @@ struct ReservoirFlags {
         set {
             flags &= ~(uint)ReservoirPathFlags::isRadianceEstimate; // Clear bit
             flags |= (newValue ? (uint)ReservoirPathFlags::isRadianceEstimate : 0);
+        }
+    }
+
+    property bool isNEE {
+        get { return (flags & (uint)ReservoirPathFlags::isNEE) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isNEE; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isNEE : 0);
         }
     }
 }
@@ -297,7 +306,8 @@ struct ReservoirCaustic {
 // Path Reservoir
 // Path Reservoir; Size: 112 Byte (28 floats)
 struct PathReservoir {
-    SampleGenerator sgPathDirections; // Sample Generator for random direction (float4)
+    SampleGenerator sgPathDirections;    // Sample Generator for random direction (float4)
+    SampleGenerator sgNeeLightSelection; // Sample Generator for light selection (float4)
 
     float3 samplePosW;  // Sample Position
     float sampleRadius; // For radiance estimate
@@ -318,6 +328,7 @@ struct PathReservoir {
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
+        sgNeeLightSelection = SampleGenerator(uint2(0), 0);
         samplePosW = float3(0);
         sampleRadius = 0;
         jacobian = 1;

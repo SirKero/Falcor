@@ -5,14 +5,17 @@ import Scene.Raytracing;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
+import Rendering.Lights.LightHelpers;
+import Rendering.Lights.EmissiveLightSampler;
+import Rendering.Lights.EmissiveLightSamplerHelpers;
 import RenderPasses.PhotonGuiding.PhotonHelper;
 import RenderPasses.PhotonGuiding.StructsAndHelpers;
 import RenderPasses.PhotonGuiding.SharedEnums;
+import RenderPasses.PhotonGuiding.NextEventEstimationHelper;
 import Rendering.RTXDI.RTXDI;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float2> gMVec;
-
 
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<PathReservoir> gPathReservoir;
@@ -31,7 +34,8 @@ cbuffer CB
     uint gNumLightPaths;      // For photon weight
     float gNormalizedPixelArea; // Pixel area at distance 1 used in light trace
 
-    float gJacobianDistanceThreshold;   //Jacobian distance threshold for path ReSTIR FG
+    float gJacobianDistanceThreshold; // Jacobian distance threshold for path ReSTIR FG
+    float3 gNeeLightSelectProb;       // Light Selection probabilities for NEE
 }
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -40,6 +44,7 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kEnableRandomReplay = ENABLE_RANDOM_REPLAY;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
+static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
@@ -198,12 +203,13 @@ bool traceFGRay(RayDesc ray, inout SampleGenerator sg, inout PathData pd, inout 
 }
 
 //Path for Path Reservoirs
-void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayDirectionSG, inout PathData pd, inout PathReservoir pathReservoir)
+void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout SampleGenerator rayDirectionSG, inout PathData pd, inout PathReservoir pathReservoir)
 {
     RayPayload rayPayload = RayPayload();
     bool firstHitDiffuse = pd.lastHitDiffuse;
     bool triedToSetFGSurface = false;
     bool isFirstCollectionSurface = true;
+    float3 prevPosW = ray.Origin;
 
     for (pd.pathLength = 1; pd.pathLength <= gFGRayMaxPathLength; pd.pathLength++)
     {
@@ -213,7 +219,12 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         // Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI except the primary hit is delta
         if (!hit.isValid()) {
             if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
-                float3 envMapContribution = kUseEnvMap ? gScene.envMap.eval(ray.Direction) : float3(0);
+                float misWeight = 1.0;
+                if (kUseEnvLight && pd.lastHitDiffuse) {
+                    float lightPdf = gNeeLightSelectProb[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
+                    misWeight = evalMIS(1, pd.scatterPDF, 1, lightPdf);
+                }
+                float3 envMapContribution = kUseEnvMap ? gScene.envMap.eval(ray.Direction) * misWeight : float3(0);
                 if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), envMapContribution, pd.thp))
                 {
                     pathReservoir.jacobian = pd.scatterPDF;
@@ -237,9 +248,28 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // Jacobian for this iteration
 
+        //TODO add this as an option (either stop or continue with the same stategy after specular was hit)
+        if (triedToSetFGSurface && !hitIsDiffuse)
+            break;
+
         // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI except the primary hit is delta
         if ((pd.pathLength > 1 && pd.specularPath) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
-            if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), bsdfProperties.emission, pd.thp))
+            float misWeight = 1.0;
+            float neeEmissiveProbability = gNeeLightSelectProb[kNeeLightTypeEmissive];
+            if(neeEmissiveProbability > 0 && pd.lastHitDiffuse)
+            {
+                // Get hit in light collection representation
+                TriangleHit triangleHit = hit.getTriangleHit();
+                TriangleLightHit lightHit;
+                lightHit.triangleIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+                lightHit.posW = sd.posW;
+                lightHit.normalW = sd.getOrientedFaceNormal();
+                float neePDF = neeEmissiveProbability * gEmissiveSampler.evalPdf(prevPosW, prevFaceN, true, lightHit);
+                misWeight = evalMIS(1.0, pd.scatterPDF, 1.0, neePDF);
+            }
+
+            float3 emissiveContribution = bsdfProperties.emission * misWeight;
+            if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), emissiveContribution, pd.thp))
             {
                 pathReservoir.jacobian = jacobian; // Jacobian Path == 1, as all hits are delta/specular
                 uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::firstHitIsDelta | (uint)ReservoirPathFlags::isEmissiveHit;
@@ -256,7 +286,8 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         if (hitIsDiffuse) {
             bool isFinalGather = pd.lastHitDiffuse && !triedToSetFGSurface;
             PhotonSample photonSample;
-            photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather && !triedToSetFGSurface);
+            //photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather && !triedToSetFGSurface); //TODO add this setting as a mode
+            photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02 , gNumLightPaths, sg, photonSample, false);
             // float3 radianceEstimate = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !isFinalGather && !triedToSetFGSurface);
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
@@ -281,6 +312,26 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
                 pathReservoir.flags.setReservoirPathFlags(flags);
             }
 
+            // Next event estimation after specular hits used for direct light
+            if (!isFinalGather) {
+                SampleGenerator neeSgState = sg; // Cache sampleGenerator state
+                LightSample ls;
+                float3 nee = nextEventEstimation(sd, mi, gNeeLightSelectProb, ls, sg);
+                if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), nee, pd.thp))
+                {
+                    pathReservoir.sgNeeLightSelection = neeSgState; // Store cached sg state
+                    pathReservoir.jacobian = ls.pdf;
+                    if (!ls.isInfiniteDistance) {
+                        pathReservoir.jacobian *= abs(dot(sd.faceN, ls.dir)) / (ls.distance * ls.distance);
+                    }
+                    pathReservoir.pathLength = pd.pathLength;
+                    pathReservoir.lightIndex = -1; // Invalid sample for guiding TODO add nee to guiding?
+                    uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isNEE;
+                    flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                    pathReservoir.flags.setReservoirPathFlags(flags);
+                }
+            }
+
             // We always stop at this point
             if (isFinalGather || triedToSetFGSurface)
                 break;
@@ -291,6 +342,8 @@ void tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayD
         triedToSetFGSurface |= pd.lastHitDiffuse; // If 1 diffuse surface was encountered, it was tried to set the Final Gather surface
         pd.lastHitDiffuse = hitIsDiffuse;
         pd.specularPath &= !hitIsDiffuse;
+        prevPosW = sd.posW;
+        prevFaceN = sd.faceN;
 
         // Calc new ray direction
         if (!sampleNewDirection(sd, mi, rayDirectionSG, pd, ray)) {
@@ -460,7 +513,7 @@ void rayGen()
         SampleGenerator pathDirSG = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 2); // Sample generator for sampling new directions
         pathReservoir.sgPathDirections = pathDirSG;
         if (sampleNewDirection(sd, mi, pathDirSG, pd, ray))
-            tracePath(ray, sg, pathDirSG, pd, pathReservoir);
+            tracePath(ray, sd.faceN , sg, pathDirSG, pd, pathReservoir);
     #else //"Old" ReSTIR FG
         // Store surface
         finalGatherReservoir.sampleSurface = hitInfo.getData();

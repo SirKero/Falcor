@@ -774,7 +774,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         {
             mCanResample = false;
             mpPathReservoir[i] = Buffer::createStructured(
-                mpDevice, 24 * sizeof(uint), mScreenRes.x * mScreenRes.y,
+                mpDevice, 28 * sizeof(uint), mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpPathReservoir[i]->setName("PathReservoir" + std::to_string(i));
@@ -1748,6 +1748,9 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
     mGenerateInitialSamplesPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mGenerateInitialSamplesPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPdfs ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
+    if (mpEmissiveLightSampler)
+        mGenerateInitialSamplesPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -1762,9 +1765,16 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
     var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
+    var["CB"]["gNeeLightSelectProb"] = mNeeLightSelectProb;
 
     // RTXDI Resources
     mpRTXDI->setShaderData(var);
+
+    // NEE Structures for Path Resampling 
+    if (mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    if (mpEnvMapSampler)
+        mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -1913,6 +1923,8 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
         "GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor)
     );
     mRetracePathsPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
+    mRetracePathsPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
+    mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
     if (!mRetracePathsPass.pVars)
@@ -1924,12 +1936,19 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
 
     auto var = mRetracePathsPass.pVars->getRootVar();
 
+    //Bind NEE structures
+    if(mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    if(mpEnvMapSampler)
+        mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
+
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
     var["CB"]["gNumResamplingPass"] = numPass; // Current path iteration starting from 0 (temporal)
     var["CB"]["gSpatialSampleRadius"] = mResampleSettingsFG.samplingRadius;
     var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
+    var["CB"]["gNeeLightSelectProb"] = mNeeLightSelectProb;
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();

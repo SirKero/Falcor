@@ -5,9 +5,13 @@ import Scene.Raytracing;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
+import Rendering.Lights.LightHelpers;
+import Rendering.Lights.EmissiveLightSampler;
+import Rendering.Lights.EmissiveLightSamplerHelpers;
 import RenderPasses.PhotonGuiding.PhotonHelper;
 import RenderPasses.PhotonGuiding.StructsAndHelpers;
 import RenderPasses.PhotonGuiding.SharedEnums;
+import RenderPasses.PhotonGuiding.NextEventEstimationHelper;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
@@ -29,6 +33,7 @@ static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const bool kUseEnvLight = USE_ENV_LIGHT;
 
 cbuffer CB
 {
@@ -37,7 +42,8 @@ cbuffer CB
     float gSpatialSampleRadius; // Pixel area at distance 1 used in light trace
     uint gNumResamplingPass;
 
-    float gJacobianDistanceThreshold;  //Depth threshold for jacobian
+    float gJacobianDistanceThreshold; // Depth threshold for jacobian
+    float3 gNeeLightSelectProb;       // Light selection probabilities for NEE
 }
 
 struct RayPayload
@@ -120,6 +126,8 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
 
     bool triedToSetFGSurface = false;
     bool isFirstCollectionSurface = true;
+    float3 prevPosW = primSD.posW;
+    float3 prevFaceN = primSD.faceN;
     // Trace Loop
     for (uint pathLength = 1; pathLength <= reservoir.pathLength; pathLength++)
     {
@@ -131,7 +139,12 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
             bool validEnvSample = reservoir.flags.isEnvMapHit && pathLength == reservoir.pathLength;
             validEnvSample &= reservoir.pathLength > 1 || (pathLength == 1 && firstHitIsDelta);
             if (validEnvSample) {
-                float3 envMapContribution = gScene.envMap.eval(ray.Direction) * rpd.thp;
+                float misWeight = 1.0;
+                if (kUseEnvLight && rpd.lastHitDiffuse) {
+                    float lightPdf = gNeeLightSelectProb[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
+                    misWeight = evalMIS(1, rpd.scatterPDF, 1, lightPdf);
+                }
+                float3 envMapContribution = gScene.envMap.eval(ray.Direction) * rpd.thp * misWeight;
                 retracedPath.flags = (uint)ReservoirPathFlags::isEnvMapHit;
                 retracedPath.rcViewDir = -ray.Direction;
                 retracedPath.jacobian = rpd.scatterPDF;
@@ -154,7 +167,20 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         // Delta -> Emissive case
         if (reservoir.flags.isEmissiveHit && pathLength == reservoir.pathLength && rpd.specularPath && hitIsEmissive)
         {
-            retracedPath.F = bsdfProperties.emission * rpd.thp;
+            float misWeight = 1.0;
+            float neeEmissiveProbability = gNeeLightSelectProb[kNeeLightTypeEmissive];
+            if (neeEmissiveProbability > 0 && rpd.lastHitDiffuse)
+            {
+                // Get hit in light collection representation
+                TriangleHit triangleHit = hit.getTriangleHit();
+                TriangleLightHit lightHit;
+                lightHit.triangleIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+                lightHit.posW = sd.posW;
+                lightHit.normalW = sd.getOrientedFaceNormal();
+                float neePDF = neeEmissiveProbability * gEmissiveSampler.evalPdf(prevPosW, prevFaceN, true, lightHit);
+                misWeight = evalMIS(1.0, rpd.scatterPDF, 1.0, neePDF);
+            }
+            retracedPath.F = bsdfProperties.emission * rpd.thp * misWeight;
             retracedPath.jacobian = jacobian; // Jacobian Path == 1, as all hits are delta/specular
             retracedPath.flags = (uint)ReservoirPathFlags::isEmissiveHit;
             rpd.retraceSuccessful = true;
@@ -182,6 +208,19 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
                 retracedPath.F = reservoir.fgRadiance * rpd.thp;
                 retracedPath.flags = isReconnectable ? (uint)ReservoirPathFlags::isRadianceEstimate : 0;
                 rpd.retraceSuccessful = isReconnectable;
+            } else if (reservoir.flags.isNEE)
+            {
+                SampleGenerator neeSG = reservoir.sgNeeLightSelection;
+                LightSample ls;
+                float3 nee = nextEventEstimation(sd, mi, gNeeLightSelectProb, ls, neeSG);
+                if (any(nee > 0) && ls.pdf > 0 && ls.distance > gJacobianDistanceThreshold) {
+                    retracedPath.flags = (uint)ReservoirPathFlags::isNEE;
+                    retracedPath.F = nee * rpd.thp; 
+                    retracedPath.jacobian = ls.pdf;
+                    if (!ls.isInfiniteDistance)
+                        retracedPath.jacobian *= abs(dot(sd.faceN, ls.dir)) / (ls.distance * ls.distance);
+                    rpd.retraceSuccessful = true;
+                }
             }
 
             break;
@@ -191,6 +230,8 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         triedToSetFGSurface |= rpd.lastHitDiffuse; // If 1 diffuse surface was encountered, it was tried to set the Final Gather surface
         rpd.lastHitDiffuse = hitIsDiffuse;
         rpd.specularPath &= !hitIsDiffuse;
+        prevPosW = sd.posW;
+        prevFaceN = sd.faceN;
 
         if (!sampleNewDirection(sd, mi, rayDirSg, rpd, ray))
             break;    
