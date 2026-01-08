@@ -550,6 +550,33 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
 
     if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->update(pRenderContext);
+
+    //EnvMap sampler
+    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::EnvMapChanged))
+    {
+        mpEnvMapSampler = nullptr;
+    }
+
+    if (mpScene->useEnvLight())
+    {
+        if (!mpEnvMapSampler)
+        {
+            mpEnvMapSampler = std::make_unique<EnvMapSampler>(mpDevice, mpScene->getEnvMap());
+        }
+    }
+    else
+    {
+        if (mpEnvMapSampler)
+        {
+            mpEnvMapSampler = nullptr;
+            resetRenderPasses();
+        }
+    }
+
+    //Update NEE selection probability
+    mNeeLightSelectProb =
+        float3(mpScene->useEmissiveLights() ? 1.f : 0.f, mpScene->useAnalyticLights() ? 1.f : 0.f, mpScene->useEnvLight() ? 1.f : 0.f);
+    mNeeLightSelectProb /= mNeeLightSelectProb.x + mNeeLightSelectProb.y + mNeeLightSelectProb.z;
 }
 
 void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const RenderData& renderData) {
@@ -1492,6 +1519,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     // Defines
     mTraceCameraPass.pProgram->addDefine("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
     mTraceCameraPass.pProgram->addDefine("USE_ENV_MAP", mpScene->useEnvBackground() ? "1" : "0");
+    mTraceCameraPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mTraceCameraPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTraceCameraPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     mTraceCameraPass.pProgram->addDefine("RENDER_TECHNIQUE", std::to_string((uint)mPhotonRenderMode));
@@ -1513,12 +1541,15 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     // Structures
     if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    if(mpEnvMapSampler)
+        mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
 
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gMaxBounces"] = mPTMaxBounces;
     var["CB"]["gNumLightPaths"] = mNumberLightPaths;
     var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
+    var["CB"]["gLightTypeSelectProbability"] = mNeeLightSelectProb;
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();

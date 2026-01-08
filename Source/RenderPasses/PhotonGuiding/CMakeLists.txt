@@ -13,6 +13,7 @@ target_sources(PhotonGuiding PRIVATE
     StructsAndHelpers.slang
     SharedEnums.slang
     PhotonHelper.slang
+    NextEventEstimationHelper.slang
     ReSTIR_FG/EvaluateReservoirs.cs.slang
     ReSTIR_FG/GenerateInitialSamples.rt.slang
     ReSTIR_FG/ResampleReservoirCaustic.cs.slang

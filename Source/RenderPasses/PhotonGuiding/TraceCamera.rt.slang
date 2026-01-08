@@ -10,6 +10,7 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 import SharedEnums;
+import NextEventEstimationHelper;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
@@ -22,10 +23,6 @@ RaytracingAccelerationStructure gPhotonAS;
 
 RWTexture2D<float4> gOutColor;
 
-cbuffer Light {
-    EmissiveLightSampler gEmissiveSampler;
-}
-
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
@@ -33,6 +30,8 @@ cbuffer CB
 
     uint gNumLightPaths;               // Number of light paths for MIS
     uint gLightIndexGuidingResolution; // Resolution of "gLightIndexGuidingCounter"
+
+    float3 gLightTypeSelectProbability; // Probability of selecting each light type in NEE
 }
 
 static const float kPhotonCollectTMax = 1e-7;
@@ -45,6 +44,7 @@ static const uint kGuidingMode = GUIDING_MODE;
 static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const bool kUseEnvLight = USE_ENV_LIGHT;
 
 struct RayPayload
 {
@@ -60,14 +60,25 @@ struct RayPayload
 
 //Helper struct for MIS
 struct CameraState {
+    float3 thp;
     uint pathLength;
+
+    float3 prevPosW;
     uint diffuseHitCount;
+
+    float3 prevFaceN;
     bool isSpecularPath;
+
+    float scatterPDF;
 
     __init() {
         pathLength = 0;
         isSpecularPath = true;
         diffuseHitCount = 0;
+        thp = float3(1);
+        prevPosW = float3(0);
+        prevFaceN = float3(0, 1, 0);
+        scatterPDF = 0.0;
     }
 }
 
@@ -149,7 +160,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
     return collectedRadiance;
 }
 
-bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout SampleGenerator sg, inout float3 thp, inout CameraState camState, inout RayDesc ray)
+bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout SampleGenerator sg, inout CameraState camState, inout RayDesc ray)
 {
     // Abort on diffuse surfaces
     bool isDiffuse = roughness > kRoughnessThreshold;
@@ -169,84 +180,16 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout S
     bool transmission = bsdfSample.isLobe(LobeType::Transmission);
     ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
     ray.Direction = bsdfSample.wo;
-    thp *= bsdfSample.weight;
+    camState.thp *= bsdfSample.weight;
+    camState.scatterPDF = bsdfSample.pdf;
 
     camState.pathLength++;
     camState.isSpecularPath &= !isDiffuse;
     camState.diffuseHitCount += isDiffuse ? 1 : 0;
+    camState.prevPosW = sd.posW;
+    camState.prevFaceN = sd.faceN;
 
     return true;
-}
-
-float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg)
-{
-    TriangleLightSample tls = {};
-    if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
-        return float3(0);
-
-    float3 bsdf = mi.eval(sd, tls.dir, sg);
-
-    if (all(bsdf <= 0) || tls.pdf <= 0)
-        return float3(0);
-
-    //Shadow Ray
-    SceneRayQuery<1> rayQuery;
-    const Ray ray = Ray(sd.computeNewRayOrigin(), tls.dir, 0.f, tls.distance * 0.98);
-    if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
-        return float3(0);
-
-    float3 radiance = bsdf * tls.Le / tls.pdf;
-    return radiance;
-}
-
-float3 tracePath(RayDesc ray, ShadingData sd, inout CameraState camState,  inout SampleGenerator sg , inout float3 thp)
-{
-    float3 outColor = float3(0);
-    RayPayload rayPayload = RayPayload();
-    bool validRay = true;
-    float3 prevPos = sd.posW;
-    float3 prevFaceN = sd.faceN;
-
-    for (uint i = 0; i < gMaxBounces && validRay; i++)
-    {
-        // Trace new ray
-        TraceRay(gScene.rtAccel, 0 , 0xff , 0, rayTypeCount, 0 , ray, rayPayload);
-        HitInfo hit = HitInfo(rayPayload.packedHitInfo);
-        //Miss
-        if (!hit.isValid()) {
-            float3 envColor = kUseEnvMap ? gScene.envMap.eval(ray.Direction) : kDefaultBackgroundColor;
-            outColor += thp * envColor;
-            break;
-        }
-
-        // Get shading data
-        let lod = ExplicitLodTextureSampler(0);
-        ShadingData sd = loadShadingData(hit, ray.Direction, lod);
-        uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
-        let bsdfProperties = mi.getProperties(sd);
-
-        bool hitEmissive = any(bsdfProperties.emission > 0);
-        bool finalGatherFirstHit = (kRenderMode == (uint)PhotonRenderMode::FinalGathering) && (camState.diffuseHitCount == 0);
-        if (hitEmissive && (finalGatherFirstHit || kRenderMode == (uint)PhotonRenderMode::PhotonMapping)) {
-            outColor += bsdfProperties.emission * thp;
-            break;
-        }
-
-        // Evaluate Photons
-        if (bsdfProperties.roughness > kRoughnessThreshold) {
-            uint instanceMask = finalGatherFirstHit ? 2 : 0xFF;
-            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg) * thp;
-            if (finalGatherFirstHit)
-                outColor += nextEventEstimation(sd, mi, sg) * thp;
-        }
-
-        validRay = sampleNewRay(sd, mi, bsdfProperties.roughness, sg, thp, camState, ray);
-        prevPos = sd.posW;
-        prevFaceN = sd.faceN;
-    }
-   
-    return outColor;
 }
 
 [shader("miss")]
@@ -287,49 +230,87 @@ void rayGen()
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 dispatchDims = DispatchRaysDimensions().xy;
 
-    HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
-    float3 viewDir = gView[pixel].xyz;
-
     float3 outColor = float3(0);
+    CameraState camState = CameraState();
+    let lod = ExplicitLodTextureSampler(0);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1);
+    RayPayload rayPayload = RayPayload();
+    RayDesc ray;
+    ray.TMin = 0.0;
+    ray.TMax = FLT_MAX;
 
-    if (hitInfo.isValid()) {
-        //Init Camera state with MIS
-        CameraState camState = CameraState();
-        
-        //Get Material Properties
-        let lod = ExplicitLodTextureSampler(0);
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1);
+    rayPayload.packedHitInfo = gVBuffer[pixel];
+    ray.Direction = -gView[pixel].xyz;
 
-        ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
+    //Camera Tracing loop
+    for (uint i = 0; i < gMaxBounces; i++)
+    {
+        // Primary hit is given by VBuffer
+        if(i>0)
+            TraceRay(gScene.rtAccel, 0, 0xff, 0, rayTypeCount, 0, ray, rayPayload);
+        HitInfo hit = HitInfo(rayPayload.packedHitInfo);
+
+        // Miss
+        if (!hit.isValid()) {
+            float3 envColor = kUseEnvMap ? gScene.envMap.eval(ray.Direction) : kDefaultBackgroundColor;
+            // MIS
+            float misWeight = 1.0;
+            if (kUseEnvLight && camState.diffuseHitCount > 0) {
+                float lightPdf = gLightTypeSelectProbability[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
+                misWeight = evalMIS(1, camState.scatterPDF, 1, lightPdf);
+            }
+            outColor += misWeight * camState.thp * envColor;
+            break;
+        }
+
+        // Get shading data
+        ShadingData sd = loadShadingData(hit, ray.Direction, lod);
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
         let bsdfProperties = mi.getProperties(sd);
 
-      
-        outColor += bsdfProperties.emission; // On first hit, no MIS is necessary if emissive is hit
         bool hitEmissive = any(bsdfProperties.emission > 0);
+        bool hitDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
 
-        if (!hitEmissive) {
-            // Evaluate Photons
-            bool isDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-            if (isDiffuse)
+        // Stop if diffuse -> specular bounce in final gathering, as those paths are already covered by caustic photons.
+        if ((kRenderMode == (uint)PhotonRenderMode::FinalGathering) && (camState.diffuseHitCount > 0) && !hitDiffuse)
+            break;
+
+        if (hitEmissive) {
+            // MIS (only for final gather on the second hit)
+            float emissiveProb = gLightTypeSelectProbability[kNeeLightTypeEmissive];
+            float misWeight = 1.0;
+            if (camState.diffuseHitCount > 0 && (kRenderMode == (uint)PhotonRenderMode::FinalGathering) && emissiveProb > 0)
             {
-                uint instanceMask = kRenderMode == (uint)PhotonRenderMode::FinalGathering ? 2 : 0xFF; // For final gather collect caustic only
-                outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg);
-                if (kRenderMode == (uint)PhotonRenderMode::FinalGathering) {
-                    outColor += nextEventEstimation(sd, mi, sg);
-                }
+                // Get hit in light collection representation
+                TriangleHit triangleHit = hit.getTriangleHit();
+                TriangleLightHit lightHit;
+                lightHit.triangleIndex = gScene.lightCollection.getTriangleIndex(triangleHit.instanceID, triangleHit.primitiveIndex);
+                lightHit.posW = sd.posW;
+                lightHit.normalW = sd.getOrientedFaceNormal();
+                float neePDF = emissiveProb * gEmissiveSampler.evalPdf(camState.prevPosW, camState.prevFaceN, true, lightHit);
+                misWeight = evalMIS(1.0, camState.scatterPDF, 1.0, neePDF);
             }
-            // Calculate next ray
-            float3 thp = float3(1.0);
-            RayDesc ray;
-            ray.TMin = 0.0;
-            ray.TMax = FLT_MAX;
-            if (sampleNewRay(sd, mi, bsdfProperties.roughness, sg, thp, camState, ray))
-                outColor += tracePath(ray, sd, camState, sg, thp);
+
+            outColor += bsdfProperties.emission * camState.thp * misWeight;
+            break;
         }
-    } else {
-        outColor += kUseEnvMap ? gScene.envMap.eval(viewDir) : kDefaultBackgroundColor;
+
+        // Evaluate Photons
+        if (hitDiffuse) {
+            bool finalGatherFirstHit = (kRenderMode == (uint)PhotonRenderMode::FinalGathering) && (camState.diffuseHitCount == 0);
+            uint instanceMask = finalGatherFirstHit ? 2 : 0xFF; // Collect only caustics on final gather first hit
+            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg) * camState.thp;
+            // Next event estimation for first hit in final gathering
+            if (finalGatherFirstHit) {
+                LightSample ls = {};
+                // ShadingData sd, IMaterialInstance mi, float3 lightTypeSelectProbability,  out LightSample ls, inout SampleGenerator sg
+                outColor += nextEventEstimation(sd, mi, gLightTypeSelectProbability, ls, sg) * camState.thp;
+            }
+        }
+
+        if (!sampleNewRay(sd, mi, bsdfProperties.roughness, sg, camState, ray))
+            break;
     }
 
     gOutColor[pixel] = float4(outColor, 1);

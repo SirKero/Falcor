@@ -39,24 +39,7 @@ RWStructuredBuffer<PathReservoir> gPathReservoir;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
-/* Evaluate MIS weight
-   \param[in] n0 Number of samples taken from the first sampling strategy.
-    \param[in] p0 Pdf for the first sampling strategy.
-    \param[in] n1 Number of samples taken from the second sampling strategy.
-    \param[in] p1 Pdf for the second sampling strategy.
-    \return Weight for the contribution from the first strategy (p0).
-*/
-float evalMIS(float n0, float p0, float n1, float p1)
-{
-    // Currently only balance heuristic
-    float q0 = n0 * p0;
-    float q1 = n1 * p1;
-    float sum = (q0 + q1);
-    if (sum > 0)
-        return q0 / (q0 + q1);
-    else
-        return 0;
-}
+
 
 bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout SampleGenerator sg) {
 

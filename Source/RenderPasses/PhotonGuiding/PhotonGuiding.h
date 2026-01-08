@@ -31,6 +31,7 @@
 #include "Rendering/Lights/EmissiveLightSampler.h"
 #include "Rendering/Lights/LightBVHSampler.h"
 #include "Rendering/RTXDI/RTXDI.h"
+#include "Rendering/Lights/EnvMapSampler.h"
 
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 #include "SharedEnums.slang"
@@ -134,7 +135,6 @@ private:
     //
     ref<Scene> mpScene;                     // Scene Pointer
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
-    std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler for NEE
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
     std::unique_ptr<RTXDI> mpRTXDI;                                 // Ptr to RTXDI for direct use
     RTXDI::Options mRTXDIOptions;                                 // Options for RTXDI
@@ -155,15 +155,20 @@ private:
     float mSpecularRoughnessThreshold = 0.25f; // Any material below this is considered specular
     bool mEvalDeltaPdfs = false;                // If true delta pdfs are properly evaluated (==0), if false they are set to 1.
 
+    
+
     //
     // Path Tracer
     //
-
     uint mPTMaxBounces = 10;
+    PhotonRenderMode mPhotonRenderMode = PhotonRenderMode::ReSTIR_FG;
+    //Light Sampler
+    std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     EmissiveLightSamplerType mEmissiveLightSamplerType = EmissiveLightSamplerType::LightBVH;
     LightBVHSampler::Options mLightBVHOptions;
-    bool mRebuildLightSampler = true;
-    PhotonRenderMode mPhotonRenderMode = PhotonRenderMode::ReSTIR_FG;
+    bool mRebuildLightSampler = false;
+    std::unique_ptr<EnvMapSampler> mpEnvMapSampler;
+    float3 mNeeLightSelectProb = float3(0.33f);
 
     //
     // Photon Distribution
