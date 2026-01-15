@@ -31,18 +31,18 @@
 
 using namespace Falcor;
 
-class GBufferOutputsToRayReconstructionInputsPass : public RenderPass
+class UnpackVBuffer : public RenderPass
 {
 public:
-    FALCOR_PLUGIN_CLASS(GBufferOutputsToRayReconstructionInputsPass, "GBufferOutputsToRayReconstructionInputsPass", "Insert pass description here.");
+    FALCOR_PLUGIN_CLASS(UnpackVBuffer, "UnpackVBuffer", "Unpacks VBuffer contents into GBuffer like textures");
 
-    static ref<GBufferOutputsToRayReconstructionInputsPass> create(ref<Device> pDevice, const Properties& props) { return make_ref<GBufferOutputsToRayReconstructionInputsPass>(pDevice, props); }
+    static ref<UnpackVBuffer> create(ref<Device> pDevice, const Properties& props) { return make_ref<UnpackVBuffer>(pDevice, props); }
 
-    GBufferOutputsToRayReconstructionInputsPass(ref<Device> pDevice, const Properties& props);
+    UnpackVBuffer(ref<Device> pDevice, const Properties& props);
 
     virtual Properties getProperties() const override;
     virtual RenderPassReflection reflect(const CompileData& compileData) override;
-    virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override {}
+    virtual void compile(RenderContext* pRenderContext, const CompileData& compileData) override;
     virtual void execute(RenderContext* pRenderContext, const RenderData& renderData) override;
     virtual void renderUI(Gui::Widgets& widget) override;
     virtual void setScene(RenderContext* pRenderContext, const ref<Scene>& pScene) override;
@@ -50,6 +50,9 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
-    ref<Scene> mpScene; //Copy of scene
-    ref<ComputePass> mpCopyResources; // Compute Pass for direct light
+    DefineList getShaderDefines(const RenderData& renderData) const;
+
+    ref<ComputePass> mpComputePass;
+    ref<Scene> mpScene;
+    uint2 mLastDim;
 };

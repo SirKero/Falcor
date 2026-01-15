@@ -119,8 +119,12 @@ void RayReconstructionPass::execute(RenderContext* pRenderContext, const RenderD
         case RayReconstructionPass::Preset::Transformer:
             preset = NVSDK_NGX_RayReconstruction_Hint_Render_Preset::NVSDK_NGX_RayReconstruction_Hint_Render_Preset_D;
             break;
+        case RayReconstructionPass::Preset::TransformerLastest:
+            preset = NVSDK_NGX_RayReconstruction_Hint_Render_Preset::NVSDK_NGX_RayReconstruction_Hint_Render_Preset_E;
+            break;
         }
         mpNGXWrapper->changeDLSSPreset(preset);
+
 
         mpNGXWrapper->initializeDLSSD(
             pRenderContext,

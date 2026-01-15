@@ -226,6 +226,7 @@ void DLSSPass::initializeDLSS(RenderContext* pRenderContext)
     case DLSSPass::Preset::Default:
         renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_Default;
         break;
+    /*
     case DLSSPass::Preset::PresetA:
         renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_A;
         break;
@@ -244,11 +245,18 @@ void DLSSPass::initializeDLSS(RenderContext* pRenderContext)
     case DLSSPass::Preset::PresetF:
         renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_F;
         break;
+    */
     case DLSSPass::Preset::PresetJ:
         renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_J;
         break;
     case DLSSPass::Preset::PresetK:
         renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_K;
+        break;
+    case DLSSPass::Preset::PresetL:
+        renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_L;
+        break;
+    case DLSSPass::Preset::PresetM:
+        renderPreset = NVSDK_NGX_DLSS_Hint_Render_Preset::NVSDK_NGX_DLSS_Hint_Render_Preset_M;
         break;
     default:
         break;

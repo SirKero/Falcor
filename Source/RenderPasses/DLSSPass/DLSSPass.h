@@ -63,28 +63,36 @@ public:
     enum class Preset : uint32_t
     {
         Default,
-        PresetA,
-        PresetB,
-        PresetC,
-        PresetD,
-        PresetE,
-        PresetF,
+        /* 
+        PresetA, //Deprecated
+        PresetB, //Deprecated
+        PresetC, //Deprecated
+        PresetD, //Deprecated
+        PresetE, //Deprecated
+        PresetF, //Deprecated
+        */
         PresetJ,
         PresetK,
+        PresetL,
+        PresetM,
     };
 
     FALCOR_ENUM_INFO(
         Preset,
         {
-            {Preset::Default, "Default(CNN)"},
-            {Preset::PresetA, "PresetA(CNN)"},
-            {Preset::PresetB, "PresetB(CNN)"},
-            {Preset::PresetC, "PresetC(CNN)"},
-            {Preset::PresetD, "PresetD(CNN)"},
-            {Preset::PresetE, "PresetE(CNN)"},
-            {Preset::PresetF, "PresetF(CNN)"},
-            {Preset::PresetJ, "PresetJ(Transformer)"},
-            {Preset::PresetK, "PresetK(Transformer)"},
+            {Preset::Default, "Default(?)"},
+            /*
+            {Preset::PresetA, "PresetA(CNN)"}, //Deprecated
+            {Preset::PresetB, "PresetB(CNN)"}, //Deprecated
+            {Preset::PresetC, "PresetC(CNN)"}, //Deprecated
+            {Preset::PresetD, "PresetD(CNN)"}, //Deprecated
+            {Preset::PresetE, "PresetE(CNN)"}, //Deprecated
+            {Preset::PresetF, "PresetF(CNN)"}, //Deprecated
+            */
+            {Preset::PresetJ, "PresetJ(Similar to K; Less Ghosting more flickering)"},
+            {Preset::PresetK, "PresetK(Default Preset)"},
+            {Preset::PresetL, "PresetL(Default Ultra Perf)"},
+            {Preset::PresetM, "PresetM(Default Perf)"},
         }
     );
 

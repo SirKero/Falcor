@@ -41,12 +41,14 @@ public:
     {
         Default = 0,
         Transformer = 1,
+        TransformerLastest = 2,
     };
     FALCOR_ENUM_INFO(
         Preset,
         {
             {Preset::Default, "Default"},
             {Preset::Transformer, "Transformer"},
+            {Preset::TransformerLastest, "TransformerLastest"},
         }
     );
 
