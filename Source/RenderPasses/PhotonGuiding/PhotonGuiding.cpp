@@ -144,7 +144,7 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     auto excluded = Camera::Changes::Jitter | Camera::Changes::History;
     auto cameraChanges = mpScene->getCamera()->getChanges();
     bool cameraMoved = (cameraChanges & ~excluded) != Camera::Changes::None;
-    if ((cameraMoved && (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::ResetOnMove)) || mOptionsChanged || mGuidingResetAccumulateCount)
+    if ((cameraMoved && (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::ResetOnMove)) || mOptionsChanged || mGuidingResetAccumulateCount)
     {
         mGuidingAccumulateCount = 0;
         mGuidingResetAccumulateCount = false;
@@ -327,23 +327,23 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     if (auto group = widget.group("Guiding Options"))
     {
         //Set default values on reset
-        if (group.dropdown("Guiding Histogram Accumulate Mode", mGuidingHistrogramAccumMode))
+        if (group.dropdown("Guiding Histogram Accumulate Mode", mGuidingHistogramAccumMode))
         {
             mGuidingResetAccumulateCount = true;
-            if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+            if (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
                 mGuidingHistogramAccumValue = 64.f;
-            else if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AveragePercentage)
+            else if (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::AveragePercentage)
                 mGuidingHistogramAccumValue = 0.3f;
         }
         
         //2nd option for accum mode
-        if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+        if (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
         {
             uint frameVal = (uint)floor(mGuidingHistogramAccumValue);
             group.var("Frame Limit", frameVal, 0u, UINT_MAX, 1u);
             mGuidingHistogramAccumValue = (float)frameVal;
         }
-        else if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AveragePercentage)
+        else if (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::AveragePercentage)
             group.var("Running Percentage", mGuidingHistogramAccumValue, 0.f, 1.f, 0.0001f);
            
 
@@ -1058,14 +1058,14 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         defines.add("COUNTER_FORMAT", guidingIsUintFormat(mGuidingMode) ? "uint" : "float");
         defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "0");
-        defines.add("HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode));
+        defines.add("HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistogramAccumMode));
 
         mpGenerateGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
     }
 
     //Runtime define
     mpGenerateGuidingMipTraverseChainPass->getProgram()->addDefine(
-        "HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode)
+        "HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistogramAccumMode)
     );
 
     auto var = mpGenerateGuidingMipTraverseChainPass->getRootVar();
@@ -1074,7 +1074,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
     //First pass to get the level 0 values from the counter and clear counter to 1
     {
         uint iterationCount = mGuidingMode == GuidingMode::Disabled ? 0 : mGuidingAccumulateCount;
-        if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+        if (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
             iterationCount = math::min(iterationCount, (uint)floor(mGuidingHistogramAccumValue));
 
         //Adjust clear value
@@ -1295,14 +1295,14 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
         defines.add("COUNTER_FORMAT", "uint");
         defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
         defines.add("IS_LIGHT_INDEX_TEXTURE", "1");
-        defines.add("HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode));
+        defines.add("HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistogramAccumMode));
 
         mpGenerateLightIndexGuidingMipTraverseChainPass = ComputePass::create(mpDevice, desc, defines, true);
     }
 
     // Runtime define
     mpGenerateLightIndexGuidingMipTraverseChainPass->getProgram()->addDefine(
-        "HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistrogramAccumMode)
+        "HISTORAM_ACCUM_MODE", std::to_string((uint)mGuidingHistogramAccumMode)
     );
 
     auto var = mpGenerateLightIndexGuidingMipTraverseChainPass->getRootVar();
@@ -1311,7 +1311,7 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
     // First pass to get the level 0 values from the counter and clear counter to 1
     {
         uint iterationCount = mGuidingLightIndexMode == GuidingLightIndexMode::Disabled ? 0 : mGuidingAccumulateCount; 
-       if (mGuidingHistrogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
+       if (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
             iterationCount = math::min(iterationCount, (uint)floor(mGuidingHistogramAccumValue));
 
         const uint maxMip = mpRecordLightIndexGuidingTexture->getMipCount() - 1u;
