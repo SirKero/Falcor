@@ -211,8 +211,9 @@ private:
     ResamplingSettings mResampleSettingsFG = {};
     ResamplingSettings mResampleSettingsCaustic = {};
     bool mRebuildReservoirBuffer = false;
-    bool mCanResample = false;
-    bool mPathResamplingUseNEEAfterSpecular = true;
+    bool mCanResample = false;                              //Is re
+    bool mPathResamplingUseNEEAfterSpecular = true;         //Uses NEE instead of radiance estimate after a specular event
+    bool mPathResamplingStopAfterDiffuseSpecular = true;   //Enables tracing the path if a specular hit occured after the first diffuse hit. This case is usually covered by caustics.
 
     // Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();

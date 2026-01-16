@@ -394,7 +394,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 group.text("Load a scene for RTXDI options");
             }
         }
-        if (auto group = widget.group("Photon ReSTIR"))
+        if (auto group = widget.group("ReSTIR FG+"))
         {
             group.var("Final Gather Path Length", mPTMaxBounces, 1u, 64u, 1u);
             group.tooltip(
@@ -432,6 +432,10 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                         mCanResample = false;
                     group2.tooltip("If enabled, NEE is used for direct light after an specular surface was encountered."
                         "Else, the radiance estimate for those surfaces includes global photons with a path lenght of 0 (direct light for that surface)");
+                    if (group2.checkbox("Stop tracing the Path if diffuse->specular hit is encountered", mPathResamplingStopAfterDiffuseSpecular))
+                        mCanResample = false;
+                    group2.tooltip("If enabled, the path is not traced further if a specular hit is encountered after the first diffuse hit."
+                        "This case is usually covered by caustics and tracing further wastes performance.");
                 }
             }
             if (auto group2 = group.group("Resampling Caustic options"))
@@ -1759,6 +1763,8 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPdfs ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_USE_NEE", mPathResamplingUseNEEAfterSpecular ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_STOP_PATH_AFTER_DIFFUSE_SPECULAR", mPathResamplingStopAfterDiffuseSpecular ? "1" : "0");
+
     if (mpEmissiveLightSampler)
         mGenerateInitialSamplesPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 

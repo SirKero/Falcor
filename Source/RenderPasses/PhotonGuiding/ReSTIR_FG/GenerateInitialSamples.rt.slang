@@ -48,6 +48,7 @@ static const bool kUseEnvLight = USE_ENV_LIGHT;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseNEEForPathReservoirs = PATH_RESERVOIR_USE_NEE;
+static const bool kStopPathAfterDiffuseSpecular = PATH_RESERVOIR_STOP_PATH_AFTER_DIFFUSE_SPECULAR;
 
 struct RayPayload
 {
@@ -208,7 +209,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
 {
     RayPayload rayPayload = RayPayload();
     bool firstHitDiffuse = pd.lastHitDiffuse;
-    bool triedToSetFGSurface = false;
+    bool lastHitUseNEE = false;      //If NEE was used, Enviroment Map hits and Emissive hits needs to be evaluated for MIS
     bool isFirstCollectionSurface = true;
     float3 prevPosW = ray.Origin;
 
@@ -219,7 +220,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         // Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI except the primary hit is delta
         if (!hit.isValid()) {
-            if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
+            if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta) || lastHitUseNEE) {
                 float misWeight = 1.0;
                 if (kUseEnvLight && pd.lastHitDiffuse) {
                     float lightPdf = gNeeLightSelectProb[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
@@ -249,12 +250,8 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // Jacobian for this iteration
 
-        //TODO add this as an option (either stop or continue with the same stategy after specular was hit)
-        if (triedToSetFGSurface && !hitIsDiffuse)
-            break;
-
         // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI except the primary hit is delta
-        if ((pd.pathLength > 1 && pd.specularPath) || (pd.pathLength == 1 && pd.firstHitIsDelta)) {
+        if ((pd.pathLength > 1 && pd.specularPath) || (pd.pathLength == 1 && pd.firstHitIsDelta) || lastHitUseNEE) {
             float misWeight = 1.0;
             float neeEmissiveProbability = gNeeLightSelectProb[kNeeLightTypeEmissive];
             if(neeEmissiveProbability > 0 && pd.lastHitDiffuse)
@@ -279,18 +276,18 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             }
         }
 
-        // Bounces on emissive materials are undefined
-        if (hitIsEmissive)
+        // Stop on emissive hits (reflections are undefined) or when first diffuse -> specular bounce if the setting is enabled
+        if (hitIsEmissive || (kStopPathAfterDiffuseSpecular && !hitIsDiffuse && pd.lastHitDiffuse))
             break;
 
         // If surface is diffuse do radiance estimate (photon types are depended on the current path state)
         if (hitIsDiffuse) {
-            bool isFinalGather = pd.lastHitDiffuse && !triedToSetFGSurface;
+            const bool isFinalGather = pd.lastHitDiffuse; // If the last two hits are diffuse, the hit is a final gather surface
             PhotonSample photonSample;
             if (kUseNEEForPathReservoirs)
                 photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
             else
-                photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather && !triedToSetFGSurface);
+                photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather);
 
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
@@ -333,16 +330,17 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                     flags |= firstHitDiffuse ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                     pathReservoir.flags.setReservoirPathFlags(flags);
                 }
-            }
+                lastHitUseNEE = true;
+            } else
+                lastHitUseNEE = false;
 
-            // We always stop at this point
-            if (isFinalGather || triedToSetFGSurface)
+            //Tracing is always stopped after final gather
+            if (isFinalGather)
                 break;
 
             isFirstCollectionSurface = false;
         }
 
-        triedToSetFGSurface |= pd.lastHitDiffuse; // If 1 diffuse surface was encountered, it was tried to set the Final Gather surface
         pd.lastHitDiffuse = hitIsDiffuse;
         pd.specularPath &= !hitIsDiffuse;
         prevPosW = sd.posW;
@@ -505,7 +503,7 @@ void rayGen()
         }
 
         pd.specularPath &= !pd.lastHitDiffuse;
-        pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08;
+        pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08; // 0.08 is the delta threshold used in Falcor. Needed for emission after delta paths
 
         // Distribute a Final Gather ray
         RayDesc ray = {};
