@@ -477,7 +477,7 @@ float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)
 void causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
 {
     // Check if position is in camera view
-    float4 screenPos = mul(gScene.camera.getViewProj(), float4(sd.posW, 1));
+    float4 screenPos = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1));
     screenPos /= screenPos.w;
     screenPos.y *= -1;
     screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]

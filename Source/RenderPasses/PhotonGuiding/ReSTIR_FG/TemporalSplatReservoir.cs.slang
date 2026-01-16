@@ -32,9 +32,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     ShadingData sd = loadShadingData(hit, r.sampleSurfaceView, lod);
 
-
-    //Reproject postion in current camera view
-    float4 screenPos = mul(gScene.camera.getViewProj(), float4(sd.posW, 1));
+    // Reproject postion in current camera view
+    float4 screenPos = mul(gScene.camera.data.viewProjMatNoJitter, float4(sd.posW, 1));
     screenPos /= screenPos.w;
     screenPos.y *= -1;
     screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
