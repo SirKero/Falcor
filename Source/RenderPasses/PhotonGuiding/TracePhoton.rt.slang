@@ -29,6 +29,7 @@ cbuffer CB
 
     uint gLightIndexGuidingResolution; // Resolution of "gGuidingLightIndex"
     float2 gAdaptivePhotonRadius;      // Pixel scale for global/ caustic photons.
+    float gJacobianDistanceThreshold;   //Distance threshold for jacobian used in Path ReSTIR 
 }
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
@@ -54,6 +55,7 @@ static const uint kFixedPhotonGuidingMinPhotons = FIXED_GUIDING_MIN_PHOTONS; // 
 static const uint kAnalyticLightIdxOffset = ANALYTIC_START_INDEX;
 static const uint kTotalLightCount = TOTAL_LIGHT_COUNT;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const bool kUseJacobianToMarkCaustic = USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC; //Used for path ReSTIR to get samples is regions where the jacobian distance threshold applies
 
 struct RayPayload
 {
@@ -600,6 +602,12 @@ void rayGen()
                    
         photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        if (kUseJacobianToMarkCaustic) {
+            float rayDistance = distance(ray.Origin, sd.posW);
+            if(rayDistance < gJacobianDistanceThreshold) {
+                storeAsCaustic = true;
+            }
+        }
 
         // Store Photon
         if (reflectedDiffuse) {

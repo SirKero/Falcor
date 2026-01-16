@@ -1425,6 +1425,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
     mTracePhotonPass.pProgram->addDefine("TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
     mTracePhotonPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+    mTracePhotonPass.pProgram->addDefine("USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC", mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -1458,6 +1459,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
     var["CB"]["gLightIndexGuidingMaxMip"] = mUseFixedGuidingDispatch ? mpGuidingAtlas[mFrameCount % 2]->getMipCount() - 1
                                                                      : mpLightIndexGuidingTexture[mFrameCount % 2]->getMipCount() - 1u;
+    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
 
     // Output
     for (uint i = 0; i < 2; i++)
@@ -1901,7 +1903,8 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
 
 void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
-    FALCOR_PROFILE(pRenderContext, "Retrace Paths");
+    std::string profileName = "RetracePaths" + std::to_string(numPass);
+    FALCOR_PROFILE(pRenderContext, profileName);
 
     // Init Shader
     if (!mRetracePathsPass.pProgram)
@@ -1992,7 +1995,8 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
 
 void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
-    FALCOR_PROFILE(pRenderContext, "Resample Paths");
+    std::string profilerName = "ResamplePaths" + std::to_string(numPass);
+    FALCOR_PROFILE(pRenderContext, profilerName);
 
     auto getRuntimeDefines = [&](){
         DefineList defines;
