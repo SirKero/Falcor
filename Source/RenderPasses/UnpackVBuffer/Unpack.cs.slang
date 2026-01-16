@@ -61,16 +61,16 @@ void main(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 localI
         ShadingData sd = gScene.materials.prepareShadingData(v, materialID, viewDir, lod);
         // Create material instance at shading point.
         let mi = gScene.materials.getMaterialInstance(sd, lod, (uint) MaterialInstanceHints::AdjustShadingNormal);
-        let bsdf = mi.getProperties(sd);
+        let bsdfProperties = mi.getProperties(sd);
 
-        gRoughness[pixel] = saturate(bsdf.roughness);
-        gDiffuse[pixel] = float4(bsdf.diffuseReflectionAlbedo + bsdf.emission, 1.0);
-        //gSpecular[pixel] = float4(bsdf.specularReflectionAlbedo, 1.0);
-        gSpecular[pixel] = float4(EnvBRDFApprox2(bsdf.specularReflectionAlbedo, bsdf.roughness * bsdf.roughness, abs(dot(v.normalW, viewDir))), 1.0);
+        gRoughness[pixel] = saturate(bsdfProperties.roughness);
+        gDiffuse[pixel] = float4(bsdfProperties.diffuseReflectionAlbedo + bsdfProperties.diffuseTransmissionAlbedo + bsdfProperties.emission, 1.0);
+        // gSpecular[pixel] = float4(bsdf.specularReflectionAlbedo, 1.0);
+        gSpecular[pixel] = float4(EnvBRDFApprox2(bsdfProperties.specularReflectionAlbedo + bsdfProperties.specularTransmissionAlbedo, bsdfProperties.roughness * bsdfProperties.roughness, abs(dot(v.normalW, viewDir))), 1.0);
 
-        float3 normal = bsdf.guideNormal;
+        float3 normal = bsdfProperties.guideNormal;
         float2 octNormal = ndir_to_oct_unorm(normal);
-        float roughness = bsdf.roughness;
+        float roughness = bsdfProperties.roughness;
         gNormalWRoughnessMaterialID[pixel] = float4(octNormal, roughness, 0.0);
     }
     else // invalid hit => default values
