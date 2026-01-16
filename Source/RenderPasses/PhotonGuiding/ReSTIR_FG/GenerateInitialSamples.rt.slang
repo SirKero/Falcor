@@ -295,7 +295,6 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                 pathReservoir.jacobian = jacobian;
                 pathReservoir.guidingPixels = photonSample.guidingPixels;
                 pathReservoir.lightIndex = photonSample.lightIndex;
-                pathReservoir.guidingPdf = photonSample.guidingPdf;
                 uint flags = 0;
                 if (isFinalGather) {
                     flags |= (uint)ReservoirPathFlags::isFinalGather;
@@ -392,7 +391,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
         float targetFunction = luminance(photonData.flux * bsdf) / gNumLightPaths;
-        float w = targetFunction / (cameraPdf * photonData.guidingPdf);
+        float w = targetFunction / (cameraPdf);
 
         r.wSum += w;
         bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
@@ -406,7 +405,6 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
             r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
             r.lightIndex = photonData.lightIndex;
             r.guidingPixels = photonData.guidingPixel;
-            r.guidingPdf = photonData.guidingPdf;
         }
 
         addToGuidingTexture(photonData, w);

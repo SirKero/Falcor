@@ -8,7 +8,6 @@ import Utils.Math.MathHelpers;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
-import RenderPasses.PhotonGuiding.PhotonHelper;
 import RenderPasses.PhotonGuiding.StructsAndHelpers;
 import RenderPasses.PhotonGuiding.SharedEnums;
 import RenderPasses.PhotonGuiding.NextEventEstimationHelper;
@@ -203,7 +202,6 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
                 rpd.retraceSuccessful = true;
             } else if (reservoir.flags.isRadianceEstimate)
             {
-                // retracedPath.F = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg, !triedToSetFGSurface) * rpd.thp;
                 bool isReconnectable = distance(reservoir.samplePosW, sd.posW) < reservoir.sampleRadius;
                 retracedPath.F = reservoir.fgRadiance * rpd.thp;
                 retracedPath.flags = isReconnectable ? (uint)ReservoirPathFlags::isRadianceEstimate : 0;

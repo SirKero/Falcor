@@ -73,10 +73,13 @@ struct RayPayload
 struct PhotonLightSample {
     float3 posW;
     float rndX;
+
     float3 normal;
     float rndY;
+
     float3 flux;
     uint lightIdx;
+
     uint2 guidingPixels;
     float guidingPdf;
     uint _pad;
@@ -568,7 +571,7 @@ void rayGen()
     
     bool storeAsCaustic = false;
     bool reflectedDiffuse = false;
-    float3 photonStartFlux = pls.flux;
+    float3 photonStartFlux = pls.flux / pls.guidingPdf;
     float3 thp = float3(1.0); //Throughput
 
     PhotonData photon = PhotonData();
@@ -577,8 +580,6 @@ void rayGen()
     photon.normalW = pls.normal;
     photon.lightIndex = pls.lightIdx;
     photon.guidingPixel = pls.guidingPixels;
-    photon.guidingRandomVal = float2(pls.rndX, pls.rndY);
-    photon.guidingPdf = pls.guidingPdf;
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {

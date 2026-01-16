@@ -40,9 +40,9 @@ static const bool kDisableDirectLight = DEBUG_DISABLE_DIRECT_LIGHT;
 static const bool kDisableIndirectLight = DEBUG_DISABLE_INDIRECT_LIGHT;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 
-void addToGuidingTexture(int lightIndex, int2 guidingPixel, float emission, uint reservoirConfidence)
+void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uint reservoirConfidence)
 {
-    if (lightIndex < 0 || emission <= 0|| any(guidingPixel < 0))
+    if (lightIndex < 0 || emission <= 0)
         return;
 
     if (kGuidingMode == (uint)GuidingMode::ReSTIR)

@@ -11,15 +11,10 @@ import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 import SharedEnums;
 import NextEventEstimationHelper;
+import PhotonHelper;
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
-RWTexture2D<uint> gGuidingCounter;
-RWTexture2D<uint> gLightIndexGuidingCounter;
-
-StructuredBuffer<PhotonData> gPhotonData[2];
-StructuredBuffer<AABB> gPhotonAABB[2];
-RaytracingAccelerationStructure gPhotonAS;
 
 RWTexture2D<float4> gOutColor;
 
@@ -40,9 +35,6 @@ static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const float3 kDefaultBackgroundColor = float3(0.0);
 static const uint kRenderMode = RENDER_TECHNIQUE;
-static const uint kGuidingMode = GUIDING_MODE;
-static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
-static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseEnvLight = USE_ENV_LIGHT;
 
@@ -82,6 +74,7 @@ struct CameraState {
     }
 }
 
+/*
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
     float3 collectedRadiance = float3(0);
     // Prepare ray
@@ -117,7 +110,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        float3 photonRadiance = max( 0, (photonData.flux * bsdf) / (NdotL * radius * radius * photonWeight * photonData.guidingPdf)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        float3 photonRadiance = max( 0, (photonData.flux * bsdf) / (NdotL * radius * radius * photonWeight)); // NdotL needs to be taken out of the bsdf for Photon Mapping
         collectedRadiance += photonRadiance;
 
         // Add to the guiding texture
@@ -159,7 +152,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
     }
     return collectedRadiance;
 }
-
+*/
 bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout SampleGenerator sg, inout CameraState camState, inout RayDesc ray)
 {
     // Abort on diffuse surfaces
@@ -300,7 +293,7 @@ void rayGen()
         if (hitDiffuse) {
             bool finalGatherFirstHit = (kRenderMode == (uint)PhotonRenderMode::FinalGathering) && (camState.diffuseHitCount == 0);
             uint instanceMask = finalGatherFirstHit ? 2 : 0xFF; // Collect only caustics on final gather first hit
-            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, sg) * camState.thp;
+            outColor += collectPhotons(sd, mi, bsdfProperties.guideNormal, instanceMask, gNumLightPaths, sg) * camState.thp;
             // Next event estimation for first hit in final gathering
             if (finalGatherFirstHit) {
                 LightSample ls = {};

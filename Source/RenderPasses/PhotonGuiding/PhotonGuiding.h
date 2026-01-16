@@ -106,6 +106,12 @@ private:
     // Gets normalized pixel area for back projection
     float getNormalizedPixelArea();
 
+    //Get Photon Collect defines
+    DefineList getPhotonCollectDefines(bool isReSTIRPass = true);
+
+    //Bind Collect Photon data
+    void bindCollectPhotonData(ShaderVar& var);
+
     //ReSTIR initial sample generation
     void reSTIRGenerateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -249,7 +255,6 @@ private:
     uint mGuidingBlurWidth = 3;        //Blur radius
     float mGuidingBlurSigma = 1.f;      //Gaussian blur sigma
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
-    bool mReSTIREnableGuidingJacobian = false;   //Enable guiding jacobian
     bool mUseFixedGuidingDispatch = true;      //Determine guiding dispatch beforehand and distribute on trace photon pixels
     uint mFixedGuidingDispatchReservedPhotons = 64; //Number of photons that are reserved due to fixed dispatch
 

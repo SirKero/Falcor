@@ -19,6 +19,7 @@ static const uint kGuidingMode = GUIDING_MODE;
 static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 static const uint kLightIndexGuidingResolution = GUIDING_LIGHT_INDEX_SIZE;
+static const bool kNotReSTIRPass = NOT_RESTIR_PASS;
 
 
 struct PhotonSample {
@@ -60,7 +61,7 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
     if (emission <= 0)
         return;
     // Add to the guiding texture
-    if (kGuidingMode == (uint)GuidingMode::Emission) {
+    if (kGuidingMode == (uint)GuidingMode::Emission || (kNotReSTIRPass && kGuidingMode == (uint)GuidingMode::ReSTIR)) {
         uint currentColor = 0;
         uint originalValue;
         [allow_uav_condition]
@@ -72,17 +73,19 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
         InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 1u);
-    } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized)
+    } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized || (kNotReSTIRPass && kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized))
     {
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
         InterlockedAdd(gGuidingCounter[photonData.guidingPixel], discretizedEmission);
     }
 
+    //Add light index to guiding
+
     if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
     {
         uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
         InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
-    } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission)
+    } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission || (kNotReSTIRPass && (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR || kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIRConf)))
     {
         uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
@@ -130,7 +133,7 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        float3 F = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL * photonData.guidingPdf)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        float3 F = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
         float approxF = luminance(F);
         addToGuidingTexture(photonData, approxF);
         photonSample.weight += approxF;
@@ -141,7 +144,6 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
             photonSample.normal = photonData.normalW;
             photonSample.radiance = F;
             photonSample.approxRadiance = approxF;
-            photonSample.guidingPdf = photonData.guidingPdf;
             photonSample.lightIndex = photonData.lightIndex;
             photonSample.guidingPixels = photonData.guidingPixel;
         }
@@ -193,7 +195,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        float3 photonRadiance = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL * photonData.guidingPdf));
+        float3 photonRadiance = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL));
         collectedRadiance += photonRadiance; // NdotL needs to be taken out of the bsdf for Photon Mapping
 
         addToGuidingTexture(photonData, luminance(photonRadiance));
@@ -243,7 +245,7 @@ void selectFGSample(inout ReservoirFG r, float pdf, ShadingData sd, IMaterialIns
             radianceOut = (photonData.flux * bsdf) / NdotL;
             targetFunction = luminance(radianceOut);
         }
-        float photonDenom = photonWeight * radius * radius * pdf * photonData.guidingPdf;
+        float photonDenom = photonWeight * radius * radius * pdf;
         float w = targetFunction / photonDenom;
 
         r.wSum += w;
@@ -254,7 +256,6 @@ void selectFGSample(inout ReservoirFG r, float pdf, ShadingData sd, IMaterialIns
             // Guiding data
             r.lightIndex = photonData.lightIndex;
             r.guidingPixels = photonData.guidingPixel;
-            r.guidingPdf = photonData.guidingPdf;
         }
 
         // Guiding
@@ -312,7 +313,7 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
         float targetFunction = 0;
         if (NdotL > 0)
             targetFunction = evalApproximateBRDFPhoton(sd, bsdfProperties, photonData.dir) * luminance(photonData.flux);
-        float photonDenom = photonWeight * radius * radius * photonData.guidingPdf;
+        float photonDenom = photonWeight * radius * radius;
         float w = targetFunction / photonDenom;
 
         causticReservoir.wSum += w;
@@ -326,7 +327,6 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
             // Guiding data
             causticReservoir.lightIndex = photonData.lightIndex;
             causticReservoir.guidingPixels = photonData.guidingPixel;
-            causticReservoir.guidingPdf = photonData.guidingPdf;
         }
 
         // Add to guiding

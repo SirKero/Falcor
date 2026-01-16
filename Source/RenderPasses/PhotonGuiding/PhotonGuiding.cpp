@@ -366,11 +366,6 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         if (mGuidingMode == GuidingMode::Emission || mGuidingMode == GuidingMode::ReSTIR)
             changed |= group.var("Uniform weight (clear value)", mGuidingClearValueEmission, 0.f, FLT_MAX, 0.001f);
 
-        if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_FG)
-        {
-            group.checkbox("ReSTIR Enable Guiding Jacobian", mReSTIREnableGuidingJacobian);
-        }
-
         changed |= group.checkbox("Map Guiding to Photon dispatch size", mUseFixedGuidingDispatch);
 
         changed |= group.var(
@@ -630,7 +625,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         if (!mpPhotonData[i])
         {
             mpPhotonData[i] = Buffer::createStructured(
-                mpDevice, sizeof(float) * 16, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(float) * 12, mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
@@ -1500,6 +1495,27 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     pRenderContext->uavBarrier(mpLightTraceHeadCounter.get());
 }
 
+DefineList PhotonGuiding::getPhotonCollectDefines(bool isReSTIRPass) {
+    DefineList defines = {};
+    defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
+    defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
+    defines.add("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
+    defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+    defines.add("NOT_RESTIR_PASS", isReSTIRPass ? "0" : "1");
+    return defines;
+}
+
+void PhotonGuiding::bindCollectPhotonData(ShaderVar& var) {
+    mpPhotonAS->bindTlas(var, "gPhotonAS");
+    for (uint i = 0; i < 2; i++)
+    {
+        var["gPhotonAABB"][i] = mpPhotonAABB[i];
+        var["gPhotonData"][i] = mpPhotonData[i];
+    }
+    var["gGuidingCounter"] = mpRecordGuidingAtlas;
+    var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
+}
+
 void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "TraceCamera");
@@ -1538,10 +1554,8 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     mTraceCameraPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTraceCameraPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     mTraceCameraPass.pProgram->addDefine("RENDER_TECHNIQUE", std::to_string((uint)mPhotonRenderMode));
-    mTraceCameraPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-    mTraceCameraPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
-    mTraceCameraPass.pProgram->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
     mTraceCameraPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+    mTraceCameraPass.pProgram->addDefines(getPhotonCollectDefines(false));
     if (mpEmissiveLightSampler)
         mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -1571,15 +1585,7 @@ void PhotonGuiding::traceCameraPass(RenderContext* pRenderContext, const RenderD
     var["gView"] = renderData[kInputView]->asTexture();
 
     // Photon Data
-    mpPhotonAS->bindTlas(var, "gPhotonAS");
-
-    for (uint i = 0; i < 2; i++)
-    {
-        var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPhotonData"][i] = mpPhotonData[i];
-    }
-    var["gGuidingCounter"] = mpRecordGuidingAtlas;
-    var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
+    bindCollectPhotonData(var);
 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
 
@@ -1753,19 +1759,16 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
     mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-    mGenerateInitialSamplesPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-    mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
     mGenerateInitialSamplesPass.pProgram->addDefine(
         "ENABLE_RANDOM_REPLAY", mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0"
     );
-    mGenerateInitialSamplesPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
     mGenerateInitialSamplesPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mGenerateInitialSamplesPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPdfs ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_USE_NEE", mPathResamplingUseNEEAfterSpecular ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_STOP_PATH_AFTER_DIFFUSE_SPECULAR", mPathResamplingStopAfterDiffuseSpecular ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefines(getPhotonCollectDefines());
 
     if (mpEmissiveLightSampler)
         mGenerateInitialSamplesPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
@@ -1835,7 +1838,6 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
         DefineList defines;
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
-        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         return defines;
     };
@@ -1881,16 +1883,10 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
     var["CB"]["gNormalThreshold"] = mResampleSettingsFG.normalThreshold;
     var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
     var["CB"]["gUsePathThreshold"] = mResampleSettingsFG.usePathThreshold;
-    var["CB"]["gLightGuidingTextureResSq"] = mGuidingTextureResolution * mGuidingTextureResolution;
-    var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
 
     // Input Resources
     var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount + 1) % 2];
     var["gMVec"] = mpResampleMVec;
-    var["gLightIndexGuiding"] = mpLightIndexGuidingTexture[mFrameCount % 2];
-    var["gLightIndexGuidingPrev"] = mpLightIndexGuidingTexture[(mFrameCount + 1) % 2];
-    var["gGuidingAtlas"] = mpGuidingAtlas[mFrameCount % 2];
-    var["gGuidingAtlasPrev"] = mpGuidingAtlas[(mFrameCount+1) % 2];
 
     // In-/Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
@@ -1937,11 +1933,6 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     mRetracePathsPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
     mRetracePathsPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mRetracePathsPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-    mRetracePathsPass.pProgram->addDefine("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
-    mRetracePathsPass.pProgram->addDefine(
-        "GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor)
-    );
-    mRetracePathsPass.pProgram->addDefine("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
     mRetracePathsPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -1976,12 +1967,6 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     var["gVBufferPrev"] = mpVBufferPrev;
     var["gViewPrev"] = mpViewPrev;
 
-    mpPhotonAS->bindTlas(var, "gPhotonAS");
-    for (uint32_t i = 0; i < 2; i++)
-    {
-        var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPhotonData"][i] = mpPhotonData[i];
-    }
     var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
     var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
 
@@ -2073,7 +2058,6 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         DefineList defines;
         defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
-        defines.add("ENABLE_GUIDING_JACOBIAN", mReSTIREnableGuidingJacobian ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         return defines;
     };
@@ -2120,8 +2104,6 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
     var["CB"]["gPhotonRadius"] = mPhotonRadius;
     var["CB"]["gAdaptivePhotonRadius"] = mAdaptivePhotonRadius;
     var["CB"]["gNormalizedPixelDiagonal"] = mNormalizePixelDiagonal;
-    var["CB"]["gLightGuidingTextureResSq"] = mGuidingTextureResolution * mGuidingTextureResolution;
-    var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
 
     var["CB"]["gPrevCamPos"] = mTemporalCameraPosition;
     var["CB"]["gPrevCamViewProjection"] = mTemporalCameraViewProjection;
@@ -2131,11 +2113,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
     // Input Resources
     var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
     var["gMVec"] = mpResampleMVec;
-    var["gLightIndexGuiding"] = mpLightIndexGuidingTexture[mFrameCount % 2];
-    var["gLightIndexGuidingPrev"] = mpLightIndexGuidingTexture[(mFrameCount + 1) % 2];
-    var["gGuidingAtlas"] = mpGuidingAtlas[mFrameCount % 2];
-    var["gGuidingAtlasPrev"] = mpGuidingAtlas[(mFrameCount + 1) % 2];
-
+    
     // In-/Output Resources
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
 
@@ -2387,3 +2365,5 @@ void PhotonGuiding::updateNumberOfRNGPasses()
         break;
     }
 }
+
+

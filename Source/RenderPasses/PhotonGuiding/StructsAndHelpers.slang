@@ -111,13 +111,7 @@ struct ReservoirFlags {
     }
 }
 
-/* Struct describing a Photon 
-flux - the energy of the photon
-pathLength - Which bounce the photon is on the light path. 0 is the first surface hit (direct light from camera)
-dir - incoming direction
-lightIndex - index of the light that generated this photon
-normalW - world face normal for the photon, used for surface rejections
-*/
+// Photon Data struct 48B (12 floats)
 struct PhotonData {
     float3 flux;
     uint pathLenght;
@@ -126,21 +120,16 @@ struct PhotonData {
     int lightIndex;
 
     float3 normalW;
-    float guidingPdf;
+    uint packedGuidingPixels;
 
-    uint2 guidingPixel;
-    float2 guidingRandomVal; //Not used? 
-
-    // Normal helper
-    /*
-    property uint2 guidingPixels {
+    //Guiding pixels helper
+    property uint2 guidingPixel {
         get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
         set {
             packedGuidingPixels = newValue.x & 0xFFFF;
             packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
         }
     }
-    */
 
     __init() {
         this.dir = float3(0);
@@ -148,9 +137,7 @@ struct PhotonData {
         this.flux = float3(0);
         this.pathLenght = 0;
         this.lightIndex = -1;
-        this.guidingPixel = uint2(0);
-        this.guidingPdf = 0;
-        this.guidingRandomVal = float2(0);
+        this.packedGuidingPixels = 0;
     }
 }
 
@@ -197,9 +184,9 @@ struct ReservoirFG {
     float jacobianDeterminant;   // Jacobian determinant to the current sample
     uint pathLength;             // Path Length
 
-    int lightIndex;            //Guiding
-    int2 guidingPixels;        // Pixel for the guiding texture
-    float guidingPdf;          //pdf for guiding
+    int lightIndex;            // Guiding
+    uint packedGuidingPixels;  // Pixel for the guiding texture
+    uint2 _pad;                // Padding
 
     __init() {
         sampleSurface = {};
@@ -211,12 +198,11 @@ struct ReservoirFG {
         pathLength = 0;
         jacobianDeterminant = -1.0;
         lightIndex = -1;
-        guidingPixels = int2(-1);
-        guidingPdf = 0;
+        packedGuidingPixels = 0;
+        _pad = uint2(0);
     }
 
     //Guiding pixels helper
-    /*
     property uint2 guidingPixels {
         get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
         set {
@@ -224,7 +210,6 @@ struct ReservoirFG {
             packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
         }
     }
-    */
 
     // Valid check
     bool isValid() {
@@ -253,9 +238,9 @@ struct ReservoirCaustic {
     uint pathLength; // Path Length
     float subPixelJacobian; // Sub pixel jacobian for reprojection
 
-    int lightIndex;          // Guiding
-    int2 guidingPixels;      // Pixel for the guiding texture
-    float guidingPdf;       //Pdf for guiding
+    int lightIndex;           // Guiding
+    uint packedGuidingPixels; //(Packed) Pixel for the guiding texture
+    uint2 _pad;
 
     __init() {
         sampleSurface = {};
@@ -272,8 +257,8 @@ struct ReservoirCaustic {
         pathLength = 0;
         subPixelJacobian = 0;
         lightIndex = -1;
-        guidingPixels = uint2(-1);
-        guidingPdf = 0;
+        packedGuidingPixels = 0;
+        _pad = uint2(0);
     }
 
     // Photon dir helper
@@ -287,7 +272,6 @@ struct ReservoirCaustic {
     }
 
     // Guiding pixels helper
-    /*
     property uint2 guidingPixels {
         get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
         set {
@@ -295,7 +279,6 @@ struct ReservoirCaustic {
             packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
         }
     }
-    */
 
     // Valid check
     bool isValid() {
@@ -322,9 +305,9 @@ struct PathReservoir {
     float3 fgRadiance; // Radiance estimate for the final gather point. Can be reused
     float weight;      // Unbiased contribution weight
 
-    int lightIndex;         // Guiding
-    int2 guidingPixels;     // Pixel for the guiding texture
-    float guidingPdf;       // Pdf for guiding
+    int lightIndex;           // Guiding
+    uint packedGuidingPixels; //(Packed) Pixel for the guiding texture
+    uint2 _pad; 
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
@@ -339,8 +322,8 @@ struct PathReservoir {
         fgRadiance = float3(0);
         weight = 0.0;
         lightIndex = -1;
-        guidingPixels = uint2(-1);
-        guidingPdf = 0;
+        packedGuidingPixels = 0;
+        _pad = uint2(0);
     }
 
     bool isValid() {
@@ -355,6 +338,15 @@ struct PathReservoir {
     property float3 sampleNormal {
         get { return oct_to_ndir_snorm(packedSampleNormal);}
         set { packedSampleNormal = ndir_to_oct_snorm(newValue);}
+    }
+
+    // Guiding pixels helper
+    property uint2 guidingPixels {
+        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = newValue.x & 0xFFFF;
+            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+        }
     }
 }
 
