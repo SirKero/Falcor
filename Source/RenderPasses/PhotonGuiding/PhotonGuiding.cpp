@@ -1798,13 +1798,8 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
         mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
 
     // Input Resources
+    bindCollectPhotonData(var);
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
-    mpPhotonAS->bindTlas(var, "gPhotonAS");
-    for (uint32_t i = 0; i < 2; i++)
-    {
-        var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPhotonData"][i] = mpPhotonData[i];
-    }
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
     var["gCausticPhotonHitInfo"] = mpCausticPhotonHitInfo;
