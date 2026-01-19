@@ -12,6 +12,7 @@ RWTexture2D<uint> gLightIndexGuidingCounter;
 
 StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
+StructuredBuffer<uint> gPhotonDirSGPackedPixel[2]; 
 RaytracingAccelerationStructure gPhotonAS;
 
 static const float kPhotonCollectTMax = 1e-7;
@@ -20,7 +21,7 @@ static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 static const uint kLightIndexGuidingResolution = GUIDING_LIGHT_INDEX_SIZE;
 static const bool kNotReSTIRPass = NOT_RESTIR_PASS;
-
+static const bool kEnablePhotonRetracing = ENABLE_PHOTON_RETRACING;
 
 struct PhotonSample {
     float3 posW;
@@ -33,8 +34,8 @@ struct PhotonSample {
     float approxRadiance;
 
     int lightIndex;
-    int2 guidingPixels;
-    float guidingPdf;
+    uint2 guidingPixels;
+    uint packedStartPixelAndPathLength;
 
     __init() {
         posW = float3(0);
@@ -44,8 +45,8 @@ struct PhotonSample {
         radiance = float3(0);
         approxRadiance = 0;
         lightIndex = -1;
-        guidingPixels = int2(-1);
-        guidingPdf = 0;
+        guidingPixels = uint2(0);
+        packedStartPixelAndPathLength = 0;
     }
 }
 
@@ -101,6 +102,9 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
     ray.TMin = 0;
     ray.TMax = kPhotonCollectTMax;
     const float photonWeight = M_PI * numLightPaths;
+    #if ENABLE_PHOTON_RETRACING
+        uint2 choosenPhotonInstanceAndPrimIndex = uint2(0);
+    #endif
 
     RayQuery<RAY_FLAG_NONE> rayQuery;
     rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
@@ -146,12 +150,23 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
             photonSample.approxRadiance = approxF;
             photonSample.lightIndex = photonData.lightIndex;
             photonSample.guidingPixels = photonData.guidingPixel;
+            #if ENABLE_PHOTON_RETRACING
+                choosenPhotonInstanceAndPrimIndex = uint2(instanceIdx, primIdx);
+                photonSample.packedStartPixelAndPathLength = photonData.pathLenght; //Temporary only store the path length
+            #endif
+            
         }
     }
 
     // Finalize RIS
-    if (photonSample.approxRadiance > 0)
+    if (photonSample.approxRadiance > 0){
         photonSample.weight /= photonSample.approxRadiance;
+
+        //If photon retracing is enabled, prepare retrace data
+        #if ENABLE_PHOTON_RETRACING
+            photonSample.packedStartPixelAndPathLength = gPhotonDirSGPackedPixel[choosenPhotonInstanceAndPrimIndex.x][choosenPhotonInstanceAndPrimIndex.y];
+        #endif
+    }
 }
 
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, uint numLightPaths, inout SampleGenerator sg, bool collectOnlyDirectGlobal = false) {

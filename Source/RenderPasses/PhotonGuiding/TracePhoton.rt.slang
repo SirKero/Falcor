@@ -12,6 +12,10 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 
+#ifndef USE_SEPERATE_DIR_SG
+#define USE_SEPERATE_DIR_SG 0
+#endif
+
 cbuffer CB
 {
     uint gMaxBounces;   // Max number of bounces allowed
@@ -34,6 +38,7 @@ cbuffer CB
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<PhotonData> gPhotonData[2];
+RWStructuredBuffer<uint> gPhotonDirSG[2]; 
 RWStructuredBuffer<uint> gPhotonCounter;
 
 RWTexture2D<int> gLightTraceHeadCounter;
@@ -82,7 +87,19 @@ struct PhotonLightSample {
 
     uint2 guidingPixels;
     float guidingPdf;
-    uint _pad;
+    bool useRandomLightDirection;
+
+    __init(){
+        posW = float3(0, 0, 0);
+        normal = float3(0, 0, 0);
+        flux = float3(0, 0, 0);
+        lightIdx = 0;
+        rndX = 0.0;
+        rndY = 0.0;
+        guidingPixels = uint2(0, 0);
+        guidingPdf = 1.0;
+        useRandomLightDirection = false;
+    }
 };
 
 // transforms direction from local to world space
@@ -123,12 +140,12 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
     return true;
 }
 
-bool sampleLightIndex(inout SampleGenerator sg, out uint selectedIdx , out float selectPdf)
+bool sampleLightIndex(float randomVal, out uint selectedIdx , out float selectPdf)
 {
     selectedIdx = 0;
     selectPdf = 0.0;
 
-    float tw = sampleNext1D(sg); // traverse weight
+    float tw = randomVal; // traverse weight
     uint2 mipIdx = uint2(0);     // Working index for mip chain traversal. Starts top left (0)
     int startMip = int(gLightIndexGuidingMaxMip) - 1; // start from secound highest level
     float weightNormFactor = gGuidingLightIndex.Load(uint3(0, 0, gLightIndexGuidingMaxMip)); //Sum of all weights, used for normalization
@@ -181,7 +198,7 @@ bool sampleLightIndex(inout SampleGenerator sg, out uint selectedIdx , out float
     return true;
 }
 
-bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pls)
+bool createGuidingLightSample(float4 randomVal, out PhotonLightSample pls)
 {
     pls = {};
     if (kTotalLightCount == 0)
@@ -199,11 +216,11 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     //Select triangle index with guiding texture
     float triangleSelectionPdf;
     uint triIdx;
-    if (!sampleLightIndex(sg, triIdx, triangleSelectionPdf))
+    if (!sampleLightIndex(randomVal.x, triIdx, triangleSelectionPdf))
         return false;
     
     // Traverse the mipmap
-    float tw = sampleNext1D(sg); // traverse weight
+    float tw = randomVal.y; // traverse weight
     uint2 mipIdx = uint2(0);       // Working index for mip chain traversal. Starts top left (0)
     int startMip = int(gGuidingTextureMaxMip) - 1; //start from second highest level
     float endWeight = 0;
@@ -257,7 +274,7 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     pls.guidingPixels = atlasOffset + mipIdx;
     float2 relMinWeight = float2(mipIdx) / gGuidingTextureResolution;
     float2 relMaxWeight = float2(mipIdx + 1) / gGuidingTextureResolution;
-    relMinWeight += (relMaxWeight - relMinWeight) * sampleNext2D(sg);
+    relMinWeight += (relMaxWeight - relMinWeight) * randomVal.zw;
     pls.rndX = relMinWeight.x;
     pls.rndY = relMinWeight.y;
     float guidingPDF = endWeight * (gGuidingTextureResolution * gGuidingTextureResolution);
@@ -285,7 +302,7 @@ bool createGuidingLightSample(inout SampleGenerator sg, out PhotonLightSample pl
     */
 }
 
-bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenerator sg, out PhotonLightSample pls)
+bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, out PhotonLightSample pls)
 {
     pls = {};
     if (kTotalLightCount == 0)
@@ -314,7 +331,7 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenera
     float endWeight = 0;
     uint lightIndex = 0;
     const uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
-    bool endedLoopEarly = false;
+    //pls.useRandomLightDirection = false; //Default value
     for (int m = startMip; m >= 0; m--) {
         // Update mip index and offset from last iteration
         mipIdx *= 2;
@@ -356,7 +373,7 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenera
             if (mipSamples[selectedSubpixel] < kFixedPhotonGuidingMinPhotons)
             {
                 endWeight = mipSamples[selectedSubpixel];
-                endedLoopEarly = true;
+                pls.useRandomLightDirection = true;
                 break;
             }
         }
@@ -365,11 +382,10 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, inout SampleGenera
             endWeight = mipSamples[selectedSubpixel];
     }
     // Recreate selected random number range from the choosen index
-    float2 randomVal = sampleNext2D(sg);
     float guidingPDF = endWeight / maxPhotons;
 
     //Fill out random values depending if the loop ended at the light or direction
-    if (endedLoopEarly) {
+    if (pls.useRandomLightDirection) {
         pls.rndX = randomVal.x;
         pls.rndY = randomVal.y;
         uint2 offsetLightIdx = uint2(lightIndex % atlasLightsPerRow, lightIndex / atlasLightsPerRow) * gGuidingTextureResolution;
@@ -548,21 +564,37 @@ void rayGen()
     const float invRejection = 1.f / gGlobalRejectionProb;
 
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
+    #if USE_SEPERATE_DIR_SG
+        SampleGenerator sgPhotonDir = SampleGenerator(pixel, getStartSeedPhotonDirSG(gFrameCount, kRNGNumPasses));
+    #endif
     RayDesc ray = {};
-    PhotonLightSample pls = {};
+    PhotonLightSample pls = PhotonLightSample();
 
     // Create a photon by sampling from emissive lights or analytic light sources
+#if USE_SEPERATE_DIR_SG
+    float2 randomValForLightDirection = sampleNext2D(sgPhotonDir);
+#else
+    float2 randomValForLightDirection = sampleNext2D(sg);
+#endif
     if (kUseFixedPhotonGuiding) {
-        if (!createGuidingSampleFixed(pixel, dispatchDims.x, sg, pls))
+        if (!createGuidingSampleFixed(pixel, dispatchDims.x, randomValForLightDirection, pls))
             return;
     } else {
-        if (!createGuidingLightSample(sg, pls))
+        float4 randomVal = float4(sampleNext2D(sg), randomValForLightDirection);
+        if (!createGuidingLightSample(randomVal, pls))
             return;
     }
 
     //Sample emissive or analytic light
-    if (!sampleLight(pls, ray, sg))
-        return;
+    bool validLightSample = false;
+#if USE_SEPERATE_DIR_SG
+    bool usedRandomDirection = pls.useRandomLightDirection;
+    validLightSample = sampleLight(pls, ray, sgPhotonDir);
+#else
+    validLightSample = sampleLight(pls, ray, sg);
+#endif
+    if(!validLightSample)
+        return;  
     
     const uint lightCount = dispatchDims.x * dispatchDims.y;
 
@@ -634,13 +666,20 @@ void rayGen()
                             gCausticPhotonHitInfo[photonInsertIndex] = hit.getData();
                         }  
                     }
+                    #if USE_SEPERATE_DIR_SG
+                        gPhotonDirSG[photonTypeIdx][photonInsertIndex] = packPhotonRetraceData(pixel, photon.pathLenght, usedRandomDirection);
+                    #endif
                 }
             }
         }
              
         //Photon Bounce for next iteration
         BSDFSample bsdfSample;
+#if USE_SEPERATE_DIR_SG
+        bool validSample = mi.sample(sd, sgPhotonDir, bsdfSample, true /*ImportanceSampling*/);
+#else
         bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+#endif
         if (!validSample)
             return;
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);

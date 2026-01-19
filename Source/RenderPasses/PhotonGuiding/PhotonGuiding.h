@@ -161,8 +161,6 @@ private:
     float mSpecularRoughnessThreshold = 0.25f; // Any material below this is considered specular
     bool mEvalDeltaPdfs = false;                // If true delta pdfs are properly evaluated (==0), if false they are set to 1.
 
-    
-
     //
     // Path Tracer
     //
@@ -227,6 +225,7 @@ private:
     float3 mTemporalCameraForward = float3(0);
     float mNormalizedPixelArea = 1.0; // For light trace
     bool mEnableLightTraceSplatting = true;
+    bool mRetraceLightPaths = true; //Retrace light paths for final gather and caustic backprojection
 
     //
     //Guiding Infos/Options
@@ -274,6 +273,7 @@ private:
     //
     ref<Buffer> mpPhotonAABB[2];    // Photon AABBs for Acceleration Structure building
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
+    ref<Buffer> mpPhotonDirSampleGen[2]; // Stores the RNG states for direction sampling. Used for photon retracing
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     ref<Texture> mpGuidingAtlas[2];                  //Atlas for Guiding Textures for Photon Guiding

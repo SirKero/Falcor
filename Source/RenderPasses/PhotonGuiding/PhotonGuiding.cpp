@@ -603,6 +603,8 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpPhotonAABB[1].reset();
         mpPhotonData[0].reset();
         mpPhotonData[1].reset();
+        mpPhotonDirSampleGen[0].reset();
+        mpPhotonDirSampleGen[1].reset();
         mpPhotonAS.reset();
         mpLightTraceLinkedList.reset();
         mpCausticPhotonHitInfo.reset();
@@ -629,6 +631,15 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
+        }
+
+        if(!mpPhotonDirSampleGen[i])
+        {
+            mpPhotonDirSampleGen[i] = Buffer::createStructured(
+                mpDevice, sizeof(uint), mNumMaxPhotons[i], ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPhotonDirSampleGen[i]->setName("PhotonDirectionSampleGenerator" + std::to_string(i));
         }
     }
 
@@ -1421,6 +1432,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
     mTracePhotonPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mTracePhotonPass.pProgram->addDefine("USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC", mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("USE_SEPERATE_DIR_SG", mRetraceLightPaths ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -1461,6 +1473,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
+        var["gPhotonDirSG"][i] = mpPhotonDirSampleGen[i];
     }
 
     var["gGuidingTexture"] = mpGuidingAtlas[mFrameCount % 2];
@@ -1502,6 +1515,7 @@ DefineList PhotonGuiding::getPhotonCollectDefines(bool isReSTIRPass) {
     defines.add("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
     defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
     defines.add("NOT_RESTIR_PASS", isReSTIRPass ? "0" : "1");
+    defines.add("ENABLE_PHOTON_RETRACING", mRetraceLightPaths ? "1" : "0");
     return defines;
 }
 
@@ -1511,6 +1525,7 @@ void PhotonGuiding::bindCollectPhotonData(ShaderVar& var) {
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
+        var["gPhotonDirSGPackedPixel"][i] = mpPhotonDirSampleGen[i];
     }
     var["gGuidingCounter"] = mpRecordGuidingAtlas;
     var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
@@ -1804,17 +1819,13 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
     var["gCausticPhotonHitInfo"] = mpCausticPhotonHitInfo;
     var["gMVec"] = renderData[kInputMVec]->asTexture();
-
+   
     // Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
     var["gResamplingMVec"] = mpResampleMVec;
-
-    //Guiding textures
-    var["gGuidingCounter"] = mpRecordGuidingAtlas;
-    var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
@@ -1929,6 +1940,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     mRetracePathsPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mRetracePathsPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     mRetracePathsPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
+    mRetracePathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
     mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
@@ -1954,6 +1966,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     var["CB"]["gSpatialSampleRadius"] = mResampleSettingsFG.samplingRadius;
     var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
     var["CB"]["gNeeLightSelectProb"] = mNeeLightSelectProb;
+    var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -2358,6 +2371,12 @@ void PhotonGuiding::updateNumberOfRNGPasses()
         break;
     default:
         break;
+    }
+
+    //One addition RNG generator is needed when the light passes need to be retraced
+    if(mRetraceLightPaths) // && (mPhotonRenderMode != PhotonRenderMode::PhotonMapping) && (mPhotonRenderMode != PhotonRenderMode::FinalGathering))
+    {
+        mRNGNumPasses++;
     }
 }
 

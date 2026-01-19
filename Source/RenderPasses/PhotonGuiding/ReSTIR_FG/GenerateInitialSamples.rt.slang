@@ -295,6 +295,12 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                 pathReservoir.jacobian = jacobian;
                 pathReservoir.guidingPixels = photonSample.guidingPixels;
                 pathReservoir.lightIndex = photonSample.lightIndex;
+                #if ENABLE_PHOTON_RETRACING
+                    PhotonRetraceData photonRetraceData = PhotonRetraceData();
+                    photonRetraceData.startPixelPathLengthData = photonSample.packedStartPixelAndPathLength;
+                    photonRetraceData.startSeed = getStartSeedPhotonDirSG(gFrameCount, kRNGNumPasses);
+                    pathReservoir.photonRetraceData = photonRetraceData;
+                #endif
                 uint flags = 0;
                 if (isFinalGather) {
                     flags |= (uint)ReservoirPathFlags::isFinalGather;

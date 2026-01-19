@@ -111,6 +111,81 @@ struct ReservoirFlags {
     }
 }
 
+struct PhotonRetraceData{
+    uint startPixelPathLengthData;
+    uint startSeed;
+
+    //Start pixel helper for SG
+    property uint2 startPixel {
+        get { return uint2(startPixelPathLengthData & 0xFFF, (startPixelPathLengthData >> 12) & 0xFFF); }
+        set {
+            startPixelPathLengthData &= ~0xFFFFFF; // Clear lower 24 bits
+            startPixelPathLengthData |= newValue.x & 0xFFF;
+            startPixelPathLengthData |= (newValue.y & 0xFFF) << 12;
+        }
+    }
+
+    //Path length helper
+    property uint pathLength {
+        get { return (startPixelPathLengthData >> 24) & 0xFF; }
+        set {
+            startPixelPathLengthData &= ~0x7F000000; // Clear upper 8 bits
+            startPixelPathLengthData |= (newValue.x & 0x7F) << 24;
+        }
+    }
+
+    //Random direction flag helper
+    property bool usedRandomDirection {
+        get { return (startPixelPathLengthData >> 31) & 0x1; }
+        set {
+            startPixelPathLengthData &= 0x7FFFFFFF; // Clear upper bit
+            if(newValue)
+                startPixelPathLengthData |= 1 << 31;
+        }
+    }
+
+    //Inits
+    __init() {
+        startPixelPathLengthData = 0;
+        startSeed = 0;
+    }
+
+    __init(uint2 pixel, uint pathLength , uint seed) {
+        this.startPixel = pixel;
+        this.pathLength = pathLength;
+        this.startSeed = seed;
+    }
+}
+
+struct DirectionSampleGeneratorState{
+    uint startPixelData;
+    uint startSeed;
+
+    //Start pixel helper
+    property uint2 startPixel {
+        get { return uint2(startPixelData & 0xFFFF, (startPixelData >> 16) & 0xFFFF); }
+        set {
+            startPixelData = newValue.x & 0xFFFF;
+            startPixelData |= (newValue.y & 0xFFFF) << 16;
+        }
+    }
+
+    __init() {
+        startPixelData = 0;
+        startSeed = 0;
+    }
+
+    __init(uint packedPixelData, uint seed) {
+        this.startPixelData = packedPixelData;
+        this.startSeed = seed;
+    }
+
+    __init(uint2 pixelData, uint seed) {
+        this.startPixel = pixelData;
+        this.startSeed = seed;
+    }
+}
+
 // Photon Data struct 48B (12 floats)
 struct PhotonData {
     float3 flux;
@@ -307,7 +382,7 @@ struct PathReservoir {
 
     int lightIndex;           // Guiding
     uint packedGuidingPixels; //(Packed) Pixel for the guiding texture
-    uint2 _pad; 
+    PhotonRetraceData photonRetraceData; //Photon data for retrace
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
@@ -323,7 +398,7 @@ struct PathReservoir {
         weight = 0.0;
         lightIndex = -1;
         packedGuidingPixels = 0;
-        _pad = uint2(0);
+        photonRetraceData = PhotonRetraceData();
     }
 
     bool isValid() {
@@ -374,6 +449,24 @@ struct RetracedPath
         flags = 0;
         _pad = 0;
     }
+}
+
+//Packing helper. S
+uint packPhotonRetraceData(uint2 startPixel, uint pathLength, bool usedRandomDirection){
+    uint newData = 0;
+    newData |= startPixel.x & 0xFFF;
+    newData |= (startPixel.y & 0xFFF) << 12;
+    newData |= (pathLength & 0x7F) << 24;
+    uint directionFlag = usedRandomDirection ? 1 : 0;
+    newData |= directionFlag << 31;
+    return newData;
+}
+
+
+
+//Start seed for photon direction sample generator
+uint getStartSeedPhotonDirSG(uint frameCount, uint rngNumPasses){
+    return frameCount * rngNumPasses + (rngNumPasses - 3);
 }
 
 // Load in shading data from hit and direction
