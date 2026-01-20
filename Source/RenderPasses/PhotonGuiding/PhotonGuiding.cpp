@@ -440,6 +440,19 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                     mCanResample = false;
                 group2.tooltip("Enables Light Trace with ReSTIR Splatting for the directly visible caustics");
             }
+
+            if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton)
+            {
+                if (group.checkbox("Retrace Light Paths (Photons)", mRetraceLightPaths))
+                {
+                    mRetracePathsPass.reset();
+                    mCanResample = false;
+                }
+                group.tooltip(
+                    "If enabled, the light paths (photons) are retraced each frame instead assuming that the photon did not move"
+                );
+            }
+            
         }
     }
     else
@@ -902,6 +915,15 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             Buffer::CpuAccess::None, nullptr, false
         );
         mpSplattingSortedReservoirs->setName("SplattingSortedReservoirs");
+    }
+
+    if (!mpPhotonRetraceMask || mResetScreenTex)
+    {
+        mpPhotonRetraceMask = Texture::create2D(
+            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::R8Uint, 1u, 1u, nullptr,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
+        );
+        mpPhotonRetraceMask->setName("PhotonRetraceMask");
     }
 
     if (mResetClearResources)
@@ -1908,6 +1930,10 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     std::string profileName = "RetracePaths" + std::to_string(numPass);
     FALCOR_PROFILE(pRenderContext, profileName);
 
+    //TODO remove
+    if (renderData[kOutputDebug])
+        pRenderContext->clearTexture(renderData[kOutputDebug]->asTexture().get());
+
     // Init Shader
     if (!mRetracePathsPass.pProgram)
     {
@@ -1941,6 +1967,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     mRetracePathsPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     mRetracePathsPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mRetracePathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+    mRetracePathsPass.pProgram->addDefine("USE_LIGHT_PATH_RETRACING", mRetraceLightPaths ? "1" : "0");
     mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
@@ -1981,6 +2008,10 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     // Output Resources
     var["gRetraceReservoirPath"] = mpRetracedPath[0];
     var["gRetraceReservoirPathPrev"] = mpRetracedPath[1];
+
+    var["gPhotonRetraceSuccessfulMask"] = mpPhotonRetraceMask;
+
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));

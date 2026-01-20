@@ -306,6 +306,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                     flags |= (uint)ReservoirPathFlags::isFinalGather;
                     pathReservoir.samplePosW = sd.posW;
                     pathReservoir.sampleNormal = sd.faceN;
+                    pathReservoir.sampleRadius = photonSample.radius;
                 }
                 else {
                     flags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;

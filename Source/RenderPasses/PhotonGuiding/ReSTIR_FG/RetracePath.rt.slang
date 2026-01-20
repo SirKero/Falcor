@@ -13,17 +13,30 @@ import RenderPasses.PhotonGuiding.StructsAndHelpers;
 import RenderPasses.PhotonGuiding.SharedEnums;
 import RenderPasses.PhotonGuiding.NextEventEstimationHelper;
 
+#ifndef USE_LIGHT_PATH_RETRACING
+#define USE_LIGHT_PATH_RETRACING 0
+#endif
+
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 Texture2D<float2> gMVec;
 Texture2D<PackedHitInfo> gVBufferPrev;
 Texture2D<float4> gViewPrev;
 
+#if USE_LIGHT_PATH_RETRACING
+RWStructuredBuffer<PathReservoir> gPathReservoir;
+RWStructuredBuffer<PathReservoir> gPathReservoirPrev;
+#else
 StructuredBuffer<PathReservoir> gPathReservoir;
 StructuredBuffer<PathReservoir> gPathReservoirPrev;
+#endif  
 
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPath;         //Retraced path for the current sample
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
+
+RWTexture2D<uint> gPhotonRetraceSuccessfulMask; //TODO
+
+RWTexture2D<float4> gDebug;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -230,7 +243,7 @@ void recreateDirectionsRandomVals(inout PhotonLightSample pls, float2 randomVal)
    
 }
 
-bool randomReplayPhotonPath(PathReservoir reservoirs)
+bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPosW)
 {
     //Recreate Light Dir Sample generator
     SampleGenerator sg = SampleGenerator(reservoirs.photonRetraceData.startPixel, reservoirs.photonRetraceData.startSeed);
@@ -246,16 +259,50 @@ bool randomReplayPhotonPath(PathReservoir reservoirs)
     if(!sampleLight(pls, ray, sg))
         return false;
 
-    //TODO trace path
+    const uint targetPathLength = reservoirs.photonRetraceData.pathLength;
+    RayPayload rayPayload = RayPayload();
+    bool validPhoton = false;
 
-    const uint pathLength = reservoirs.photonRetraceData.pathLength;
-    return false;
+    for (uint i = 0; i <= targetPathLength; i++) {
+        TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
+
+        HitInfo hit = HitInfo(rayPayload.packedHitInfo);
+        if (!hit.isValid())
+            break;
+
+        // Get shading infos
+        let lod = ExplicitLodTextureSampler(0);
+        // Get Material properties
+        ShadingData sd = loadShadingData(hit, ray.Direction, lod);
+
+        // Check if hit is valid for final gather
+        if (i == targetPathLength) {
+            validPhoton = distance(photonCollectionPosW, sd.posW) <= reservoirs.sampleRadius;
+            gDebug[DispatchRaysIndex().xy] = float4(distance(photonCollectionPosW, sd.posW), reservoirs.sampleRadius, validPhoton ? 1 : 0, 1);
+            break;
+        }
+
+        // Photon Bounce for next iteration
+        uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        let bsdfProperties = mi.getProperties(sd);
+        BSDFSample bsdfSample;
+        bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+        if (!validSample || any(bsdfProperties.emission > 0))
+            break;
+        bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+        ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
+        ray.Direction = bsdfSample.wo;
+    }
+
+    return validPhoton;
 }
 
-bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGenerator sg , inout RetracedPath retracedPath)
+bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGenerator sg , inout RetracedPath retracedPath, out float3 collectionPosW)
 {
     let lod = ExplicitLodTextureSampler(0);
     const uint2 dispatchDims = DispatchRaysDimensions().xy;
+    collectionPosW = float3(0);
 
     // Init needed path data
     SampleGenerator rayDirSg = reservoir.sgPathDirections;
@@ -358,6 +405,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
             } else if (reservoir.flags.isRadianceEstimate)
             {
                 bool isReconnectable = distance(reservoir.samplePosW, sd.posW) < reservoir.sampleRadius;
+                collectionPosW = sd.posW;
                 retracedPath.F = reservoir.fgRadiance * rpd.thp;
                 retracedPath.flags = isReconnectable ? (uint)ReservoirPathFlags::isRadianceEstimate : 0;
                 rpd.retraceSuccessful = isReconnectable;
@@ -459,10 +507,12 @@ void rayGen()
             return;
         }
 
-        // Get current reservoir
+        //Random Replay for camera path
         let lod = ExplicitLodTextureSampler(0);
         const uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
         PathReservoir reservoir = gPathReservoir[reservoirIndex];
+        bool validRandomReplayPath = true;
+        float3 collectionPosW = float3(0);
         if (reservoir.pathLength > 0 && reservoir.isValid()) {
             RetracedPath retraceSurface = RetracedPath();
             // Get starting surface for temporal retrace
@@ -470,26 +520,60 @@ void rayGen()
             float3 prevViewDir = gViewPrev[prevPixel].xyz;
             ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
-            if (!randomReplay(sd, reservoir, sg, retraceSurface)) {
+            // Retrace camera path
+            validRandomReplayPath = randomReplay(sd, reservoir, sg, retraceSurface, collectionPosW);
+            if (!validRandomReplayPath) {
                 retraceSurface.F = float3(0);
                 retraceSurface.flags = 0;
-            } 
+            }
 
             gRetraceReservoirPath[reservoirIndex] = retraceSurface;
         }
 
-        PathReservoir resampleReservoir = gPathReservoirPrev[index2Dto1D(prevPixel, dispatchDims.x)];
+        /* TODO for this, the previous AS needs to be available
+        // Photon Path retracing
+        #if USE_LIGHT_PATH_RETRACING
+        if (validRandomReplayPath && reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate) {
+            if (reservoir.flags.isFinalGather)
+                collectionPosW = reservoir.samplePosW;
+            if (!randomReplayPhotonPath(reservoir, collectionPosW)) {
+                reservoir.weight = 0.0;
+                gPathReservoir[reservoirIndex] = reservoir;
+            }
+        }
+        #endif
+        */
+
+        // Temporal Retrace for previous frame
+        const uint resampleReservoirIndex = index2Dto1D(prevPixel, dispatchDims.x);
+        PathReservoir resampleReservoir = gPathReservoirPrev[resampleReservoirIndex];
+        validRandomReplayPath = true;
+        collectionPosW = float3(0);
         if (resampleReservoir.pathLength > 0) {
             RetracedPath retraceSurface = RetracedPath();
             float3 viewDir = gView[pixel].xyz;
             ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
 
-            if (!randomReplay(sd, resampleReservoir, sg, retraceSurface)) {
+            validRandomReplayPath = randomReplay(sd, resampleReservoir, sg, retraceSurface, collectionPosW);
+            if (!validRandomReplayPath) {
                 retraceSurface.F = float3(0);
                 retraceSurface.flags = 0;
             }
 
             gRetraceReservoirPathPrev[reservoirIndex] = retraceSurface;
         }
+        
+        // Photon Path retracing
+        #if USE_LIGHT_PATH_RETRACING
+        if (validRandomReplayPath && resampleReservoir.flags.isFinalGather || resampleReservoir.flags.isRadianceEstimate) {
+            if (resampleReservoir.flags.isFinalGather)
+                collectionPosW = resampleReservoir.samplePosW;
+            if (!randomReplayPhotonPath(resampleReservoir, collectionPosW)) {
+                resampleReservoir.weight = 0.0;
+                gPathReservoirPrev[resampleReservoirIndex] = resampleReservoir;
+            }
+        }
+        #endif
+        
     }
 }

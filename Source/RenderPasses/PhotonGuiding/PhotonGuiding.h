@@ -293,6 +293,7 @@ private:
     ref<Buffer> mpRetracedPath[2];                             // Buffer for retracing a path
     ref<Texture> mpVBufferPrev;                                // VBuffer previous Frame
     ref<Texture> mpViewPrev;                                   // View Vector previous Frame
+    ref<Texture> mpPhotonRetraceMask;                          // Mask indicating if the photon in the reservoir is valid after retracing
     //Caustic ReSTIR Splatting
     ref<Texture> mpLightTraceHeadCounter;                      // Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;                        // Linked List for light tracing
