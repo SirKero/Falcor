@@ -16,6 +16,8 @@ StructuredBuffer<uint> gPhotonDirSGPackedPixel[2];
 RaytracingAccelerationStructure gPhotonAS;
 
 static const float kPhotonCollectTMax = 1e-7;
+static const uint kPhotonGlobalBufferIndex = 0;
+static const uint kPhotonCausticBufferIndex = 1;
 static const uint kGuidingMode = GUIDING_MODE;
 static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
@@ -152,7 +154,6 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
             photonSample.guidingPixels = photonData.guidingPixel;
             #if ENABLE_PHOTON_RETRACING
                 choosenPhotonInstanceAndPrimIndex = uint2(instanceIdx, primIdx);
-                photonSample.packedStartPixelAndPathLength = photonData.pathLenght; //Temporary only store the path length
             #endif
             
         }

@@ -375,11 +375,15 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
 
     let lod = ExplicitLodTextureSampler(0);
 
+    #if ENABLE_PHOTON_RETRACING
+    uint selectedHeadIndex = 0; 
+    #endif
+
     uint count = 0;
     while (headIndex != -1)
     {
         // Get Photon Data
-        PhotonData photonData = gPhotonData[1][headIndex];
+        PhotonData photonData = gPhotonData[kPhotonCausticBufferIndex][headIndex];
         HitInfo photonHit = HitInfo(gCausticPhotonHitInfo[headIndex]);
         if (!photonHit.isValid())
             return;
@@ -412,6 +416,9 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
             r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
             r.lightIndex = photonData.lightIndex;
             r.guidingPixels = photonData.guidingPixel;
+            #if ENABLE_PHOTON_RETRACING
+            selectedHeadIndex = headIndex;
+            #endif
         }
 
         addToGuidingTexture(photonData, w);
@@ -424,6 +431,12 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
     // Finalize Reservoir
     if (r.targetFunction > 0) {
         r.wSum /= r.targetFunction;
+        #if ENABLE_PHOTON_RETRACING
+        PhotonRetraceData photonRetraceData = PhotonRetraceData();
+        photonRetraceData.startPixelPathLengthData = gPhotonDirSGPackedPixel[kPhotonCausticBufferIndex][selectedHeadIndex];
+        photonRetraceData.startSeed = getStartSeedPhotonDirSG(gFrameCount, kRNGNumPasses);
+        r.photonRetraceData = photonRetraceData;
+        #endif
     }
     else
         r.wSum = 0;

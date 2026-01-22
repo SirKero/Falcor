@@ -1,9 +1,9 @@
-#include "../StructsAndHelpers.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.RaytracingInline;
 import Utils.Math.MathHelpers;
+import RenderPasses.PhotonGuiding.StructsAndHelpers;
 
 cbuffer CB {
     uint2 gFrameDim;
@@ -13,6 +13,8 @@ StructuredBuffer<ReservoirCaustic> gPrevReservoir;
 RWStructuredBuffer<uint> gCellCounter;
 RWStructuredBuffer<uint> gGlobalCounter;
 RWStructuredBuffer<uint4> gSplatSortData;
+
+//TODO Photon retracing
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)

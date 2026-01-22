@@ -321,7 +321,7 @@ struct ReservoirCaustic {
 
     int lightIndex;           // Guiding
     uint packedGuidingPixels; //(Packed) Pixel for the guiding texture
-    uint2 _pad;
+    PhotonRetraceData photonRetraceData; // Photon data for retrace
 
     __init() {
         sampleSurface = {};
@@ -339,7 +339,7 @@ struct ReservoirCaustic {
         subPixelJacobian = 0;
         lightIndex = -1;
         packedGuidingPixels = 0;
-        _pad = uint2(0);
+        photonRetraceData = PhotonRetraceData();
     }
 
     // Photon dir helper

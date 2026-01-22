@@ -2280,10 +2280,12 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
 
         mpTemporalSplatReservoirs = ComputePass::create(mpDevice, desc, defines, true);
     }
+    mpTemporalSplatReservoirs->getProgram()->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+    mpTemporalSplatReservoirs->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+
     FALCOR_ASSERT(mpTemporalSplatReservoirs);
 
     // Return early if there is no previous reservoir or resampling is disabled
