@@ -23,13 +23,8 @@ Texture2D<float2> gMVec;
 Texture2D<PackedHitInfo> gVBufferPrev;
 Texture2D<float4> gViewPrev;
 
-#if USE_LIGHT_PATH_RETRACING
-RWStructuredBuffer<PathReservoir> gPathReservoir;
-RWStructuredBuffer<PathReservoir> gPathReservoirPrev;
-#else
 StructuredBuffer<PathReservoir> gPathReservoir;
 StructuredBuffer<PathReservoir> gPathReservoirPrev;
-#endif  
 
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPath;         //Retraced path for the current sample
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
@@ -47,7 +42,6 @@ static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kUseEnvLight = USE_ENV_LIGHT;
-static const uint kAnalyticLightIdxOffset = ANALYTIC_START_INDEX;
 
 cbuffer CB
 {
@@ -97,35 +91,6 @@ struct RetracePathData {
     }
 }
 
-//TODO this is a copy from tracePhoton. Maybe store it in a shared file?
-//Helper struct to generate a photon form the lightSources
-struct PhotonLightSample {
-    float3 posW;
-    float rndX;
-
-    float3 normal;
-    float rndY;
-
-    float3 flux;
-    uint lightIdx;
-
-    uint2 guidingPixels;
-    float guidingPdf;
-    bool useRandomLightDirection;
-
-    __init(){
-        posW = float3(0, 0, 0);
-        normal = float3(0, 0, 0);
-        flux = float3(0, 0, 0);
-        lightIdx = 0;
-        rndX = 0.0;
-        rndY = 0.0;
-        guidingPixels = uint2(0, 0);
-        guidingPdf = 1.0;
-        useRandomLightDirection = false;
-    }
-};
-
 bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout RetracePathData pd, inout RayDesc ray) {
     // Photon Bounce for next iteration
     BSDFSample bsdfSample;
@@ -141,89 +106,6 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
     }
   
     return validSample;
-}
-
-// transforms direction from local to world space
-float3 fromLocalToWorld(const in float3 normal, float3 w)
-{
-    // transform from local space -> random dir vector in world space
-    float3 bitangent = perp_stark(normal);
-    float3 tangent = cross(bitangent, normal);
-
-    return w.x * tangent + w.y * bitangent + w.z * normal;
-}
-
-//TODO this is a copy from tracePhoton. Maybe store it in a shared file?
-//Creates a photon sample from the light
-bool sampleLight(inout PhotonLightSample pls, inout RayDesc ray, inout SampleGenerator sg)
-{
-    // Check if the light is emissive or analytic
-    bool isAnalytic = pls.lightIdx >= kAnalyticLightIdxOffset;
-    float2 randomValues = float2(pls.rndX, pls.rndY);
-    // float2 randomValues = sampleNext2D(sg);
-
-    float3 woLocal = float3 (0);
-
-    // Sample Light depending on type
-    if (isAnalytic)
-    {
-        const uint analyticLightIndex = pls.lightIdx - kAnalyticLightIdxOffset;
-        LightData lightData = gScene.getLight(analyticLightIndex);
-        //For now only point (and spot) lights are supported
-        if (lightData.type != uint(LightType::Point))
-            return false;
-
-        float spotAngle = lightData.cosOpeningAngle;
-       
-        if (lightData.openingAngle < M_2PI) // If the opening angle is smaller than 2PI it is a spotlight
-        {
-            // TODO support penumbra
-            woLocal = sample_cone(randomValues.xy, spotAngle);
-        } else // Pointlight
-        {
-            spotAngle = 0;
-            woLocal = sample_sphere(randomValues.xy);
-        }
-        float invLightPdf = M_2PI * (1.0 - spotAngle);
-
-        if (invLightPdf <= 0.f)
-            return false;
-
-        pls.posW = lightData.posW;
-        pls.normal = lightData.dirW;
-        pls.flux = lightData.intensity * invLightPdf;
-
-    } else //Emissive
-    {
-        // Get light data
-        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(pls.lightIdx);
-        const float3 barycentrics = sample_triangle(sampleNext2D(sg));
-        pls.posW = tri.getPosition(barycentrics);
-        pls.normal = tri.normal;
-
-        // Get Flux
-        float2 uv = tri.getTexCoord(barycentrics);
-        pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
-
-        pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
-
-        //Light direction
-        float lightDirPDF = 1.0;
-        
-        woLocal = sample_cosine_hemisphere_concentric(randomValues, lightDirPDF);
-
-        if (lightDirPDF <= 0.)
-            return false;
-
-        pls.flux *= M_PI; // Lambert Emitter
-    }
-
-    ray.Origin = pls.posW;
-    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-    ray.TMin = 0.0f;
-    ray.TMax = FLT_MAX;
-    
-    return true;
 }
 
 void recreateDirectionsRandomVals(inout PhotonLightSample pls, float2 randomVal)
@@ -256,7 +138,7 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
     recreateDirectionsRandomVals(pls, sampleNext2D(sg));
 
     RayDesc ray = {};
-    if(!sampleLight(pls, ray, sg))
+    if(!photonSampleLight(pls, ray, sg))
         return false;
 
     const uint targetPathLength = reservoirs.photonRetraceData.pathLength;
@@ -530,19 +412,20 @@ void rayGen()
             gRetraceReservoirPath[reservoirIndex] = retraceSurface;
         }
 
-        /* TODO for this, the previous AS needs to be available
+        
         // Photon Path retracing
         #if USE_LIGHT_PATH_RETRACING
+        uint photonRetraceMask = 1; //TODO is set to valid for now
+        /* TODO for this to make sense, the previous AS needs to be available
         if (validRandomReplayPath && reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate) {
             if (reservoir.flags.isFinalGather)
                 collectionPosW = reservoir.samplePosW;
-            if (!randomReplayPhotonPath(reservoir, collectionPosW)) {
-                reservoir.weight = 0.0;
-                gPathReservoir[reservoirIndex] = reservoir;
+            if (randomReplayPhotonPath(reservoir, collectionPosW)) {
+                uint photonRetraceMask |= 1;
             }
         }
-        #endif
         */
+        #endif
 
         // Temporal Retrace for previous frame
         const uint resampleReservoirIndex = index2Dto1D(prevPixel, dispatchDims.x);
@@ -568,11 +451,12 @@ void rayGen()
         if (validRandomReplayPath && resampleReservoir.flags.isFinalGather || resampleReservoir.flags.isRadianceEstimate) {
             if (resampleReservoir.flags.isFinalGather)
                 collectionPosW = resampleReservoir.samplePosW;
-            if (!randomReplayPhotonPath(resampleReservoir, collectionPosW)) {
-                resampleReservoir.weight = 0.0;
-                gPathReservoirPrev[resampleReservoirIndex] = resampleReservoir;
+            if (randomReplayPhotonPath(resampleReservoir, collectionPosW)) {
+                photonRetraceMask |= 2;
             }
         }
+
+        gPhotonRetraceSuccessfulMask[pixel] = photonRetraceMask;
         #endif
         
     }

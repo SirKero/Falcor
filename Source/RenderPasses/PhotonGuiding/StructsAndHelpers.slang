@@ -1,13 +1,19 @@
 #pragma once
 #include "Utils/Math/MathConstants.slangh"
 
+#ifndef ANALYTIC_START_INDEX
+#define ANALYTIC_START_INDEX 0
+#endif
+
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
+import Utils.Geometry.GeometryHelpers;
 import Utils.Math.MathHelpers;
 import Rendering.Materials.IsotropicGGX;
 import Rendering.Materials.Fresnel;
 
+static const uint kAnalyticLightIdxOffset = ANALYTIC_START_INDEX;
 static const float kShadowRayEpsilon = 0.98f;
 static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kMinGGXAlpha. Everything under this value is considered a delta event
 
@@ -451,6 +457,34 @@ struct RetracedPath
     }
 }
 
+// Helper struct to generate a photon form the lightSources
+struct PhotonLightSample {
+    float3 posW;
+    float rndX;
+
+    float3 normal;
+    float rndY;
+
+    float3 flux;
+    uint lightIdx;
+
+    uint2 guidingPixels;
+    float guidingPdf;
+    bool useRandomLightDirection;
+
+    __init() {
+        posW = float3(0, 0, 0);
+        normal = float3(0, 0, 0);
+        flux = float3(0, 0, 0);
+        lightIdx = 0;
+        rndX = 0.0;
+        rndY = 0.0;
+        guidingPixels = uint2(0, 0);
+        guidingPdf = 1.0;
+        useRandomLightDirection = false;
+    }
+};
+
 //Packing helper. S
 uint packPhotonRetraceData(uint2 startPixel, uint pathLength, bool usedRandomDirection){
     uint newData = 0;
@@ -461,8 +495,6 @@ uint packPhotonRetraceData(uint2 startPixel, uint pathLength, bool usedRandomDir
     newData |= directionFlag << 31;
     return newData;
 }
-
-
 
 //Start seed for photon direction sample generator
 uint getStartSeedPhotonDirSG(uint frameCount, uint rngNumPasses){
@@ -666,4 +698,85 @@ float evalMIS(float n0, float p0, float n1, float p1)
         return q0 / (q0 + q1);
     else
         return 0;
+}
+
+// transforms direction from local to world space
+float3 fromLocalToWorld(const in float3 normal, float3 w)
+{
+    // transform from local space -> random dir vector in world space
+    float3 bitangent = perp_stark(normal);
+    float3 tangent = cross(bitangent, normal);
+
+    return w.x * tangent + w.y * bitangent + w.z * normal;
+}
+
+// Creates a photon sample from the light
+bool photonSampleLight(inout PhotonLightSample pls, inout RayDesc ray, inout SampleGenerator sg)
+{
+    // Check if the light is emissive or analytic
+    bool isAnalytic = pls.lightIdx >= kAnalyticLightIdxOffset;
+    float2 randomValues = float2(pls.rndX, pls.rndY);
+    // float2 randomValues = sampleNext2D(sg);
+
+    float3 woLocal = float3(0);
+
+    // Sample Light depending on type
+    if (isAnalytic)
+    {
+        const uint analyticLightIndex = pls.lightIdx - kAnalyticLightIdxOffset;
+        LightData lightData = gScene.getLight(analyticLightIndex);
+        // For now only point (and spot) lights are supported
+        if (lightData.type != uint(LightType::Point))
+            return false;
+
+        float spotAngle = lightData.cosOpeningAngle;
+
+        if (lightData.openingAngle < M_2PI) // If the opening angle is smaller than 2PI it is a spotlight
+        {
+            // TODO support penumbra
+            woLocal = sample_cone(randomValues.xy, spotAngle);
+        } else // Pointlight
+        {
+            spotAngle = 0;
+            woLocal = sample_sphere(randomValues.xy);
+        }
+        float invLightPdf = M_2PI * (1.0 - spotAngle);
+
+        if (invLightPdf <= 0.f)
+            return false;
+
+        pls.posW = lightData.posW;
+        pls.normal = lightData.dirW;
+        pls.flux = lightData.intensity * invLightPdf;
+    } else // Emissive
+    {
+        // Get light data
+        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(pls.lightIdx);
+        const float3 barycentrics = sample_triangle(sampleNext2D(sg));
+        pls.posW = tri.getPosition(barycentrics);
+        pls.normal = tri.normal;
+
+        // Get Flux
+        float2 uv = tri.getTexCoord(barycentrics);
+        pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
+
+        pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
+
+        // Light direction
+        float lightDirPDF = 1.0;
+
+        woLocal = sample_cosine_hemisphere_concentric(randomValues, lightDirPDF);
+
+        if (lightDirPDF <= 0.)
+            return false;
+
+        pls.flux *= M_PI; // Lambert Emitter
+    }
+
+    ray.Origin = pls.posW;
+    ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+    ray.TMin = 0.0f;
+    ray.TMax = FLT_MAX;
+
+    return true;
 }

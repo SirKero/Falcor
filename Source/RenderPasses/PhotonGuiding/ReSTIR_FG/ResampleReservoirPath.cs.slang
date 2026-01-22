@@ -33,13 +33,18 @@ Texture2D<float2> gMVec;
 StructuredBuffer<PathReservoir> gPathReservoirPrev;
 StructuredBuffer<RetracedPath> gRetracedPath;
 StructuredBuffer<RetracedPath> gRetracedPathPrev;
+Texture2D<uint> gPhotonRetraceSuccessfulMask;
 
 RWStructuredBuffer<PathReservoir> gPathReservoir;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kRetraceLightPaths = RETRACE_LIGHT_PATHS;
 
-
+// Checks if the photon retrace was successful by checking the corresponding bit in the mask
+bool checkPhotonRetraceMask(uint photonRetraceMask, uint passID) {
+    return (photonRetraceMask & (1 << passID)) != 0;
+}
 
 bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout SampleGenerator sg) {
 
@@ -67,7 +72,11 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         if (normalThreshold || depthThreshold)
             return false;
     }
-    
+
+    #if RETRACE_LIGHT_PATHS
+    uint photonRetraceMask = gPhotonRetraceSuccessfulMask[pixel];
+    #endif
+
     // Needed reservoir variables
     float w_0 = 0;
     float w_1 = 0;
@@ -89,20 +98,24 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     {
         //Calc MIS weight
         float mis = 1;
-        if (rCurr.flags.hasNoReconnectionSurface) {
+        bool photonRetraceValid = true;
+        #if RETRACE_LIGHT_PATHS
+        if ((rCurr.flags.isRadianceEstimate || rCurr.flags.isFinalGather) && !checkPhotonRetraceMask(photonRetraceMask, 0))
+            photonRetraceValid = false;
+        #endif
+        if (rCurr.flags.hasNoReconnectionSurface && photonRetraceValid) {
             float3 retracedF = retracedPath.F * (retracedPath.jacobian / rCurr.jacobian);
-            mis = evalMIS(rCurr.c, luminance(rCurr.F), rPrev.c, luminance(retracedF));            
+            mis = evalMIS(rCurr.c, luminance(rCurr.F), rPrev.c, luminance(retracedF));
         }else
         {
             float3 thpOther = float3(1);
-
             // Load other reconnection surface if path length > 0
-            if (rCurr.pathLength > 0 && retracedPathValid) {
+            if (rCurr.pathLength > 0 && retracedPathValid && photonRetraceValid) {
                 sdPrev = loadShadingData(HitInfo(retracedPath.rcSurface), -retracedPath.rcViewDir, lod);
                 thpOther = retracedPath.rcThp;
             }
 
-            if (retracedPathValid) {
+            if (retracedPathValid && photonRetraceValid) {
                 float p0 = luminance(rCurr.F);
 
                 let miPrev = gScene.materials.getMaterialInstance(sdPrev, lod, kMIHints);
@@ -141,6 +154,11 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     float jacobianPrev = 1;
     bool prevCanBeSelected = rPrev.isValid();
     prevCanBeSelected &= !isnan(rPrev.weight) && !isinf(rPrev.weight);
+    #if RETRACE_LIGHT_PATHS
+    if ((rPrev.flags.isRadianceEstimate || rPrev.flags.isFinalGather) && !checkPhotonRetraceMask(photonRetraceMask, 1))
+        prevCanBeSelected = false;
+    #endif
+
     // Load retraced surface for temporal reservoir
     retracedPath = RetracedPath();
     retracedPathValid = true; // If the surface is not valid MIS is skipped

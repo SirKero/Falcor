@@ -2026,6 +2026,7 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
         DefineList defines;
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("RETRACE_LIGHT_PATHS", mRetraceLightPaths ? "1" : "0");
         return defines;
     };
 
@@ -2079,6 +2080,7 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
     var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
     var["gRetracedPath"] = mpRetracedPath[0];
     var["gRetracedPathPrev"] = mpRetracedPath[1];
+    var["gPhotonRetraceSuccessfulMask"] = mpPhotonRetraceMask;
 
     // In-/Output Resources
     var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
