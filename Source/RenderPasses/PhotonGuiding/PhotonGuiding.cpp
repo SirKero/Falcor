@@ -2044,7 +2044,7 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
 
         mpResampleReservoirPathPass = ComputePass::create(mpDevice, desc, defines, true);
     }
-    FALCOR_ASSERT(mpResampleReservoirPass);
+    FALCOR_ASSERT(mpResampleReservoirPathPass);
     mpResampleReservoirPathPass->getProgram()->addDefines(getRuntimeDefines());                       // Runtime define
 
     // Return early if there is no previous reservoir or resampling is disabled
