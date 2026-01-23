@@ -445,7 +445,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             {
                 if (group.checkbox("Retrace Light Paths (Photons)", mRetraceLightPaths))
                 {
-                    mRetracePathsPass.reset();
+                    mpTemporalSplatReservoirs.reset();
                     mCanResample = false;
                 }
                 group.tooltip(

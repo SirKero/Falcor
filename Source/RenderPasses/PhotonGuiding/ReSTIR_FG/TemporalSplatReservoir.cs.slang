@@ -15,14 +15,19 @@ cbuffer CB {
     uint gGuidingTextureResolution;
 }
 
+#if USE_LIGHT_PATH_RETRACE
+RWStructuredBuffer<ReservoirCaustic> gPrevReservoir;
+#else
 StructuredBuffer<ReservoirCaustic> gPrevReservoir;
+#endif
 RWStructuredBuffer<uint> gCellCounter;
 RWStructuredBuffer<uint> gGlobalCounter;
 RWStructuredBuffer<uint4> gSplatSortData;
 
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 
-// Photon retracing
+//TODO implement in ray tracing shader?
+// Photon retracing; 
 bool randomReplayPhotonPath(ReservoirCaustic reservoir, out float3 photonHitPosition)
 {
     photonHitPosition = float3(0);
@@ -81,6 +86,65 @@ bool randomReplayPhotonPath(ReservoirCaustic reservoir, out float3 photonHitPosi
     return validPhoton;
 }
 
+bool randomReplayPhotonPath2(ReservoirCaustic reservoir, out HitInfo photonHit, out float3 photonView) {
+    photonHit = {}; // Init
+    photonView = float3(0);
+    // Recreate Light Dir Sample generator
+    SampleGenerator sg = SampleGenerator(reservoir.photonRetraceData.startPixel, reservoir.photonRetraceData.startSeed);
+
+    // Create pls to get start position for the path
+    PhotonLightSample pls = PhotonLightSample();
+    pls.lightIdx = reservoir.lightIndex;
+    pls.guidingPixels = reservoir.guidingPixels;
+    pls.useRandomLightDirection = reservoir.photonRetraceData.usedRandomDirection;
+    photonRetraceRecreateDirectionsRandomValues(pls, sampleNext2D(sg), gGuidingTextureResolution);
+
+    RayDesc tmpRay = {};
+    if (!photonSampleLight(pls, tmpRay, sg))
+        return false;
+
+    Ray ray = Ray(tmpRay.Origin, tmpRay.Direction, tmpRay.TMin, tmpRay.TMax); // Ray query uses this ray struct
+    const uint targetPathLength = reservoir.photonRetraceData.pathLength;
+    bool validPhoton = false;
+    bool lastHitSpecular = false;
+
+    for (uint i = 0; i <= targetPathLength; i++) {
+        SceneRayQuery<1> rayQuery;
+        HitInfo hit = {};
+        float hitT = -1.0;
+        if (!rayQuery.traceRay(ray, hit, hitT, 0, 0xFF))
+            break;
+
+        // Get shading infos
+        let lod = ExplicitLodTextureSampler(0);
+        // Get Material properties
+        ShadingData sd = loadShadingData(hit, ray.dir, lod);
+
+        // If target lenght is reached, store position and end path
+        if (i == targetPathLength) {
+            photonHit = hit;
+            photonView = ray.dir;
+            validPhoton = lastHitSpecular;
+            break;
+        }
+
+        // Photon Bounce for next iteration
+        uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+        let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
+        let bsdfProperties = mi.getProperties(sd);
+        BSDFSample bsdfSample;
+        bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+        if (!validSample || any(bsdfProperties.emission > 0))
+            break;
+        bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+        ray.origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
+        ray.dir = bsdfSample.wo;
+        lastHitSpecular = bsdfProperties.roughness < kRoughnessThreshold;
+    }
+
+    return validPhoton; 
+}
+
 
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
@@ -94,9 +158,19 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     // Get shading data for the current reservoir (TODO could be optimized, as shading data is only used to calculate the offset ray)
     let lod = ExplicitLodTextureSampler(0.f);
-    HitInfo hit = HitInfo(r.sampleSurface);
+    HitInfo hit = {};
+    #if USE_LIGHT_PATH_RETRACE
+    float3 photonView;
+    if (!randomReplayPhotonPath2(r, hit, photonView))
+        return;
+    r.sampleSurfaceView = photonView;
+    r.sampleSurface = hit.getData();
+
+    #else
+    hit = HitInfo(r.sampleSurface);
     if (!hit.isValid())
         return;
+    #endif
 
     ShadingData sd = loadShadingData(hit, r.sampleSurfaceView, lod);
 
@@ -109,7 +183,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         return;
 
     uint2 newPixel = uint2(floor(screenPos.xy * gFrameDim));
-    #if USE_LIGHT_PATH_RETRACE
+    #if 0 //USE_LIGHT_PATH_RETRACE
     float3 retracedPhotonPos;
     bool validRetrace = randomReplayPhotonPath(r, retracedPhotonPos);
     if (validRetrace) {
@@ -141,5 +215,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
     uint cellIndex = 0;
     InterlockedAdd(gCellCounter[linPixel], 1, cellIndex);
 
-    gSplatSortData[index] = uint4(linPixel, cellIndex, pixel); 
+    gSplatSortData[index] = uint4(linPixel, cellIndex, pixel);
+#if USE_LIGHT_PATH_RETRACE
+    gPrevReservoir[index2Dto1D(pixel, gFrameDim.x)] = r;
+#endif
 }
