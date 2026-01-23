@@ -54,6 +54,7 @@ namespace
     const std::string kShaderReSTIRResampleCaustic = kShaderFolderReSTIR + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderReSTIREvalReservoirs = kShaderFolderReSTIR + "EvaluateReservoirs.cs.slang";
     const std::string kShaderReSTIRTemporalSplatReservoirs = kShaderFolderReSTIR + "TemporalSplatReservoir.cs.slang";
+    const std::string kShaderReSTIRRetraceAndSplatReservoirs = kShaderFolderReSTIR + "RetraceAndSplatReservoir.rt.slang";
     const std::string kShaderReSTIRSortSplatReservoirs = kShaderFolderReSTIR + "SortSplatReservoirs.cs.slang";
 
     //Input Textures
@@ -189,7 +190,10 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
         if (mEnableLightTraceSplatting)
         {
             //Reproject reservoirs from last frame to current camera
-            reSTIRSplatTemporalReservoirsPass(pRenderContext, renderData);
+            if (mRetraceLightPaths)
+                reSTIRRetraceAndSplatTemporalReservoirsPass(pRenderContext, renderData);
+            else
+                reSTIRSplatTemporalReservoirsPass(pRenderContext, renderData);
 
             //Sort Splatted reservoirs, so they can be properly used for resampling
             reSTIRSortSplattedReservoirsPass(pRenderContext, renderData);
@@ -445,7 +449,6 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             {
                 if (group.checkbox("Retrace Light Paths (Photons)", mRetraceLightPaths))
                 {
-                    mpTemporalSplatReservoirs.reset();
                     mCanResample = false;
                 }
                 group.tooltip(
@@ -2267,10 +2270,7 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
     auto getRuntimeDefines = [&]()
     {
         DefineList defines;
-        defines.add("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-        defines.add("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-        defines.add("USE_LIGHT_PATH_RETRACE", mRetraceLightPaths ? "1" : "0");
         return defines;
     };
 
@@ -2303,7 +2303,6 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
 
     var["CB"]["gFrameDim"] = mScreenRes;
-    var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
 
     var["gPrevReservoir"] = mpCausticReservoir[(mFrameCount + 1) % 2];
     var["gCellCounter"] = mpSplattingCellCounter;
@@ -2314,6 +2313,69 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
     const uint2 targetDim = mScreenRes;
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpTemporalSplatReservoirs->execute(pRenderContext, uint3(targetDim, 1));
+}
+
+void PhotonGuiding::reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    //mRetraceCausticPathsPass
+    std::string profileName = "RetraceAndSplatCausticReservoirs";
+    FALCOR_PROFILE(pRenderContext, profileName);
+
+    //Clear counter
+    pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
+    pRenderContext->clearUAV(mpSplattingCellCounter->getUAV(0).get(), uint4(0));
+    pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0));
+
+    // Init Shader
+    if (!mRetraceCausticPathsPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderReSTIRRetraceAndSplatReservoirs);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mRetraceCausticPathsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mRetraceCausticPathsPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+
+        mRetraceCausticPathsPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+    }
+
+    // Defines that can change on runtime
+    mRetraceCausticPathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+    mRetraceCausticPathsPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mRetraceCausticPathsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+
+    // Program Vars
+    if (!mRetraceCausticPathsPass.pVars)
+        mRetraceCausticPathsPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+    FALCOR_ASSERT(mRetraceCausticPathsPass.pVars);
+
+    if (!mCanResample || !mResampleSettingsFG.enable)
+        return;
+
+    auto var = mRetraceCausticPathsPass.pVars->getRootVar();
+
+    var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
+
+    var["gPrevReservoir"] = mpCausticReservoir[(mFrameCount + 1) % 2];
+    var["gCellCounter"] = mpSplattingCellCounter;
+    var["gGlobalCounter"] = mpSplattingGlobalCounter;
+    var["gSplatSortData"] = mpSplattingSortingData;
+
+    // Dispatch Shader
+    mpScene->raytrace(pRenderContext, mRetraceCausticPathsPass.pProgram.get(), mRetraceCausticPathsPass.pVars, uint3(mScreenRes, 1));
 }
 
 void PhotonGuiding::reSTIRSortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)

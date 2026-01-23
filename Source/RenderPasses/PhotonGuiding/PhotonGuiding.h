@@ -133,6 +133,9 @@ private:
     // Splat the reservoirs from last frame into the current frame
     void reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    // Retrace caustic paths and splat last frame into the current frame
+    void reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     // Sort the splatted reservoirs so they can be used in the resampling pass
     void reSTIRSortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -341,6 +344,7 @@ private:
     //ReSTIR Passes
     RayTraceProgramHelper mGenerateInitialSamplesPass; // Trace Final Gather rays and collect photons
     RayTraceProgramHelper mRetracePathsPass;         // Retrace Path Reservoirs
+    RayTraceProgramHelper mRetraceCausticPathsPass;  // Retrace the Caustic Paths for the Caustic reservoirs
     ref<ComputePass> mpResampleReservoirFGPass;      // Resampling Pass for Final Gather Reservoirs
     ref<ComputePass> mpResampleReservoirPathPass;    // Resampling of the Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass; // Resampling Pass for Caustic Reservoirs
