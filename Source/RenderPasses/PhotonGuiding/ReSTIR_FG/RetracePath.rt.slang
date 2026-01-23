@@ -31,8 +31,6 @@ RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path 
 
 RWTexture2D<uint> gPhotonRetraceSuccessfulMask; //TODO
 
-RWTexture2D<float4> gDebug;
-
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kCausticInstanceMask = 2;
@@ -108,23 +106,6 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
     return validSample;
 }
 
-void recreateDirectionsRandomVals(inout PhotonLightSample pls, float2 randomVal)
-{
-    if(pls.useRandomLightDirection){
-        pls.rndX = randomVal.x;
-        pls.rndY = randomVal.y;
-    }
-    else{
-        uint2 relIdx = pls.guidingPixels % gGuidingTextureResolution; //To local guiding pixels
-        float2 relMinWeight = float2(relIdx) / gGuidingTextureResolution;
-        float2 relMaxWeight = float2(relIdx + 1) / gGuidingTextureResolution;
-        relMinWeight += (relMaxWeight - relMinWeight) * randomVal;
-        pls.rndX = relMinWeight.x;
-        pls.rndY = relMinWeight.y;
-    }
-   
-}
-
 bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPosW)
 {
     //Recreate Light Dir Sample generator
@@ -135,7 +116,7 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
     pls.lightIdx = reservoirs.lightIndex;
     pls.guidingPixels = reservoirs.guidingPixels;
     pls.useRandomLightDirection = reservoirs.photonRetraceData.usedRandomDirection;
-    recreateDirectionsRandomVals(pls, sampleNext2D(sg));
+    photonRetraceRecreateDirectionsRandomValues(pls, sampleNext2D(sg), gGuidingTextureResolution);
 
     RayDesc ray = {};
     if(!photonSampleLight(pls, ray, sg))
@@ -144,6 +125,7 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
     const uint targetPathLength = reservoirs.photonRetraceData.pathLength;
     RayPayload rayPayload = RayPayload();
     bool validPhoton = false;
+    bool lastHitSpecular = false;
 
     for (uint i = 0; i <= targetPathLength; i++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -160,7 +142,9 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
         // Check if hit is valid for final gather
         if (i == targetPathLength) {
             validPhoton = distance(photonCollectionPosW, sd.posW) <= reservoirs.sampleRadius;
-            gDebug[DispatchRaysIndex().xy] = float4(distance(photonCollectionPosW, sd.posW), reservoirs.sampleRadius, validPhoton ? 1 : 0, 1);
+            //Check if caustic photon is still caustic
+            if(reservoirs.flags.isCausticPhoton)
+                validPhoton &= lastHitSpecular;
             break;
         }
 
@@ -175,6 +159,7 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
+        lastHitSpecular = bsdfProperties.roughness < kRoughnessThreshold;
     }
 
     return validPhoton;

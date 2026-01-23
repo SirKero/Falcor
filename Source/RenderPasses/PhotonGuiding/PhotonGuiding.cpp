@@ -1930,10 +1930,6 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     std::string profileName = "RetracePaths" + std::to_string(numPass);
     FALCOR_PROFILE(pRenderContext, profileName);
 
-    //TODO remove
-    if (renderData[kOutputDebug])
-        pRenderContext->clearTexture(renderData[kOutputDebug]->asTexture().get());
-
     // Init Shader
     if (!mRetracePathsPass.pProgram)
     {
@@ -2010,8 +2006,6 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     var["gRetraceReservoirPathPrev"] = mpRetracedPath[1];
 
     var["gPhotonRetraceSuccessfulMask"] = mpPhotonRetraceMask;
-
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));
@@ -2270,6 +2264,16 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
     pRenderContext->clearUAV(mpSplattingCellCounter->getUAV(0).get(), uint4(0));
     pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0));
 
+    auto getRuntimeDefines = [&]()
+    {
+        DefineList defines;
+        defines.add("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+        defines.add("USE_LIGHT_PATH_RETRACE", mRetraceLightPaths ? "1" : "0");
+        return defines;
+    };
+
     if (!mpTemporalSplatReservoirs)
     {
         Program::Desc desc;
@@ -2280,11 +2284,11 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
+        defines.add(getRuntimeDefines());
 
         mpTemporalSplatReservoirs = ComputePass::create(mpDevice, desc, defines, true);
     }
-    mpTemporalSplatReservoirs->getProgram()->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
-    mpTemporalSplatReservoirs->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mpTemporalSplatReservoirs->getProgram()->addDefines(getRuntimeDefines()); //Update
 
     FALCOR_ASSERT(mpTemporalSplatReservoirs);
 
@@ -2299,6 +2303,7 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
 
     var["CB"]["gFrameDim"] = mScreenRes;
+    var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
 
     var["gPrevReservoir"] = mpCausticReservoir[(mFrameCount + 1) % 2];
     var["gCellCounter"] = mpSplattingCellCounter;

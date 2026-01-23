@@ -34,7 +34,8 @@ enum ReservoirPathFlags : uint {
     isEmissiveHit = 0x800,            // 1<<11
     isEnvMapHit = 0x1000,             // 1<<12
     isRadianceEstimate = 0x2000,      // 1<<13
-    isNEE = 0x4000                    // 1<<14
+    isNEE = 0x4000,                   // 1<<14
+    isCausticPhoton = 0x8000          // 1<<15
 }
 
 //Reservoir flag struct
@@ -113,6 +114,14 @@ struct ReservoirFlags {
         set {
             flags &= ~(uint)ReservoirPathFlags::isNEE; // Clear bit
             flags |= (newValue ? (uint)ReservoirPathFlags::isNEE : 0);
+        }
+    }
+
+    property bool isCausticPhoton {
+        get { return (flags & (uint)ReservoirPathFlags::isCausticPhoton) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isCausticPhoton; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isCausticPhoton : 0);
         }
     }
 }
@@ -779,4 +788,20 @@ bool photonSampleLight(inout PhotonLightSample pls, inout RayDesc ray, inout Sam
     ray.TMax = FLT_MAX;
 
     return true;
+}
+
+void photonRetraceRecreateDirectionsRandomValues(inout PhotonLightSample pls, float2 randomVal, uint guidingTextureResolution)
+{
+    if (pls.useRandomLightDirection) {
+        pls.rndX = randomVal.x;
+        pls.rndY = randomVal.y;
+    }
+    else {
+        uint2 relIdx = pls.guidingPixels % guidingTextureResolution; // To local guiding pixels
+        float2 relMinWeight = float2(relIdx) / guidingTextureResolution;
+        float2 relMaxWeight = float2(relIdx + 1) / guidingTextureResolution;
+        relMinWeight += (relMaxWeight - relMinWeight) * randomVal;
+        pls.rndX = relMinWeight.x;
+        pls.rndY = relMinWeight.y;
+    }
 }

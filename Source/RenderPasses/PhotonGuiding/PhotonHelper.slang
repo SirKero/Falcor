@@ -96,7 +96,8 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
     }
 }
 
-void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, uint numLightPaths, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
+int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, uint numLightPaths, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
+    int photonHitType = -1; // -1 = None, 0 = Global, 1 = Caustic
     photonSample = PhotonSample();
     RayDesc ray;
     ray.Origin = sd.posW;
@@ -145,6 +146,7 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
         photonSample.weight += approxF;
         bool selected = (sampleNext1D(sg) * photonSample.weight) < approxF;
         if (selected) {
+            photonHitType = instanceIdx;
             photonSample.posW = photonPosW;
             photonSample.radius = radius;
             photonSample.normal = photonData.normalW;
@@ -168,6 +170,7 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
             photonSample.packedStartPixelAndPathLength = gPhotonDirSGPackedPixel[choosenPhotonInstanceAndPrimIndex.x][choosenPhotonInstanceAndPrimIndex.y];
         #endif
     }
+    return photonHitType;
 }
 
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, uint numLightPaths, inout SampleGenerator sg, bool collectOnlyDirectGlobal = false) {

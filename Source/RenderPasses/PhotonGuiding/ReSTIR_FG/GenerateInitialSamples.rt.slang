@@ -284,10 +284,11 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         if (hitIsDiffuse) {
             const bool isFinalGather = pd.lastHitDiffuse; // If the last two hits are diffuse, the hit is a final gather surface
             PhotonSample photonSample;
+            int photonHitType = -1;
             if (kUseNEEForPathReservoirs)
-                photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
             else
-                photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather);
 
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
@@ -295,13 +296,16 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                 pathReservoir.jacobian = jacobian;
                 pathReservoir.guidingPixels = photonSample.guidingPixels;
                 pathReservoir.lightIndex = photonSample.lightIndex;
+                uint flags = 0;
+                if (photonHitType == kPhotonCausticBufferIndex)
+                    flags |= (uint)ReservoirPathFlags::isCausticPhoton;
                 #if ENABLE_PHOTON_RETRACING
                     PhotonRetraceData photonRetraceData = PhotonRetraceData();
                     photonRetraceData.startPixelPathLengthData = photonSample.packedStartPixelAndPathLength;
                     photonRetraceData.startSeed = getStartSeedPhotonDirSG(gFrameCount, kRNGNumPasses);
                     pathReservoir.photonRetraceData = photonRetraceData;
                 #endif
-                uint flags = 0;
+                
                 if (isFinalGather) {
                     flags |= (uint)ReservoirPathFlags::isFinalGather;
                     pathReservoir.samplePosW = sd.posW;
