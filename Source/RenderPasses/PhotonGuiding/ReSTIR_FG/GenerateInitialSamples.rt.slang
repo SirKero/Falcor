@@ -296,6 +296,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                 pathReservoir.jacobian = jacobian;
                 pathReservoir.guidingPixels = photonSample.guidingPixels;
                 pathReservoir.lightIndex = photonSample.lightIndex;
+                pathReservoir.photonGuidingPdf = photonSample.guidingPdf * gNumLightPaths; //Is needed to update flux for photon retrace
                 uint flags = 0;
                 if (photonHitType == kPhotonCausticBufferIndex)
                     flags |= (uint)ReservoirPathFlags::isCausticPhoton;
@@ -416,6 +417,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
             r.photonPosW = sd.posW;
             r.photonDir = photonData.dir;
             r.photonRadiance = photonData.flux / gNumLightPaths;
+            r.photonGuidingPdf = photonData.guidingPdf * gNumLightPaths;
             r.targetFunction = targetFunction;
             r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
             r.lightIndex = photonData.lightIndex;

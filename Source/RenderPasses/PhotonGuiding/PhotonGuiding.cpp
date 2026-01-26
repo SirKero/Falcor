@@ -1967,6 +1967,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     mRetracePathsPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mRetracePathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
     mRetracePathsPass.pProgram->addDefine("USE_LIGHT_PATH_RETRACING", mRetraceLightPaths ? "1" : "0");
+    mRetracePathsPass.pProgram->addDefine("PHOTON_RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
     mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
@@ -2355,6 +2356,7 @@ void PhotonGuiding::reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* p
     mRetraceCausticPathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
     mRetraceCausticPathsPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mRetraceCausticPathsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mRetraceCausticPathsPass.pProgram->addDefine("PHOTON_RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
 
     // Program Vars
     if (!mRetraceCausticPathsPass.pVars)

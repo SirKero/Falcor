@@ -29,7 +29,7 @@ StructuredBuffer<PathReservoir> gPathReservoirPrev;
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPath;         //Retraced path for the current sample
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
 
-RWTexture2D<uint> gPhotonRetraceSuccessfulMask; //TODO
+RWTexture2D<uint> gPhotonRetraceSuccessfulMask;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -40,6 +40,7 @@ static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kUseEnvLight = USE_ENV_LIGHT;
+static const bool kPhotonRussianRoulette = PHOTON_RUSSIAN_ROULETTE;
 
 cbuffer CB
 {
@@ -106,8 +107,10 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
     return validSample;
 }
 
-bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPosW)
+bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPosW, out float3 samplePosW, out float3 sampleFlux)
 {
+    samplePosW = float3(0);
+    sampleFlux = float3(0);
     //Recreate Light Dir Sample generator
     SampleGenerator sg = SampleGenerator(reservoirs.photonRetraceData.startPixel, reservoirs.photonRetraceData.startSeed);
 
@@ -126,6 +129,8 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
     RayPayload rayPayload = RayPayload();
     bool validPhoton = false;
     bool lastHitSpecular = false;
+    float3 thp = float3(1);
+    sampleFlux = pls.flux;
 
     for (uint i = 0; i <= targetPathLength; i++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -141,6 +146,7 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
 
         // Check if hit is valid for final gather
         if (i == targetPathLength) {
+            samplePosW = sd.posW;
             validPhoton = distance(photonCollectionPosW, sd.posW) <= reservoirs.sampleRadius;
             //Check if caustic photon is still caustic
             if(reservoirs.flags.isCausticPhoton)
@@ -160,7 +166,22 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
         lastHitSpecular = bsdfProperties.roughness < kRoughnessThreshold;
+
+        thp *= bsdfSample.weight;
+        // Russian roulette
+        if (kPhotonRussianRoulette) {
+            float rrRand = sampleNext1D(sg);
+            const float rrVal = luminance(thp);
+            if ((rrRand > rrVal))
+            {
+                break; // Photon is absorbed
+            }
+            thp /= rrVal;
+        }
+
     }
+
+    sampleFlux *= validPhoton ? thp : 0.0;
 
     return validPhoton;
 }
@@ -436,8 +457,11 @@ void rayGen()
         if (validRandomReplayPath && resampleReservoir.flags.isFinalGather || resampleReservoir.flags.isRadianceEstimate) {
             if (resampleReservoir.flags.isFinalGather)
                 collectionPosW = resampleReservoir.samplePosW;
-            if (randomReplayPhotonPath(resampleReservoir, collectionPosW)) {
+            // TODO update reservoir radiance and sample position
+            float3 photonSamplePosW, photonSampleFlux;
+            if (randomReplayPhotonPath(resampleReservoir, collectionPosW, photonSamplePosW , photonSampleFlux)) {
                 photonRetraceMask |= 2;
+                photonSampleFlux /= resampleReservoir.photonGuidingPdf;
             }
         }
 

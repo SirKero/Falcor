@@ -28,14 +28,14 @@ enum class PhotonType // : uint32_t
 
 //Flags for the Path Reservoir
 enum ReservoirPathFlags : uint {
-    firstHitIsDelta = 0x100,          // 1<<8
-    hasNoReconnectionSurface = 0x200, // 1<<9
-    isFinalGather = 0x400,            // 1<<10
-    isEmissiveHit = 0x800,            // 1<<11
-    isEnvMapHit = 0x1000,             // 1<<12
-    isRadianceEstimate = 0x2000,      // 1<<13
-    isNEE = 0x4000,                   // 1<<14
-    isCausticPhoton = 0x8000          // 1<<15
+    firstHitIsDelta = 0x10000,          // 1<<16
+    hasNoReconnectionSurface = 0x20000, // 1<<17
+    isFinalGather = 0x40000,            // 1<<18
+    isEmissiveHit = 0x80000,            // 1<<19
+    isEnvMapHit = 0x100000,             // 1<<20
+    isRadianceEstimate = 0x200000,      // 1<<21
+    isNEE = 0x400000,                   // 1<<22
+    isCausticPhoton = 0x800000          // 1<<23
 }
 
 //Reservoir flag struct
@@ -49,8 +49,8 @@ struct ReservoirFlags {
     // Replaces path flag. Assumes that it is already or'ed
     [mutating]
     void setReservoirPathFlags(uint pathFlag) {
-        flags &= ~0xFF00; // Clear all flag bits
-        flags |= pathFlag;
+        flags &= ~0xFFFF0000; // Clear all flag bits
+        flags |= pathFlag & 0xFFFF0000;
     }
 
     property uint pathLength {
@@ -58,6 +58,14 @@ struct ReservoirFlags {
         set {
             flags &= ~0xFF; // Clear lower bits
             flags |= (newValue & 0xFF);
+        }
+    }
+
+    property uint confidence {
+        get { return flags & 0xFF00; }
+        set {
+            flags &= ~0xFF00; // Clear bits
+            flags |= (newValue & 0xFF) << 8;
         }
     }
 
@@ -172,52 +180,32 @@ struct PhotonRetraceData{
     }
 }
 
-struct DirectionSampleGeneratorState{
-    uint startPixelData;
-    uint startSeed;
-
-    //Start pixel helper
-    property uint2 startPixel {
-        get { return uint2(startPixelData & 0xFFFF, (startPixelData >> 16) & 0xFFFF); }
-        set {
-            startPixelData = newValue.x & 0xFFFF;
-            startPixelData |= (newValue.y & 0xFFFF) << 16;
-        }
-    }
-
-    __init() {
-        startPixelData = 0;
-        startSeed = 0;
-    }
-
-    __init(uint packedPixelData, uint seed) {
-        this.startPixelData = packedPixelData;
-        this.startSeed = seed;
-    }
-
-    __init(uint2 pixelData, uint seed) {
-        this.startPixel = pixelData;
-        this.startSeed = seed;
-    }
-}
-
 // Photon Data struct 48B (12 floats)
 struct PhotonData {
-    float3 flux;
-    uint pathLenght;
+    float3 flux;      // Photon flux
+    float guidingPdf; // Guiding PDF used to generate the photon
 
-    float3 dir;
-    int lightIndex;
+    float3 dir;         // Photon direction
+    int lightIndex;     //Light index used to generate the photon
 
-    float3 normalW;
-    uint packedGuidingPixels;
+    float3 normalW;           // Face Normal
+    uint packedGuidingPixelsPathLength; // Pixel for the guiding texture
 
     //Guiding pixels helper
     property uint2 guidingPixel {
-        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        get { return uint2(packedGuidingPixelsPathLength & 0xFFF, (packedGuidingPixelsPathLength >> 12) & 0xFFF); }
         set {
-            packedGuidingPixels = newValue.x & 0xFFFF;
-            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+            packedGuidingPixelsPathLength &= ~0xFFFFFF; // Clear lower 24 bits
+            packedGuidingPixelsPathLength |= newValue.x & 0xFFF;
+            packedGuidingPixelsPathLength |= (newValue.y & 0xFFF) << 12;
+        }
+    }
+
+    property uint pathLength {
+        get { return (packedGuidingPixelsPathLength>>24) & 0xFF; }
+        set {
+            packedGuidingPixelsPathLength &= ~0xFF000000; // Clear upper bits
+            packedGuidingPixelsPathLength |= (newValue & 0xFF)<<24;
         }
     }
 
@@ -225,9 +213,9 @@ struct PhotonData {
         this.dir = float3(0);
         this.normalW = float3(0,1,0);
         this.flux = float3(0);
-        this.pathLenght = 0;
+        this.guidingPdf = 1;
         this.lightIndex = -1;
-        this.packedGuidingPixels = 0;
+        this.packedGuidingPixelsPathLength = 0;
     }
 }
 
@@ -323,14 +311,14 @@ struct ReservoirCaustic {
     float3 photonRadiance; // Radiance
     float photonDirZ;
 
-    float wSum;      // W and wSum
-    uint c;          // Confidence weight
-    uint pathLength; // Path Length
+    ReservoirFlags flags; // Flags, path length and confidence
+    float wSum;           // W and wSum
     float subPixelJacobian; // Sub pixel jacobian for reprojection
-
     int lightIndex;           // Guiding
+
     uint packedGuidingPixels; //(Packed) Pixel for the guiding texture
     PhotonRetraceData photonRetraceData; // Photon data for retrace
+    float photonGuidingPdf;                    // Guiding PDF for retracing
 
     __init() {
         sampleSurface = {};
@@ -343,12 +331,24 @@ struct ReservoirCaustic {
         photonRadiance = float3(0);
         photonDirZ = 0;
         wSum = 0;
-        c = 0;
-        pathLength = 0;
+        flags = ReservoirFlags();
+        photonGuidingPdf = 0;
         subPixelJacobian = 0;
         lightIndex = -1;
         packedGuidingPixels = 0;
         photonRetraceData = PhotonRetraceData();
+    }
+
+    // Path length helper
+    property uint pathLength {
+        get { return flags.pathLength; }
+        set { flags.pathLength = newValue;}
+    }
+
+    // Confidence helper
+    property uint c {
+        get { return flags.confidence; }
+        set { flags.confidence = newValue;}
     }
 
     // Photon dir helper
@@ -389,40 +389,24 @@ struct PathReservoir {
     ReservoirFlags flags; // path length and flags
     float2 packedSampleNormal;
 
-    float3 F; // Complete radiance of the path
-    uint c;   // Confidence Weight
-
-    float3 fgRadiance; // Radiance estimate for the final gather point. Can be reused
+    float3 F;          // Complete radiance of the path
     float weight;      // Unbiased contribution weight
 
+    float3 fgRadiance; // Radiance estimate for the final gather point. Can be reused
     int lightIndex;           // Guiding
-    uint packedGuidingPixels; //(Packed) Pixel for the guiding texture
+
+    uint packedGuidingPixels;            //(Packed) Pixel for the guiding texture
+    float photonGuidingPdf;                    // Guiding PDF for photon retracing
     PhotonRetraceData photonRetraceData; //Photon data for retrace
-
-    __init() {
-        sgPathDirections = SampleGenerator(uint2(0), 0);
-        sgNeeLightSelection = SampleGenerator(uint2(0), 0);
-        samplePosW = float3(0);
-        sampleRadius = 0;
-        jacobian = 1;
-        packedSampleNormal = float2(0);
-        flags = ReservoirFlags();
-        F = float3(0);
-        c = 1;
-        fgRadiance = float3(0);
-        weight = 0.0;
-        lightIndex = -1;
-        packedGuidingPixels = 0;
-        photonRetraceData = PhotonRetraceData();
-    }
-
-    bool isValid() {
-        return weight > 0 && jacobian > 0 && any(F > 0);
-    }
 
     property uint pathLength {
         get { return flags.pathLength; }
         set { flags.pathLength = newValue;}
+    }
+
+    property uint c {
+        get { return flags.confidence; }
+        set { flags.confidence = newValue;}
     }
 
     property float3 sampleNormal {
@@ -437,6 +421,28 @@ struct PathReservoir {
             packedGuidingPixels = newValue.x & 0xFFFF;
             packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
         }
+    }
+
+    __init() {
+        sgPathDirections = SampleGenerator(uint2(0), 0);
+        sgNeeLightSelection = SampleGenerator(uint2(0), 0);
+        samplePosW = float3(0);
+        sampleRadius = 0;
+        jacobian = 1;
+        packedSampleNormal = float2(0);
+        flags = ReservoirFlags();
+        c = 1;
+        F = float3(0);
+        guidingPdf = 1;
+        fgRadiance = float3(0);
+        weight = 0.0;
+        lightIndex = -1;
+        packedGuidingPixels = 0;
+        photonRetraceData = PhotonRetraceData();
+    }
+
+    bool isValid() {
+        return weight > 0 && jacobian > 0 && any(F > 0);
     }
 }
 

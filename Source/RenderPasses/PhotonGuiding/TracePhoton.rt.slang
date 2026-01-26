@@ -500,6 +500,7 @@ void rayGen()
     photon.normalW = pls.normal;
     photon.lightIndex = pls.lightIdx;
     photon.guidingPixel = pls.guidingPixels;
+    photon.guidingPdf = pls.guidingPdf;
 
     // Main Loop
     for (uint i = 0; i < gMaxBounces; i++) {
@@ -555,32 +556,38 @@ void rayGen()
                         }  
                     }
                     #if USE_SEPERATE_DIR_SG
-                        gPhotonDirSG[photonTypeIdx][photonInsertIndex] = packPhotonRetraceData(pixel, photon.pathLenght, usedRandomDirection);
+                        gPhotonDirSG[photonTypeIdx][photonInsertIndex] = packPhotonRetraceData(pixel, i, usedRandomDirection);
                     #endif
                 }
             }
         }
-             
-        //Photon Bounce for next iteration
+
+        // Photon Bounce for next iteration
+        bool isEmissive = any(bsdfProperties.emission > 0);
         BSDFSample bsdfSample;
 #if USE_SEPERATE_DIR_SG
         bool validSample = mi.sample(sd, sgPhotonDir, bsdfSample, true /*ImportanceSampling*/);
 #else
         bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
 #endif
-        if (!validSample)
+        if (!validSample || isEmissive)
             return;
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
         thp *= bsdfSample.weight;
-        bool isEmissive = any(bsdfProperties.emission > 0);
+       
 
         // RussianRoulette
         if (kRussianRoulette)
         {
+        #if USE_SEPERATE_DIR_SG
+            float rrRand = sampleNext1D(sgPhotonDir);
+        #else
+            float rrRand = sampleNext1D(sg);
+        #endif
             const float rrVal = luminance(thp);
-            if ((sampleNext1D(sg) > rrVal) || isEmissive)
+            if (rrRand > rrVal)
             {
                 return; // Photon is absorbed
             }
@@ -591,6 +598,6 @@ void rayGen()
         storeAsCaustic = !reflectedDiffuse;
         photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
-        photon.pathLenght++;
+        photon.pathLength = i + 1;
     }
 }

@@ -5,6 +5,7 @@ import Scene.Raytracing;
 import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Math.MathHelpers;
+import Utils.Color.ColorHelpers;
 import RenderPasses.PhotonGuiding.StructsAndHelpers;
 
 #ifndef USE_LIGHT_PATH_RETRACE
@@ -13,7 +14,7 @@ import RenderPasses.PhotonGuiding.StructsAndHelpers;
 
 cbuffer CB {
     uint2 gFrameDim;
-    uint gGuidingTextureResolution;
+    uint gGuidingTextureResolution; // Resolution of one guiding texture
 }
 
 RWStructuredBuffer<ReservoirCaustic> gPrevReservoir;
@@ -24,6 +25,7 @@ RWStructuredBuffer<uint4> gSplatSortData;
 
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const bool kPhotonRussianRoulette = PHOTON_RUSSIAN_ROULETTE;
 
 struct RayPayload
 {
@@ -37,8 +39,8 @@ struct RayPayload
     }
 }
 
-//TODO recalculate photon flux
-bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, out float3 photonView) {
+bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, out float3 photonView, out float3 photonFlux) {
+    photonFlux = float3(0);
     photonHit = {}; // Init
     photonView = float3(0);
     // Recreate Light Dir Sample generator
@@ -55,6 +57,8 @@ bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, o
     if (!photonSampleLight(pls, ray, sg))
         return false;
 
+    photonFlux = pls.flux;
+    float3 thp = float3(1.0);
     RayPayload rayPayload = RayPayload();
     const uint targetPathLength = reservoir.photonRetraceData.pathLength;
     bool validPhoton = false;
@@ -76,6 +80,7 @@ bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, o
         if (i == targetPathLength) {
             photonHit = hit;
             photonView = ray.Direction;
+            photonFlux *= thp;
             validPhoton = lastHitSpecular;
             break;
         }
@@ -92,6 +97,19 @@ bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, o
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
         lastHitSpecular = bsdfProperties.roughness < kRoughnessThreshold;
+
+        thp *= bsdfSample.weight;
+        // Russian roulette
+        if (kPhotonRussianRoulette) {
+            float rrRand = sampleNext1D(sg);
+            const float rrVal = luminance(thp);
+            if ((rrRand > rrVal))
+            {
+                break; // Photon is absorbed
+            }
+            thp /= rrVal;
+        }
+
     }
 
     return validPhoton; 
@@ -145,11 +163,13 @@ void rayGen()
     let lod = ExplicitLodTextureSampler(0.f);
     HitInfo hit = {};
     float3 photonView;
-    if (!randomReplayPhotonPath(r, hit, photonView))
+    float3 photonFlux;
+    if (!randomReplayPhotonPath(r, hit, photonView, photonFlux))
         return;
 
     r.sampleSurfaceView = photonView;
     r.sampleSurface = hit.getData();
+    r.photonRadiance = photonFlux / r.photonGuidingPdf;
 
     ShadingData sd = loadShadingData(hit, r.sampleSurfaceView, lod);
 
@@ -180,7 +200,5 @@ void rayGen()
     InterlockedAdd(gCellCounter[linPixel], 1, cellIndex);
 
     gSplatSortData[index] = uint4(linPixel, cellIndex, pixel);
-#if USE_LIGHT_PATH_RETRACE
     gPrevReservoir[index2Dto1D(pixel, gFrameDim.x)] = r;
-#endif
 }

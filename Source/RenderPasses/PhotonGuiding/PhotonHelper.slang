@@ -36,7 +36,8 @@ struct PhotonSample {
     float approxRadiance;
 
     int lightIndex;
-    uint2 guidingPixels;
+    uint packedGuidingPixels;
+    float guidingPdf;
     uint packedStartPixelAndPathLength;
 
     __init() {
@@ -47,8 +48,16 @@ struct PhotonSample {
         radiance = float3(0);
         approxRadiance = 0;
         lightIndex = -1;
-        guidingPixels = uint2(0);
+        packedGuidingPixels = 0;
         packedStartPixelAndPathLength = 0;
+    }
+
+    property uint2 guidingPixels {
+        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = newValue.x & 0xFFFF;
+            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+        }
     }
 }
 
@@ -130,7 +139,7 @@ int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask,
         // If direct global photons should be collected and the photon is global, check the path length
         if (collectOnlyDirectGlobal)
         {
-            if (((PhotonType)instanceIdx == PhotonType::Global) && (photonData.pathLenght > 0))
+            if (((PhotonType)instanceIdx == PhotonType::Global) && (photonData.pathLength > 0))
                 continue;
         }
 
@@ -154,6 +163,7 @@ int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask,
             photonSample.approxRadiance = approxF;
             photonSample.lightIndex = photonData.lightIndex;
             photonSample.guidingPixels = photonData.guidingPixel;
+            photonSample.guidingPdf = photonData.guidingPdf;
             #if ENABLE_PHOTON_RETRACING
                 choosenPhotonInstanceAndPrimIndex = uint2(instanceIdx, primIdx);
             #endif
@@ -204,7 +214,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
         // If direct global photons should be collected and the photon is global, check the path length
         if (collectOnlyDirectGlobal)
         {
-            if (((PhotonType)instanceIdx == PhotonType::Global) && (photonData.pathLenght > 0))
+            if (((PhotonType)instanceIdx == PhotonType::Global) && (photonData.pathLength > 0))
                 continue;
         }
 
@@ -320,7 +330,7 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
 
         // If direct global photons should be collected and the photon is global, check the path length
         if (collectGlobalDirect && (type == PhotonType::Global)) {
-            if (photonData.pathLenght > 0)
+            if (photonData.pathLength > 0)
                 continue;
         }
 
