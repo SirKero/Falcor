@@ -121,6 +121,9 @@ private:
     //Retraces the paths
     void reSTIRRetracePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
+    //Retraces and Resamples the paths
+    void reSTIRRetraceAndResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     //Resamples paths
     void reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
@@ -221,6 +224,7 @@ private:
     bool mCanResample = false;                              //Is re
     bool mPathResamplingUseNEEAfterSpecular = true;         //Uses NEE instead of radiance estimate after a specular event
     bool mPathResamplingStopAfterDiffuseSpecular = true;   //Enables tracing the path if a specular hit occured after the first diffuse hit. This case is usually covered by caustics.
+    bool mPathResamplingUseCombinedPass = true; 
 
     // Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();
@@ -344,6 +348,7 @@ private:
     //ReSTIR Passes
     RayTraceProgramHelper mGenerateInitialSamplesPass; // Trace Final Gather rays and collect photons
     RayTraceProgramHelper mRetracePathsPass;         // Retrace Path Reservoirs
+    RayTraceProgramHelper mRetraceAndResamplePathsPass; // Retrace and Resamples Path Reservoirs
     RayTraceProgramHelper mRetraceCausticPathsPass;  // Retrace the Caustic Paths for the Caustic reservoirs
     ref<ComputePass> mpResampleReservoirFGPass;      // Resampling Pass for Final Gather Reservoirs
     ref<ComputePass> mpResampleReservoirPathPass;    // Resampling of the Reservoirs
