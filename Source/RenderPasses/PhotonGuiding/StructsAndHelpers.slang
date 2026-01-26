@@ -433,7 +433,7 @@ struct PathReservoir {
         flags = ReservoirFlags();
         c = 1;
         F = float3(0);
-        guidingPdf = 1;
+        photonGuidingPdf = 1;
         fgRadiance = float3(0);
         weight = 0.0;
         lightIndex = -1;
