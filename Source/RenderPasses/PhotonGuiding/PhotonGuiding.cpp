@@ -50,7 +50,6 @@ namespace
     const std::string kShaderReSTIRInitialSamples = kShaderFolderReSTIR + "GenerateInitialSamples.rt.slang";
     const std::string kShaderReSTIRResampleFG = kShaderFolderReSTIR + "ResampleReservoirFG.cs.slang";
     const std::string kShaderReSTIRRetracePath = kShaderFolderReSTIR + "RetracePath.rt.slang";
-    const std::string kShaderReSTIRRetraceAndResamplePath = kShaderFolderReSTIR + "RetraceAndResamplePath.rt.slang";
     const std::string kShaderReSTIRResamplePath = kShaderFolderReSTIR + "ResampleReservoirPath.cs.slang";
     const std::string kShaderReSTIRResampleCaustic = kShaderFolderReSTIR + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderReSTIREvalReservoirs = kShaderFolderReSTIR + "EvaluateReservoirs.cs.slang";
@@ -209,18 +208,12 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
             reSTIRResampleFGPass(pRenderContext, renderData);
         else
         {
-            if (mPathResamplingUseCombinedPass) {
-                reSTIRRetraceAndResamplePathsPass(pRenderContext, renderData);
-            }
-            else {
-                for (uint i = 0; i < mResampleSettingsFG.spatialSamples + 1; i++)
-                {
-                    reSTIRRetracePathsPass(pRenderContext, renderData, i);
+            for (uint i = 0; i < mResampleSettingsFG.spatialSamples + 1; i++)
+            {
+                reSTIRRetracePathsPass(pRenderContext, renderData, i);
 
-                    reSTIRResamplePathsPass(pRenderContext, renderData, i);
-                }
+                reSTIRResamplePathsPass(pRenderContext, renderData, i);
             }
-            
         }
             
         reSTIRResampleCausticPass(pRenderContext, renderData);
@@ -454,9 +447,6 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
             if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton)
             {
-                group.checkbox("Use Combined Retrace+Resample Pass", mPathResamplingUseCombinedPass);
-                group.tooltip("If enabled, the retrace and resample step are combined into a single pass, reducing memory bandwidth.");
-
                 if (group.checkbox("Retrace Light Paths (Photons)", mRetraceLightPaths))
                 {
                     mCanResample = false;
@@ -2097,92 +2087,6 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpResampleReservoirPathPass->execute(pRenderContext, uint3(targetDim, 1));
-}
-
-void PhotonGuiding::reSTIRRetraceAndResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData)
-{
-    std::string profileName = "RetraceAndResamplePaths";
-    FALCOR_PROFILE(pRenderContext, profileName);
-
-    // Init Shader
-    if (!mRetraceAndResamplePathsPass.pProgram)
-    {
-        RtProgram::Desc desc;
-        desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderReSTIRRetraceAndResamplePath);
-        desc.setMaxPayloadSize(sizeof(float) * 4);
-        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
-        desc.setMaxTraceRecursionDepth(1);
-        if (!mpScene->hasProceduralGeometry())
-            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
-
-        mRetraceAndResamplePathsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-        auto& sbt = mRetraceAndResamplePathsPass.pBindingTable;
-        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
-        sbt->setMiss(0, desc.addMiss("miss"));
-
-        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
-        {
-            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
-        }
-
-        mRetraceAndResamplePathsPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
-    }
-
-    // Defines that can change on runtime
-    mRetraceAndResamplePathsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
-    mRetraceAndResamplePathsPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPdfs ? "1" : "0");
-    mRetraceAndResamplePathsPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
-    mRetraceAndResamplePathsPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
-    mRetraceAndResamplePathsPass.pProgram->addDefine("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-    mRetraceAndResamplePathsPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
-    mRetraceAndResamplePathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
-    mRetraceAndResamplePathsPass.pProgram->addDefine("USE_LIGHT_PATH_RETRACING", mRetraceLightPaths ? "1" : "0");
-    mRetraceAndResamplePathsPass.pProgram->addDefine("PHOTON_RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
-    mRetraceAndResamplePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
-
-    // Program Vars
-    if (!mRetraceAndResamplePathsPass.pVars)
-        mRetraceAndResamplePathsPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
-    FALCOR_ASSERT(mRetraceAndResamplePathsPass.pVars);
-
-    if (!mCanResample || !mResampleSettingsFG.enable)
-        return;
-
-    auto var = mRetraceAndResamplePathsPass.pVars->getRootVar();
-
-    //Bind NEE structures
-    if (mpEmissiveLightSampler)
-        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
-    if (mpEnvMapSampler)
-        mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
-
-    // Constant Buffer
-    var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gFGRayMaxPathLength"] = mPTMaxBounces;
-    var["CB"]["gNeeLightSelectProb"] = mNeeLightSelectProb;
-    var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
-    var["CB"]["gConfidenceLimit"] = mResampleSettingsFG.confidenceCap;
-    var["CB"]["gSpatialRadius"] = mResampleSettingsFG.samplingRadius;
-    var["CB"]["gSpatialSamples"] = mResampleSettingsFG.spatialSamples;
-    var["CB"]["gNormalThreshold"] = mResampleSettingsFG.usePathThreshold;
-    var["CB"]["gRelativeDepthThreshold"] = mResampleSettingsFG.relativeDepthThreshold;
-    var["CB"]["gUsePathThreshold"] = mResampleSettingsFG.usePathThreshold;
-    var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
-
-    // Input Resources
-    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
-    var["gView"] = renderData[kInputView]->asTexture();
-    var["gMVec"] = renderData[kInputMVec]->asTexture();
-    var["gVBufferPrev"] = mpVBufferPrev;
-    var["gViewPrev"] = mpViewPrev;
-    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
-   
-    // Output Resources
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
-
-    // Dispatch Shader
-    mpScene->raytrace(pRenderContext, mRetraceAndResamplePathsPass.pProgram.get(), mRetraceAndResamplePathsPass.pVars, uint3(mScreenRes, 1));
 }
 
 void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, const RenderData& renderData)

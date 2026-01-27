@@ -594,6 +594,14 @@ bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
     return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
 }
 
+// Visibility test helper
+bool dispatchShadowRay(float3 rayOrigin, float3 toLight, float distanceToLight) {
+    // Create a DXR 1.1 query object to trace a ray (the <1> means use alpha testing)
+    SceneRayQuery<1> rayQuery;
+    const Ray ray = Ray(rayOrigin, toLight, 0.f, distanceToLight * kShadowRayEpsilon);
+    return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
+}
+
 //Used to evaluate the final gather reservoir at the end. Visibility ray and jacobian determinant
 //are not needed due to MIS during resampling
 float3 evaluateFinalGatherSample(ReservoirFG r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg) {
