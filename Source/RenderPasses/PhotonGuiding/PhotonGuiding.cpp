@@ -443,6 +443,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 if (group2.checkbox("Use Light Trace Splatting for direct", mEnableLightTraceSplatting))
                     mCanResample = false;
                 group2.tooltip("Enables Light Trace with ReSTIR Splatting for the directly visible caustics");
+                group2.checkbox("Use Backup Sample", mCausticReservoirsUseBackupSample);
+                group2.tooltip("Uses a backup sample if no reservoir was reprojected into the current pixel");
             }
 
             if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton)
@@ -2098,6 +2100,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptivePhotonRadius ? "1" : "0");
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("USE_BACKUP_SAMPLE", mCausticReservoirsUseBackupSample ? "1" : "0");
         return defines;
     };
 

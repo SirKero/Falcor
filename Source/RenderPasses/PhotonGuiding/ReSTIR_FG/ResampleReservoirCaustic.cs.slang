@@ -44,6 +44,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const bool kUseBackupSample = USE_BACKUP_SAMPLE; // Caustic backup sample with motion vector if no other sample was found
 
 inline float getPhotonRadius(ReservoirCaustic r, bool isPrev = false)
 {
@@ -255,28 +256,56 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
     const float3 currentCamPosW = gScene.camera.getPosition();
     const float3 currentCamForward = normalize(gScene.camera.data.cameraW);
     float newConfidence = current.c;
+    bool isBackupSample = kUseBackupSample && numReservoirs == 0;
+    if (isBackupSample)
+        numReservoirs = max(1, numReservoirs);
+
     for (uint i = 0; i < numReservoirs; i++)
     {
-        uint2 splattedPixel = gSortedReservoirs[cellOffset + i];
+        uint2 splattedPixel;
+        if (isBackupSample)
+            splattedPixel = float2(pixel) + 0.5 + gMVec[pixel] * gFrameDim;
+        else
+            splattedPixel = gSortedReservoirs[cellOffset + i];
         ReservoirCaustic prevR = gCausticReservoirPrev[index2Dto1D(splattedPixel, gFrameDim.x)];
         float prevMIS = 0.0;
         float targetFunc = 0.0;
         float jacobianToCurrent = 0.0;
         bool prevReservoirValid = prevR.isValid();
+        
         if (prevReservoirValid)
         {
             // Load surface data
             ShadingData prevSD = loadShadingData(HitInfo(prevR.sampleSurface), prevR.sampleSurfaceView, lod);
-            let prevMi = gScene.materials.getMaterialInstance(prevSD, lod, kMIHints);
-
-            float p0 = prevR.targetFunction * prevR.c;
-            float p1 = 0.0;
 
             // MIS weight for current (Visibility was already tested in a previous pass)
             float3 toCurrentCam = currentCamPosW - prevSD.posW;
             float distToCurrentCam = length(toCurrentCam);
             toCurrentCam /= distToCurrentCam;
 
+            // Perform visibility for backup reservoir check
+            if (isBackupSample) {
+                float4 backupScreenPos = mul(gScene.camera.data.viewProjMatNoJitter, float4(prevSD.posW, 1));
+                backupScreenPos /= backupScreenPos.w;
+                backupScreenPos.y *= -1;
+                backupScreenPos.xy = backupScreenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+                int2 backupPixelPos = int2(floor(backupScreenPos.xy * gFrameDim));
+                backupPixelPos = abs(backupPixelPos - int2(pixel));
+                // Check if the position is outside of the screen or too far away from the current pixel
+                if (any(backupScreenPos.xy < 0) || any(backupScreenPos.xy >= 1) || backupScreenPos.z < 0 || backupScreenPos.z > 1 || any(backupPixelPos > 1))
+                    break;
+
+                // Visibility test (from point to camera)
+                SceneRayQuery<1> rayQuery;
+                const Ray ray = Ray(prevSD.computeNewRayOrigin(), toCurrentCam, 0.f, distToCurrentCam);
+                if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+                    break;
+            }
+
+            float p0 = prevR.targetFunction * prevR.c;
+            float p1 = 0.0;
+
+            let prevMi = gScene.materials.getMaterialInstance(prevSD, lod, kMIHints);
             // Calc jacobians
             p1 = getSplattingMISWeight(toCurrentCam, distToCurrentCam, currentCamForward, prevR, prevSD, prevMi, sg, jacobianToCurrent, targetFunc);
             p1 *= current.c;
