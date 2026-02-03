@@ -19,13 +19,15 @@ cbuffer CB {
 
 RWStructuredBuffer<ReservoirCaustic> gPrevReservoir;
 
-RWStructuredBuffer<uint> gCellCounter;
+RWStructuredBuffer<int> gCellCounter; //Is head buffer if linked list is used
+RWStructuredBuffer<int> gSplattingLinkedList;
 RWStructuredBuffer<uint> gGlobalCounter;
 RWStructuredBuffer<uint4> gSplatSortData;
 
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kPhotonRussianRoulette = PHOTON_RUSSIAN_ROULETTE;
+static const bool kSplattingUseLinkedList = SPLATTING_USE_LINKED_LIST;
 
 struct RayPayload
 {
@@ -152,8 +154,9 @@ void rayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 dispatchDims = DispatchRaysDimensions().xy;
+    const uint reservoirIndex = index2Dto1D(pixel, gFrameDim.x);
     // Load the reservoir from the last frame
-    ReservoirCaustic r = gPrevReservoir[index2Dto1D(pixel, gFrameDim.x)];
+    ReservoirCaustic r = gPrevReservoir[reservoirIndex];
 
     // Return for non-splattable reservoirs
     if (r.pathLength > 0 || !r.isValid())
@@ -191,14 +194,23 @@ void rayGen()
         return;
 
     uint2 newPixel = uint2(floor(screenPos.xy * gFrameDim));
-    uint linPixel = index2Dto1D(newPixel, gFrameDim.x);
+    int newReservoirIndex = index2Dto1D(newPixel, gFrameDim.x);
+    if (kSplattingUseLinkedList)
+    {
+        int nodeNext = -1;
+        InterlockedExchange(gCellCounter[newReservoirIndex], int(reservoirIndex), /*out*/ nodeNext);
+        gSplattingLinkedList[int(reservoirIndex)] = nodeNext;
+    }
+    else
+    {
+        uint index = 0;
+        InterlockedAdd(gGlobalCounter[kSplattingGlobalCounterElement], 1, index);
 
-    uint index = 0;
-    InterlockedAdd(gGlobalCounter[kSplattingGlobalCounterElement], 1, index);
+        int cellIndex = 0;
+        InterlockedAdd(gCellCounter[newReservoirIndex], 1, cellIndex);
 
-    uint cellIndex = 0;
-    InterlockedAdd(gCellCounter[linPixel], 1, cellIndex);
+        gSplatSortData[index] = uint4(newReservoirIndex, cellIndex, pixel);
+    }
 
-    gSplatSortData[index] = uint4(linPixel, cellIndex, pixel);
-    gPrevReservoir[index2Dto1D(pixel, gFrameDim.x)] = r;
+    gPrevReservoir[reservoirIndex] = r;
 }

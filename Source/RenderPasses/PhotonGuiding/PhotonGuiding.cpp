@@ -196,7 +196,10 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
                 reSTIRSplatTemporalReservoirsPass(pRenderContext, renderData);
 
             //Sort Splatted reservoirs, so they can be properly used for resampling
-            reSTIRSortSplattedReservoirsPass(pRenderContext, renderData);
+            if (mSplattingResampleUseLinkedList)
+                pRenderContext->uavBarrier(mpSplattingCellCounter.get());
+            else
+                reSTIRSortSplattedReservoirsPass(pRenderContext, renderData);
         }
 
         // ReSTIR DI pass
@@ -443,6 +446,9 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 if (group2.checkbox("Use Light Trace Splatting for direct", mEnableLightTraceSplatting))
                     mCanResample = false;
                 group2.tooltip("Enables Light Trace with ReSTIR Splatting for the directly visible caustics");
+                if (group2.checkbox("Splatting: Use Linked List", mSplattingResampleUseLinkedList))
+                    mResetClearResources = true;
+                group2.tooltip("Uses a linked list instead of sorting the splatted reservoirs");
                 group2.checkbox("Use Backup Sample", mCausticReservoirsUseBackupSample);
                 group2.tooltip("Uses a backup sample if no reservoir was reprojected into the current pixel");
             }
@@ -902,6 +908,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             Buffer::CpuAccess::None, nullptr, false
         );
         mpSplattingCellOffsets->setName("SplattingCellOffsets");
+        mResetClearResources = true; //Just to be sure this is triggered
     }
 
     if (!mpSplattingSortingData || mResetScreenTex)
@@ -911,6 +918,15 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             Buffer::CpuAccess::None, nullptr, false
         );
         mpSplattingSortingData->setName("SplattingSortingData");
+    }
+
+    if (!mpSplattingResamlingLinkedList || mResetScreenTex)
+    {
+        mpSplattingResamlingLinkedList = Buffer::createStructured(
+            mpDevice, sizeof(uint), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpSplattingResamlingLinkedList->setName("SplattingResamplingLinkedList");
     }
 
     if (!mpSplattingSortedReservoirs || mResetScreenTex)
@@ -936,6 +952,9 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         pRenderContext->clearUAV(mpLightTraceHeadCounter->getUAV(0).get(), uint4(uint(-1)));
         pRenderContext->clearUAV(mpLightTraceLinkedList->getUAV(0).get(), uint4(-1));
         pRenderContext->clearUAV(mpCausticPhotonHitInfo->getUAV(0).get(), uint4(0));
+        uint4 cellCounterClear = mSplattingResampleUseLinkedList ? uint4(uint(-1)) : uint4(0);
+        pRenderContext->clearUAV(mpSplattingCellCounter->getUAV(0).get(), cellCounterClear);
+        pRenderContext->clearUAV(mpSplattingResamlingLinkedList->getUAV(0).get(), uint4(-1));
         for (uint i = 0; i < 2; i++)
         {
             pRenderContext->clearUAV(mpCausticReservoir[i]->getUAV(0).get(), uint4(0));
@@ -2101,6 +2120,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         defines.add("USE_BACKUP_SAMPLE", mCausticReservoirsUseBackupSample ? "1" : "0");
+        defines.add("SPLATTING_USE_LINKED_LIST", mSplattingResampleUseLinkedList ? "1" : "0");
         return defines;
     };
 
@@ -2162,6 +2182,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
     var["gCellCounters"] = mpSplattingCellCounter;
     var["gCellOffsets"] = mpSplattingCellOffsets;
     var["gSortedReservoirs"] = mpSplattingSortedReservoirs;
+    var["gSplattingLinkedList"] = mpSplattingResamlingLinkedList;
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -2267,14 +2288,16 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
 {
     FALCOR_PROFILE(pRenderContext, "Splat Caustic Reservoirs");
 
-    pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
-    pRenderContext->clearUAV(mpSplattingCellCounter->getUAV(0).get(), uint4(0));
-    pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0));
+    if (!mSplattingResampleUseLinkedList) {
+        pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
+        pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0));
+    }
 
     auto getRuntimeDefines = [&]()
     {
         DefineList defines;
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add("SPLATTING_USE_LINKED_LIST", mSplattingResampleUseLinkedList ? "1" : "0");
         return defines;
     };
 
@@ -2312,6 +2335,7 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
     var["gCellCounter"] = mpSplattingCellCounter;
     var["gGlobalCounter"] = mpSplattingGlobalCounter;
     var["gSplatSortData"] = mpSplattingSortingData;
+    var["gSplattingLinkedList"] = mpSplattingResamlingLinkedList;
 
     // Execute Compute Pass
     const uint2 targetDim = mScreenRes;
@@ -2326,9 +2350,12 @@ void PhotonGuiding::reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* p
     FALCOR_PROFILE(pRenderContext, profileName);
 
     //Clear counter
-    pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
-    pRenderContext->clearUAV(mpSplattingCellCounter->getUAV(0).get(), uint4(0));
-    pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0));
+    if (!mSplattingResampleUseLinkedList) {
+        pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
+        pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0)); 
+    }
+    else
+        pRenderContext->clearUAV(mpSplattingResamlingLinkedList->getUAV(0).get(), uint4(uint(-1)));
 
     // Init Shader
     if (!mRetraceCausticPathsPass.pProgram)
@@ -2360,6 +2387,7 @@ void PhotonGuiding::reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* p
     mRetraceCausticPathsPass.pProgram->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mRetraceCausticPathsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mRetraceCausticPathsPass.pProgram->addDefine("PHOTON_RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
+    mRetraceCausticPathsPass.pProgram->addDefine("SPLATTING_USE_LINKED_LIST", mSplattingResampleUseLinkedList ? "1" : "0");
 
     // Program Vars
     if (!mRetraceCausticPathsPass.pVars)
@@ -2378,6 +2406,7 @@ void PhotonGuiding::reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* p
     var["gCellCounter"] = mpSplattingCellCounter;
     var["gGlobalCounter"] = mpSplattingGlobalCounter;
     var["gSplatSortData"] = mpSplattingSortingData;
+    var["gSplattingLinkedList"] = mpSplattingResamlingLinkedList;
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mRetraceCausticPathsPass.pProgram.get(), mRetraceCausticPathsPass.pVars, uint3(mScreenRes, 1));

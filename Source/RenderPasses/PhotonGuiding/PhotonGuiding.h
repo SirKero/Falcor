@@ -229,7 +229,8 @@ private:
     float mNormalizedPixelArea = 1.0; // For light trace
     bool mEnableLightTraceSplatting = true;
     bool mRetraceLightPaths = true; //Retrace light paths for final gather and caustic backprojection
-    bool mCausticReservoirsUseBackupSample = true; //If there is no valid sample, a backup sample is aquired using motion vectors
+    bool mCausticReservoirsUseBackupSample = false; //If there is no valid sample, a backup sample is aquired using motion vectors
+    bool mSplattingResampleUseLinkedList = false; //Uses a linked list for resampled reprojection
 
     //
     //Guiding Infos/Options
@@ -306,6 +307,7 @@ private:
     ref<Buffer> mpSplattingCellCounter;                        // Per pixel cell counter
     ref<Buffer> mpSplattingCellOffsets;                        // Per pixel cell offsets
     ref<Buffer> mpSplattingSortingData;                        // Indices needed for sorting
+    ref<Buffer> mpSplattingResamlingLinkedList;                // Linked list for resampling step
     ref<Buffer> mpSplattingSortedReservoirs;                   // Sorted reservoirs
 
 

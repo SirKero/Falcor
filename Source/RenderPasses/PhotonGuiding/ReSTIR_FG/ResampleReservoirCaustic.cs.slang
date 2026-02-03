@@ -36,15 +36,19 @@ StructuredBuffer<ReservoirCaustic> gCausticReservoirPrev;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 
 // Splatting
-StructuredBuffer<uint> gCellCounters;      // Number of reservoirs per pixel
+RWStructuredBuffer<int> gCellCounters;      // Number of reservoirs per pixel
+StructuredBuffer<int> gSplattingLinkedList;  //Linked List, gCell counters is the head buffer if the linked list is used
 StructuredBuffer<uint> gCellOffsets;       // Initial offset for the sorted reservoir buffer
 StructuredBuffer<uint2> gSortedReservoirs; // Buffer of splatted reservoirs
+
+RWTexture2D<float4> gDebug;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseBackupSample = USE_BACKUP_SAMPLE; // Caustic backup sample with motion vector if no other sample was found
+static const bool kSplattingUseLinkedList = SPLATTING_USE_LINKED_LIST;
 
 inline float getPhotonRadius(ReservoirCaustic r, bool isPrev = false)
 {
@@ -209,6 +213,46 @@ float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, Re
     return misP;
 }
 
+void resampleSplattedReservoir(inout ReservoirCaustic dstR, inout float wSum, inout SampleGenerator sg, uint reservoirIndex, uint currentConfidence, float3 currentCamPosW, float3 currentCamForward)
+{
+    ReservoirCaustic prevR = gCausticReservoirPrev[reservoirIndex];
+    float prevMIS = 0.0;
+    float targetFunc = 0.0;
+    float jacobianToCurrent = 0.0;
+    bool prevReservoirValid = prevR.isValid();
+
+    if (prevReservoirValid)
+    {
+        let lod = ExplicitLodTextureSampler(0.0);
+        // Load surface data
+        ShadingData prevSD = loadShadingData(HitInfo(prevR.sampleSurface), prevR.sampleSurfaceView, lod);
+
+        // MIS weight for current (Visibility was already tested in a previous pass)
+        float3 toCurrentCam = currentCamPosW - prevSD.posW;
+        float distToCurrentCam = length(toCurrentCam);
+        toCurrentCam /= distToCurrentCam;
+
+        float p0 = prevR.targetFunction * prevR.c;
+        float p1 = 0.0;
+
+        let prevMi = gScene.materials.getMaterialInstance(prevSD, lod, kMIHints);
+        // Calc jacobians
+        p1 = getSplattingMISWeight(toCurrentCam, distToCurrentCam, currentCamForward, prevR, prevSD, prevMi, sg, jacobianToCurrent, targetFunc);
+        p1 *= currentConfidence;
+        prevMIS = evalMISBalanceHeuristic(p0, p1);
+    }
+    float jacobianShift = jacobianToCurrent / prevR.subPixelJacobian;
+    float w1 = prevMIS * targetFunc * prevR.wSum * jacobianShift;
+    wSum += w1;
+    // Check if other sample is selected and replace in reservoir if it was selected
+    bool selectOtherSample = (sampleNext1D(sg) * wSum) < w1 && prevReservoirValid;
+    if (selectOtherSample) {
+        dstR = prevR;
+        dstR.targetFunction = targetFunc;
+        dstR.subPixelJacobian = jacobianToCurrent;
+    }
+}
+
 void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData currentSD, IMaterialInstance currentMi, BSDFProperties currentBsdfProperties, inout SampleGenerator sg)
 {
     float currentMIS = 0.0;
@@ -250,12 +294,32 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
 
     // Shift the other samples
     uint reservoirIdx = index2Dto1D(pixel, gFrameDim.x);
-    uint numReservoirs = gCellCounters[reservoirIdx];
-    uint cellOffset = gCellOffsets[reservoirIdx];
+  
     let lod = ExplicitLodTextureSampler(0.0);
     const float3 currentCamPosW = gScene.camera.getPosition();
     const float3 currentCamForward = normalize(gScene.camera.data.cameraW);
     float newConfidence = current.c;
+
+    if (kSplattingUseLinkedList) {
+        int headIndex = gCellCounters[reservoirIdx];
+        while (headIndex >= 0)
+        {
+            resampleSplattedReservoir(dstR, wSum, sg, uint(headIndex), current.c, currentCamPosW, currentCamForward);
+            int newHeadIndex = gSplattingLinkedList[headIndex];
+            //headIndex = newHeadIndex;
+            headIndex = -1;
+        }
+    }
+    else {
+        uint numReservoirs = gCellCounters[reservoirIdx];
+        uint cellOffset = gCellOffsets[reservoirIdx];
+        for (uint i = 0; i < numReservoirs; i++)
+        {
+            uint2 splattedPixel = gSortedReservoirs[cellOffset + i];
+            resampleSplattedReservoir(dstR, wSum, sg, index2Dto1D(splattedPixel, gFrameDim.x), current.c, currentCamPosW, currentCamForward);
+        }
+    }
+    /*
     bool isBackupSample = kUseBackupSample && numReservoirs == 0;
     if (isBackupSample)
         numReservoirs = max(1, numReservoirs);
@@ -323,6 +387,7 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
         }
         // newConfidence += prevR.c;
     }
+    */
 
     // Use motion vector and bilinear interpolation for new confidence weight
     float2 prevPixel = float2(pixel) + gMVec[pixel] * gFrameDim;
@@ -382,5 +447,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
         resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
 
     // Store final reservoir
-    gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)] = current;
+    const uint reservoirIdx = index2Dto1D(pixel, gFrameDim.x);
+    gCausticReservoir[reservoirIdx] = current;
+    if (kSplattingUseLinkedList)
+        gCellCounters[reservoirIdx] = -1;
+    else
+        gCellCounters[reservoirIdx] = 0;
 }
