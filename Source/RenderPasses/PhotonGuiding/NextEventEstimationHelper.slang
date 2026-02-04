@@ -102,11 +102,10 @@ bool selectLightType(out uint lightType, out float pdf, float u, float3 lightTyp
     return false;
 }
 
-float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, float3 lightTypeSelectProbability,  out LightSample ls, inout SampleGenerator sg)
+bool generateAndSelectLightSample(ShadingData sd, float3 lightTypeSelectProbability, inout LightSample ls, inout SampleGenerator sg)
 {
-    ls = {};
     if (!selectLightType(ls.type, ls.pdf, sampleNext1D(sg), lightTypeSelectProbability))
-        return float3(0);
+        return false;
 
     bool valid = false;
     if (ls.type == kNeeLightTypeEmissive)
@@ -116,7 +115,13 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, float3 lightTyp
     if (ls.type == kNeeLightTypeEnvMap)
         valid = generateEnvMapSample(sd, sg, ls);
 
-    if (!valid)
+    return valid;
+}
+
+float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, float3 lightTypeSelectProbability, out LightSample ls, inout SampleGenerator sg)
+{
+    ls = {};
+    if(!generateAndSelectLightSample(sd, lightTypeSelectProbability, ls, sg))
         return float3(0);
 
     float3 bsdf = mi.eval(sd, ls.dir, sg);
@@ -127,7 +132,8 @@ float3 nextEventEstimation(ShadingData sd, IMaterialInstance mi, float3 lightTyp
     // Shadow Ray
     if (!dispatchShadowRay(sd, ls.dir, ls.distance))
         return float3(0);
-
+    
+    
     float misWeight = 1.0;
     if (ls.type != kNeeLightTypeAnalytic) {
         float scatterPdf = mi.evalPdf(sd, ls.dir);

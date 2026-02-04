@@ -827,7 +827,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         {
             mCanResample = false;
             mpRetracedPath[i] = Buffer::createStructured(
-                mpDevice, 16 * sizeof(uint), mScreenRes.x * mScreenRes.y,
+                mpDevice, 4 * sizeof(uint), mScreenRes.x * mScreenRes.y,
                 ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
             );
             mpRetracedPath[i]->setName("RetracePath" + std::to_string(i));

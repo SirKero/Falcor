@@ -452,23 +452,10 @@ struct RetracedPath
     float3 F;
     float jacobian;
 
-    float3 rcThp;
-    uint _pad;
-
-    PackedHitInfo rcSurface;
-
-    float3 rcViewDir;
-    uint flags;
-
     __init()
     {
         F = float3(0);
         jacobian = 1;
-        rcThp = float3(0);
-        rcSurface = {};
-        rcViewDir = float3(0);
-        flags = 0;
-        _pad = 0;
     }
 }
 

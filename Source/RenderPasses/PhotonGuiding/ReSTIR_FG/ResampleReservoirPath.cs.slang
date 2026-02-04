@@ -66,16 +66,16 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         const float3 cameraPos = gScene.camera.getPosition();
         float currentDepth = distance(cameraPos, sdCurrent.posW);
         float temporalDepth = distance(cameraPos, sdPrev.posW);
-        bool normalThreshold = abs(dot(sdCurrent.getOrientedFaceNormal(), sdPrev.getOrientedFaceNormal())) < gNormalThreshold; 
+        bool normalThreshold = abs(dot(sdCurrent.getOrientedFaceNormal(), sdPrev.getOrientedFaceNormal())) < gNormalThreshold;
         bool depthThreshold = abs(currentDepth - temporalDepth) > gRelativeDepthThreshold * currentDepth;
 
         if (normalThreshold || depthThreshold)
             return false;
     }
 
-    #if RETRACE_LIGHT_PATHS
+#if RETRACE_LIGHT_PATHS
     uint photonRetraceMask = gPhotonRetraceSuccessfulMask[pixel];
-    #endif
+#endif
 
     // Needed reservoir variables
     float w_0 = 0;
@@ -88,34 +88,27 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
     bool reservoirContributes = rCurr.isValid();
     RetracedPath retracedPath = RetracedPath();
-    bool retracedPathValid = true; // If the path is not valid, the path was not possible and MIS weight is 1
     if (reservoirContributes && rCurr.pathLength > 0) {
         retracedPath = gRetracedPath[retracedPathIndex];
-        retracedPathValid &= retracedPath.flags > 0; //A valid path has flags set
     }
 
     if (reservoirContributes)
     {
-        //Calc MIS weight
+        // Calc MIS weight
         float mis = 1;
         bool photonRetraceValid = true;
-        #if RETRACE_LIGHT_PATHS
+#if RETRACE_LIGHT_PATHS
         if ((rCurr.flags.isRadianceEstimate || rCurr.flags.isFinalGather) && !checkPhotonRetraceMask(photonRetraceMask, 0))
             photonRetraceValid = false;
-        #endif
-        if (rCurr.flags.hasNoReconnectionSurface && photonRetraceValid) {
+#endif
+        if (rCurr.pathLength > 0 && photonRetraceValid) {
             float3 retracedF = retracedPath.F * (retracedPath.jacobian / rCurr.jacobian);
             mis = evalMIS(rCurr.c, luminance(rCurr.F), rPrev.c, luminance(retracedF));
-        }else
+        } else
         {
             float3 thpOther = float3(1);
-            // Load other reconnection surface if path length > 0
-            if (rCurr.pathLength > 0 && retracedPathValid && photonRetraceValid) {
-                sdPrev = loadShadingData(HitInfo(retracedPath.rcSurface), -retracedPath.rcViewDir, lod);
-                thpOther = retracedPath.rcThp;
-            }
 
-            if (retracedPathValid && photonRetraceValid) {
+            if (photonRetraceValid) {
                 float p0 = luminance(rCurr.F);
 
                 let miPrev = gScene.materials.getMaterialInstance(sdPrev, lod, kMIHints);
@@ -148,69 +141,57 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
     if (reservoirContributes && (w_0 > 0) && !isinf(w_0) && !isnan(w_0))
         reservoir = rCurr;
-    
+
     // Temporal Reservoir
     float3 Fprev = float3(0);
     float jacobianPrev = 1;
     bool prevCanBeSelected = rPrev.isValid();
     prevCanBeSelected &= !isnan(rPrev.weight) && !isinf(rPrev.weight);
-    #if RETRACE_LIGHT_PATHS
+#if RETRACE_LIGHT_PATHS
     if ((rPrev.flags.isRadianceEstimate || rPrev.flags.isFinalGather) && !checkPhotonRetraceMask(photonRetraceMask, 1))
         prevCanBeSelected = false;
-    #endif
+#endif
 
     // Load retraced surface for temporal reservoir
     retracedPath = RetracedPath();
-    retracedPathValid = true; // If the surface is not valid MIS is skipped
     if (prevCanBeSelected && rPrev.pathLength > 0) {
         retracedPath = gRetracedPathPrev[retracedPathIndex];
-        retracedPathValid &= retracedPath.flags > 0; // A valid path has flags set
     }
 
     if (prevCanBeSelected)
     {
         float jacobianDeterminant = 1.0;
-        if (rPrev.flags.hasNoReconnectionSurface) {
-            if (retracedPathValid) {
-                jacobianPrev = retracedPath.jacobian;
-                jacobianDeterminant = (jacobianPrev / rPrev.jacobian);
-                Fprev = retracedPath.F;
-            }
+        if (rPrev.pathLength > 0) {
+            jacobianPrev = retracedPath.jacobian;
+            jacobianDeterminant = (jacobianPrev / rPrev.jacobian);
+            Fprev = retracedPath.F;
         } else
         {
             float3 thpPrev = float3(1);
-            // Load retraced surface
-            if (rPrev.pathLength > 0 && retracedPathValid) {
-                sdCurrent = loadShadingData(HitInfo(retracedPath.rcSurface), -retracedPath.rcViewDir, lod);
-                thpPrev = retracedPath.rcThp;
-            }
-
             // Reconnect
-            if (retracedPathValid) {
-                let miCurrent = gScene.materials.getMaterialInstance(sdCurrent, lod, kMIHints);
-                float3 toSample = rPrev.samplePosW - sdCurrent.posW;
-                float distToSample = length(toSample);
-                toSample /= distToSample;
-                // Jacobian from reconnect surface to other sample
-                float pdf = miCurrent.evalPdf(sdCurrent, toSample);
-                jacobianPrev = abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
-                jacobianPrev *= pdf;
-                jacobianDeterminant = jacobianPrev / rPrev.jacobian;
-                  
-                float3 bsdf = float3(0);
-                if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
-                    if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
-                        bsdf = miCurrent.eval(sdCurrent, toSample, sg) / pdf;
-                    }
-                    Fprev = rPrev.fgRadiance * bsdf * thpPrev;
+            let miCurrent = gScene.materials.getMaterialInstance(sdCurrent, lod, kMIHints);
+            float3 toSample = rPrev.samplePosW - sdCurrent.posW;
+            float distToSample = length(toSample);
+            toSample /= distToSample;
+            // Jacobian from reconnect surface to other sample
+            float pdf = miCurrent.evalPdf(sdCurrent, toSample);
+            jacobianPrev = abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
+            jacobianPrev *= pdf;
+            jacobianDeterminant = jacobianPrev / rPrev.jacobian;
+
+            float3 bsdf = float3(0);
+            if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
+                if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
+                    bsdf = miCurrent.eval(sdCurrent, toSample, sg) / pdf;
                 }
+                Fprev = rPrev.fgRadiance * bsdf * thpPrev;
             }
         }
 
         float estFprev = luminance(Fprev) * jacobianDeterminant;
         float mis = evalMIS(rPrev.c, luminance(rPrev.F), rCurr.c, estFprev);
         w_1 = mis * estFprev * rPrev.weight;
-        
+
         wSum += w_1;
     }
 
@@ -222,7 +203,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         reservoir.jacobian = jacobianPrev;
         reservoir.F = Fprev;
     }
-    
+
     reservoir.weight = wSum;
     reservoir.c = cSum;
 
@@ -231,7 +212,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         reservoir.weight /= sampleRad;
     else
         reservoir.weight = 0;
-    
+
     return true;
 }
 

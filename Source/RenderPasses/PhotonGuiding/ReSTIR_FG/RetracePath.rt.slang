@@ -78,6 +78,7 @@ struct RetracePathData {
     bool lastHitDiffuse;
     bool specularPath;      //True if the full path is specular
     bool retraceSuccessful; // True if the retraced path matches the one used to generate the reservoir
+    uint flags;             // debug flags
 
     __init() {
         thp = float3(1);
@@ -87,6 +88,22 @@ struct RetracePathData {
         lastHitDiffuse = true;
         specularPath = true;
         retraceSuccessful = false;
+        flags = 0;
+    }
+}
+
+//Data for visibility test if needed
+struct VisibilityTestData {
+    float3 rayOrigin;
+    bool useVisTest;
+    float3 rayDirection;
+    float distanceToLight;
+
+    __init() {
+        rayOrigin = float3(0);
+        useVisTest = false;
+        rayDirection = float3(0);
+        distanceToLight = -1;
     }
 }
 
@@ -234,8 +251,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
                     misWeight = evalMIS(1, rpd.scatterPDF, 1, lightPdf);
                 }
                 float3 envMapContribution = gScene.envMap.eval(ray.Direction) * rpd.thp * misWeight;
-                retracedPath.flags = (uint)ReservoirPathFlags::isEnvMapHit;
-                retracedPath.rcViewDir = -ray.Direction;
+                rpd.flags = (uint)ReservoirPathFlags::isEnvMapHit;
                 retracedPath.jacobian = rpd.scatterPDF;
                 retracedPath.F = envMapContribution;
                 rpd.retraceSuccessful = true;
@@ -271,7 +287,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
             }
             retracedPath.F = bsdfProperties.emission * rpd.thp * misWeight;
             retracedPath.jacobian = jacobian; // Jacobian Path == 1, as all hits are delta/specular
-            retracedPath.flags = (uint)ReservoirPathFlags::isEmissiveHit;
+            rpd.flags = (uint)ReservoirPathFlags::isEmissiveHit;
             rpd.retraceSuccessful = true;
             break;
         }
@@ -283,33 +299,56 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         // Collect photons or set reconnection surface
         if (hitIsDiffuse && pathLength == reservoir.pathLength) {
             retracedPath.jacobian = jacobian;
+            float3 toSample = float3(0);
+            float distToSample = -1;
             if (reservoir.flags.isFinalGather)
             {
-                retracedPath.rcThp = rpd.thp;
-                retracedPath.rcSurface = hit.getData();
-                retracedPath.rcViewDir = -ray.Direction;
-                retracedPath.flags = (uint)ReservoirPathFlags::isFinalGather;
-                rpd.retraceSuccessful = true;
+                toSample = reservoir.samplePosW - sd.posW;
+                distToSample = length(toSample);
+                toSample /= distToSample;
+                // Jacobian to Sample
+                float pdf = mi.evalPdf(sd, toSample);
+                retracedPath.jacobian = abs(dot(reservoir.sampleNormal, -toSample)) / (distToSample * distToSample);
+                retracedPath.jacobian *= pdf;
+               
+                retracedPath.F = reservoir.fgRadiance / pdf; //BSDF and thp is added later
+                rpd.flags = (uint)ReservoirPathFlags::isFinalGather;
             } else if (reservoir.flags.isRadianceEstimate)
             {
                 bool isReconnectable = distance(reservoir.samplePosW, sd.posW) < reservoir.sampleRadius;
                 collectionPosW = sd.posW;
                 retracedPath.F = reservoir.fgRadiance * rpd.thp;
-                retracedPath.flags = isReconnectable ? (uint)ReservoirPathFlags::isRadianceEstimate : 0;
+                rpd.flags = isReconnectable ? (uint)ReservoirPathFlags::isRadianceEstimate : 0;
                 rpd.retraceSuccessful = isReconnectable;
             } else if (reservoir.flags.isNEE)
             {
-                SampleGenerator neeSG = reservoir.sgNeeLightSelection;
+                sg = reservoir.sgNeeLightSelection;
                 LightSample ls;
-                float3 nee = nextEventEstimation(sd, mi, gNeeLightSelectProb, ls, neeSG);
-                if (any(nee > 0) && ls.pdf > 0 && ls.distance > gJacobianDistanceThreshold) {
-                    retracedPath.flags = (uint)ReservoirPathFlags::isNEE;
-                    retracedPath.F = nee * rpd.thp; 
+                bool validLight = generateAndSelectLightSample(sd, gNeeLightSelectProb, ls, sg);
+                if (validLight && ls.pdf > 0 && ls.distance > gJacobianDistanceThreshold) {
+                    rpd.flags = (uint)ReservoirPathFlags::isNEE;
                     retracedPath.jacobian = ls.pdf;
+                    float misWeight = 1.0;
+                    if (ls.type != kNeeLightTypeAnalytic) {
+                        float scatterPdf = mi.evalPdf(sd, ls.dir);
+                        misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
+                    }
+                    retracedPath.F = ls.Li * misWeight; // BSDF and thp is added later
                     if (!ls.isInfiniteDistance)
                         retracedPath.jacobian *= abs(dot(ls.faceN, ls.dir)) / (ls.distance * ls.distance);
-                    rpd.retraceSuccessful = true;
+                    toSample = ls.dir;
+                    distToSample = ls.distance;
                 }
+            }
+
+            if ((rpd.flags == (uint)ReservoirPathFlags::isNEE) || (rpd.flags == (uint)ReservoirPathFlags::isFinalGather))
+            {
+                float3 bsdf = mi.eval(sd, toSample, sg);
+                retracedPath.F *= bsdf * rpd.thp;
+                if (!dispatchShadowRay(sd, toSample, distToSample))
+                    retracedPath.F = float3(0);
+
+                rpd.retraceSuccessful = any(retracedPath.F > 0);
             }
 
             break;
@@ -401,7 +440,7 @@ void rayGen()
         PathReservoir reservoir = gPathReservoir[reservoirIndex];
         bool validRandomReplayPath = true;
         float3 collectionPosW = float3(0);
-        if (reservoir.pathLength > 0 && reservoir.isValid()) {
+        if (reservoir.isValid() && reservoir.pathLength > 0) {
             RetracedPath retraceSurface = RetracedPath();
             // Get starting surface for temporal retrace
             HitInfo prevHit = HitInfo(gVBufferPrev[prevPixel]);
@@ -412,7 +451,6 @@ void rayGen()
             validRandomReplayPath = randomReplay(sd, reservoir, sg, retraceSurface, collectionPosW);
             if (!validRandomReplayPath) {
                 retraceSurface.F = float3(0);
-                retraceSurface.flags = 0;
             }
 
             gRetraceReservoirPath[reservoirIndex] = retraceSurface;
@@ -438,7 +476,7 @@ void rayGen()
         PathReservoir resampleReservoir = gPathReservoirPrev[resampleReservoirIndex];
         validRandomReplayPath = true;
         collectionPosW = float3(0);
-        if (resampleReservoir.pathLength > 0) {
+        if (resampleReservoir.isValid() && resampleReservoir.pathLength > 0) {
             RetracedPath retraceSurface = RetracedPath();
             float3 viewDir = gView[pixel].xyz;
             ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
@@ -446,7 +484,6 @@ void rayGen()
             validRandomReplayPath = randomReplay(sd, resampleReservoir, sg, retraceSurface, collectionPosW);
             if (!validRandomReplayPath) {
                 retraceSurface.F = float3(0);
-                retraceSurface.flags = 0;
             }
 
             gRetraceReservoirPathPrev[reservoirIndex] = retraceSurface;
