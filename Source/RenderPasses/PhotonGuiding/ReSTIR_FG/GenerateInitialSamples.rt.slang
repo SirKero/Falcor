@@ -333,7 +333,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                     pathReservoir.sgNeeLightSelection = neeSgState; // Store cached sg state
                     pathReservoir.jacobian = ls.pdf;
                     if (!ls.isInfiniteDistance) {
-                        pathReservoir.jacobian *= abs(dot(sd.faceN, ls.dir)) / (ls.distance * ls.distance);
+                        pathReservoir.jacobian *= abs(dot(ls.faceN, ls.dir)) / (ls.distance * ls.distance);
                     }
                     pathReservoir.pathLength = pd.pathLength;
                     pathReservoir.lightIndex = -1; // Invalid sample for guiding TODO add nee to guiding?

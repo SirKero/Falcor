@@ -307,7 +307,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
                     retracedPath.F = nee * rpd.thp; 
                     retracedPath.jacobian = ls.pdf;
                     if (!ls.isInfiniteDistance)
-                        retracedPath.jacobian *= abs(dot(sd.faceN, ls.dir)) / (ls.distance * ls.distance);
+                        retracedPath.jacobian *= abs(dot(ls.faceN, ls.dir)) / (ls.distance * ls.distance);
                     rpd.retraceSuccessful = true;
                 }
             }

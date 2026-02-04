@@ -74,5 +74,4 @@ void main(uint2 pixel: SV_DispatchThreadID)
         gSplatSortData[index] = uint4(newReservoirIndex, cellIndex, pixel);
     }
 
-    gSplatSortData[index] = uint4(linPixel, cellIndex, pixel);
 }
