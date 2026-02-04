@@ -221,6 +221,7 @@ private:
     bool mCanResample = false;                              //Is re
     bool mPathResamplingUseNEEAfterSpecular = true;         //Uses NEE instead of radiance estimate after a specular event
     bool mPathResamplingStopAfterDiffuseSpecular = true;   //Enables tracing the path if a specular hit occured after the first diffuse hit. This case is usually covered by caustics.
+    bool mPathRetraceSeperatePass = true;                  //Seperate pass for retracing the current and other reservoir sample
 
     // Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();

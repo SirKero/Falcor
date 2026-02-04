@@ -438,6 +438,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                         mCanResample = false;
                     group2.tooltip("If enabled, the path is not traced further if a specular hit is encountered after the first diffuse hit."
                         "This case is usually covered by caustics and tracing further wastes performance.");
+                    group2.checkbox("Seperate Retrace shader", mPathRetraceSeperatePass);
+                    group2.tooltip("Uses a seperate pass for retracing the current and other reservoir sample");
                 }
             }
             if (auto group2 = group.group("Resampling Caustic options"))
@@ -2033,7 +2035,16 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     var["gPhotonRetraceSuccessfulMask"] = mpPhotonRetraceMask;
 
     // Dispatch Shader
-    mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));
+    int numDispatches = mPathRetraceSeperatePass ? 2 : 1;
+    for (int i = 0; i < numDispatches; i++) {
+
+        var["CB"]["gSeperatePasses"] = mPathRetraceSeperatePass ? i : -1;
+        if (i == 1)
+            pRenderContext->uavBarrier(mpPhotonRetraceMask.get());
+
+        mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));
+    }
+    
 }
 
 void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
