@@ -1,4 +1,3 @@
-#include "../StructsAndHelpers.slang"
 #include "Scene/SceneDefines.slangh"
 #include "Utils/Math/MathConstants.slangh"
 
@@ -6,6 +5,7 @@ import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
+import RenderPasses.PhotonGuiding.StructsAndHelpers;
 
 cbuffer CB
 {
@@ -40,8 +40,6 @@ RWStructuredBuffer<int> gCellCounters;      // Number of reservoirs per pixel
 StructuredBuffer<int> gSplattingLinkedList;  //Linked List, gCell counters is the head buffer if the linked list is used
 StructuredBuffer<uint> gCellOffsets;       // Initial offset for the sorted reservoir buffer
 StructuredBuffer<uint2> gSortedReservoirs; // Buffer of splatted reservoirs
-
-RWTexture2D<float4> gDebug;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
@@ -306,8 +304,7 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
         {
             resampleSplattedReservoir(dstR, wSum, sg, uint(headIndex), current.c, currentCamPosW, currentCamForward);
             int newHeadIndex = gSplattingLinkedList[headIndex];
-            //headIndex = newHeadIndex;
-            headIndex = -1;
+            headIndex = newHeadIndex;
         }
     }
     else {
@@ -319,6 +316,7 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
             resampleSplattedReservoir(dstR, wSum, sg, index2Dto1D(splattedPixel, gFrameDim.x), current.c, currentCamPosW, currentCamForward);
         }
     }
+
     /*
     bool isBackupSample = kUseBackupSample && numReservoirs == 0;
     if (isBackupSample)
@@ -428,27 +426,27 @@ void main(uint2 pixel: SV_DispatchThreadID)
 {
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 2));
 
-    ReservoirCaustic current = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
+    const uint reservoirIdx = index2Dto1D(pixel, gFrameDim.x);
+    ReservoirCaustic current = gCausticReservoir[reservoirIdx];
     HitInfo currentHit = HitInfo(current.sampleSurface);
 
-    if (!currentHit.isValid())
-        return;
+    if (currentHit.isValid()) {
+        // Get Shading Data
+        let lod = ExplicitLodTextureSampler(0.0);
+        ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
+        let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
+        let currentBsdfProperties = currentMi.getProperties(currentSD);
 
-    // Get Shading Data
-    let lod = ExplicitLodTextureSampler(0.0);
-    ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
-    let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
-    let currentBsdfProperties = currentMi.getProperties(currentSD);
+        // Either photon or light trace resample
+        if (kEnableLightTraceSplatting && current.pathLength == 0)
+            reservoirSplatting(current, pixel, currentSD, currentMi, currentBsdfProperties, sg);
+        else
+            resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
 
-    // Either photon or light trace resample
-    if (kEnableLightTraceSplatting && current.pathLength == 0)
-        reservoirSplatting(current, pixel, currentSD, currentMi, currentBsdfProperties, sg);
-    else
-        resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
+        // Store final reservoir
+        gCausticReservoir[reservoirIdx] = current;
+    }
 
-    // Store final reservoir
-    const uint reservoirIdx = index2Dto1D(pixel, gFrameDim.x);
-    gCausticReservoir[reservoirIdx] = current;
     if (kSplattingUseLinkedList)
         gCellCounters[reservoirIdx] = -1;
     else

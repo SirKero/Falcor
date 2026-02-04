@@ -2354,8 +2354,6 @@ void PhotonGuiding::reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* p
         pRenderContext->clearUAV(mpSplattingGlobalCounter->getUAV(0).get(), uint4(0));
         pRenderContext->clearUAV(mpSplattingCellOffsets->getUAV(0).get(), uint4(0)); 
     }
-    else
-        pRenderContext->clearUAV(mpSplattingResamlingLinkedList->getUAV(0).get(), uint4(uint(-1)));
 
     // Init Shader
     if (!mRetraceCausticPathsPass.pProgram)

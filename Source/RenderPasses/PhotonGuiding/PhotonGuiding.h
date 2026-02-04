@@ -230,7 +230,7 @@ private:
     bool mEnableLightTraceSplatting = true;
     bool mRetraceLightPaths = true; //Retrace light paths for final gather and caustic backprojection
     bool mCausticReservoirsUseBackupSample = false; //If there is no valid sample, a backup sample is aquired using motion vectors
-    bool mSplattingResampleUseLinkedList = false; //Uses a linked list for resampled reprojection
+    bool mSplattingResampleUseLinkedList = true; //Uses a linked list for resampled reprojection
 
     //
     //Guiding Infos/Options
