@@ -513,6 +513,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         }
         changed |= group.checkbox("Disable Direct Light", mDebugDisableDirectLight);
         changed |= group.checkbox("Disable Indirect Light", mDebugDisableIndirectLight);
+        changed |= group.checkbox("ReSTIR FG+ Show Paths", mDebugPathRetracingShowPaths);
     }
     mOptionsChanged = changed;
 }
@@ -2220,6 +2221,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
             "ENABLE_RANDOM_REPLAY", mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0"
         );
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("DEBUG_SHOW_PATHS", mDebugPathRetracingShowPaths ? "1" : "0");
         return defines;
     };
 
@@ -2272,6 +2274,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     // Guiding textures
     var["gGuidingCounter"] = mpRecordGuidingAtlas;
     var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
+
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();

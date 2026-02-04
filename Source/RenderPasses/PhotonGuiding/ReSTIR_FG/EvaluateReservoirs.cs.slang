@@ -22,6 +22,8 @@ RWTexture2D<float4> gOutColor;
 RWTexture2D<PackedHitInfo> gVBufferPrev;
 RWTexture2D<float4> gViewPrev;
 
+RWTexture2D<float4> gDebug;
+
 cbuffer CB
 {
     uint gFrameCount;         // Current it for sample gen
@@ -172,6 +174,23 @@ void main(uint2 pixel: SV_DispatchThreadID)
         PathReservoir pathReservoir = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
         indirectLight += pathReservoir.F * pathReservoir.weight;
         addToGuidingTexture(pathReservoir.lightIndex, pathReservoir.guidingPixels, luminance(indirectLight), pathReservoir.c);
+
+        // Debug Show Paths as color
+        #if DEBUG_SHOW_PATHS
+            float3 debugColor = float3(0);
+            if (pathReservoir.flags.isFinalGather && pathReservoir.pathLength == 0)
+                debugColor = float3(0, 1, 0); //Green
+            else if (pathReservoir.flags.isFinalGather && pathReservoir.pathLength > 0)
+                debugColor = float3(0, 1, 1); //Cyan
+            else if (pathReservoir.flags.isRadianceEstimate)
+                debugColor = float3(1, 0, 0); // Red
+            else if (pathReservoir.flags.isNEE)
+                debugColor = float3(1, 1, 0); // Yellow
+            else if (pathReservoir.flags.isEmissiveHit)
+                debugColor = float3(1, 0, 1); // Purple
+
+            gDebug[pixel] = float4(debugColor, 1);
+        #endif
     #else
         indirectLight += evaluateFinalGatherReservoir(pixel, sg);
         indirectLight += gEmission[pixel].xyz;

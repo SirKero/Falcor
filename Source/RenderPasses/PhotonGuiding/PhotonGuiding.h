@@ -273,6 +273,7 @@ private:
     bool mDebugShowLightIndexGuidingTex = false;
     bool mDebugDisableDirectLight = false;
     bool mDebugDisableIndirectLight = false;
+    bool mDebugPathRetracingShowPaths = false;
 
     //
     // Resources
