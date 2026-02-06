@@ -140,6 +140,52 @@ private:
     void reSTIRSortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //
+    //Structs
+    //
+    struct PathLengthSettings
+    {
+        uint maxPathLength = 10;
+        uint deltaBounces = 10;
+        uint diffuseBounces = 3;
+        uint speculatBounces = 3;
+
+        bool renderUI(Gui::Widgets& widget, std::string ident = "##") {
+            bool changed = false;
+            changed |= widget.var(("Path Length" + ident).c_str(), maxPathLength, 0u, 254u, 1u);
+            widget.tooltip("Maximal combined path length");
+            changed |= widget.var(("Delta Bounces" + ident).c_str(), deltaBounces, 0u, 254u, 1u);
+            widget.tooltip("Maximal delta bounces (reflection + transmission)");
+            changed |= widget.var(("Diffuse Bounces" + ident).c_str(), diffuseBounces, 0u, 254u, 1u);
+            widget.tooltip("Maximal diffuse bounces  (reflection + transmission)");
+            changed |= widget.var(("Specular Bounces" + ident).c_str(), speculatBounces, 0u, 254u, 1u);
+            widget.tooltip("Maximal specular bounces  (reflection + transmission)");
+            return changed;
+        }
+
+        uint pack() {
+            uint packed = 0;
+            packed |= maxPathLength & 0xFF;
+            packed |= (deltaBounces & 0xFF) << 8;
+            packed |= (diffuseBounces & 0xFF) << 16;
+            packed |= (speculatBounces & 0xFF) << 24;
+            return packed;
+        }
+    };
+
+    struct ResamplingSettings
+    {
+        bool enable = true;
+        uint confidenceCap = 20;                // Maximum confidence allowed
+        uint spatialSamples = 1;                // Number of spatial samples
+        uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found
+        float samplingRadius = 20.f;            // Sampling radius in pixel
+        float relativeDepthThreshold = 0.15f;  // Relative Depth threshold(is neighbor 0.1 = 10 % as near as the current depth)
+        float normalThreshold = 0.6f;          // Cosine of maximum angle between both normals allowed
+        float jacobianDistanceThreshold = 0.001f; // Threshold for Jacobian distances
+        bool usePathThreshold;                     // Enable resampling only if path length are the same
+    };
+
+    //
     // Pointers
     //
     ref<Scene> mpScene;                     // Scene Pointer
@@ -180,7 +226,7 @@ private:
     //
     // Photon Distribution
     //
-    uint mPhotonMaxBounces = 10;                    // Number of Photon bounces
+    PathLengthSettings mPhotonPathLength = {};      // Number of Photon bounces
     float mGlobalPhotonRejection = 0.3f;            // Probability a global photon is stored
     uint mNumDispatchedPhotons = 2000000;           // Number of Photons dispatched
     uint2 mNumMaxPhotons = uint2(1000000);   // Size of the photon buffer
@@ -203,18 +249,7 @@ private:
     //
     // ReSTIR FG
     //
-    struct ResamplingSettings
-    {
-        bool enable = true;
-        uint confidenceCap = 20;                // Maximum confidence allowed
-        uint spatialSamples = 1;                // Number of spatial samples
-        uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found
-        float samplingRadius = 20.f;            // Sampling radius in pixel
-        float relativeDepthThreshold = 0.15f;  // Relative Depth threshold(is neighbor 0.1 = 10 % as near as the current depth)
-        float normalThreshold = 0.6f;          // Cosine of maximum angle between both normals allowed
-        float jacobianDistanceThreshold = 0.001f; // Threshold for Jacobian distances
-        bool usePathThreshold;                     // Enable resampling only if path length are the same
-    };
+   
     ResamplingSettings mResampleSettingsFG = {};
     ResamplingSettings mResampleSettingsCaustic = {};
     bool mRebuildReservoirBuffer = false;

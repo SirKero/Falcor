@@ -309,7 +309,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
         changed |= group.var("Global photon store probability", mGlobalPhotonRejection, 0.f, 1.f, 0.0001f);
         group.tooltip("Probability a photon light is stored on diffuse hit. Flux is scaled up appropriately");
-        changed |= group.var("Max Bounces", mPhotonMaxBounces, 0u, 256u);
+
+        changed |= mPhotonPathLength.renderUI(group, "##Photon");
 
         group.checkbox("Use per pixel adaptive photon radius", mUseAdaptivePhotonRadius);
         if (mUseAdaptivePhotonRadius)
@@ -1504,7 +1505,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPhotonRadius"] = mPhotonRadius; 
-    var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
+    var["CB"]["gPackedPathLength"] = mPhotonPathLength.pack();
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
     var["CB"]["gGuidingTextureMaxMip"] = mGuidingAtlasMipLevels - 1;

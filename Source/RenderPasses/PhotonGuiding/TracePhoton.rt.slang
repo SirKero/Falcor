@@ -18,7 +18,7 @@ import StructsAndHelpers;
 
 cbuffer CB
 {
-    uint gMaxBounces;   // Max number of bounces allowed
+    PackedPathLength gPackedPathLength;   //Packed path length
     uint gFrameCount;   // Frame count since scene was loaded.
     float2 gPhotonRadius;//Global/Caustic radius
 
@@ -502,8 +502,10 @@ void rayGen()
     photon.guidingPixel = pls.guidingPixels;
     photon.guidingPdf = pls.guidingPdf;
 
+    const PackedPathLength maxPathLengths = gPackedPathLength;
+    PackedPathLength currentPathLength = PackedPathLength();
     // Main Loop
-    for (uint i = 0; i < gMaxBounces; i++) {
+    for (uint i = 0; i < maxPathLengths.pathLength; i++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
 
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
@@ -577,7 +579,6 @@ void rayGen()
         ray.Direction = bsdfSample.wo;
         thp *= bsdfSample.weight;
        
-
         // RussianRoulette
         if (kRussianRoulette)
         {
@@ -599,5 +600,17 @@ void rayGen()
         photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
         photon.pathLength = i + 1;
+
+        // Update path lenght
+        if (bsdfSample.isLobe(LobeType::Delta))
+            currentPathLength.deltaBounces = currentPathLength.deltaBounces + 1;
+        else if (bsdfSample.isLobe(LobeType::Diffuse))
+            currentPathLength.diffuseBounces = currentPathLength.diffuseBounces + 1;
+        else // Specular
+            currentPathLength.specularBounces = currentPathLength.specularBounces + 1;
+
+        //Abort path if max bounces for a type was reached
+        if (!currentPathLength.comparePathLengts(maxPathLengths))
+            return;
     }
 }
