@@ -59,7 +59,8 @@ static const bool kUseFixedPhotonGuiding = USE_FIXED_PHOTON_GUIDING; // Photons 
 static const uint kFixedPhotonGuidingMinPhotons = FIXED_GUIDING_MIN_PHOTONS; // Min photons for light guiding
 static const uint kTotalLightCount = TOTAL_LIGHT_COUNT;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
-static const bool kUseJacobianToMarkCaustic = USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC; //Used for path ReSTIR to get samples is regions where the jacobian distance threshold applies
+static const bool kUseJacobianToMarkCaustic = USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC; // Used for path ReSTIR to get samples is regions where the jacobian distance threshold applies
+static const bool kStoreOnlyIndirectPhotons = STORE_ONLY_INDIRECT_PHOTONS; //Store only photons with path length >= 1
 
 struct RayPayload
 {
@@ -534,9 +535,11 @@ void rayGen()
         }
 
         // Store Photon
-        if (reflectedDiffuse) {
+        bool storePhoton = reflectedDiffuse;
+        if (kStoreOnlyIndirectPhotons)
+            storePhoton &= i > 0;
+        if (storePhoton) {
             PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
-            bool storePhoton = true;
             if (photonType == PhotonType::Global) {
                 storePhoton = sampleNext1D(sg) <= gGlobalRejectionProb;
                 photon.flux *= invRejection;

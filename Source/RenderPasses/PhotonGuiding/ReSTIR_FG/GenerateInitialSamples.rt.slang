@@ -49,6 +49,7 @@ static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseNEEForPathReservoirs = PATH_RESERVOIR_USE_NEE;
 static const bool kStopPathAfterDiffuseSpecular = PATH_RESERVOIR_STOP_PATH_AFTER_DIFFUSE_SPECULAR;
+static const bool kUseNeeAtFGHit = USE_NEE_AT_FG_HIT;
 
 struct RayPayload
 {
@@ -324,7 +325,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             }
 
             // Next event estimation after specular hits used for direct light
-            if (kUseNEEForPathReservoirs && !isFinalGather) {
+            if ((kUseNEEForPathReservoirs && !isFinalGather) || kUseNeeAtFGHit) {
                 SampleGenerator neeSgState = sg; // Cache sampleGenerator state
                 LightSample ls;
                 float3 nee = nextEventEstimation(sd, mi, gNeeLightSelectProb, ls, sg);

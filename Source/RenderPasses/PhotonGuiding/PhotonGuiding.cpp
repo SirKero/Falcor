@@ -405,6 +405,9 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
                 "Material Options)"
             );
 
+            group.checkbox("Use Photons only for indirect light", mUseNEEatFGPoint);
+            group.tooltip("Stores and collects photons with path length >= 1. For all direct light, NEE is used");
+
             auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget, bool isCausticResampling = false, bool includeDisocclusionSamples = false)
             {
                 widget.checkbox("Enable Resampling", settings.enable);
@@ -1483,6 +1486,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mTracePhotonPass.pProgram->addDefine("USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC", mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_SEPERATE_DIR_SG", mRetraceLightPaths ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("STORE_ONLY_INDIRECT_PHOTONS", mUseNEEatFGPoint ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -1833,6 +1837,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_LIGHT", mpScene->useEnvLight() ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_USE_NEE", mPathResamplingUseNEEAfterSpecular ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_STOP_PATH_AFTER_DIFFUSE_SPECULAR", mPathResamplingStopAfterDiffuseSpecular ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("USE_NEE_AT_FG_HIT", mUseNEEatFGPoint ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefines(getPhotonCollectDefines());
 
     if (mpEmissiveLightSampler)
