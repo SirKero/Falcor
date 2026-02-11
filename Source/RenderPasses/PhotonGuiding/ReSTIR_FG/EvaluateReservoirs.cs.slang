@@ -64,6 +64,10 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
         InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
     }
 
+
+    //Light Index guiding entry
+    //TODO add back for the optimize mode
+    /*
     if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
     {
         uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
@@ -76,6 +80,7 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
         uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence));
         InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
     }
+    */
 }
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {

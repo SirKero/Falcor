@@ -43,7 +43,8 @@ cbuffer CB {
 
     uint gDispatchSize;
     bool gFixedGuidingCheckPhotonCount;
-    float gAccumValue;          //Used in some accumulate modes
+    float gAccumValue; // Used in some accumulate modes
+    bool gClearCounter; 
 }
 
 /* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
@@ -98,16 +99,21 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 weight = (weight * gAccumValue) + (oldWeight * (1.0 - gAccumValue));
         }
 
-        COUNTER_FORMAT clearValue = 0;
-        #if IS_LIGHT_INDEX_TEXTURE
-            clearValue = COUNT_LIGHTS > index1D ? (COUNTER_FORMAT)gClearValue : 0.0;
-        #else
-            clearValue = (COUNTER_FORMAT)gClearValue; // Clear
-        #endif
-
+        //Clear the guiding counter texture
+        if (gClearCounter)
+        {
+            COUNTER_FORMAT clearValue = 0;
+            #if IS_LIGHT_INDEX_TEXTURE
+                clearValue = COUNT_LIGHTS > index1D ? (COUNTER_FORMAT)gClearValue : 0.0;
+            #else
+                clearValue = (COUNTER_FORMAT)gClearValue; // Clear
+            #endif
+                
+            gSrcCounter[pixel] = clearValue;    //Write
+        }
+        
         // Write
         gDst[pixel] = weight;
-        gSrcCounter[pixel] = clearValue;
         if(kAccumMode != kAccumMode_LastFrame)
             gWeightLastFrame[pixel] = weight;
     }

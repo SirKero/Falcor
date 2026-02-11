@@ -298,6 +298,9 @@ private:
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated
     bool mUseFixedGuidingDispatch = true;      //Determine guiding dispatch beforehand and distribute on trace photon pixels
     uint mFixedGuidingDispatchReservedPhotons = 64; //Number of photons that are reserved due to fixed dispatch
+    bool mUseDirectionAtlasOptimization = false;  //Reduces the number of recorded and stored direction maps by mapping direction guiding textures only to light sources that need them
+    uint mAtlasOptimizationMaxDirectionGuidingMaps = 512;
+    bool mResetGuidingTextures = false;
 
     //Debug
     bool mDebugFreezeGuidingTextures = false;
@@ -327,6 +330,8 @@ private:
     ref<Texture> mpLightIndexGuidingTexture[2];            //Texture with the size corresponding to the number of lights
     ref<Texture> mpLightIndexGuidingPrevTex;            //Light index guiding texture from last frame
     ref<Texture> mpRecordLightIndexGuidingTexture;      //Record the guiding
+    ref<Texture> mpMapLightIdxToGuidingDirection;       //Size of light Index texture; Maps a light index to a guiding direction
+    ref<Buffer> mpMapLightIdxToGuidingDirectionCounter; //A counter needed for the indices
     //ReSTIR
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample

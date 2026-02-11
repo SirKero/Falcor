@@ -77,7 +77,17 @@ namespace
     };
 
     const std::string kShaderModel = "6_6";
-    }
+
+    const Gui::DropdownList kNumberOfFixedGuidingMaps = {
+        {128, "128"},
+        {256, "256"},
+        {512, "512"},
+        {1024, "1024"},
+        {2048, "2048"},
+        {4096, "4096"},
+        {8192, "8192"},
+    };
+}
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
 {
@@ -159,6 +169,11 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     //Return if there is no emissive light
     if (mTotalLightCount == 0)
         return;
+
+    if (mUseDirectionAtlasOptimization) {
+        if(mTotalLightCount <= mAtlasOptimizationMaxDirectionGuidingMaps)
+            mUseDirectionAtlasOptimization = false;
+    }
 
     //Prepare Textures and Buffers
     prepareResources(pRenderContext, renderData);
@@ -334,6 +349,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("Guiding Options"))
     {
+        bool rebuildGuidingTextures = false;
         //Set default values on reset
         if (group.dropdown("Guiding Histogram Accumulate Mode", mGuidingHistogramAccumMode))
         {
@@ -380,8 +396,17 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             "Map Guiding: Min Photons Per Light", mFixedGuidingDispatchReservedPhotons, 32u, mGuidingTextureResolution * mGuidingTextureResolution, 1u
         );
 
+        rebuildGuidingTextures = group.checkbox("Use Optimized Guiding Atlas", mUseDirectionAtlasOptimization);
+        group.tooltip("Limits the number of directional guiding maps and uses a map texture to map light indices to the guiding maps."
+            "Setting is disabled if the number of lights is smaller than the limit.");
+        rebuildGuidingTextures = group.dropdown("Optimized Atlas, Fixed Guiding Textures", kNumberOfFixedGuidingMaps, mAtlasOptimizationMaxDirectionGuidingMaps);
+        group.tooltip("Number of directional guiding textures.");
 
         mGuidingResetAccumulateCount = group.button("Reset Guiding Textures");
+
+        //Check if guiding texture needs to be resetted
+        mResetGuidingTextures |= rebuildGuidingTextures;
+        changed |= rebuildGuidingTextures;
     }
 
     if (mPhotonRenderMode == PhotonRenderMode::ReSTIR_FG || mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton)
@@ -643,6 +668,21 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mResetClearResources = true;
     }
 
+    if (mResetGuidingTextures)
+    {
+        mpGuidingAtlas[0].reset();
+        mpGuidingAtlas[1].reset();
+        mpRecordGuidingAtlas.reset();
+        mpGuidingAtlasPrevUnblurred.reset();
+        mpGuidingAtlasBlurHelper.reset();
+        mpLightIndexGuidingTexture[0].reset();
+        mpLightIndexGuidingTexture[1].reset();
+        mpLightIndexGuidingPrevTex.reset();
+        mpRecordLightIndexGuidingTexture.reset();
+        mpMapLightIdxToGuidingDirection.reset();
+        mResetGuidingTextures = false;
+    }
+
     //Photon Buffers
     for (uint i = 0; i < 2; i++)
     {
@@ -797,6 +837,20 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
             ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
         );
         mpRecordLightIndexGuidingTexture->setName("LightIndexGuidingRecordTexture");
+    }
+
+    if (!mpMapLightIdxToGuidingDirection) {
+        mpMapLightIdxToGuidingDirection = Texture::create2D(mpDevice, mGuidingLightIndexSize, mGuidingLightIndexSize, ResourceFormat::R16Uint, 1u, 1u,
+            nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpMapLightIdxToGuidingDirection->setName("MapLightIdxToGuidingDirection");
+        uint uint16Max = 0xFFFF;
+        pRenderContext->clearUAV(mpMapLightIdxToGuidingDirection->getUAV(0).get(), uint4(uint16Max));
+    }
+
+    if (!mpMapLightIdxToGuidingDirectionCounter) {
+        mpMapLightIdxToGuidingDirectionCounter = Buffer::createStructured(mpDevice, sizeof(uint), 2 ,
+            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr, false);
+        mpMapLightIdxToGuidingDirectionCounter->setName("MapLightIdxToGuidingDirectionCounter");
     }
 
     //ReSTIR Resources
@@ -1091,7 +1145,12 @@ void PhotonGuiding::guidingCounterReducePass(RenderContext* pRenderContext, cons
 
             var["CB"]["gDstSize"] = dispatchDim.xy();
             var["CB"]["gUseMip"] = useMipMapReduce;
-            var["gSrc"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(mip, 1u));
+            if (mip == 0 && !mUseDirectionAtlasOptimization) {
+                var["gSrc"].setSrv(mpRecordGuidingAtlas->getSRV(mGuidingAtlasMipLevels - 1u, 1u));
+            }
+            else {
+                var["gSrc"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(mip, 1u));
+            }
             var["gDst"].setUav(mpRecordLightIndexGuidingTexture->getUAV(dstMip, 0u, 1u));
           
             mpGuidingLightIndexCounterReducePass->execute(pRenderContext, dispatchDim);
@@ -1153,6 +1212,7 @@ void PhotonGuiding::generateGuidingMipTraverseChainPass(RenderContext* pRenderCo
         var["CB"]["gDispatchSize"] = mGuidingAtlasResolution;
         var["CB"]["gFixedGuidingCheckPhotonCount"] = false;
         var["CB"]["gAccumValue"] = mGuidingHistogramAccumValue;
+        var["CB"]["gClearCounter"] = true;
 
         var["gSrcCounter"].setUav(mpRecordGuidingAtlas->getUAV(0));
         var["gSrcCounterTotal"].setSrv(mpRecordGuidingAtlas->getSRV(maxMip, 1u));
@@ -1384,8 +1444,12 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
         var["CB"]["gClearValue"] = mUseFixedGuidingDispatch ? 0.f : 1.f;
         var["CB"]["gDispatchSize"] = mGuidingLightIndexSize;
         var["CB"]["gAccumValue"] = mGuidingHistogramAccumValue;
+        var["CB"]["gClearCounter"] = mUseDirectionAtlasOptimization;
 
-        var["gSrcCounter"].setUav(mpRecordLightIndexGuidingTexture->getUAV(0));
+        if(mUseDirectionAtlasOptimization)
+            var["gSrcCounter"].setUav(mpRecordLightIndexGuidingTexture->getUAV(0));
+        else
+            var["gSrcCounter"].setUav(mpRecordGuidingAtlas->getUAV(mGuidingAtlasMipLevels - 1u));
         var["gSrcCounterTotal"].setSrv(mpRecordLightIndexGuidingTexture->getSRV(maxMip, 1u));
         var["gSrc"].setSrv(mpLightIndexGuidingTexture[(mFrameCount + 1) % 2]->getSRV(0, 1u));
         var["gDst"].setUav(pCurrLightGuidingTex->getUAV(0));

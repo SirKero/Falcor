@@ -92,7 +92,8 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
     }
 
     //Add light index to guiding
-
+    //TODO this is only needed for special modes
+    /*
     if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
     {
         uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
@@ -103,6 +104,7 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
         InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
     }
+    */
 }
 
 int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, uint numLightPaths, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
