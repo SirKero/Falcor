@@ -150,7 +150,7 @@ struct PhotonRetraceData{
 
     //Path length helper
     property uint pathLength {
-        get { return (startPixelPathLengthData >> 24) & 0xFF; }
+        get { return (startPixelPathLengthData >> 24) & 0x7F; }
         set {
             startPixelPathLengthData &= ~0x7F000000; // Clear upper 8 bits
             startPixelPathLengthData |= (newValue.x & 0x7F) << 24;
