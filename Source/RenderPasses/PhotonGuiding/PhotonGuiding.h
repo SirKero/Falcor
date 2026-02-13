@@ -330,7 +330,7 @@ private:
     ref<Texture> mpLightIndexGuidingTexture[2];            //Texture with the size corresponding to the number of lights
     ref<Texture> mpLightIndexGuidingPrevTex;            //Light index guiding texture from last frame
     ref<Texture> mpRecordLightIndexGuidingTexture;      //Record the guiding
-    ref<Texture> mpMapLightIdxToGuidingDirection;       //Size of light Index texture; Maps a light index to a guiding direction
+    ref<Texture> mpMapLightIdxToGuidingDirection[2];       //Size of light Index texture; Maps a light index to a guiding direction
     ref<Buffer> mpMapLightIdxToGuidingDirectionCounter; //A counter needed for the indices
     //ReSTIR
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample

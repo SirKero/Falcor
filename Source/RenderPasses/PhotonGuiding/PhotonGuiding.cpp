@@ -679,7 +679,8 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpLightIndexGuidingTexture[1].reset();
         mpLightIndexGuidingPrevTex.reset();
         mpRecordLightIndexGuidingTexture.reset();
-        mpMapLightIdxToGuidingDirection.reset();
+        mpMapLightIdxToGuidingDirection[0].reset();
+        mpMapLightIdxToGuidingDirection[1].reset();
         mResetGuidingTextures = false;
     }
 
@@ -760,9 +761,10 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
     //Guiding Textures
     if (!mpGuidingAtlas[0] || !mpGuidingAtlas[1])
     {
+        uint numGuidingTextures = mUseDirectionAtlasOptimization ? mAtlasOptimizationMaxDirectionGuidingMaps : mTotalLightCount;
         //Update atlas size
         float minSideLength =
-            math::ceil(math::sqrt(float(mTotalLightCount * mGuidingTextureResolution * mGuidingTextureResolution))); // ceiled pixel
+            math::ceil(math::sqrt(float(numGuidingTextures * mGuidingTextureResolution * mGuidingTextureResolution))); // ceiled pixel
                                                                                                                         // width/length
         mGuidingAtlasResolution = uint(pow(2.f, math::ceil(math::log2(minSideLength)))); // Gets next nearest power 2 number
         mGuidingAtlasMipLevels = uint(round(math::log2(float(mGuidingTextureResolution)))) + 1;
@@ -839,13 +841,16 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpRecordLightIndexGuidingTexture->setName("LightIndexGuidingRecordTexture");
     }
 
-    if (!mpMapLightIdxToGuidingDirection) {
-        mpMapLightIdxToGuidingDirection = Texture::create2D(mpDevice, mGuidingLightIndexSize, mGuidingLightIndexSize, ResourceFormat::R16Uint, 1u, 1u,
-            nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
-        mpMapLightIdxToGuidingDirection->setName("MapLightIdxToGuidingDirection");
-        uint uint16Max = 0xFFFF;
-        pRenderContext->clearUAV(mpMapLightIdxToGuidingDirection->getUAV(0).get(), uint4(uint16Max));
+    for (uint i = 0; i < 2; i++) {
+        if (!mpMapLightIdxToGuidingDirection) {
+            mpMapLightIdxToGuidingDirection[i] = Texture::create2D(mpDevice, mGuidingLightIndexSize, mGuidingLightIndexSize, ResourceFormat::R16Uint, 1u, 1u,
+                nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+            mpMapLightIdxToGuidingDirection[i]->setName("MapLightIdxToGuidingDirection" + std::to_string(i));
+            uint uint16Max = 0xFFFF;
+            pRenderContext->clearUAV(mpMapLightIdxToGuidingDirection[i]->getUAV(0).get(), uint4(uint16Max));
+        }
     }
+       
 
     if (!mpMapLightIdxToGuidingDirectionCounter) {
         mpMapLightIdxToGuidingDirectionCounter = Buffer::createStructured(mpDevice, sizeof(uint), 2 ,
@@ -1551,6 +1556,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC", mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_SEPERATE_DIR_SG", mRetraceLightPaths ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("STORE_ONLY_INDIRECT_PHOTONS", mUseNEEatFGPoint ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)
@@ -1585,6 +1591,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     var["CB"]["gLightIndexGuidingMaxMip"] = mUseFixedGuidingDispatch ? mpGuidingAtlas[mFrameCount % 2]->getMipCount() - 1
                                                                      : mpLightIndexGuidingTexture[mFrameCount % 2]->getMipCount() - 1u;
     var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
+    var["CB"]["gLightIndexGuidingMaxMip2"] = mpLightIndexGuidingTexture[mFrameCount % 2]->getMipCount() - 1u;
 
     // Output
     for (uint i = 0; i < 2; i++)
@@ -1634,6 +1641,7 @@ DefineList PhotonGuiding::getPhotonCollectDefines(bool isReSTIRPass) {
     defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
     defines.add("NOT_RESTIR_PASS", isReSTIRPass ? "0" : "1");
     defines.add("ENABLE_PHOTON_RETRACING", mRetraceLightPaths ? "1" : "0");
+    defines.add("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
     return defines;
 }
 
@@ -2292,6 +2300,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         );
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         defines.add("DEBUG_SHOW_PATHS", mDebugPathRetracingShowPaths ? "1" : "0");
+        defines.add("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
         return defines;
     };
 

@@ -41,11 +41,34 @@ static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACT
 static const bool kDisableDirectLight = DEBUG_DISABLE_DIRECT_LIGHT;
 static const bool kDisableIndirectLight = DEBUG_DISABLE_INDIRECT_LIGHT;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
+static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
 
 void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uint reservoirConfidence)
 {
     if (lightIndex < 0 || emission <= 0)
         return;
+
+    // Light Index guiding entry
+    if (kUseOptimizedAtlas) {
+        if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
+        {
+            uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
+            uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+        }
+        else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIRConf)
+        {
+            uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
+            uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence));
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+        }
+    }
+
+    // Update guiding pixel if mapping is enabled
+    if (kUseOptimizedAtlas) {
+        //TODO
+        return;
+    }
 
     if (kGuidingMode == (uint)GuidingMode::ReSTIR)
     {
@@ -63,24 +86,6 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
         InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
     }
-
-
-    //Light Index guiding entry
-    //TODO add back for the optimize mode
-    /*
-    if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
-    {
-        uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
-        uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
-        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
-    }
-    else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIRConf)
-    {
-        uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
-        uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence));
-        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
-    }
-    */
 }
 
 float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {

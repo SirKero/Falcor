@@ -33,7 +33,9 @@ cbuffer CB
 
     uint gLightIndexGuidingResolution; // Resolution of "gGuidingLightIndex"
     float2 gAdaptivePhotonRadius;      // Pixel scale for global/ caustic photons.
-    float gJacobianDistanceThreshold;   //Distance threshold for jacobian used in Path ReSTIR 
+    float gJacobianDistanceThreshold;   //Distance threshold for jacobian used in Path ReSTIR
+
+    uint gLightIndexGuidingMaxMip2;
 }
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
@@ -60,7 +62,8 @@ static const uint kFixedPhotonGuidingMinPhotons = FIXED_GUIDING_MIN_PHOTONS; // 
 static const uint kTotalLightCount = TOTAL_LIGHT_COUNT;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseJacobianToMarkCaustic = USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC; // Used for path ReSTIR to get samples is regions where the jacobian distance threshold applies
-static const bool kStoreOnlyIndirectPhotons = STORE_ONLY_INDIRECT_PHOTONS; //Store only photons with path length >= 1
+static const bool kStoreOnlyIndirectPhotons = STORE_ONLY_INDIRECT_PHOTONS; // Store only photons with path length >= 1
+static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
 
 struct RayPayload
 {
@@ -269,8 +272,165 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
     if (kTotalLightCount == 0)
         return false;
 
+    
     //Get start id and compaire against the total number of photons
+    const uint blockSize = kFixed1DIndexBlockSize;
+    uint2 blockPixel = pixel % blockSize;
+    uint2 blockID = pixel / blockSize;
+    uint block1D = blockPixel.x + blockPixel.y * blockSize;
+    uint blockOffset = blockID.x * (blockSize * blockSize) + blockID.y * dispatchDimX * blockSize;
+    float tw = block1D + blockOffset;
 
+    float maxPhotons = gGuidingLightIndex.Load(uint3(0, 0, gLightIndexGuidingMaxMip2)); // Sum of all photons
+
+    if (tw >= maxPhotons)
+        return false;
+
+    // Traverse light index guiding map
+    // TODO use unroll and define number of mips
+    uint2 mipIdx = uint2(0);                           // Working index for mip chain traversal. Starts top left (0)
+    int startMip = int(gLightIndexGuidingMaxMip2) - 1; // start from second highest level
+    float endWeight = 0;
+    uint lightIndex = 0;
+    const uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
+
+    for (int m = startMip; m >= 0; m--) {
+        // Update mip index and offset from last iteration
+        mipIdx *= 2;
+
+        // Fetch samples in 2x2 grid
+        uint2 fetchIdx = mipIdx;
+        float4 mipSamples;
+        mipSamples[0] = gGuidingLightIndex.Load(uint3(mipIdx.x, mipIdx.y, m));
+        mipSamples[1] = gGuidingLightIndex.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+        mipSamples[2] = gGuidingLightIndex.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+        mipSamples[3] = gGuidingLightIndex.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+
+        // Select a sample using the current traverse weight
+        float totalWeight = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+        float currWeight = 0;      // Total for select in loop
+        uint selectedSubpixel = 0; // Selected subpixel id
+        float selWeight = 0;       // Selected weight
+        for (uint x = 0; x < 4 && totalWeight > 0; x++) {
+            selWeight = mipSamples[x];
+            currWeight += selWeight;
+            selectedSubpixel = x;
+            if (tw < currWeight)
+                break;
+        }
+
+        // Update traversal weight
+        float nonSelectedWeight = currWeight - selWeight;
+        tw -= nonSelectedWeight;
+
+        // Update the index used to fetch the next mip level
+        if (selectedSubpixel == 1 || selectedSubpixel == 3)
+            mipIdx.x += 1;
+        if (selectedSubpixel > 1) // 2 or 3
+            mipIdx.y += 1;
+
+        if (m == 0) {
+            lightIndex = mipIdx.x + mipIdx.y * atlasLightsPerRow;
+            endWeight = mipSamples[selectedSubpixel];
+        }
+    }
+
+    // Check if the light fulfills the min photon condition for directional guiding
+    bool useDirectionalGuiding = endWeight >= kFixedPhotonGuidingMinPhotons;
+    //useDirectionalGuiding = false;
+    // Get mapped starting index in the atlas
+    if (kUseOptimizedAtlas)
+    {
+        //TODO update mipidx
+        useDirectionalGuiding = false;
+    }
+
+    //Check if the current photon is a directionally guided photon 
+    if (useDirectionalGuiding) {
+         float directionalPhotons = gGuidingTexture.Load(uint3(mipIdx, gGuidingTextureMaxMip));
+         useDirectionalGuiding = (tw - directionalPhotons) <= 0;    //All photon greater 0 are left over photons from flooring the directional importance
+    }
+    
+    pls.useRandomLightDirection = !useDirectionalGuiding;
+
+    //Perform traversal of the directional guiding map
+    if (useDirectionalGuiding)
+    {
+        startMip = gGuidingTextureMaxMip - 1;
+        endWeight = 0;
+
+        for (int m = startMip; m >= 0; m--) {
+            // Update mip index and offset from last iteration
+            mipIdx *= 2;
+
+            // Fetch samples in 2x2 grid
+            uint2 fetchIdx = mipIdx;
+            float4 mipSamples;
+            mipSamples[0] = gGuidingTexture.Load(uint3(mipIdx.x, mipIdx.y, m));
+            mipSamples[1] = gGuidingTexture.Load(uint3(mipIdx.x + 1, mipIdx.y, m));
+            mipSamples[2] = gGuidingTexture.Load(uint3(mipIdx.x, mipIdx.y + 1, m));
+            mipSamples[3] = gGuidingTexture.Load(uint3(mipIdx.x + 1, mipIdx.y + 1, m));
+
+            // Select a sample using the current traverse weight
+            float totalWeight = mipSamples[0] + mipSamples[1] + mipSamples[2] + mipSamples[3];
+            float currWeight = 0;      // Total for select in loop
+            uint selectedSubpixel = 0; // Selected subpixel id
+            float selWeight = 0;       // Selected weight
+            for (uint x = 0; x < 4 && totalWeight > 0; x++) {
+                selWeight = mipSamples[x];
+                currWeight += selWeight;
+                selectedSubpixel = x;
+                if (tw < currWeight)
+                    break;
+            }
+
+            // Update traversal weight
+            float nonSelectedWeight = currWeight - selWeight;
+            tw -= nonSelectedWeight;
+
+            // Update the index used to fetch the next mip level
+            if (selectedSubpixel == 1 || selectedSubpixel == 3)
+                mipIdx.x += 1;
+            if (selectedSubpixel > 1) // 2 or 3
+                mipIdx.y += 1;
+
+            if (m == 0) {
+                endWeight = mipSamples[selectedSubpixel];
+            }
+        }
+    }
+
+    // Recreate selected random number range from the choosen index
+    float guidingPDF = endWeight / maxPhotons;
+
+    // Fill out random values depending if the loop ended at the light or direction
+    if (pls.useRandomLightDirection) {
+        pls.rndX = randomVal.x;
+        pls.rndY = randomVal.y;
+        uint2 offsetLightIdx = uint2(lightIndex % atlasLightsPerRow, lightIndex / atlasLightsPerRow) * gGuidingTextureResolution;
+        pls.guidingPixels = offsetLightIdx + uint2(floor(randomVal * gGuidingTextureResolution)); // TODO guiding pixels for optimized atlas traveral?
+        //guidingPDF /= kTotalLightCount;
+    } else {
+        pls.guidingPixels = mipIdx;
+        uint2 relIdx = mipIdx % gGuidingTextureResolution;
+        float2 relMinWeight = float2(relIdx) / gGuidingTextureResolution;
+        float2 relMaxWeight = float2(relIdx + 1) / gGuidingTextureResolution;
+        relMinWeight += (relMaxWeight - relMinWeight) * randomVal;
+        pls.rndX = relMinWeight.x;
+        pls.rndY = relMinWeight.y;
+        guidingPDF *= (gGuidingTextureResolution * gGuidingTextureResolution);
+    }
+
+    if (lightIndex >= kTotalLightCount)
+        return false;
+
+    pls.guidingPdf = guidingPDF;
+    pls.lightIdx = lightIndex;
+
+    return true;
+    
+    //Old code (uses 1 atlas)
+    /*
     // Get a 1D index, divided into blocks
     const uint blockSize = kFixed1DIndexBlockSize;
     uint2 blockPixel = pixel % blockSize;
@@ -331,7 +491,7 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
         if (m == mipLevelCheckLightCount)
         {
             lightIndex = mipIdx.x + mipIdx.y * atlasLightsPerRow;
-            if (mipSamples[selectedSubpixel] < kFixedPhotonGuidingMinPhotons)
+            if (true)//(mipSamples[selectedSubpixel] < kFixedPhotonGuidingMinPhotons)
             {
                 endWeight = mipSamples[selectedSubpixel];
                 pls.useRandomLightDirection = true;
@@ -369,6 +529,7 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
     pls.lightIdx = lightIndex;
 
     return true;
+    */
 }
 
 float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)

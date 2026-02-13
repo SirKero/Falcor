@@ -24,6 +24,7 @@ static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACT
 static const uint kLightIndexGuidingResolution = GUIDING_LIGHT_INDEX_SIZE;
 static const bool kNotReSTIRPass = NOT_RESTIR_PASS;
 static const bool kEnablePhotonRetracing = ENABLE_PHOTON_RETRACING;
+static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
 
 struct PhotonSample {
     float3 posW;
@@ -61,50 +62,51 @@ struct PhotonSample {
     }
 }
 
-// Checks if the ray start point is inside the sphere.
-/*
-bool hitSphere(const float3 center, const float radius, const float3 p)
-{
-    float3 radiusTest = p - center;
-    return dot(radiusTest, radiusTest) < radius * radius;
-}
-*/
+
 void addToGuidingTexture(PhotonData photonData, float emission) {
     if (emission <= 0)
         return;
-    // Add to the guiding texture
+
+    // Record light index guiding map
+    if (kUseOptimizedAtlas)
+    {
+        if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
+        {
+            uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
+        } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission || (kNotReSTIRPass && (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR || kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIRConf)))
+        {
+            uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
+            uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+        }
+    }
+    
+    //Get corresponding atlas pixel
+    uint2 guidingPixel = photonData.guidingPixel;
+    if (kUseOptimizedAtlas) {
+        // TODO fetch mapped pixel
+        return;
+    }
+
+    // Add to directional guiding texture
     if (kGuidingMode == (uint)GuidingMode::Emission || (kNotReSTIRPass && kGuidingMode == (uint)GuidingMode::ReSTIR)) {
         uint currentColor = 0;
         uint originalValue;
         [allow_uav_condition]
         do {
-            InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 0u, currentColor);
+            InterlockedAdd(gGuidingCounter[guidingPixel], 0u, currentColor);
             float color = asfloat(currentColor);
             uint updatedColor = asuint(color + emission);
-            InterlockedCompareExchange(gGuidingCounter[photonData.guidingPixel], currentColor, updatedColor, originalValue);
+            InterlockedCompareExchange(gGuidingCounter[guidingPixel], currentColor, updatedColor, originalValue);
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
-        InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 1u);
+        InterlockedAdd(gGuidingCounter[guidingPixel], 1u);
     } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized || (kNotReSTIRPass && kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized))
     {
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
-        InterlockedAdd(gGuidingCounter[photonData.guidingPixel], discretizedEmission);
-    }
-
-    //Add light index to guiding
-    //TODO this is only needed for special modes
-    /*
-    if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
-    {
-        uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
-        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
-    } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission || (kNotReSTIRPass && (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR || kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIRConf)))
-    {
-        uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
-        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
-        InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
-    }
-    */
+        InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
+    }    
 }
 
 int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, uint numLightPaths, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
