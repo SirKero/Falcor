@@ -20,12 +20,19 @@ import SharedEnums;
 #define HISTORAM_ACCUM_MODE 0
 #endif
 
+#ifndef USE_ATLAS_OPTIMIZATION
+#define USE_ATLAS_OPTIMIZATION 0
+#endif
+
 RWTexture2D<COUNTER_FORMAT> gSrcCounter;    // RW for clearing; only used when gCopyFromCounter = true
 Texture2D<COUNTER_FORMAT> gSrcCounterTotal; // Only used when gCopyFromCounter = true
 RWTexture2D<float> gWeightLastFrame; // Only used when gCopyFromCounter = true
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
 Texture2D<float> gFixedGuidingLightIdxPhotons; //Only used on a certain mip level
+
+Texture2D<uint> gMapGuidingDirectionToLightIndex; //Used when Atlas Optimization is active
+Texture2D<uint> gMapLightIdxToDirGMPrev; //Used when Atlas Optimization is active
 
 //Histogram accumulate modes
 static const uint kAccumMode_Offline = (uint)(GuidingHistogramAccumulateMode::ResetOnMove);
@@ -34,6 +41,7 @@ static const uint kAccumMode_PercentageAvrg = (uint)(GuidingHistogramAccumulateM
 static const uint kAccumMode_LastFrame = (uint)(GuidingHistogramAccumulateMode::UseLastFrame);
 
 static const uint kAccumMode = HISTORAM_ACCUM_MODE;
+static const bool kUseAtlasOptimization = USE_ATLAS_OPTIMIZATION;
 
 cbuffer CB {
     uint gRes;
@@ -44,7 +52,11 @@ cbuffer CB {
     uint gDispatchSize;
     bool gFixedGuidingCheckPhotonCount;
     float gAccumValue; // Used in some accumulate modes
-    bool gClearCounter; 
+    bool gClearCounter;
+
+    uint gLightGMResolution;
+    uint gGMResolution;
+    uint gMapResolution;
 }
 
 /* Reduce using a Mip-Chain. Calculates the Total Importance for the Importance Map.
@@ -90,9 +102,28 @@ void main(uint3 thdID: SV_DispatchThreadID)
             float pixelCounterVal = float(gSrcCounter[pixel]);
             weight = total > 0 ? pixelCounterVal / total : 0.0;
             float oldWeight = 0.0;
-            if(kAccumMode != kAccumMode_LastFrame)
-                oldWeight = gWeightLastFrame[pixel];
-           
+            if (kAccumMode != kAccumMode_LastFrame) {
+                uint2 prevPixel = pixel;
+                bool oldWeightValid = true;
+                if (kUseAtlasOptimization)
+                {
+                    oldWeightValid = false;
+                    // Get pixel from last iteration
+                    uint lightIndex = gMapGuidingDirectionToLightIndex[pixel / gGMResolution];
+                    if (lightIndex < COUNT_LIGHTS)
+                    {
+                        uint2 lightPixel = uint2(lightIndex % gLightGMResolution, lightIndex / gLightGMResolution);
+                        uint prevMapIdx = gMapLightIdxToDirGMPrev[lightPixel];
+                        if(prevMapIdx < 0xFFFF){
+                            prevPixel = uint2(prevMapIdx % gMapResolution, prevMapIdx / gMapResolution);
+                            oldWeightValid = true;
+                        }
+                    }
+                }
+                if(oldWeightValid)
+                    oldWeight = gWeightLastFrame[prevPixel];
+            }
+                
             if(kAccumMode == kAccumMode_Offline || kAccumMode == kAccumMode_FrameAvrg)
                 weight = (weight + oldWeight * gIterationCount) / (gIterationCount + 1);
             else if (kAccumMode == kAccumMode_PercentageAvrg)

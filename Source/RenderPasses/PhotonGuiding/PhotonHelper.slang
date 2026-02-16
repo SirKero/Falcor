@@ -9,6 +9,7 @@ import SharedEnums;
 
 RWTexture2D<uint> gGuidingCounter;
 RWTexture2D<uint> gLightIndexGuidingCounter;
+Texture2D<uint> gMapLightIndexToGuidingDirection;
 
 StructuredBuffer<PhotonData> gPhotonData[2];
 StructuredBuffer<AABB> gPhotonAABB[2];
@@ -25,6 +26,14 @@ static const uint kLightIndexGuidingResolution = GUIDING_LIGHT_INDEX_SIZE;
 static const bool kNotReSTIRPass = NOT_RESTIR_PASS;
 static const bool kEnablePhotonRetracing = ENABLE_PHOTON_RETRACING;
 static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
+
+//TODO move these to defines? 
+cbuffer PhotonHelperCB
+{
+    uint gLightIndexGuidingResolution;
+    uint gGuidingTextureResolution;
+    uint gMapTextureResolution;
+}
 
 struct PhotonSample {
     float3 posW;
@@ -85,8 +94,14 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
     //Get corresponding atlas pixel
     uint2 guidingPixel = photonData.guidingPixel;
     if (kUseOptimizedAtlas) {
-        // TODO fetch mapped pixel
-        return;
+        uint2 lightPixel = uint2(photonData.lightIndex % gLightIndexGuidingResolution, photonData.lightIndex / gLightIndexGuidingResolution);
+        uint mapIdx = gMapLightIndexToGuidingDirection[lightPixel];
+
+        //If mapped index is invalid, return
+        if(mapIdx >= kAtlasOptimizationMaxMapIndex)
+            return;
+        
+        guidingPixel += uint2(mapIdx % gMapTextureResolution, mapIdx / gMapTextureResolution) * gGuidingTextureResolution;
     }
 
     // Add to directional guiding texture

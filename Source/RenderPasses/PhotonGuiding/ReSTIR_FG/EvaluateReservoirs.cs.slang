@@ -17,6 +17,7 @@ Texture2D<float4> gEmission;
 
 RWTexture2D<uint> gGuidingCounter;
 RWTexture2D<uint> gLightIndexGuidingCounter;
+Texture2D<uint> gMapLightIndexToGuidingDirection;
 
 RWTexture2D<float4> gOutColor;
 RWTexture2D<PackedHitInfo> gVBufferPrev;
@@ -30,6 +31,9 @@ cbuffer CB
     uint2 gFrameDim;          // Frame Dimensions for camera dir
     float gNormalizedPixelArea; // For backprojection
     uint gLightIndexGuidingResolution;
+
+    uint gGuidingTextureResolution;
+    uint gMapTextureResolution;
 }
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
@@ -66,8 +70,14 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
 
     // Update guiding pixel if mapping is enabled
     if (kUseOptimizedAtlas) {
-        //TODO
-        return;
+        uint2 lightPixel = uint2(lightIndex % gLightIndexGuidingResolution, lightIndex / gLightIndexGuidingResolution);
+        uint mapIdx = gMapLightIndexToGuidingDirection[lightPixel];
+
+        //If mapped index is invalid, return
+        if(mapIdx >= kAtlasOptimizationMaxMapIndex)
+            return;
+        
+        guidingPixel += uint2(mapIdx % gMapTextureResolution, mapIdx / gMapTextureResolution) * gGuidingTextureResolution;
     }
 
     if (kGuidingMode == (uint)GuidingMode::ReSTIR)

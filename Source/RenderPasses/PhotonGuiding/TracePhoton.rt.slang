@@ -36,6 +36,7 @@ cbuffer CB
     float gJacobianDistanceThreshold;   //Distance threshold for jacobian used in Path ReSTIR
 
     uint gLightIndexGuidingMaxMip2;
+    uint gMapTextureResolution; 
 }
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
@@ -49,6 +50,7 @@ RWStructuredBuffer<PackedHitInfo> gCausticPhotonHitInfo;
 
 Texture2D<float> gGuidingTexture;
 Texture2D<float> gGuidingLightIndex;
+Texture2D<uint> gMapLightIndexToGuidingDirection;
 
 static const uint kFixed1DIndexBlockSize = 16;
 static const bool kAlphaTest = true;
@@ -292,7 +294,6 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
     int startMip = int(gLightIndexGuidingMaxMip2) - 1; // start from second highest level
     float endWeight = 0;
     uint lightIndex = 0;
-    const uint atlasLightsPerRow = gGuidingAtlasResolution / gGuidingTextureResolution;
 
     for (int m = startMip; m >= 0; m--) {
         // Update mip index and offset from last iteration
@@ -330,19 +331,23 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
             mipIdx.y += 1;
 
         if (m == 0) {
-            lightIndex = mipIdx.x + mipIdx.y * atlasLightsPerRow;
+            lightIndex = mipIdx.x + mipIdx.y * gLightIndexGuidingResolution;
             endWeight = mipSamples[selectedSubpixel];
         }
     }
 
     // Check if the light fulfills the min photon condition for directional guiding
     bool useDirectionalGuiding = endWeight >= kFixedPhotonGuidingMinPhotons;
-    //useDirectionalGuiding = false;
+
     // Get mapped starting index in the atlas
     if (kUseOptimizedAtlas)
     {
-        //TODO update mipidx
-        useDirectionalGuiding = false;
+        uint2 lightPixel = uint2(lightIndex % gLightIndexGuidingResolution, lightIndex / gLightIndexGuidingResolution);
+        uint mapIndex = gMapLightIndexToGuidingDirection[lightPixel];
+        if(mapIndex < kAtlasOptimizationMaxMapIndex){
+            mipIdx = uint2(mapIndex % gMapTextureResolution, mapIndex / gMapTextureResolution);
+        }else
+            useDirectionalGuiding = false;
     }
 
     //Check if the current photon is a directionally guided photon 
@@ -407,12 +412,15 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
     if (pls.useRandomLightDirection) {
         pls.rndX = randomVal.x;
         pls.rndY = randomVal.y;
-        uint2 offsetLightIdx = uint2(lightIndex % atlasLightsPerRow, lightIndex / atlasLightsPerRow) * gGuidingTextureResolution;
-        pls.guidingPixels = offsetLightIdx + uint2(floor(randomVal * gGuidingTextureResolution)); // TODO guiding pixels for optimized atlas traveral?
-        //guidingPDF /= kTotalLightCount;
+        if(kUseOptimizedAtlas)
+            pls.guidingPixels = uint2(floor(randomVal * gGuidingTextureResolution)); //Store as local for the optimized atlas
+        else{
+            uint2 offsetLightIdx = uint2(lightIndex % gLightIndexGuidingResolution, lightIndex / gLightIndexGuidingResolution) * gGuidingTextureResolution;
+            pls.guidingPixels = offsetLightIdx + uint2(floor(randomVal * gGuidingTextureResolution)); 
+        }
     } else {
-        pls.guidingPixels = mipIdx;
         uint2 relIdx = mipIdx % gGuidingTextureResolution;
+        pls.guidingPixels = kUseOptimizedAtlas ? relIdx : mipIdx;
         float2 relMinWeight = float2(relIdx) / gGuidingTextureResolution;
         float2 relMaxWeight = float2(relIdx + 1) / gGuidingTextureResolution;
         relMinWeight += (relMaxWeight - relMinWeight) * randomVal;
