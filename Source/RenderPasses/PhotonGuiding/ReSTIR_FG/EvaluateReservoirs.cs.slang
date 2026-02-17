@@ -39,7 +39,6 @@ cbuffer CB
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kGuidingMode = GUIDING_MODE;
-static const uint kLightIndexGuidingMode = LIGHT_INDEX_GUIDING_MODE;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
 static const bool kDisableDirectLight = DEBUG_DISABLE_DIRECT_LIGHT;
@@ -54,13 +53,14 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
 
     // Light Index guiding entry
     if (kUseOptimizedAtlas) {
-        if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
+        //For the optimized atlas we only use the discretized methods
+        if (kGuidingMode == (uint)GuidingMode::ReSTIR || kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
         {
             uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
             uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
             InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
         }
-        else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIRConf)
+        else if (kGuidingMode == (uint)GuidingMode::ReSTIRConfidence)
         {
             uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
             uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence));
@@ -94,6 +94,10 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
     } else if (kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
     {
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
+        InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
+    } else if (kGuidingMode == (uint)GuidingMode::ReSTIRConfidence)
+    {
+        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence)), 1);
         InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
     }
 }

@@ -277,12 +277,6 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         resetRenderPasses();
     }
 
-    if (widget.dropdown("Guiding Light Index Mode", mGuidingLightIndexMode))
-    {
-        changed = true;
-        resetRenderPasses();
-    }
-
     if (auto group = widget.group("Photon Options"))
     {
         if (mUseDynamicPhotonDispatchCount)
@@ -1487,7 +1481,7 @@ void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext*
 
     // First pass to get the level 0 values from the counter and clear counter to 1
     {
-        uint iterationCount = mGuidingLightIndexMode == GuidingLightIndexMode::Disabled ? 0 : mGuidingAccumulateCount; 
+       uint iterationCount = mGuidingMode == GuidingMode::Disabled ? 0 : mGuidingAccumulateCount; 
        if (mGuidingHistogramAccumMode == GuidingHistogramAccumulateMode::AverageFrames)
             iterationCount = math::min(iterationCount, (uint)floor(mGuidingHistogramAccumValue));
 
@@ -1687,7 +1681,6 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
 DefineList PhotonGuiding::getPhotonCollectDefines(bool isReSTIRPass) {
     DefineList defines = {};
     defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-    defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
     defines.add("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
     defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
     defines.add("NOT_RESTIR_PASS", isReSTIRPass ? "0" : "1");
@@ -2346,7 +2339,6 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
         defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
-        defines.add("LIGHT_INDEX_GUIDING_MODE", std::to_string((uint)mGuidingLightIndexMode));
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
         defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
         defines.add("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));

@@ -280,7 +280,6 @@ private:
     uint mGuidingAtlasResolution = 512;     //Resolution of the guiding atlas
     uint mGuidingAtlasMipLevels = 1;        //
     GuidingMode mGuidingMode = GuidingMode::ReSTIRDiscretized;
-    GuidingLightIndexMode mGuidingLightIndexMode = GuidingLightIndexMode::ReSTIR;
     float mGuidingClearValueEmission = 0.1f;
     bool mUseGaussianBlur = true;
     bool mGuidingResetAccumulateCount = false;
