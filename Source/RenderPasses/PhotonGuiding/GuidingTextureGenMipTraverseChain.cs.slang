@@ -86,13 +86,14 @@ void main(uint3 thdID: SV_DispatchThreadID)
     if (gCopyFromCounter)
     {
         // Get Start weight
-        float weight = 0.0;
+        float defaultWeight = 0.0;
         #if IS_LIGHT_INDEX_TEXTURE
             uint index1D = pixel.x + pixel.y * gRes;
-            weight = COUNT_LIGHTS > index1D ? 1.0 / (COUNT_LIGHTS) : 0.0;
+            defaultWeight = COUNT_LIGHTS > index1D ? 1.0 / (COUNT_LIGHTS) : 0.0;
         #else
-            weight = 1.0 / (gRes * gRes); // Uniform
+            defaultWeight = 1.0 / (gRes * gRes); // Uniform
         #endif
+        float weight = defaultWeight;
         if (gIterationCount > 0) {
             uint2 totalCounterIndex = uint2(0);
             #if !IS_LIGHT_INDEX_TEXTURE
@@ -102,9 +103,9 @@ void main(uint3 thdID: SV_DispatchThreadID)
             float pixelCounterVal = float(gSrcCounter[pixel]);
             weight = total > 0 ? pixelCounterVal / total : 0.0;
             float oldWeight = 0.0;
+            bool oldWeightValid = true;
             if (kAccumMode != kAccumMode_LastFrame) {
                 uint2 prevPixel = pixel;
-                bool oldWeightValid = true;
                 if (kUseAtlasOptimization)
                 {
                     oldWeightValid = false;
@@ -123,12 +124,17 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 }
                 if(oldWeightValid)
                     oldWeight = gWeightLastFrame[prevPixel];
+                oldWeightValid = oldWeight > 0; //If one old weight is 0, it can be assumed that the whole direction GM did not exist last frame
             }
-                
-            if(kAccumMode == kAccumMode_Offline || kAccumMode == kAccumMode_FrameAvrg)
-                weight = (weight + oldWeight * gIterationCount) / (gIterationCount + 1);
-            else if (kAccumMode == kAccumMode_PercentageAvrg)
-                weight = (weight * gAccumValue) + (oldWeight * (1.0 - gAccumValue));
+
+            if (oldWeightValid)
+            {
+                if (kAccumMode == kAccumMode_Offline || kAccumMode == kAccumMode_FrameAvrg)
+                    weight = (weight + oldWeight * gIterationCount) / (gIterationCount + 1);
+                else if (kAccumMode == kAccumMode_PercentageAvrg)
+                    weight = (weight * gAccumValue) + (oldWeight * (1.0 - gAccumValue));
+            } else
+                weight = defaultWeight;
         }
 
         //Clear the guiding counter texture
@@ -143,7 +149,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 
             gSrcCounter[pixel] = clearValue;    //Write
         }
-        
+
         // Write
         gDst[pixel] = weight;
         if(kAccumMode != kAccumMode_LastFrame)

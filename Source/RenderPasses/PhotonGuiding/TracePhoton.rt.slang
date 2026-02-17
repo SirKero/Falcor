@@ -338,6 +338,7 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
 
     // Check if the light fulfills the min photon condition for directional guiding
     bool useDirectionalGuiding = endWeight >= kFixedPhotonGuidingMinPhotons;
+    //useDirectionalGuiding = false;
 
     // Get mapped starting index in the atlas
     if (kUseOptimizedAtlas)
