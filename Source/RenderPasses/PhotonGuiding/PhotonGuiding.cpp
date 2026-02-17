@@ -1597,7 +1597,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
     mTracePhotonPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
     mTracePhotonPass.pProgram->addDefine("USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC", mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0");
-    mTracePhotonPass.pProgram->addDefine("USE_SEPERATE_DIR_SG", mRetraceLightPaths ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("USE_SEPERATE_DIR_SG", mRetraceLightPaths && mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("STORE_ONLY_INDIRECT_PHOTONS", mUseNEEatFGPoint ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
 

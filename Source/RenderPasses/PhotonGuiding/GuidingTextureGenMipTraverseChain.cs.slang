@@ -114,8 +114,9 @@ void main(uint3 thdID: SV_DispatchThreadID)
                     {
                         uint2 lightPixel = uint2(lightIndex % gLightGMResolution, lightIndex / gLightGMResolution);
                         uint prevMapIdx = gMapLightIdxToDirGMPrev[lightPixel];
-                        if(prevMapIdx < 0xFFFF){
-                            prevPixel = uint2(prevMapIdx % gMapResolution, prevMapIdx / gMapResolution);
+                        if (prevMapIdx < 0xFFFF) {
+                            prevPixel = prevPixel % gGMResolution;
+                            prevPixel += uint2(prevMapIdx % gMapResolution, prevMapIdx / gMapResolution);
                             oldWeightValid = true;
                         }
                     }

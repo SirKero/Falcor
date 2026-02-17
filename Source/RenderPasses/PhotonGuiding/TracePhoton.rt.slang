@@ -623,7 +623,7 @@ void rayGen()
 
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
     #if USE_SEPERATE_DIR_SG
-        SampleGenerator sgPhotonDir = SampleGenerator(pixel, getStartSeedPhotonDirSG(gFrameCount, kRNGNumPasses));
+        SampleGenerator sgPhotonDir = SampleGenerator(pixel, getStartSeedPhotonDirSG(gFrameCount, kRNGNumPasses)); //TODO test if this works properly
     #endif
     RayDesc ray = {};
     PhotonLightSample pls = PhotonLightSample();
