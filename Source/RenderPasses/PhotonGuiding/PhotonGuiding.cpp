@@ -1600,6 +1600,8 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("USE_SEPERATE_DIR_SG", mRetraceLightPaths && mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("STORE_ONLY_INDIRECT_PHOTONS", mUseNEEatFGPoint ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("LIGHT_GUIDING_MAP_MIPLEVEL", std::to_string(mpLightIndexGuidingTexture[0]->getMipCount() - 1u));
+    mTracePhotonPass.pProgram->addDefine("DIRECTION_GUIDING_MAP_MIPLEVEL", std::to_string(mGuidingAtlasMipLevels - 1));
 
     // Program Vars
     if (!mTracePhotonPass.pVars)

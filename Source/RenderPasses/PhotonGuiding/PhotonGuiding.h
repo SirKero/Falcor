@@ -228,7 +228,7 @@ private:
     //
     PathLengthSettings mPhotonPathLength = {};      // Number of Photon bounces
     float mGlobalPhotonRejection = 0.3f;            // Probability a global photon is stored
-    uint mNumDispatchedPhotons = 2000000;           // Number of Photons dispatched
+    uint mNumDispatchedPhotons = 1000000;           // Number of Photons dispatched
     uint2 mNumMaxPhotons = uint2(1000000);   // Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;        // For UI, as changing happens with a button
     bool mChangePhotonLightBufferSize = true;       // If buffer size has changed
@@ -241,7 +241,7 @@ private:
 
     bool mPhotonRussianRoulette = true; //Enables Russian Roulette for the photon pass
     
-    bool mUseDynamicPhotonDispatchCount = true;   // Dynamically change the number of photons to fit the max photon number
+    bool mUseDynamicPhotonDispatchCount = false;   // Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 4000000;     // Max value for dynamically dispatched photons
     float mPhotonDynamicGuardPercentage = 0.08f;  // Determines how much space of the buffer is used to guard against buffer overflows
     float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
