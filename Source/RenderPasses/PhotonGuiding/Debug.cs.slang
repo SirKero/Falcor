@@ -4,6 +4,7 @@
 
 Texture2D<float> gGuidingTexture;
 Texture2D<float> gLightIndexGuidingTexture;
+Texture2D<uint> gMapLightIdxToDirGM;
 RWTexture2D<float4> gDebug;
 
 SamplerState gLinearSampler;
@@ -15,7 +16,7 @@ cbuffer CB {
     uint gGuidingAtlasSize;   // Guiding Texture size
     float gColorScaleFactor;
 
-    float gSizeScaleFactor;
+    uint gMapTextureResolution;
     int gLightIndex;
     uint gGuidingTextureSize;
     bool gShowLightIndexGuiding;
@@ -25,6 +26,9 @@ cbuffer CB {
     bool gIsFixedGuidingMode; 
 }
 
+static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
+static const uint kMapMaxIndex = 0xFFFF;
+
 [numthreads(16, 16, 1)]
 void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_GroupThreadID, uint3 workGroupID: SV_GroupID)
 {
@@ -32,30 +36,50 @@ void main(uint3 dispatchID: SV_DispatchThreadID, uint3 localInvocationID: SV_Gro
     if (any(pixel > gDispatchSize))
         return;
 
-    // TODO add other scaling settings
-    uint textureSize = gShowLightIndexGuiding ? gLightIndexGuidingSize : gGuidingAtlasSize;
-    float divident = min(min(textureSize * gSizeScaleFactor, float(gDispatchSize.x)), float(gDispatchSize.y));
     float4 output = float4(0, 0, 0, 1);
-    float2 uv = (float2(pixel) + 0.5) / divident;
+    float2 uv = (float2(pixel) + 0.5) / float2(min(gDispatchSize.x,gDispatchSize.y));
 
     // Scale UV to light area
     if (gLightIndex >= 0 && all(uv <= 1)) {
-        uint atlasLightsPerRow = gGuidingAtlasSize / gGuidingTextureSize;
-        uint2 atlasOffset = uint2(gLightIndex % atlasLightsPerRow, gLightIndex / atlasLightsPerRow); // Offset in the atlas for the current lights
-        uv /= float(atlasLightsPerRow);
-        uv += float2(atlasOffset) / float(atlasLightsPerRow);
+        uint2 atlasOffset = uint2(gLightIndex % gLightIndexGuidingSize, gLightIndex / gLightIndexGuidingSize); // Offset in the atlas for the current lights
+        uv /= float(gLightIndexGuidingSize);
+        uv += float2(atlasOffset) / float(gLightIndexGuidingSize);
     }
 
     if (all(uv <= 1))
     {
-        if (gShowLightIndexGuiding)
-            output.xyz = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
-        else {
-            float guidingValue = gGuidingTexture.SampleLevel(gPointSampler, uv, 0);
-            output.xyz = guidingValue * gColorScaleFactor;
-            if (guidingValue < 1 && gIsFixedGuidingMode)
-                output.xy += gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
+        if (kUseOptimizedAtlas) {
+            //For this mode this is the unmodified Guiding Atlas (can flicker)
+            if (gShowLightIndexGuiding)
+            {
+                output.xyz = gGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gColorScaleFactor;
+            }
+            else
+            {
+                output.xyz = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
+                uint2 lightIndexPixel = gLightIndex >= 0 ? uint2(gLightIndex % gLightIndexGuidingSize, gLightIndex / gLightIndexGuidingSize) : uint2(uv * gLightIndexGuidingSize);
+                uint mapIndex = gMapLightIdxToDirGM[lightIndexPixel];
+                if (mapIndex < kMapMaxIndex) {
+                    /* TODO Mapping (calc new uvs) 
+                    uint2 mapPixel = uint2(mapIndex % gMapTextureResolution, mapIndex / gMapTextureResolution) * gGuidingTextureSize;
+                    uint2 atlasSize = gLightIndexGuidingSize * gGuidingTextureSize;
+                    */
+                    output.xyz = float3(1, 0, 0);
+                }
+            }
         }
+        else
+        {
+            if (gShowLightIndexGuiding)
+                output.xyz = gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
+            else {
+                float guidingValue = gGuidingTexture.SampleLevel(gPointSampler, uv, 0);
+                output.xyz = guidingValue * gColorScaleFactor;
+                if (guidingValue < 1 && gIsFixedGuidingMode)
+                    output.xy += gLightIndexGuidingTexture.SampleLevel(gPointSampler, uv, 0) * gLightIndexGuidingScale;
+            }
+        }
+       
     }
     gDebug[pixel] = output; 
 }

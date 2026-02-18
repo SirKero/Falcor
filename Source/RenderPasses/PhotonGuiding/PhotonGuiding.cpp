@@ -535,12 +535,10 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         group.checkbox("Show Guiding Texture", mDebugShowGuidingTexture);
         if (mDebugShowGuidingTexture)
         {
-            group.checkbox("Show Light Index Select Guiding Tex", mDebugShowLightIndexGuidingTex);
-            group.slider("Selected Tri light", mDebugSelectedTriLight, -1, int(mTotalLightCount) - 1);
+            std::string selectText = mUseDirectionAtlasOptimization ? "Show Directional Guiding Atlas" : "Show Light Index Select Guiding Tex";
+            group.checkbox(selectText.c_str(), mDebugShowLightIndexGuidingTex);
+            group.var("Selected Tri light", mDebugSelectedTriLight, -1, int(mTotalLightCount) - 1);
             group.var("Color Scale", mDebugColorScaleFactor, 0.f, FLT_MAX, 0.01f, false, "%.6f");
-            group.checkbox("Scale to DebugTex", mDebugScaleToDstDim);
-            if (!mDebugScaleToDstDim)
-                group.var("Size Scale", mDebugSizeScaleFactor, 0.f, FLT_MAX, 0.001f);     
         }
         changed |= group.checkbox("Disable Direct Light", mDebugDisableDirectLight);
         changed |= group.checkbox("Disable Indirect Light", mDebugDisableIndirectLight);
@@ -1799,6 +1797,12 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
 {
     FALCOR_PROFILE(pRenderContext, "Debug");
 
+    auto getRuntimeDefines = [&](){
+        DefineList defines;
+        defines.add("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
+        return defines;
+    };
+
     if (!mpDebugPass)
     {
         Program::Desc desc;
@@ -1806,16 +1810,16 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
 
         DefineList defines;
         defines.add("COUNT_TEXTURES", std::to_string(mTotalLightCount));
+        defines.add(getRuntimeDefines());
 
         mpDebugPass = ComputePass::create(mpDevice, desc, defines, true);
     }
 
+    mpDebugPass->getProgram()->addDefines(getRuntimeDefines()); //Update Runtime defines
+
     auto var = mpDebugPass->getRootVar();
 
     uint3 dispatchDim = uint3(renderData.getDefaultTextureDims().xy(), 1);
-    uint showDebugTexRes = mDebugShowLightIndexGuidingTex ? mGuidingLightIndexSize : mGuidingAtlasResolution;
-    float scaleToDebugTexFactor = (float(math::min(dispatchDim.x, dispatchDim.y)) / float(showDebugTexRes)) + 0.5f;
-
     //Determine color scales
     float atlasColorScale = mDebugColorScaleFactor * mGuidingTextureResolution * mGuidingTextureResolution;
     if (mUseFixedGuidingDispatch)
@@ -1827,14 +1831,16 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     var["CB"]["gDispatchSize"] = dispatchDim.xy();
     var["CB"]["gLightIndex"] = mDebugSelectedTriLight;
     var["CB"]["gGuidingTextureSize"] = mGuidingTextureResolution;
-    var["CB"]["gSizeScaleFactor"] = mDebugScaleToDstDim ? scaleToDebugTexFactor : mDebugSizeScaleFactor;
     var["CB"]["gShowLightIndexGuiding"] = mDebugShowLightIndexGuidingTex;
     var["CB"]["gLightIndexGuidingSize"] = mGuidingLightIndexSize;
     var["CB"]["gLightIndexGuidingScale"] = lightIdxColorScale;
     var["CB"]["gIsFixedGuidingMode"] = mUseFixedGuidingDispatch;
+    var["CB"]["gMapTextureResolution"] = mAtlasOptimizationMapSize;
       
     var["gGuidingTexture"] = mpGuidingAtlas[mFrameCount % 2];
     var["gLightIndexGuidingTexture"] = mpLightIndexGuidingTexture[mFrameCount % 2];
+    var["gMapLightIdxToDirGM"] = mpMapLightIdxToGuidingDirection[mFrameCount % 2];
+    
     var["gDebug"] = renderData[kOutputDebug]->asTexture();
     var["gLinearSampler"] = mpLinearSampler;
     var["gPointSampler"] = mpPointSampler;

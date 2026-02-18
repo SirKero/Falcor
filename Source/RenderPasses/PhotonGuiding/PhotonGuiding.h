@@ -307,8 +307,6 @@ private:
     bool mDebugShowGuidingTexture = false;
     int mDebugSelectedTriLight = -1;
     float mDebugColorScaleFactor = 1.f;
-    float mDebugSizeScaleFactor = 1.f;
-    bool mDebugScaleToDstDim = true;
     bool mDebugShowLightIndexGuidingTex = false;
     bool mDebugDisableDirectLight = false;
     bool mDebugDisableIndirectLight = false;
