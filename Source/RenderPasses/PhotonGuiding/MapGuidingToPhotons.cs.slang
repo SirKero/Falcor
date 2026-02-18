@@ -5,12 +5,12 @@
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
 
-//Mapping Resources
-RWTexture2D<uint> gMapLightIdxToDirGM;   // If "isLightIdxPass" current frame, else unused
-RWTexture2D<uint> gMapDirToLightIndex;   // If "isLightIdxPass" current frame, else the reverse map for temporal accumulation
-RWBuffer<uint> gMapLightIdxToDirCounter; // If "isLightIdxPass" current frame, else the last frame (for clear)
+// Mapping Resources
+RWTexture2D<uint> gMapLightIdxToDirGM;   // Used if "isLightIdxPass", else it is cleared 
+RWTexture2D<uint> gMapDirToLightIndex;   // Used if "isLightIdxPass", else unused
+RWBuffer<uint> gMapLightIdxToDirCounter; // If "isLightIdxPass" counter is increased, else it is cleared
 
-Texture2D<uint> gMapDirToLightIndex2;   // If "isLightIdxPass" unused, else the current frame
+Texture2D<uint> gMapRead; // If "isLightIdxPass" it is lastFrames gMapLightIdxToDirGM, else gMapDirToLightIndex
 
 cbuffer CB {
     uint2 gDispatchDim;
@@ -26,7 +26,9 @@ cbuffer CB {
 static const uint kMinPhotonsNeededForLightGuiding = LIGHT_GUIDING_MIN_PHOTONS;
 static const bool kUseAtlasOptimization = USE_ATLAS_OPTIMIZATION;
 static const uint kAtlasOptimizationMaxIndex = ATLAS_OPTIMIZATION_MAX_INDEX;
+static const uint kAtlasOptiMinPhotonsToCreate = ATLAS_OPTIMIZATION_MIN_PHOTONS_TO_CREATE;
 
+static const uint kMapIndexMax = 0xFFFF;
 [numthreads(16, 16, 1)]
 void main(uint3 thdID: SV_DispatchThreadID)
 {
@@ -43,8 +45,11 @@ void main(uint3 thdID: SV_DispatchThreadID)
             //Get Atlas Map index
             if (kUseAtlasOptimization) {
                 // Qualifies for directional guiding
-                uint mapIndex = 0xFFFF;
-                if (numberPhotons > kMinPhotonsNeededForLightGuiding) {
+                uint prevMapIndex = gMapRead[pixel];
+                uint mapIndex = kMapIndexMax;
+                bool useMapping = (prevMapIndex < kAtlasOptimizationMaxIndex) && (numberPhotons > kMinPhotonsNeededForLightGuiding); //If previous index is valid the lower amount is fine
+                useMapping |= numberPhotons > kAtlasOptiMinPhotonsToCreate; // Else the higher amount of photons is needed to create the directional guiding texture
+                if (useMapping) {
                     InterlockedAdd(gMapLightIdxToDirCounter[0], 1, mapIndex);
                 }
                 if (mapIndex < kAtlasOptimizationMaxIndex)
@@ -63,17 +68,13 @@ void main(uint3 thdID: SV_DispatchThreadID)
         if (kUseAtlasOptimization) {
             uint2 mapPixel = pixel / gGuidingTextureRes;
 
-            lightIndex = gMapDirToLightIndex2[mapPixel];
+            lightIndex = gMapRead[mapPixel];
             lightIndexPixel = uint2(lightIndex % gLightIdxRes, lightIndex / gLightIdxRes);
 
             // Clear Prev Atlas optimization resources
             bool clearCounter = (pixel.x + pixel.y) == 0;
-            uint2 mapPixelInt = pixel % gGuidingTextureRes;
-            bool clearGM = (mapPixelInt.x + mapPixelInt.y) == 0;
             if (clearCounter)
                 gMapLightIdxToDirCounter[0] = 0;
-            if (clearGM)
-                gMapLightIdxToDirGM[mapPixel] = 0xFFFF;
         } else {
             lightIndexPixel = pixel / gGuidingTextureRes;
             lightIndex = lightIndexPixel.x + lightIndexPixel.y * gLightIdxRes;

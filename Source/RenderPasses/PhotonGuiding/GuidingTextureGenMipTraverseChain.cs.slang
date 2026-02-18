@@ -42,6 +42,7 @@ static const uint kAccumMode_LastFrame = (uint)(GuidingHistogramAccumulateMode::
 
 static const uint kAccumMode = HISTORAM_ACCUM_MODE;
 static const bool kUseAtlasOptimization = USE_ATLAS_OPTIMIZATION;
+static const uint kAtlasOptimizationMaxMapIndex = 0xFFFF;
 
 cbuffer CB {
     uint gRes;
@@ -115,7 +116,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
                     {
                         uint2 lightPixel = uint2(lightIndex % gLightGMResolution, lightIndex / gLightGMResolution);
                         uint prevMapIdx = gMapLightIdxToDirGMPrev[lightPixel];
-                        if (prevMapIdx < 0xFFFF) {
+                        if (prevMapIdx < kAtlasOptimizationMaxMapIndex) {
                             prevPixel = prevPixel % gGMResolution;
                             prevPixel += uint2(prevMapIdx % gMapResolution, prevMapIdx / gMapResolution);
                             oldWeightValid = true;
@@ -124,7 +125,6 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 }
                 if(oldWeightValid)
                     oldWeight = gWeightLastFrame[prevPixel];
-                oldWeightValid = oldWeight > 0; //If one old weight is 0, it can be assumed that the whole direction GM did not exist last frame
             }
 
             if (oldWeightValid)

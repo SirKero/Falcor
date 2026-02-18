@@ -378,10 +378,6 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         
         group.var("Guiding Discretized Factor", mGuidingDiscretizedEmissionFactor, 1u, UINT_MAX, 1u);
         group.tooltip("The emission is multiplied with this factor before beeing added to the texture");
-        group.checkbox("Use Real Time mode", mGuidingRealTimeMode);
-        group.tooltip("In real-time mode, the guiding count is not reset on camera movement. Instead, a history limit is applied");
-        if (mGuidingRealTimeMode)
-            group.var("History Limit", mGuidingHistoryLimit, 0u, UINT_MAX, 1u);
 
         if (mGuidingMode == GuidingMode::Emission || mGuidingMode == GuidingMode::ReSTIR)
             changed |= group.var("Uniform weight (clear value)", mGuidingClearValueEmission, 0.f, FLT_MAX, 0.001f);
@@ -389,14 +385,24 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         changed |= group.checkbox("Map Guiding to Photon dispatch size", mUseFixedGuidingDispatch);
 
         changed |= group.var(
-            "Map Guiding: Min Photons Per Light", mFixedGuidingDispatchReservedPhotons, 32u, mGuidingTextureResolution * mGuidingTextureResolution, 1u
+            "Light Guiding: Min Photons Per Light", mFixedGuidingDispatchReservedPhotons, 32u, mGuidingTextureResolution * mGuidingTextureResolution, 1u
         );
+
+        changed |= group.var("Directional Guiding: Min Photons needed per Texel", mMinPhotonsPerGuidingTexel, 1u, 256u, 1u);
+        group.tooltip("Minimum of photons per texel to create a directional guiding map. Else random distribution is used."
+            "\n If Optimized Atlas is used, a guiding atlas is dropped if the light photons falls below this number. For creation a seperate value is used (see setting below).");
 
         rebuildGuidingTextures |= group.checkbox("Use Optimized Guiding Atlas", mUseDirectionAtlasOptimization);
         group.tooltip("Limits the number of directional guiding maps and uses a map texture to map light indices to the guiding maps."
             "Setting is disabled if the number of lights is smaller than the limit.");
         rebuildGuidingTextures |= group.dropdown("Optimized Atlas, Fixed Guiding Textures", kNumberOfFixedGuidingMaps, mAtlasOptimizationMaxDirectionGuidingMaps);
         group.tooltip("Number of directional guiding textures.");
+
+        if (mUseDirectionAtlasOptimization) {
+            changed |= group.var("Directional Guiding: Min Photons per Light to create",mAtlasOptiMinPhotonsPerTexelToCreate, mMinPhotonsPerGuidingTexel, 256u, 1u);
+            group.tooltip("Only used with the Atlas Optimization. Only creates a directional guiding map if photons for the light are above this value."
+                "Needs to be equal or higher than the minimum photons per directional guiding map texels option above");
+        }
 
         mGuidingResetAccumulateCount = group.button("Reset Guiding Textures");
 
@@ -1373,16 +1379,20 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
     FALCOR_PROFILE(pRenderContext, "MapGuidingToDistributedPhotons");
 
     //If Optimized dispatch is enabled clear the map to light index texture
+    //TODO optimize and place in a shader?
     if (mAtlasOptimizationMaxDirectionGuidingMaps && isLightIndexPass) {
         pRenderContext->clearUAV(mpMapGuidingDirectionToLightIndex->getUAV(0).get(), uint4(mTotalLightCount));
         pRenderContext->uavBarrier(mpMapGuidingDirectionToLightIndex.get());
+        pRenderContext->clearUAV(mpMapLightIdxToGuidingDirection[mFrameCount % 2]->getUAV(0).get(), uint4(0xFFFF));
+        pRenderContext->uavBarrier(mpMapLightIdxToGuidingDirection[mFrameCount % 2].get());
     }
 
     auto getRuntimeDefine = [&]() {
         DefineList defines = {};
-        defines.add("LIGHT_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution));
+        defines.add("LIGHT_GUIDING_MIN_PHOTONS", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution * mMinPhotonsPerGuidingTexel));
         defines.add("USE_ATLAS_OPTIMIZATION", mUseDirectionAtlasOptimization ? "1" : "0");
         defines.add("ATLAS_OPTIMIZATION_MAX_INDEX", std::to_string(mAtlasOptimizationMaxDirectionGuidingMaps));
+        defines.add("ATLAS_OPTIMIZATION_MIN_PHOTONS_TO_CREATE", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution * mAtlasOptiMinPhotonsPerTexelToCreate));
         return defines;
     };
 
@@ -1427,22 +1437,22 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
         var["gDst"].setUav(pCurrentIdxGuiding->getUAV(0));
 
         var["gMapLightIdxToDirGM"] = mpMapLightIdxToGuidingDirection[mFrameCount % 2];
+        var["gMapRead"]  = mpMapLightIdxToGuidingDirection[(mFrameCount + 1) % 2];
         var["gMapDirToLightIndex"] = mpMapGuidingDirectionToLightIndex;
         var["gMapLightIdxToDirCounter"] = mpMapLightIdxToGuidingDirectionCounter;
     }
     else
     {
         const uint maxYDispatch = getOptimizedAtlasYDispatch(mGuidingAtlasResolution, mGuidingTextureResolution, mTotalLightCount);
-        dispatchSize = uint2(mGuidingAtlasResolution, maxYDispatch);
+        dispatchSize = mUseDirectionAtlasOptimization ? uint2(mGuidingAtlasResolution) : uint2(mGuidingAtlasResolution, maxYDispatch);
 
         var["CB"]["gIsLightIdxPass"] = false;
 
         var["gSrc"].setSrv(pCurrentIdxGuiding->getSRV(0,1));
         var["gDst"].setUav(pCurrentAtlas->getUAV(0));
 
-        var["gMapLightIdxToDirGM"] = mpMapLightIdxToGuidingDirection[(mFrameCount + 1) % 2];          //Prev, for clear
-        var["gMapLightIdxToDirCounter"] = mpMapLightIdxToGuidingDirectionCounter;                      //For clear
-        var["gMapDirToLightIndex2"] = mpMapGuidingDirectionToLightIndex;                               
+        var["gMapLightIdxToDirCounter"] = mpMapLightIdxToGuidingDirectionCounter;   //For clear
+        var["gMapRead"] = mpMapGuidingDirectionToLightIndex;                               
     }
     var["CB"]["gDispatchDim"] = dispatchSize;
 

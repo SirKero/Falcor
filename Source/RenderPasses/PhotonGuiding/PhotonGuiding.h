@@ -278,7 +278,7 @@ private:
     uint mTotalLightCount = 0;
     uint mGuidingTextureResolution = 64;    //Resolution of one guiding texture
     uint mGuidingAtlasResolution = 512;     //Resolution of the guiding atlas
-    uint mGuidingAtlasMipLevels = 1;        //
+    uint mGuidingAtlasMipLevels = 1;        //Mip levels for the atlas
     GuidingMode mGuidingMode = GuidingMode::ReSTIRDiscretized;
     float mGuidingClearValueEmission = 0.1f;
     bool mUseGaussianBlur = true;
@@ -287,8 +287,6 @@ private:
 
     GuidingHistogramAccumulateMode mGuidingHistogramAccumMode = GuidingHistogramAccumulateMode::AveragePercentage;   //Determines what happens with the accumulate texture
     float mGuidingHistogramAccumValue = 0.3f;            //64.f; Additional value needed for some accumulate modes
-    bool mGuidingRealTimeMode = false;   //If true, the guiding texture does not reset every frame
-    uint mGuidingHistoryLimit = 256;    //History limit for the guiding texture
 
     uint mGuidingLightIndexSize = 1;    //Pixel width/height of the index guiding texture
     uint mGuidingDiscretizedEmissionFactor = 255;    //For the discretized modis, the emission is multiplied with this factor
@@ -300,6 +298,8 @@ private:
     bool mUseDirectionAtlasOptimization = false;  //Reduces the number of recorded and stored direction maps by mapping direction guiding textures only to light sources that need them
     uint mAtlasOptimizationMaxDirectionGuidingMaps = 64;
     uint mAtlasOptimizationMapSize = 8; //Sqrt above
+    uint mMinPhotonsPerGuidingTexel = 4; //Minimum number of photons that should be mapped to a guiding texel, else the directional guiding map is not used
+    uint mAtlasOptiMinPhotonsPerTexelToCreate = 8; //If the atlas optimization is used, at least this number of photons is needed to create a guiding directional texture
     bool mResetGuidingTextures = false;
 
     //Debug
