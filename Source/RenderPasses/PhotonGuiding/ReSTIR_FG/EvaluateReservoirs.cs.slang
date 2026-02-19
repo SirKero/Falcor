@@ -23,8 +23,6 @@ RWTexture2D<float4> gOutColor;
 RWTexture2D<PackedHitInfo> gVBufferPrev;
 RWTexture2D<float4> gViewPrev;
 
-RWTexture2D<float4> gDebug;
-
 cbuffer CB
 {
     uint gFrameCount;         // Current it for sample gen

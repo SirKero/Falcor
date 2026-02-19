@@ -306,11 +306,17 @@ private:
     bool mDebugFreezeGuidingTextures = false;
     bool mDebugShowGuidingTexture = false;
     int mDebugSelectedTriLight = -1;
-    float mDebugColorScaleFactor = 1.f;
+    float mDebugDirGMScaleFactor = 1.f;
+    float mDebugLightGMScaleFactor = 1.f;
     bool mDebugShowLightIndexGuidingTex = false;
     bool mDebugDisableDirectLight = false;
     bool mDebugDisableIndirectLight = false;
     bool mDebugPathRetracingShowPaths = false;
+    float3 mDebugColorDirGM = float3(1,0,0);
+    float3 mDebugColorLightGM = float3(0,1,0);
+    float3 mDebugColorExtra = float3(0,0,1);
+    bool mDebugShowSelectedLight = false;
+    bool mDebugShowMinPhotons = false;
 
     //
     // Resources

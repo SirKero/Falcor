@@ -538,7 +538,17 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             std::string selectText = mUseDirectionAtlasOptimization ? "Show Directional Guiding Atlas" : "Show Light Index Select Guiding Tex";
             group.checkbox(selectText.c_str(), mDebugShowLightIndexGuidingTex);
             group.var("Selected Tri light", mDebugSelectedTriLight, -1, int(mTotalLightCount) - 1);
-            group.var("Color Scale", mDebugColorScaleFactor, 0.f, FLT_MAX, 0.01f, false, "%.6f");
+            group.var("Dir GM Scale", mDebugDirGMScaleFactor, 0.f, FLT_MAX, 0.01f, false, "%.6f");
+            group.var("Light GM Scale", mDebugLightGMScaleFactor, 0.f, FLT_MAX, 0.01f, false, "%.6f");
+
+            group.rgbColor("Color Directional GM", mDebugColorDirGM);
+            group.rgbColor("Color Light GM", mDebugColorLightGM);
+
+            group.checkbox("Show Selected Light", mDebugShowSelectedLight);
+            group.tooltip("Shows the selected light in the Light GM");
+            group.checkbox("Show Min Photon Light", mDebugShowMinPhotons);
+            group.rgbColor("Show Color", mDebugColorExtra);
+
         }
         changed |= group.checkbox("Disable Direct Light", mDebugDisableDirectLight);
         changed |= group.checkbox("Disable Indirect Light", mDebugDisableIndirectLight);
@@ -1821,12 +1831,17 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
 
     uint3 dispatchDim = uint3(renderData.getDefaultTextureDims().xy(), 1);
     //Determine color scales
-    float atlasColorScale = mDebugColorScaleFactor * mGuidingTextureResolution * mGuidingTextureResolution;
+    float atlasColorScale = mDebugDirGMScaleFactor * mGuidingTextureResolution * mGuidingTextureResolution;
     if (mUseFixedGuidingDispatch)
         atlasColorScale /= mNumDispatchedPhotons;
-    float lightIdxColorScale = mUseFixedGuidingDispatch ? mDebugColorScaleFactor / mNumDispatchedPhotons : mDebugColorScaleFactor;
+    float lightIdxColorScale = mDebugLightGMScaleFactor;
+    if (mUseFixedGuidingDispatch) {
+        lightIdxColorScale /= mUseDirectionAtlasOptimization ?
+            mAtlasOptiMinPhotonsPerTexelToCreate * mGuidingTextureResolution * mGuidingTextureResolution
+            : mMinPhotonsPerGuidingTexel * mGuidingTextureResolution * mGuidingTextureResolution;
+    }
 
-    var["CB"]["gColorScaleFactor"] = atlasColorScale;
+    var["CB"]["gDirGMScaleFactor"] = atlasColorScale;
     var["CB"]["gGuidingAtlasSize"] = mGuidingAtlasResolution;
     var["CB"]["gDispatchSize"] = dispatchDim.xy();
     var["CB"]["gLightIndex"] = mDebugSelectedTriLight;
@@ -1836,6 +1851,12 @@ void PhotonGuiding::debugPass(RenderContext* pRenderContext, const RenderData& r
     var["CB"]["gLightIndexGuidingScale"] = lightIdxColorScale;
     var["CB"]["gIsFixedGuidingMode"] = mUseFixedGuidingDispatch;
     var["CB"]["gMapTextureResolution"] = mAtlasOptimizationMapSize;
+    var["CB"]["gColorDirGM"] = mDebugColorDirGM;
+    var["CB"]["gShowSelectLight"] = mDebugShowSelectedLight;
+    var["CB"]["gColorLightGM"] = mDebugColorLightGM;
+    var["CB"]["gShowMinPhoton"] = mDebugShowMinPhotons;
+    var["CB"]["gColorExtra"] = mDebugColorExtra;
+    var["CB"]["gMinPhotonsPerLight"] = float(mFixedGuidingDispatchReservedPhotons);
       
     var["gGuidingTexture"] = mpGuidingAtlas[mFrameCount % 2];
     var["gLightIndexGuidingTexture"] = mpLightIndexGuidingTexture[mFrameCount % 2];
@@ -2422,8 +2443,6 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     var["gGuidingCounter"] = mpRecordGuidingAtlas;
     var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
     var["gMapLightIndexToGuidingDirection"] = mpMapLightIdxToGuidingDirection[mFrameCount % 2];
-
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
