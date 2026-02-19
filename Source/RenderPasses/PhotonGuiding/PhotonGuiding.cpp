@@ -572,6 +572,7 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
     //mHasLights = analyticUsed || emissiveUsed;
     //mHasAnalyticLights = analyticUsed;
     //mMixedLights = emissiveUsed && analyticUsed;
+    bool lightCountWasResetted = false;
 
     if (pLights->getTotalLightCount() != mEmissiveLightCount || mpScene->getLightCount() != mAnalyticLightCount)
     {
@@ -586,6 +587,7 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
         mpLightIndexGuidingTexture[1].reset();
         mpRecordLightIndexGuidingTexture.reset();
         resetRenderPasses();
+        lightCountWasResetted = true;
     }
     if (emissiveUsed)
     {
@@ -655,6 +657,12 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
     mNeeLightSelectProb =
         float3(mpScene->useEmissiveLights() ? 1.f : 0.f, mpScene->useAnalyticLights() ? 1.f : 0.f, mpScene->useEnvLight() ? 1.f : 0.f);
     mNeeLightSelectProb /= mNeeLightSelectProb.x + mNeeLightSelectProb.y + mNeeLightSelectProb.z;
+
+    //Enable Atlas Optimization if enough lights are in the scene
+    if (lightCountWasResetted) {
+        if(mEmissiveLightCount + mAnalyticLightCount > mAtlasOptimizationMaxDirectionGuidingMaps * 16)
+            mUseDirectionAtlasOptimization = true;
+    }
 }
 
 void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const RenderData& renderData) {
@@ -2223,7 +2231,8 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     mRetracePathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
     mRetracePathsPass.pProgram->addDefine("USE_LIGHT_PATH_RETRACING", mRetraceLightPaths ? "1" : "0");
     mRetracePathsPass.pProgram->addDefine("PHOTON_RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
-    mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+    if(mpEmissiveLightSampler)
+        mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     // Program Vars
     if (!mRetracePathsPass.pVars)
