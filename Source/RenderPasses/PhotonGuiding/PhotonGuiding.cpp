@@ -41,6 +41,7 @@ namespace
     const std::string kShaderTraceCamera = kShaderFolder + "TraceCamera.rt.slang";
     const std::string kShaderGuidingGenMipTraverseChain = kShaderFolder + "GuidingTextureGenMipTraverseChain.cs.slang";
     const std::string kShaderMapGuidingToPhotons = kShaderFolder + "MapGuidingToPhotons.cs.slang";
+    const std::string kShaderGetFreePhotonsBasedOnDist = kShaderFolder + "GetFreePhotonsBasedOnDist.cs.slang";
     const std::string kShaderGuidingBlurAtlas = kShaderFolder + "GuidingBlurAtlas.cs.slang";
     const std::string kShaderGuidingReduce = kShaderFolder + "GuidingCounterReduce.cs.slang";
     const std::string kShaderDebug = kShaderFolder + "Debug.cs.slang";
@@ -384,9 +385,12 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
         changed |= group.checkbox("Map Guiding to Photon dispatch size", mUseFixedGuidingDispatch);
 
+        changed |= group.checkbox("Use Distance based Min Photons (DBMP) per Light", mGuidingUseDistanceBasedMinPhoton);
         changed |= group.var(
             "Light Guiding: Min Photons Per Light", mFixedGuidingDispatchReservedPhotons, 32u, mGuidingTextureResolution * mGuidingTextureResolution, 1u
         );
+        changed |= group.var("DBMP Min/Max Distance", mGuidingDBMPMinMaxDistance, 0.f, FLT_MAX, 0.0001f);
+        changed |= group.var("DBMP Min/Max Photons", mGuidingDBMPMinMaxPhotons, 1, UINT_MAX, 1u);
 
         changed |= group.var("Directional Guiding: Min Photons needed per Texel", mMinPhotonsPerGuidingTexel, 1u, 256u, 1u);
         group.tooltip("Minimum of photons per texel to create a directional guiding map. Else random distribution is used."
@@ -692,6 +696,7 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpMapLightIdxToGuidingDirection[0].reset();
         mpMapLightIdxToGuidingDirection[1].reset();
         mpMapGuidingDirectionToLightIndex.reset();
+        mpReservedPhotonsPerLight.reset();
         mResetGuidingTextures = false;
     }
 
@@ -877,7 +882,19 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
                 ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource, Buffer::CpuAccess::None, nullptr, false);
             mpMapLightIdxToGuidingDirectionCounter->setName("MapLightIdxToGuidingDirectionCounter");
         }
-       
+
+    if (!mpReservedPhotonsPerLight) {
+        mpReservedPhotonsPerLight = Texture::create2D(mpDevice, mGuidingLightIndexSize, mGuidingLightIndexSize, ResourceFormat::R16Uint, 1u, 1u,
+            nullptr, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess);
+        mpReservedPhotonsPerLight->setName("ReservedPhotonsPerLight");
+    }
+
+    if(!mpReservedPhotonsBuffer){
+        mpReservedPhotonsBuffer = Buffer::createStructured(mpDevice, sizeof(int), 1, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource,
+            Buffer::CpuAccess::None, nullptr, false);
+        mpReservedPhotonsBuffer->setName("GuidingReservedPhotons");
+    }
+
     //ReSTIR Resources
     for (uint i = 0; i < 2; i++)
     {
@@ -1401,6 +1418,7 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
         defines.add("USE_ATLAS_OPTIMIZATION", mUseDirectionAtlasOptimization ? "1" : "0");
         defines.add("ATLAS_OPTIMIZATION_MAX_INDEX", std::to_string(mAtlasOptimizationMaxDirectionGuidingMaps));
         defines.add("ATLAS_OPTIMIZATION_MIN_PHOTONS_TO_CREATE", std::to_string(mGuidingTextureResolution * mGuidingTextureResolution * mAtlasOptiMinPhotonsPerTexelToCreate));
+        defines.add("USE_DISTANCE_BASED_MIN_PHOTON", mGuidingUseDistanceBasedMinPhoton ? "1" : "0");
         return defines;
     };
 
@@ -1423,16 +1441,20 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
 
     auto var = mpMapGuidingToDistributedPhotonsPass->getRootVar();
 
-    //Get photons that can be freely distributed
-    //mFixedGuidingDispatchReservedPhotons = mGuidingTextureResolution * mGuidingTextureResolution; // Reserve 1 photon for every guiding pixel
-    uint freePhotons = static_cast<uint>(std::floor(sqrt(mNumDispatchedPhotons)));
-    freePhotons = std::max(freePhotons * freePhotons, mFixedGuidingDispatchReservedPhotons * mTotalLightCount);
-    freePhotons -= mFixedGuidingDispatchReservedPhotons * mTotalLightCount;
+    //Get the number of photons that should be distributed
+    uint distributedPhotons = static_cast<uint>(std::floor(sqrt(mNumDispatchedPhotons)));
+    distributedPhotons *= distributedPhotons; //Dispatched photons, same as in tracePhoton pass
+    if (isLightIndexPass && mGuidingUseDistanceBasedMinPhoton) {
+        reservePhotonsPerLightSource(pRenderContext);
+    }else{
+        distributedPhotons = std::max(distributedPhotons, mFixedGuidingDispatchReservedPhotons * mTotalLightCount);
+        distributedPhotons -= mFixedGuidingDispatchReservedPhotons * mTotalLightCount;
+    }
 
-    var["CB"]["gDistributedPhotons"] = freePhotons;
+    var["CB"]["gDistributedPhotons"] = distributedPhotons;
     var["CB"]["gGuidingTextureRes"] = mGuidingTextureResolution;
     var["CB"]["gLightIdxRes"] = mGuidingLightIndexSize;
-    var["CB"]["gMinPhotonsPerLight"] = mFixedGuidingDispatchReservedPhotons;
+    var["CB"]["gMinPhotonsPerLight"] = mGuidingUseDistanceBasedMinPhoton ? std::min(mGuidingDBMPMinMaxPhotons.x,mGuidingDBMPMinMaxPhotons.y) : mFixedGuidingDispatchReservedPhotons;
     var["CB"]["gMapTextureSize"] = mAtlasOptimizationMapSize;
     
     uint2 dispatchSize = uint2(0);
@@ -1448,6 +1470,8 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
         var["gMapRead"]  = mpMapLightIdxToGuidingDirection[(mFrameCount + 1) % 2];
         var["gMapDirToLightIndex"] = mpMapGuidingDirectionToLightIndex;
         var["gMapLightIdxToDirCounter"] = mpMapLightIdxToGuidingDirectionCounter;
+        var["gReservedPhotonsPerLight"] = mpReservedPhotonsPerLight; //Only used if mGuidingUseDistanceBasedMinPhoton==true
+        var["gReservedPhotons"] = mpReservedPhotonsBuffer;           //Only used if mGuidingUseDistanceBasedMinPhoton==true
     }
     else
     {
@@ -1465,6 +1489,44 @@ void PhotonGuiding::mapGuidingToPhotonsPass(RenderContext* pRenderContext, const
     var["CB"]["gDispatchDim"] = dispatchSize;
 
     mpMapGuidingToDistributedPhotonsPass->execute(pRenderContext, uint3(dispatchSize, 1));
+}
+
+void PhotonGuiding::reservePhotonsPerLightSource(RenderContext* pRenderContext) {
+    FALCOR_PROFILE(pRenderContext, "ReservePhotonsPerLight");
+
+    pRenderContext->clearUAV(mpReservedPhotonsBuffer->getUAV().get(), uint4(0));
+    pRenderContext->uavBarrier(mpReservedPhotonsBuffer.get());
+
+    if (!mpGetFreePhotonsBasedOnDistPass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderGetFreePhotonsBasedOnDist).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add("COUNT_LIGHTS", std::to_string(mTotalLightCount));
+        defines.add("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+
+        mpGetFreePhotonsBasedOnDistPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+
+     auto var = mpGetFreePhotonsBasedOnDistPass->getRootVar();
+     mpScene->setRaytracingShaderData(pRenderContext, var);
+
+    
+     var["CB"]["gMinDist"] = std::min(mGuidingDBMPMinMaxDistance.x, mGuidingDBMPMinMaxDistance.y);
+     var["CB"]["gMaxDist"] = std::max(mGuidingDBMPMinMaxDistance.x, mGuidingDBMPMinMaxDistance.y);
+     var["CB"]["gMinPhotons"] = std::min(mGuidingDBMPMinMaxPhotons.x, mGuidingDBMPMinMaxPhotons.y);
+     var["CB"]["gMaxPhotons"] = std::max(mGuidingDBMPMinMaxPhotons.x, mGuidingDBMPMinMaxPhotons.y);
+     var["CB"]["gLightGMSize"] = mGuidingLightIndexSize;
+     
+     var["gReservedPhotonsPerLight"] = mpReservedPhotonsPerLight;
+     var["gReservedPhotons"] = mpReservedPhotonsBuffer;
+
+     mpGetFreePhotonsBasedOnDistPass->execute(pRenderContext, uint3(mGuidingLightIndexSize, mGuidingLightIndexSize, 1));
 }
 
 void PhotonGuiding::generateLightIndexGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData) {
@@ -1921,6 +1983,8 @@ void PhotonGuiding::resetRenderPasses()
     mpGuidingLightIndexCounterReducePass.reset();
     mpGenerateGuidingMipTraverseChainPass.reset();
     mpGenerateLightIndexGuidingMipTraverseChainPass.reset();
+    mpMapGuidingToDistributedPhotonsPass.reset();
+    mpGetFreePhotonsBasedOnDistPass.reset();
     mpDebugPass.reset();
 
     mGenerateInitialSamplesPass.reset();
@@ -1932,6 +1996,7 @@ void PhotonGuiding::resetRenderPasses()
     mpTemporalSplatReservoirs.reset();
 
     mResetClearResources = true;
+    mResetGuidingTextures = true;
 }
 
 float PhotonGuiding::getNormalizedPixelArea()

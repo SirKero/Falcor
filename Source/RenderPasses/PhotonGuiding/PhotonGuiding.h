@@ -85,6 +85,9 @@ private:
     //Maps the guiding textures to the number of distributed photons. Also guarantees that a photon is dispatched per guiding texel
     void mapGuidingToPhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool isLightIndexPass);
 
+    //Reserverves Photons per Light source and determines hte "free" photons that can be distributed
+    void reservePhotonsPerLightSource(RenderContext* pRenderContext);
+
     //Generates the guiding mipmap for the light index
     void generateLightIndexGuidingMipTraverseChainPass(RenderContext* pRenderContext, const RenderData& renderData);
     
@@ -300,6 +303,9 @@ private:
     uint mAtlasOptimizationMapSize = 8; //Sqrt above
     uint mMinPhotonsPerGuidingTexel = 4; //Minimum number of photons that should be mapped to a guiding texel, else the directional guiding map is not used
     uint mAtlasOptiMinPhotonsPerTexelToCreate = 8; //If the atlas optimization is used, at least this number of photons is needed to create a guiding directional texture
+    bool mGuidingUseDistanceBasedMinPhoton = true;
+    float2 mGuidingDBMPMinMaxDistance = float2(1.f, 32.f); //Distance for DBMP(DistanceBasedMinPhoton)
+    uint2 mGuidingDBMPMinMaxPhotons = uint2(32, 1024);     //Photons for DBMP(DistanceBasedMinPhoton)
     bool mResetGuidingTextures = false;
 
     //Debug
@@ -337,6 +343,8 @@ private:
     ref<Texture> mpMapLightIdxToGuidingDirection[2];       //Size of light Index texture; Maps a light index to a guiding direction
     ref<Buffer> mpMapLightIdxToGuidingDirectionCounter; //A counter needed for the indices
     ref<Texture> mpMapGuidingDirectionToLightIndex;      //Size of number of guiding textures; Maps a guiding direction to a light index
+    ref<Texture> mpReservedPhotonsPerLight;             //Number of reserved photons per light source
+    ref<Buffer> mpReservedPhotonsBuffer;                          //Total number of "free" photons, that can be distributed according to the guiding map
     //ReSTIR
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample
@@ -387,6 +395,7 @@ private:
     ref<ComputePass> mpGuidingBlurPass[2];         //Blurs the guiding atlas. Horizonal and vertical pass
     ref<ComputePass> mpGuidingLightIndexCounterReducePass;            // Uses same shader as above, but is may need other data formats
     ref<ComputePass> mpMapGuidingToDistributedPhotonsPass;      //Maps the current guiding texture to the actual number of photons. Also guarantees that 1 photon is distributed per guiding pixel
+    ref<ComputePass> mpGetFreePhotonsBasedOnDistPass;      //Uses a distance based metric to reserve photons per light instead of using a fixed value per light
     ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
     ref<ComputePass> mpGenerateLightIndexGuidingMipTraverseChainPass;  // Uses same shader as above, but is may need other data formats
 

@@ -845,6 +845,24 @@ bool photonSampleLight(inout PhotonLightSample pls, inout RayDesc ray, inout Sam
     return true;
 }
 
+float3 getLightPosition(uint lightIndex)
+{
+    bool isAnalytic = lightIndex >= kAnalyticLightIdxOffset;
+    float3 posW = float3(0);
+    if (isAnalytic)
+    {
+        const uint analyticLightIndex = lightIndex - kAnalyticLightIdxOffset;
+        LightData lightData = gScene.getLight(analyticLightIndex);
+        posW = lightData.posW;
+    } else
+    {
+        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(lightIndex);
+        posW = tri.getPosition(float3(1.0 / 3.0));
+    }
+
+    return posW;
+}
+
 void photonRetraceRecreateDirectionsRandomValues(inout PhotonLightSample pls, float2 randomVal, uint guidingTextureResolution)
 {
     if (pls.useRandomLightDirection) {

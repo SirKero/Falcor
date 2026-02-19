@@ -11,6 +11,8 @@ RWTexture2D<uint> gMapDirToLightIndex;   // Used if "isLightIdxPass", else unuse
 RWBuffer<uint> gMapLightIdxToDirCounter; // If "isLightIdxPass" counter is increased, else it is cleared
 
 Texture2D<uint> gMapRead; // If "isLightIdxPass" it is lastFrames gMapLightIdxToDirGM, else gMapDirToLightIndex
+Texture2D<uint> gReservedPhotonsPerLight;
+StructuredBuffer<uint> gReservedPhotons;
 
 cbuffer CB {
     uint2 gDispatchDim;
@@ -27,6 +29,7 @@ static const uint kMinPhotonsNeededForLightGuiding = LIGHT_GUIDING_MIN_PHOTONS;
 static const bool kUseAtlasOptimization = USE_ATLAS_OPTIMIZATION;
 static const uint kAtlasOptimizationMaxIndex = ATLAS_OPTIMIZATION_MAX_INDEX;
 static const uint kAtlasOptiMinPhotonsToCreate = ATLAS_OPTIMIZATION_MIN_PHOTONS_TO_CREATE;
+static const bool kUseDistanceBasedMinPhoton = USE_DISTANCE_BASED_MIN_PHOTON;
 
 static const uint kMapIndexMax = 0xFFFF;
 [numthreads(16, 16, 1)]
@@ -41,7 +44,19 @@ void main(uint3 thdID: SV_DispatchThreadID)
         const uint lightIndex = pixel.x + pixel.y * gLightIdxRes;
         //Valid light
         if (lightIndex < COUNT_LIGHTS) {
-            numberPhotons += floor(gDst[pixel] * gDistributedPhotons) + gMinPhotonsPerLight;
+            if (kUseDistanceBasedMinPhoton)
+            {
+                int freePhotons = int(gDistributedPhotons) - int(gReservedPhotons[0]);
+                uint minPhotonsPerLight = gMinPhotonsPerLight;
+                if (freePhotons > 0)
+                    minPhotonsPerLight = gReservedPhotonsPerLight[pixel];
+                else
+                    freePhotons = max(0, gDistributedPhotons - (COUNT_LIGHTS * minPhotonsPerLight));
+                numberPhotons = gDst[pixel] * freePhotons + minPhotonsPerLight;
+            } else
+            {
+                numberPhotons = floor(gDst[pixel] * gDistributedPhotons) + gMinPhotonsPerLight;
+            }
             //Get Atlas Map index
             if (kUseAtlasOptimization) {
                 // Qualifies for directional guiding
