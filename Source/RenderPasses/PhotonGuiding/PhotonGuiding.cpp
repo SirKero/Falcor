@@ -2071,6 +2071,7 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_USE_NEE", mPathResamplingUseNEEAfterSpecular ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("PATH_RESERVOIR_STOP_PATH_AFTER_DIFFUSE_SPECULAR", mPathResamplingStopAfterDiffuseSpecular ? "1" : "0");
     mGenerateInitialSamplesPass.pProgram->addDefine("USE_NEE_AT_FG_HIT", mUseNEEatFGPoint ? "1" : "0");
+    mGenerateInitialSamplesPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     mGenerateInitialSamplesPass.pProgram->addDefines(getPhotonCollectDefines());
 
     if (mpEmissiveLightSampler)
@@ -2134,6 +2135,7 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add(mpRTXDI->getDefines());
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
         return defines;
     };
 
@@ -2232,6 +2234,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     mRetracePathsPass.pProgram->addDefine("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
     mRetracePathsPass.pProgram->addDefine("USE_LIGHT_PATH_RETRACING", mRetraceLightPaths ? "1" : "0");
     mRetracePathsPass.pProgram->addDefine("PHOTON_RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
+    mRetracePathsPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
     if(mpEmissiveLightSampler)
         mRetracePathsPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -2300,6 +2303,7 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         defines.add("RETRACE_LIGHT_PATHS", mRetraceLightPaths ? "1" : "0");
+        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
         return defines;
     };
 
@@ -2377,6 +2381,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         defines.add("USE_BACKUP_SAMPLE", mCausticReservoirsUseBackupSample ? "1" : "0");
         defines.add("SPLATTING_USE_LINKED_LIST", mSplattingResampleUseLinkedList ? "1" : "0");
+        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
         return defines;
     };
 
@@ -2466,6 +2471,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         defines.add("DEBUG_SHOW_PATHS", mDebugPathRetracingShowPaths ? "1" : "0");
         defines.add("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
+        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
         return defines;
     };
 
@@ -2563,6 +2569,7 @@ void PhotonGuiding::reSTIRSplatTemporalReservoirsPass(RenderContext* pRenderCont
         DefineList defines;
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add("SPLATTING_USE_LINKED_LIST", mSplattingResampleUseLinkedList ? "1" : "0");
+        defines.add("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
         return defines;
     };
 
@@ -2651,6 +2658,7 @@ void PhotonGuiding::reSTIRRetraceAndSplatTemporalReservoirsPass(RenderContext* p
     mRetraceCausticPathsPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mRetraceCausticPathsPass.pProgram->addDefine("PHOTON_RUSSIAN_ROULETTE", mPhotonRussianRoulette ? "1" : "0");
     mRetraceCausticPathsPass.pProgram->addDefine("SPLATTING_USE_LINKED_LIST", mSplattingResampleUseLinkedList ? "1" : "0");
+    mRetraceCausticPathsPass.pProgram->addDefine("DiffuseBrdf", mUseLambertianDiffuse ? "DiffuseBrdfLambert" : "DiffuseBrdfFrostbite");
 
     // Program Vars
     if (!mRetraceCausticPathsPass.pVars)
