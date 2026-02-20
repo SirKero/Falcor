@@ -229,7 +229,11 @@ void main(uint2 pixel: SV_DispatchThreadID)
         SampleGenerator sgPixelOffset = SampleGenerator( pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sample generator for the pixel offset (search region) same as RetraceReservoirs
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 2); // Sample generator for bsdf evaluation
 
-        PathReservoir rCurr = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
+        PathReservoir rCurr = PathReservoir();
+        if (gNumResamplingPass > 0)
+            rCurr = gPathReservoirPrev[index2Dto1D(pixel, gFrameDim.x)]; //This is the current reservoir for spatial resampling
+        else
+            rCurr = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
 
         bool isSpatial = gNumResamplingPass > 0;
         float2 motionOffset = gMVec[pixel] * float2(gFrameDim);

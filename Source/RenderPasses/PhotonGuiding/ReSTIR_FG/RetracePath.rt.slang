@@ -477,7 +477,11 @@ void rayGen()
         // Temporal Retrace for previous frame
         if (gSeperatePasses == -1 || gSeperatePasses == 1) {
             const uint resampleReservoirIndex = index2Dto1D(prevPixel, dispatchDims.x);
-            PathReservoir resampleReservoir = gPathReservoirPrev[resampleReservoirIndex];
+            PathReservoir resampleReservoir = PathReservoir();
+            if (gNumResamplingPass > 0)
+                resampleReservoir = gPathReservoir[resampleReservoirIndex];
+            else
+                resampleReservoir = gPathReservoirPrev[resampleReservoirIndex];
             bool validRandomReplayPath = true;
             float3 collectionPosW = float3(0);
             if (resampleReservoir.isValid() && resampleReservoir.pathLength > 0) {

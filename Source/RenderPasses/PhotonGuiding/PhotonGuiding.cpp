@@ -2109,8 +2109,9 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["gMVec"] = renderData[kInputMVec]->asTexture();
    
     // Output Resources
+    uint pathReservoirIndex = (mFrameCount + mResampleSettingsFG.spatialSamples) % 2;
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gPathReservoir"] = mpPathReservoir[pathReservoirIndex];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
     var["gResamplingMVec"] = mpResampleMVec;
@@ -2266,8 +2267,9 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     var["gVBufferPrev"] = mpVBufferPrev;
     var["gViewPrev"] = mpViewPrev;
 
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
-    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
+    uint reservoirIndex = numPass > 0 ? (mFrameCount + mResampleSettingsFG.spatialSamples + (numPass - 1)) % 2 : (mFrameCount + mResampleSettingsFG.spatialSamples) % 2;
+    var["gPathReservoir"] = mpPathReservoir[reservoirIndex];
+    var["gPathReservoirPrev"] = mpPathReservoir[(reservoirIndex + 1) % 2];
 
     // Output Resources
     var["gRetraceReservoirPath"] = mpRetracedPath[0];
@@ -2342,19 +2344,21 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
     var["CB"]["gNumResamplingPass"] = numPass;
     var["CB"]["gJacobianDistanceThreshold"] = mResampleSettingsFG.jacobianDistanceThreshold;
 
+    //For spatial passes both reservoirs read from the "previous" reservoir (which is the current)
+    uint prevReservoirIndex = numPass > 0 ? (mFrameCount + mResampleSettingsFG.spatialSamples + (numPass - 1)) % 2 : (mFrameCount + mResampleSettingsFG.spatialSamples + 1) % 2;
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gVBufferPrev"] = mpVBufferPrev;
     var["gView"] = renderData[kInputView]->asTexture();
     var["gViewPrev"] = mpViewPrev;
     var["gMVec"] = renderData[kInputMVec]->asTexture();
-    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
+    var["gPathReservoirPrev"] = mpPathReservoir[prevReservoirIndex];
     var["gRetracedPath"] = mpRetracedPath[0];
     var["gRetracedPathPrev"] = mpRetracedPath[1];
     var["gPhotonRetraceSuccessfulMask"] = mpPhotonRetraceMask;
 
     // In-/Output Resources
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gPathReservoir"] = mpPathReservoir[(prevReservoirIndex + 1) % 2];
 
     // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();
@@ -2504,11 +2508,14 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     mpRTXDI->setShaderData(var);
 
     // Input
+    uint pathEvalReservoirIndex = mCanResample ?
+        (mFrameCount + mResampleSettingsFG.spatialSamples + (mResampleSettingsFG.spatialSamples % 2)) % 2
+        : (mFrameCount + mResampleSettingsFG.spatialSamples) % 2;
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gPathReservoir"] = mpPathReservoir[pathEvalReservoirIndex];
 
     // Output
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
