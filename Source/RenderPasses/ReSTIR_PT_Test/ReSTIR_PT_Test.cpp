@@ -554,6 +554,13 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
 
     var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
 
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
+
+    if (renderData[kOutputDebug]->asTexture()) {
+        pRenderContext->clearTexture(renderData[kOutputDebug]->asTexture().get());
+        pRenderContext->uavBarrier(renderData[kOutputDebug]->asTexture().get());
+    }
+
     // Execute
     FALCOR_ASSERT(mScreenRes.x > 0 && mScreenRes.y > 0);
     mpResamplePass->execute(pRenderContext, uint3(mScreenRes, 1));

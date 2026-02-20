@@ -18,6 +18,8 @@ StructuredBuffer<RetracedSurface> gRetracedSurfacePrev;
 
 RWStructuredBuffer<ReservoirPT> gReservoir;
 
+RWTexture2D<float4> gDebug;
+
 cbuffer CB
 {
     uint gFrameCount;           // Current it for sample gen
@@ -74,7 +76,7 @@ float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleS
     return evalMIS(r.c, p0, otherConfidence, p1);
 }
 
-bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPixel, HitInfo firstHit, ReservoirPT current, inout SampleGenerator sg)
+bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout SampleGenerator sg)
 {
     // Check if reservoir is inside the screen.
     if (any(reservoirPixel < 0) || any(reservoirPixel >= gFrameDim))
@@ -82,8 +84,11 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
 
     ReservoirPT temporal = gReservoirPrev[index2Dto1D(reservoirPixel, gFrameDim.x)];
     HitInfo temporalHit = HitInfo(gVBufferPrev[reservoirPixel]);
-
+     
     if (!temporalHit.isValid())
+        return false;
+
+    if (current.flags.firstHitIsDelta != temporal.flags.firstHitIsDelta)
         return false;
 
     // Check if reservoir start surface and other surface are similar
@@ -131,7 +136,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
 
             // Load retraced surface
             if (current.pathLength > 0 && retracedSurfaceValid) {
-                sdTemporal = loadShadingData(HitInfo(retracedSurface.rcSurface), retracedSurface.rcViewDir, lod);
+                sdTemporal = loadShadingData(HitInfo(retracedSurface.rcSurface), -retracedSurface.rcViewDir, lod);
                 thpOther = retracedSurface.thp;
             }
 
@@ -145,10 +150,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
         wSum += w_0;
     }
 
-    // Merge reservoir
-    if (reservoirContributes && (w_0 > 0) && !isinf(w_0) && !isnan(w_0))
-        reservoir = current;
-  
+
     //Temporal Reservoir
 
     float3 thpTemporal = float3(1); // only needed for path lenght == 0
@@ -178,7 +180,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
 
             // Load retraced surface
             if (temporal.pathLength > 0 && retracedSurfaceValid) {
-                sdCurrent = loadShadingData(HitInfo(retracedSurface.rcSurface), retracedSurface.rcViewDir, lod);
+                sdCurrent = loadShadingData(HitInfo(retracedSurface.rcSurface), -retracedSurface.rcViewDir, lod);
                 thpOther = retracedSurface.thp;
             }
 
@@ -196,6 +198,8 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
                 jacobianTemporal *= abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
                 jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
 
+                gDebug[pixel] = float4(pdf,0,0, 1);
+
                 // Jacobian from sample outgoing
                 if (!temporal.flags.isNeeAfterReconnection) {
                     jacobianSampleOut = miSampleSurface.evalPdf(sdSampleSurface, temporal.sampleWo);
@@ -208,7 +212,6 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
                     } else {
                         thpTemporal = float3(0);
                     }
-
                     Ftemporal = temporal.rcThp * thpTemporal * thpOther;
                 }
             }
@@ -217,6 +220,7 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
         float estFTemporal = luminance(Ftemporal) * jacobianDeterminant;
         mis = evalMIS(temporal.c, luminance(temporal.F), current.c, estFTemporal);
         w_1 = mis * estFTemporal * temporal.weight;
+
        
         wSum += w_1;
     }
@@ -225,21 +229,21 @@ bool resampleReservoir(inout ReservoirPT reservoir, int2 pixel, int2 reservoirPi
 
     bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && temporalCanBeSelected;
     if (selectOtherSample) {
-        reservoir = temporal;
-        reservoir.jacobianDeterminant = jacobianTemporal;
-        reservoir.jacobianOutgoing = jacobianSampleOut;
-        reservoir.thp = thpTemporal;
-        reservoir.F = Ftemporal;
+        current = temporal;
+        current.jacobianDeterminant = jacobianTemporal;
+        current.jacobianOutgoing = jacobianSampleOut;
+        current.thp = thpTemporal;
+        current.F = Ftemporal;
     }
 
-    reservoir.weight = wSum;
-    reservoir.c = cSum;
+    current.weight = wSum;
+    current.c = cSum;
 
-    float sampleRad = luminance(reservoir.F);
-    if (reservoir.weight > 0 && sampleRad > 0)
-        reservoir.weight /= sampleRad;
+    float sampleRad = luminance(current.F);
+    if (current.weight > 0 && sampleRad > 0)
+        current.weight /= sampleRad;
     else
-        reservoir.weight = 0;
+        current.weight = 0;
 
     return true;
 }
@@ -256,7 +260,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     {
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (2 + gRNGNumPass));
         reservoir = gReservoir[index2Dto1D(pixel, gFrameDim.x)];
-        
+
         // Reproject to the previous pixel using the motion vectors
         // Get pixel for the reservoir. This is either the reprojected pixel (with motion vectors) or a random sample in a disc around it.
         bool isSpatial = gRNGNumPass > 0;
@@ -274,9 +278,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
         ReservoirPT resampledR = ReservoirPT();
         resampledR.c = 0;
-        bool valid = resampleReservoir(resampledR, pixel, prevPixel, hitInfo, reservoir, sg);
-        if (valid)
-            reservoir = resampledR;
+        bool valid = resampleReservoir(reservoir, pixel, prevPixel, hitInfo, sg);
     }
 
     gReservoir[index2Dto1D(pixel, gFrameDim.x)] = reservoir;
