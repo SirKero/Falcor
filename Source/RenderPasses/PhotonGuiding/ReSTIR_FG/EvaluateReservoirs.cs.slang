@@ -28,10 +28,12 @@ cbuffer CB
     uint gFrameCount;         // Current it for sample gen
     uint2 gFrameDim;          // Frame Dimensions for camera dir
     float gNormalizedPixelArea; // For backprojection
-    uint gLightIndexGuidingResolution;
 
+    uint gLightIndexGuidingResolution;
     uint gGuidingTextureResolution;
     uint gMapTextureResolution;
+    float gConfidenceCapPath;   //Maximal Confidence Value as float
+    float gConfidenceCapCaustic;  //Maximal Confidence Value as float
 }
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
@@ -44,7 +46,12 @@ static const bool kDisableIndirectLight = DEBUG_DISABLE_INDIRECT_LIGHT;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
 
-void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uint reservoirConfidence)
+inline uint getDiscretizedEmission(float emission) {
+    uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
+    return clamp(discretizedEmission, 1, kDiscretizedEmissionFactor);
+}
+
+void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uint reservoirConfidence, bool isCausticPass)
 {
     if (lightIndex < 0 || emission <= 0)
         return;
@@ -55,14 +62,19 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
         if (kGuidingMode == (uint)GuidingMode::ReSTIR || kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
         {
             uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
-            uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
-            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], getDiscretizedEmission(emission));
         }
         else if (kGuidingMode == (uint)GuidingMode::ReSTIRConfidence)
         {
             uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
-            uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence));
-            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+            float confidenceCap = isCausticPass ? gConfidenceCapCaustic : gConfidenceCapPath;
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], getDiscretizedEmission((emission / confidenceCap) * reservoirConfidence));
+        } else if (kGuidingMode == (uint)GuidingMode::ReSTIRReverseConfidence)
+        {
+            uint2 lightIndexTexturePixel = index1Dto2D(lightIndex, gLightIndexGuidingResolution);
+            float confidenceCapMul = isCausticPass ? gConfidenceCapCaustic : gConfidenceCapPath;
+            confidenceCapMul = max(1.f, confidenceCapMul - reservoirConfidence);
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], getDiscretizedEmission(emission * confidenceCapMul));
         }
     }
 
@@ -91,12 +103,19 @@ void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uin
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
     {
-        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
-        InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
+        uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
+        InterlockedAdd(gGuidingCounter[guidingPixel], getDiscretizedEmission(emission));
     } else if (kGuidingMode == (uint)GuidingMode::ReSTIRConfidence)
     {
         uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence)), 1);
-        InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
+        float confidenceCap = isCausticPass ? gConfidenceCapCaustic : gConfidenceCapPath;
+        InterlockedAdd(gGuidingCounter[guidingPixel], getDiscretizedEmission((emission / confidenceCap) * reservoirConfidence));
+    } else if (kGuidingMode == (uint)GuidingMode::ReSTIRReverseConfidence)
+    {
+        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission * reservoirConfidence)), 1);
+        float confidenceCapMul = isCausticPass ? gConfidenceCapCaustic : gConfidenceCapPath;
+        confidenceCapMul = max(1.f, confidenceCapMul - reservoirConfidence);
+        InterlockedAdd(gGuidingCounter[guidingPixel], getDiscretizedEmission(emission * confidenceCapMul));
     }
 }
 
@@ -115,7 +134,7 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
     outColor *= fgReservoir.thp * fgReservoir.wSum;
 
-    addToGuidingTexture(fgReservoir.lightIndex, fgReservoir.guidingPixels, luminance(outColor), fgReservoir.c);
+    addToGuidingTexture(fgReservoir.lightIndex, fgReservoir.guidingPixels, luminance(outColor), fgReservoir.c, false);
     
     return outColor;
 }
@@ -148,7 +167,7 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
         }
     }
 
-    addToGuidingTexture(causticReservoir.lightIndex, causticReservoir.guidingPixels, luminance(outColor), causticReservoir.c);
+    addToGuidingTexture(causticReservoir.lightIndex, causticReservoir.guidingPixels, luminance(outColor), causticReservoir.c, true);
 
     return outColor;
 }
@@ -195,7 +214,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     #if ENABLE_RANDOM_REPLAY
         PathReservoir pathReservoir = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
         indirectLight += pathReservoir.F * pathReservoir.weight;
-        addToGuidingTexture(pathReservoir.lightIndex, pathReservoir.guidingPixels, luminance(indirectLight), pathReservoir.c);
+        addToGuidingTexture(pathReservoir.lightIndex, pathReservoir.guidingPixels, luminance(indirectLight), pathReservoir.c, false);
 
         // Debug Show Paths as color
         #if DEBUG_SHOW_PATHS

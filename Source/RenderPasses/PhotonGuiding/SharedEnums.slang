@@ -26,19 +26,22 @@ enum class GuidingMode : uint
     Disabled = 0u,
     Uniform = 1u,
     Emission = 2u,
-    ReSTIR = 3u,        //Emission but applied to the surviving sample of the ReSTIR pass
-    EmissionDiscretized = 4u,
-    ReSTIRDiscretized = 5u, // DiscretizedEmission but applied to the surviving sample of the ReSTIR pass
-    ReSTIRConfidence = 6u, // Same as above but multiplied by confidence (TODO)
+    EmissionDiscretized = 3u,
+    HigherIsReSTIR = 4u, //To check if it is a ReSTIR mode
+    ReSTIR = 5u, // Emission but applied to the surviving sample of the ReSTIR pass
+    ReSTIRDiscretized = 6u, // DiscretizedEmission but applied to the surviving sample of the ReSTIR pass
+    ReSTIRConfidence = 7u,  // Same as above but multiplied by confidence
+    ReSTIRReverseConfidence = 8u, // Same as above but multiplied by (reverse) confidence (c_cap - c)
 };
 FALCOR_ENUM_INFO(GuidingMode, {
     { GuidingMode::Disabled, "Disabled" },
     { GuidingMode::Uniform, "Uniform" },
     { GuidingMode::Emission, "Emission" },
-    { GuidingMode::ReSTIR, "ReSTIR" },
     { GuidingMode::EmissionDiscretized, "EmissionDiscretized" },
+    { GuidingMode::ReSTIR, "ReSTIR" },
     { GuidingMode::ReSTIRDiscretized, "ReSTIRDiscretized" },
     { GuidingMode::ReSTIRConfidence, "ReSTIRConfidence" },
+    { GuidingMode::ReSTIRReverseConfidence, "ReSTIRReverseConfidence" },
 });
 FALCOR_ENUM_REGISTER(GuidingMode);
 

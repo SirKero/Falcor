@@ -70,6 +70,10 @@ struct PhotonSample {
     }
 }
 
+uint getDiscretizedEmission(float emission) {
+    uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
+    return clamp(discretizedEmission, 1, kDiscretizedEmissionFactor);
+}
 
 void addToGuidingTexture(PhotonData photonData, float emission) {
     if (emission <= 0)
@@ -82,11 +86,10 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
         {
             uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
             InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
-        } else if (kGuidingMode == (uint)GuidingMode::Emission || kGuidingMode == (uint)GuidingMode::EmissionDiscretized || (kNotReSTIRPass && (kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized || kGuidingMode == (uint)GuidingMode::ReSTIRConfidence)))
+        } else if (kGuidingMode == (uint)GuidingMode::Emission || kGuidingMode == (uint)GuidingMode::EmissionDiscretized || (kNotReSTIRPass && (kGuidingMode >= (uint)GuidingMode::HigherIsReSTIR)))
         {
             uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, kLightIndexGuidingResolution);
-            uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
-            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
+            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], getDiscretizedEmission(emission));
         }
     }
     
@@ -116,10 +119,9 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
         } while (originalValue != currentColor);
     } else if (kGuidingMode == (uint)GuidingMode::Uniform) {
         InterlockedAdd(gGuidingCounter[guidingPixel], 1u);
-    } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized || (kNotReSTIRPass && (kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized) || kGuidingMode == (uint)GuidingMode::ReSTIRConfidence))
+    } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized || (kNotReSTIRPass && (kGuidingMode >= (uint)GuidingMode::HigherIsReSTIR)))
     {
-        uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * emission)), 1);
-        InterlockedAdd(gGuidingCounter[guidingPixel], discretizedEmission);
+        InterlockedAdd(gGuidingCounter[guidingPixel], getDiscretizedEmission(emission));
     }    
 }
 

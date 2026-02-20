@@ -2497,6 +2497,8 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     var["CB"]["gLightIndexGuidingResolution"] = mGuidingLightIndexSize;
     var["CB"]["gGuidingTextureResolution"] = mGuidingTextureResolution;
     var["CB"]["gMapTextureResolution"] = mAtlasOptimizationMapSize;
+    var["CB"]["gConfidenceCapPath"] = float(mResampleSettingsFG.confidenceCap);
+    var["CB"]["gConfidenceCapCaustic"] = (mResampleSettingsCaustic.confidenceCap);
 
     // RTXDI resources
     mpRTXDI->setShaderData(var);
