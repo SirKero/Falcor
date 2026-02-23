@@ -1100,6 +1100,8 @@ bool guidingIsUintFormat(PhotonGuidingSharedEnums::GuidingMode guidingMode) {
     case Falcor::PhotonGuidingSharedEnums::GuidingMode::Uniform:
     case Falcor::PhotonGuidingSharedEnums::GuidingMode::EmissionDiscretized:
     case Falcor::PhotonGuidingSharedEnums::GuidingMode::ReSTIRDiscretized:
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::ReSTIRConfidence:
+    case Falcor::PhotonGuidingSharedEnums::GuidingMode::ReSTIRReverseConfidence:
         return true;
     case Falcor::PhotonGuidingSharedEnums::GuidingMode::Emission:
     case Falcor::PhotonGuidingSharedEnums::GuidingMode::ReSTIR:
@@ -1690,6 +1692,7 @@ void PhotonGuiding::tracePhotonPass(RenderContext* pRenderContext, const RenderD
     mTracePhotonPass.pProgram->addDefine("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("LIGHT_GUIDING_MAP_MIPLEVEL", std::to_string(mpLightIndexGuidingTexture[0]->getMipCount() - 1u));
     mTracePhotonPass.pProgram->addDefine("DIRECTION_GUIDING_MAP_MIPLEVEL", std::to_string(mGuidingAtlasMipLevels - 1));
+    mTracePhotonPass.pProgram->addDefine("DISABLE_GUIDING", mGuidingMode == GuidingMode::Disabled ? "1" : "0");
 
     // Program Vars
     if (!mTracePhotonPass.pVars)

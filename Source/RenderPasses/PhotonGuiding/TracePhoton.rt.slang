@@ -74,6 +74,7 @@ static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseJacobianToMarkCaustic = USE_JACOBIAN_DISTANCE_THRESHOLD_TO_MARK_AS_CAUSTIC; // Used for path ReSTIR to get samples is regions where the jacobian distance threshold applies
 static const bool kStoreOnlyIndirectPhotons = STORE_ONLY_INDIRECT_PHOTONS; // Store only photons with path length >= 1
 static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
+static const bool kDisableGuiding = DISABLE_GUIDING;    //If guiding is disabled
 
 struct RayPayload
 {
@@ -297,7 +298,6 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
         return false;
 
     // Traverse light index guiding map
-    // TODO use unroll and define number of mips
     uint2 mipIdx = uint2(0);                           // Working index for mip chain traversal. Starts top left (0)
     float endWeight = 0;
     uint lightIndex = 0;
@@ -346,7 +346,8 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
 
     // Check if the light fulfills the min photon condition for directional guiding
     bool useDirectionalGuiding = endWeight >= kFixedPhotonGuidingMinPhotons;
-    //useDirectionalGuiding = false;
+    if(kDisableGuiding)
+        useDirectionalGuiding = false;
 
     // Get mapped starting index in the atlas
     if (kUseOptimizedAtlas)
