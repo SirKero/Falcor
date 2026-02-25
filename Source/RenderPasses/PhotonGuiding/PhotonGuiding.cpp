@@ -90,6 +90,16 @@ namespace
         {4096, "4096"},
         {8192, "8192"},
     };
+
+    const Gui::DropdownList kGuidingMapResolution = {
+        {8, "8"},
+        {16, "16"},
+        {32, "32"},
+        {64, "64"},
+        {128, "128"},
+        {256, "256"},
+        {512, "512"}
+    };
 }
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
@@ -347,6 +357,10 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     if (auto group = widget.group("Guiding Options"))
     {
         bool rebuildGuidingTextures = false;
+
+        //TODO check, is bugged 
+        //rebuildGuidingTextures |= group.dropdown("GM Resolution", kGuidingMapResolution, mGuidingTextureResolution);
+
         //Set default values on reset
         if (group.dropdown("Guiding Histogram Accumulate Mode", mGuidingHistogramAccumMode))
         {

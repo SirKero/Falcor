@@ -284,7 +284,7 @@ private:
     uint mGuidingAtlasMipLevels = 1;        //Mip levels for the atlas
     GuidingMode mGuidingMode = GuidingMode::ReSTIRDiscretized;
     float mGuidingClearValueEmission = 0.1f;
-    bool mUseGaussianBlur = true;
+    bool mUseGaussianBlur = false;
     bool mGuidingResetAccumulateCount = false;
     uint mGuidingAccumulateCount = 0;
 
