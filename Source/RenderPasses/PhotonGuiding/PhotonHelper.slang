@@ -21,6 +21,7 @@ static const uint kPhotonGlobalBufferIndex = 0;
 static const uint kPhotonCausticBufferIndex = 1;
 static const uint kGuidingMode = GUIDING_MODE;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
+static const uint kDiscretizedEmissionMax = GUIDING_DISCRETIZED_EMISSION_MAX;
 static const uint kLightIndexGuidingResolution = GUIDING_LIGHT_INDEX_SIZE;
 static const bool kNotReSTIRPass = NOT_RESTIR_PASS;
 static const bool kEnablePhotonRetracing = ENABLE_PHOTON_RETRACING;
@@ -72,7 +73,7 @@ struct PhotonSample {
 
 uint getDiscretizedEmission(float emission) {
     uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
-    return clamp(discretizedEmission, 1, kDiscretizedEmissionFactor);
+    return clamp(discretizedEmission, 1, kDiscretizedEmissionMax);
 }
 
 void addToGuidingTexture(PhotonData photonData, float emission) {

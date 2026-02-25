@@ -292,7 +292,8 @@ private:
     float mGuidingHistogramAccumValue = 0.3f;            //64.f; Additional value needed for some accumulate modes
 
     uint mGuidingLightIndexSize = 1;    //Pixel width/height of the index guiding texture
-    uint mGuidingDiscretizedEmissionFactor = 255;    //For the discretized modis, the emission is multiplied with this factor
+    uint mGuidingDiscretizedEmissionFactor = 256;    //For the discretized modis, the emission is multiplied with this factor
+    uint mGuidingDiscretizedEmissionMax = mGuidingDiscretizedEmissionFactor * 4;    //For the discretized modis, the emission is multiplied with this factor
     uint mGuidingBlurWidth = 3;        //Blur radius
     float mGuidingBlurSigma = 1.f;      //Gaussian blur sigma
     bool mGuidingBlurUpdateWeights = true;         //True if weigths should be updated

@@ -41,6 +41,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kGuidingMode = GUIDING_MODE;
 static const bool kEnableLightTraceSplatting = ENABLE_LIGHT_TRACE_SPATTING;
 static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACTOR;
+static const uint kDiscretizedEmissionMax = GUIDING_DISCRETIZED_EMISSION_MAX;
 static const bool kDisableDirectLight = DEBUG_DISABLE_DIRECT_LIGHT;
 static const bool kDisableIndirectLight = DEBUG_DISABLE_INDIRECT_LIGHT;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
@@ -48,7 +49,7 @@ static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
 
 inline uint getDiscretizedEmission(float emission) {
     uint discretizedEmission = uint(round(kDiscretizedEmissionFactor * emission));
-    return clamp(discretizedEmission, 1, kDiscretizedEmissionFactor);
+    return clamp(discretizedEmission, 1, kDiscretizedEmissionMax);
 }
 
 void addToGuidingTexture(int lightIndex, uint2 guidingPixel, float emission, uint reservoirConfidence, bool isCausticPass)

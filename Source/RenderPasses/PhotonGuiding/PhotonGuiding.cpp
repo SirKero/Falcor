@@ -393,6 +393,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         
         group.var("Guiding Discretized Factor", mGuidingDiscretizedEmissionFactor, 1u, UINT_MAX, 1u);
         group.tooltip("The emission is multiplied with this factor before beeing added to the texture");
+        group.var("Guiding Discretized Max", mGuidingDiscretizedEmissionMax, mGuidingDiscretizedEmissionFactor, UINT_MAX, 1u);
+        group.tooltip("Max value the discretized emission factor can reach");
 
         if (mGuidingMode == GuidingMode::Emission || mGuidingMode == GuidingMode::ReSTIR)
             changed |= group.var("Uniform weight (clear value)", mGuidingClearValueEmission, 0.f, FLT_MAX, 0.001f);
@@ -1790,6 +1792,7 @@ DefineList PhotonGuiding::getPhotonCollectDefines(bool isReSTIRPass) {
     defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
     defines.add("GUIDING_LIGHT_INDEX_SIZE", std::to_string(mGuidingLightIndexSize));
     defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+    defines.add("GUIDING_DISCRETIZED_EMISSION_MAX", std::to_string(mGuidingDiscretizedEmissionMax));
     defines.add("NOT_RESTIR_PASS", isReSTIRPass ? "0" : "1");
     defines.add("ENABLE_PHOTON_RETRACING", mRetraceLightPaths ? "1" : "0");
     defines.add("USE_OPTIMIZED_ATLAS", mUseDirectionAtlasOptimization ? "1" : "0");
@@ -2480,6 +2483,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add("GUIDING_MODE", std::to_string((uint)mGuidingMode));
         defines.add("ENABLE_LIGHT_TRACE_SPATTING", mEnableLightTraceSplatting ? "1" : "0");
         defines.add("GUIDING_DISCRETIZED_EMISSION_FACTOR", std::to_string(mGuidingDiscretizedEmissionFactor));
+        defines.add("GUIDING_DISCRETIZED_EMISSION_MAX", std::to_string(mGuidingDiscretizedEmissionMax));
         defines.add("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));
         defines.add("DEBUG_DISABLE_INDIRECT_LIGHT", std::to_string(mDebugDisableIndirectLight));
         defines.add(
