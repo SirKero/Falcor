@@ -41,7 +41,7 @@ static const uint kAccumMode_PercentageAvrg = (uint)(GuidingHistogramAccumulateM
 static const uint kAccumMode_LastFrame = (uint)(GuidingHistogramAccumulateMode::UseLastFrame);
 
 static const uint kAccumMode = HISTORAM_ACCUM_MODE;
-static const bool kUseAtlasOptimization = USE_ATLAS_OPTIMIZATION;
+static const bool kUseAtlasOptimization = USE_ATLAS_OPTIMIZATION; //Is always disabled for light passes
 static const uint kAtlasOptimizationMaxMapIndex = 0xFFFF;
 
 cbuffer CB {
@@ -107,7 +107,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
             bool oldWeightValid = true;
             if (kAccumMode != kAccumMode_LastFrame) {
                 uint2 prevPixel = pixel;
-                if (kUseAtlasOptimization)
+                if (kUseAtlasOptimization) //Can only be true on directional guiding resources
                 {
                     oldWeightValid = false;
                     // Get pixel from last iteration
