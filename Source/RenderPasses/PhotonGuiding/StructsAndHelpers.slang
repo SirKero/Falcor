@@ -382,7 +382,7 @@ struct ReservoirCaustic {
 // Path Reservoir; Size: 112 Byte (28 floats)
 struct PathReservoir {
     SampleGenerator sgPathDirections;    // Sample Generator for random direction (float4)
-    SampleGenerator sgNeeLightSelection; // Sample Generator for light selection (float4)
+    SampleGenerator sgNeeLightSelection; // Sample Generator for light selection (float4), TODO optimize and fuse with samplePosW/Radius
 
     float3 samplePosW;  // Sample Position
     float sampleRadius; // For radiance estimate
@@ -394,7 +394,7 @@ struct PathReservoir {
     float3 F;          // Complete radiance of the path
     float weight;      // Unbiased contribution weight
 
-    float3 fgRadiance; // Radiance estimate for the final gather point. Can be reused
+    float3 photonFlux;        // Flux of the selected photon
     int lightIndex;           // Guiding
 
     uint packedGuidingPixels;            //(Packed) Pixel for the guiding texture
@@ -436,7 +436,7 @@ struct PathReservoir {
         c = 1;
         F = float3(0);
         photonGuidingPdf = 1;
-        fgRadiance = float3(0);
+        photonFlux = float3(0);
         weight = 0.0;
         lightIndex = -1;
         packedGuidingPixels = 0;

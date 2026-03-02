@@ -1065,15 +1065,6 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpSplattingSortedReservoirs->setName("SplattingSortedReservoirs");
     }
 
-    if (!mpPhotonRetraceMask || mResetScreenTex)
-    {
-        mpPhotonRetraceMask = Texture::create2D(
-            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::R8Uint, 1u, 1u, nullptr,
-            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-        );
-        mpPhotonRetraceMask->setName("PhotonRetraceMask");
-    }
-
     if (mResetClearResources)
     {
         pRenderContext->clearUAV(mpLightTraceHeadCounter->getUAV(0).get(), uint4(uint(-1)));
@@ -2298,15 +2289,18 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
     var["gRetraceReservoirPath"] = mpRetracedPath[0];
     var["gRetraceReservoirPathPrev"] = mpRetracedPath[1];
 
-    var["gPhotonRetraceSuccessfulMask"] = mpPhotonRetraceMask;
+    // Dispatch Shaders
+    if (mRetraceLightPaths && numPass == 0) {
+        var["CB"]["gSeperatePasses"] = 2;
 
-    // Dispatch Shader
+        mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));
+        pRenderContext->uavBarrier(mpPathReservoir[(reservoirIndex + 1) % 2].get());
+    }
+
     int numDispatches = mPathRetraceSeperatePass ? 2 : 1;
     for (int i = 0; i < numDispatches; i++) {
 
         var["CB"]["gSeperatePasses"] = mPathRetraceSeperatePass ? i : -1;
-        if (i == 1)
-            pRenderContext->uavBarrier(mpPhotonRetraceMask.get());
 
         mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));
     }
@@ -2379,7 +2373,6 @@ void PhotonGuiding::reSTIRResamplePathsPass(RenderContext* pRenderContext, const
     var["gPathReservoirPrev"] = mpPathReservoir[prevReservoirIndex];
     var["gRetracedPath"] = mpRetracedPath[0];
     var["gRetracedPathPrev"] = mpRetracedPath[1];
-    var["gPhotonRetraceSuccessfulMask"] = mpPhotonRetraceMask;
 
     // In-/Output Resources
     var["gPathReservoir"] = mpPathReservoir[(prevReservoirIndex + 1) % 2];

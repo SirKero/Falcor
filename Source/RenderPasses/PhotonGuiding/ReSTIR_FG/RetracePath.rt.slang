@@ -24,12 +24,10 @@ Texture2D<PackedHitInfo> gVBufferPrev;
 Texture2D<float4> gViewPrev;
 
 StructuredBuffer<PathReservoir> gPathReservoir;
-StructuredBuffer<PathReservoir> gPathReservoirPrev;
+RWStructuredBuffer<PathReservoir> gPathReservoirPrev;
 
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPath;         //Retraced path for the current sample
 RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
-
-RWTexture2D<uint> gPhotonRetraceSuccessfulMask;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -53,7 +51,7 @@ cbuffer CB
     float3 gNeeLightSelectProb;       // Light selection probabilities for NEE
 
     uint gGuidingTextureResolution; // Resolution of all guiding textures. xy is the same
-    int gSeperatePasses;            // -1 - dont seperate; 0 - Retrace current; 1- Retrace other
+    int gSeperatePasses; // -1 - Trace both camera passes in the same pass; 0 - Retrace current; 1- Retrace other; 2 - Photon retrace current; 3- Photon retrace prev
 }
 
 struct RayPayload
@@ -125,7 +123,7 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
     return validSample;
 }
 
-bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPosW, out float3 samplePosW, out float3 sampleFlux)
+bool randomReplayPhotonPath(PathReservoir reservoirs, out float3 samplePosW, out float3 sampleFlux)
 {
     samplePosW = float3(0);
     sampleFlux = float3(0);
@@ -164,8 +162,11 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
 
         // Check if hit is valid for final gather
         if (i == targetPathLength) {
+            validPhoton = true;
             samplePosW = sd.posW;
-            validPhoton = distance(photonCollectionPosW, sd.posW) <= reservoirs.sampleRadius;
+            sampleFlux *= thp;
+            if (reservoirs.flags.isFinalGather)
+                validPhoton &= distance(reservoirs.samplePosW, sd.posW) <= reservoirs.sampleRadius;
             //Check if caustic photon is still caustic
             if(reservoirs.flags.isCausticPhoton)
                 validPhoton &= lastHitSpecular;
@@ -199,16 +200,13 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, float3 photonCollectionPos
 
     }
 
-    sampleFlux *= validPhoton ? thp : 0.0;
-
     return validPhoton;
 }
 
-bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGenerator sg , inout RetracedPath retracedPath, out float3 collectionPosW)
+bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGenerator sg , inout RetracedPath retracedPath)
 {
     let lod = ExplicitLodTextureSampler(0);
     const uint2 dispatchDims = DispatchRaysDimensions().xy;
-    collectionPosW = float3(0);
 
     // Init needed path data
     SampleGenerator rayDirSg = reservoir.sgPathDirections;
@@ -312,13 +310,12 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
                 retracedPath.jacobian = abs(dot(reservoir.sampleNormal, -toSample)) / (distToSample * distToSample);
                 retracedPath.jacobian *= pdf;
                
-                retracedPath.F = reservoir.fgRadiance / pdf; //BSDF and thp is added later
+                retracedPath.F = reservoir.photonFlux / pdf; //BSDF and thp is added later
                 rpd.flags = (uint)ReservoirPathFlags::isFinalGather;
             } else if (reservoir.flags.isRadianceEstimate)
             {
                 bool isReconnectable = distance(reservoir.samplePosW, sd.posW) < reservoir.sampleRadius;
-                collectionPosW = sd.posW;
-                retracedPath.F = reservoir.fgRadiance * rpd.thp;
+                retracedPath.F = reservoir.photonFlux * rpd.thp;
                 rpd.flags = isReconnectable ? (uint)ReservoirPathFlags::isRadianceEstimate : 0;
                 rpd.retraceSuccessful = isReconnectable;
             } else if (reservoir.flags.isNEE)
@@ -403,15 +400,55 @@ void closestHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersec
     rayData.packedHitInfo = HitInfo(triangleHit).getData();
 }
 
-[shader("raygeneration")]
-void rayGen()
+//TODO update photon radiance
+void retracePhotonPath(uint2 pixel, uint2 dispatchDims)
 {
-    uint2 pixel = DispatchRaysIndex().xy;
-    uint2 dispatchDims = DispatchRaysDimensions().xy;
+    const uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x); //The reservoir index is used by both retraced paths
 
+    // Retrace photon path for the sample of the currently generated reservoir
+    // As we do not have the previous Acceleration Structure available, this will always be true/the same path, however, it is performed for consitency
+    //if (gSeperatePasses == 2) 
+    {
+        PathReservoir reservoir = gPathReservoir[reservoirIndex];
+        RetracedPath retracedPath = RetracedPath(); // This is used as a proxy to temporally store data
+        retracedPath.jacobian = 0; //set invalid
+        bool isLightPath = reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate;
+        if (reservoir.isValid() && isLightPath) {
+            float3 photonSamplePosW, photonSampleFlux;
+            if (randomReplayPhotonPath(reservoir, photonSamplePosW, photonSampleFlux)) {
+                photonSampleFlux *= reservoir.photonGuidingPdf;
+                retracedPath.F = photonSamplePosW;
+                retracedPath.jacobian = 1;
+            }
+        }
+        gRetraceReservoirPath[reservoirIndex] = retracedPath;
+    }
+
+    //Retrace photon path for the reservoirs from the previous frame. Updates the Reservoir
+    //if (gSeperatePasses == 3) //It seems 1 pass is faster
+    {
+        PathReservoir resampleReservoir = gPathReservoirPrev[reservoirIndex];
+        bool isLightPath = resampleReservoir.flags.isFinalGather || resampleReservoir.flags.isRadianceEstimate;
+        if (resampleReservoir.isValid() && isLightPath) {
+            float3 photonSamplePosW, photonSampleFlux;
+            if (randomReplayPhotonPath(resampleReservoir, photonSamplePosW, photonSampleFlux)) {
+                photonSampleFlux *= resampleReservoir.photonGuidingPdf;
+                if (resampleReservoir.flags.isRadianceEstimate)
+                    resampleReservoir.samplePosW = photonSamplePosW; //For caustics update samplePosW. Is checked on camera retrace
+                // resampleReservoir.photonFlux = photonSampleFlux; //TODO
+            } else {
+                resampleReservoir.F = float3(0);
+            }
+            gPathReservoirPrev[reservoirIndex] = resampleReservoir;
+        }
+    }
+}
+
+void retraceCameraPath(uint2 pixel, uint2 dispatchDims)
+{
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     if (hitInfo.isValid()) {
-        SampleGenerator sgPixelOffset = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sampe generator for the pixel offset (search region)
+        SampleGenerator sgPixelOffset = SampleGenerator( pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sampe generator for the pixel offset (search region)
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 1); // Sample generator for bsdf evaluation
 
         // Reprojection with motion vectors
@@ -426,95 +463,86 @@ void rayGen()
         {
             prevPixelF += u - 0.5; // [-0.5, 0.5]
         }
-
         int2 prevPixel = int2(prevPixelF);
 
-        // Check if previous pixel is inside the screen, if not, reservoir cannot be selected
+        // Check if previous pixel is inside the screen, if not, reservoir is not selected during resampling
         if (any(prevPixel < 0) || any(prevPixel >= dispatchDims))
         {
             return;
         }
 
-        //Random Replay for camera path
         let lod = ExplicitLodTextureSampler(0);
         const uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
 
+        // Random Replay for the reservoir generated this frame
         if (gSeperatePasses == -1 || gSeperatePasses == 0) {
             PathReservoir reservoir = gPathReservoir[reservoirIndex];
-            bool validRandomReplayPath = true;
-            float3 collectionPosW = float3(0);
-            if (reservoir.isValid() && reservoir.pathLength > 0) {
-                RetracedPath retraceSurface = RetracedPath();
+            RetracedPath retraceSurface = RetracedPath();
+            bool lightPathValid = true;
+            #if USE_LIGHT_PATH_RETRACING
+            if (reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate)
+            {
+                retraceSurface = gRetraceReservoirPath[reservoirIndex];
+                if (retraceSurface.jacobian < 1)
+                    lightPathValid = false;
+                else if (reservoir.flags.isRadianceEstimate)
+                    reservoir.samplePosW = retraceSurface.F;
+            }
+            #endif
+            // Only retrace if the reservoir is valid and path length > 0. Path length == 0 can only be Final Gather, which is checked during resampling
+            if (reservoir.isValid() && reservoir.pathLength > 0 && lightPathValid) {
                 // Get starting surface for temporal retrace
-                HitInfo prevHit = HitInfo(gVBufferPrev[prevPixel]);
-                float3 prevViewDir = gViewPrev[prevPixel].xyz;
+                HitInfo prevHit;
+                float3 prevViewDir;
+                //Spatial uses the already combined reservoirs and therefore always uses the current surfaces
+                if (isSpatial) {
+                    prevHit = HitInfo(gVBuffer[prevPixel]);
+                    prevViewDir = gView[prevPixel].xyz;
+                }
+                else {
+                    prevHit = HitInfo(gVBufferPrev[prevPixel]);
+                    prevViewDir = gViewPrev[prevPixel].xyz;
+                }
                 ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
                 // Retrace camera path
-                validRandomReplayPath = randomReplay(sd, reservoir, sg, retraceSurface, collectionPosW);
-                if (!validRandomReplayPath) {
+                if(!randomReplay(sd, reservoir, sg, retraceSurface))
                     retraceSurface.F = float3(0);
-                }
-
-                gRetraceReservoirPath[reservoirIndex] = retraceSurface;
             }
-
-            // Photon Path retracing
-            #if USE_LIGHT_PATH_RETRACING
-                        uint photonRetraceMask = 1; // TODO is set to valid for now
-            /* TODO for this to make sense, the previous AS needs to be available
-            if (validRandomReplayPath && reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate) {
-                if (reservoir.flags.isFinalGather)
-                    collectionPosW = reservoir.samplePosW;
-                if (randomReplayPhotonPath(reservoir, collectionPosW)) {
-                    uint photonRetraceMask |= 1;
-                }
-            }
-            */
-            #endif
+            gRetraceReservoirPath[reservoirIndex] = retraceSurface;
         }
 
-        // Temporal Retrace for previous frame
+        //Random Replay for resampled reservoir
         if (gSeperatePasses == -1 || gSeperatePasses == 1) {
             const uint resampleReservoirIndex = index2Dto1D(prevPixel, dispatchDims.x);
             PathReservoir resampleReservoir = PathReservoir();
-            if (gNumResamplingPass > 0)
+            // For spatial the source reservoir is the same for current and other reservoir
+            if (isSpatial)
                 resampleReservoir = gPathReservoir[resampleReservoirIndex];
             else
                 resampleReservoir = gPathReservoirPrev[resampleReservoirIndex];
-            bool validRandomReplayPath = true;
-            float3 collectionPosW = float3(0);
+
+            RetracedPath retraceSurface = RetracedPath();
             if (resampleReservoir.isValid() && resampleReservoir.pathLength > 0) {
-                RetracedPath retraceSurface = RetracedPath();
                 float3 viewDir = gView[pixel].xyz;
                 ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
 
-                validRandomReplayPath = randomReplay(sd, resampleReservoir, sg, retraceSurface, collectionPosW);
-                if (!validRandomReplayPath) {
+                if(!randomReplay(sd, resampleReservoir, sg, retraceSurface))
                     retraceSurface.F = float3(0);
-                }
-
-                gRetraceReservoirPathPrev[reservoirIndex] = retraceSurface;
             }
-
-            // Photon Path retracing
-            #if USE_LIGHT_PATH_RETRACING
-            uint photonRetraceMask = 1;
-            if (validRandomReplayPath && resampleReservoir.flags.isFinalGather || resampleReservoir.flags.isRadianceEstimate) {
-                if (resampleReservoir.flags.isFinalGather)
-                    collectionPosW = resampleReservoir.samplePosW;
-                // TODO update reservoir radiance and sample position
-                float3 photonSamplePosW, photonSampleFlux;
-                if (randomReplayPhotonPath(resampleReservoir, collectionPosW, photonSamplePosW, photonSampleFlux)) {
-                    photonRetraceMask |= 2;
-                    photonSampleFlux /= resampleReservoir.photonGuidingPdf;
-                }
-            }
-
-            gPhotonRetraceSuccessfulMask[pixel] = photonRetraceMask;
-            #endif
+            gRetraceReservoirPathPrev[reservoirIndex] = retraceSurface;
         }
-        
-        
     }
+}
+
+[shader("raygeneration")]
+void rayGen()
+{
+    uint2 pixel = DispatchRaysIndex().xy;
+    uint2 dispatchDims = DispatchRaysDimensions().xy;
+
+    if (gSeperatePasses == 2) // || gSeperatePasses == 3)
+        retracePhotonPath(pixel, dispatchDims);
+    else
+        retraceCameraPath(pixel, dispatchDims);
 }

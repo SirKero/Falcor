@@ -94,7 +94,7 @@ bool addSampleToPathReservoir(inout PathReservoir reservoir, float rand, float3 
     bool selectOther = rand * reservoir.weight <= w;
     if (selectOther) {
         reservoir.F = F;
-        reservoir.fgRadiance = radiance;
+        reservoir.photonFlux = radiance;
     }
     return selectOther;
 }
@@ -297,7 +297,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                 pathReservoir.jacobian = jacobian;
                 pathReservoir.guidingPixels = photonSample.guidingPixels;
                 pathReservoir.lightIndex = photonSample.lightIndex;
-                pathReservoir.photonGuidingPdf = photonSample.guidingPdf * gNumLightPaths; //Is needed to update flux for photon retrace
+                pathReservoir.photonGuidingPdf = photonSample.weight / photonSample.guidingPdf; 
                 uint flags = 0;
                 if (photonHitType == kPhotonCausticBufferIndex)
                     flags |= (uint)ReservoirPathFlags::isCausticPhoton;

@@ -170,7 +170,8 @@ int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask,
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        float3 F = max(0, (photonData.flux * bsdf) / (photonWeight * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        float divident = (photonWeight * radius * radius * NdotL);
+        float3 F = max(0, (photonData.flux * bsdf) / divident); // NdotL needs to be taken out of the bsdf for Photon Mapping
         float approxF = luminance(F);
         addToGuidingTexture(photonData, approxF);
         photonSample.weight += approxF;
@@ -184,7 +185,7 @@ int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask,
             photonSample.approxRadiance = approxF;
             photonSample.lightIndex = photonData.lightIndex;
             photonSample.guidingPixels = photonData.guidingPixel;
-            photonSample.guidingPdf = photonData.guidingPdf;
+            photonSample.guidingPdf = (photonData.guidingPdf * numLightPaths);
             #if ENABLE_PHOTON_RETRACING
                 choosenPhotonInstanceAndPrimIndex = uint2(instanceIdx, primIdx);
             #endif

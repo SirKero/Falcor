@@ -33,18 +33,12 @@ Texture2D<float2> gMVec;
 StructuredBuffer<PathReservoir> gPathReservoirPrev;
 StructuredBuffer<RetracedPath> gRetracedPath;
 StructuredBuffer<RetracedPath> gRetracedPathPrev;
-Texture2D<uint> gPhotonRetraceSuccessfulMask;
 
 RWStructuredBuffer<PathReservoir> gPathReservoir;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kRetraceLightPaths = RETRACE_LIGHT_PATHS;
-
-// Checks if the photon retrace was successful by checking the corresponding bit in the mask
-bool checkPhotonRetraceMask(uint photonRetraceMask, uint passID) {
-    return (photonRetraceMask & (1 << passID)) != 0;
-}
 
 bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout SampleGenerator sg) {
 
@@ -73,10 +67,6 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
             return false;
     }
 
-#if RETRACE_LIGHT_PATHS
-    uint photonRetraceMask = gPhotonRetraceSuccessfulMask[pixel];
-#endif
-
     // Needed reservoir variables
     float w_0 = 0;
     float w_1 = 0;
@@ -88,7 +78,8 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
 
     bool reservoirContributes = rCurr.isValid();
     RetracedPath retracedPath = RetracedPath();
-    if (reservoirContributes && rCurr.pathLength > 0) {
+    const bool loadRetracedPath = (RETRACE_LIGHT_PATHS > 0 && !isSpatialResampling) ? true : rCurr.pathLength > 0; //When photon retracing is used, the result for pathLength == 0 is written in the surface
+    if (reservoirContributes && loadRetracedPath) {
         retracedPath = gRetracedPath[retracedPathIndex];
     }
 
@@ -98,8 +89,10 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
         float mis = 1;
         bool photonRetraceValid = true;
 #if RETRACE_LIGHT_PATHS
-        if ((rCurr.flags.isRadianceEstimate || rCurr.flags.isFinalGather) && !checkPhotonRetraceMask(photonRetraceMask, 0))
-            photonRetraceValid = false;
+        bool isLightPath = rCurr.flags.isFinalGather || rCurr.flags.isRadianceEstimate;
+        if (!isSpatialResampling && rCurr.pathLength == 0 && isLightPath) {
+            photonRetraceValid = retracedPath.jacobian > 0;                
+        }
 #endif
         if (rCurr.pathLength > 0 && photonRetraceValid) {
             float3 retracedF = retracedPath.F * (retracedPath.jacobian / rCurr.jacobian);
@@ -126,7 +119,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 if (jacobian > 0 && (distToSample > gJacobianDistanceThreshold)) {
                     if (dispatchShadowRay(sdPrev, toSample, distToSample)) {
                         float3 bsdf = miPrev.eval(sdPrev, toSample, sg) / pdf;
-                        pathRadiance += bsdf * jacobian * rCurr.fgRadiance * thpOther;
+                        pathRadiance += bsdf * jacobian * rCurr.photonFlux * thpOther;
                     }
                 }
 
@@ -147,10 +140,6 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     float jacobianPrev = 1;
     bool prevCanBeSelected = rPrev.isValid();
     prevCanBeSelected &= !isnan(rPrev.weight) && !isinf(rPrev.weight);
-#if RETRACE_LIGHT_PATHS
-    if ((rPrev.flags.isRadianceEstimate || rPrev.flags.isFinalGather) && !checkPhotonRetraceMask(photonRetraceMask, 1))
-        prevCanBeSelected = false;
-#endif
 
     // Load retraced surface for temporal reservoir
     retracedPath = RetracedPath();
@@ -184,7 +173,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
                 if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
                     bsdf = miCurrent.eval(sdCurrent, toSample, sg) / pdf;
                 }
-                Fprev = rPrev.fgRadiance * bsdf * thpPrev;
+                Fprev = rPrev.photonFlux * bsdf * thpPrev;
             }
         }
 
