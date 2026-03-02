@@ -476,6 +476,7 @@ void causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
     float distanceToCamera = length(directionToCamera);
     directionToCamera /= distanceToCamera;
 
+    distanceToCamera -= gScene.camera.data.nearZ; //Remove near
     SceneRayQuery<1> rayQuery;
     const Ray ray = Ray(sd.computeNewRayOrigin(), directionToCamera, 0.f, distanceToCamera);
     if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
