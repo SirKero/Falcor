@@ -113,7 +113,7 @@ void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
     bool changed = false;
     if (auto group = widget.group("ReSTIR PT Options"))
     {
-        changed |= group.var("Bounces", mPTBounces, 0u, 256u, 1u);
+        changed |= mPathLengthSettings.renderUI(group);
         mRebuildLightSampler |= group.dropdown("NEE Sampler", mEmissiveLightSamplerType);
         if (mEmissiveLightSamplerType == EmissiveLightSamplerType::LightBVH)
         {
@@ -406,7 +406,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gNeeLightTypeSelectProbability"] = mNeeLightSelectProb;
-    var["CB"]["gMaxBounces"] = mPTBounces;
+    var["CB"]["gPackedPathLength"] = mPathLengthSettings.pack();
 
     // Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -479,7 +479,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
 
      //Constant Buffer
      var["CB"]["gFrameCount"] = mFrameCount;
-     var["CB"]["gMaxBounces"] = mPTBounces;
+     var["CB"]["gPackedPathLength"] = mPathLengthSettings.pack();
      var["CB"]["gNeeLightTypeSelectProbability"] = mNeeLightSelectProb;
      var["CB"]["gRNGNumPass"] = numResamplingIndex; 
      var["CB"]["gSpatialSampleRadius"] = mSpatialSampleRadius;

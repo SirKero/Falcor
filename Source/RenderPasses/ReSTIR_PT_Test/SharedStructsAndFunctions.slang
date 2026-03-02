@@ -11,6 +11,9 @@ import Rendering.Materials.Fresnel;
 static const float kShadowRayEpsilon = 0.98f;
 static const float kDeltaRoughnessThreshold = 0.08; // see StandardBSDF.slang kMinGGXAlpha. Everything under this value is considered a delta event
 
+static const int kLobeIsDelta = 0;
+static const int kLobeIsDiffuse = 1;
+static const int kLobeIsSpecular = 2;
 
 //
 // Structs
@@ -179,6 +182,58 @@ struct RetracedSurface {
     }
 }
 
+// Helper for packed path length
+struct PackedPathLength
+{
+    uint data;
+
+    property uint pathLength {
+        get { return data & 0xFF; }
+        set {
+            data &= ~0xFF;
+            data |= newValue & 0xFF;
+        }
+    }
+
+    property uint deltaBounces {
+        get { return (data >> 8) & 0xFF; }
+        set {
+            data &= ~0xFF00;
+            data |= (newValue & 0xFF) << 8;
+        }
+    }
+
+    property uint diffuseBounces {
+        get { return (data >> 16) & 0xFF; }
+        set {
+            data &= ~0xFF0000;
+            data |= (newValue & 0xFF) << 16;
+        }
+    }
+
+    property uint specularBounces {
+        get { return (data >> 24) & 0xFF; }
+        set {
+            data &= ~0xFF000000;
+            data |= (newValue & 0xFF) << 24;
+        }
+    }
+
+    __init() {
+        data = 0;
+    }
+
+    // Compare path with max path length
+    // Returns true if max path length was not reached
+    bool comparePathLengts(PackedPathLength max) {
+        bool valid = true;
+        valid &= deltaBounces < max.deltaBounces;
+        valid &= specularBounces < max.specularBounces;
+        valid &= diffuseBounces < max.diffuseBounces;
+        return valid;
+    }
+}
+
 //
 // Functions
 //
@@ -191,6 +246,27 @@ uint index2Dto1D(uint2 index, uint frameDimX) {
 // Helper for linearized indices to 2d
 uint2 index1Dto2D(uint index, uint frameDimX) {
     return uint2(index % frameDimX, index / frameDimX);
+}
+
+inline void updatePathLength(inout PackedPathLength packedPathLength, int lobeType)
+{
+    if (lobeType == kLobeIsDelta)
+        packedPathLength.deltaBounces = packedPathLength.deltaBounces + 1;
+    else if (lobeType == kLobeIsDiffuse)
+        packedPathLength.diffuseBounces = packedPathLength.diffuseBounces + 1;
+    else // Specular
+        packedPathLength.specularBounces = packedPathLength.specularBounces + 1;
+}
+
+inline int getLobeType(BSDFSample bsdfSample) {
+    int lobeType = -1;
+    if (bsdfSample.isLobe(LobeType::Delta))
+        lobeType = kLobeIsDelta;
+    else if (bsdfSample.isLobe(LobeType::Diffuse))
+        lobeType = kLobeIsDiffuse;
+    else // Specular
+        lobeType = kLobeIsSpecular;
+    return lobeType;
 }
 
 // Load in shading data from hit and direction

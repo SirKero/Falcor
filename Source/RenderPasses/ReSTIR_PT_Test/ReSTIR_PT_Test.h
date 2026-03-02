@@ -80,6 +80,36 @@ private:
     //Evaluates the Reservoirs
     void evalReservoirPass(RenderContext* pRenderContest, const RenderData& renderData);
 
+    struct PathLengthSettings
+    {
+        uint maxPathLength = 10;
+        uint deltaBounces = 10;
+        uint diffuseBounces = 4;
+        uint specularBounces = 4;
+
+        bool renderUI(Gui::Widgets& widget, std::string ident = "##") {
+            bool changed = false;
+            changed |= widget.var(("Path Length" + ident).c_str(), maxPathLength, 0u, 254u, 1u);
+            widget.tooltip("Maximal combined path length");
+            changed |= widget.var(("Delta Bounces" + ident).c_str(), deltaBounces, 0u, 254u, 1u);
+            widget.tooltip("Maximal delta bounces (reflection + transmission)");
+            changed |= widget.var(("Diffuse Bounces" + ident).c_str(), diffuseBounces, 0u, 254u, 1u);
+            widget.tooltip("Maximal diffuse bounces  (reflection + transmission)");
+            changed |= widget.var(("Specular Bounces" + ident).c_str(), specularBounces, 0u, 254u, 1u);
+            widget.tooltip("Maximal specular bounces  (reflection + transmission)");
+            return changed;
+        }
+
+        uint pack() {
+            uint packed = 0;
+            packed |= maxPathLength & 0xFF;
+            packed |= (deltaBounces & 0xFF) << 8;
+            packed |= (diffuseBounces & 0xFF) << 16;
+            packed |= (specularBounces & 0xFF) << 24;
+            return packed;
+        }
+    };
+
     //
     // Pointers
     //
@@ -103,7 +133,7 @@ private:
     bool mOptionsChanged = false;
     uint mRNGGenNumberRenderPasses = 4;   //Needed for the RNG
 
-    uint mPTBounces = 10;
+    PathLengthSettings mPathLengthSettings;
     float3 mNeeLightSelectProb = float3(0.33f); //Light selection probability for NEE samples (Emissive, Analytic, EnvMap)
     float mRoughnessThreshold = 0.25f;  //Threshold for reuse
     float mJacobianDistanceThreshold = 0.0001f; //Distance Threshold

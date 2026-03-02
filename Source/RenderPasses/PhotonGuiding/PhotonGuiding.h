@@ -150,7 +150,7 @@ private:
         uint maxPathLength = 10;
         uint deltaBounces = 10;
         uint diffuseBounces = 3;
-        uint speculatBounces = 3;
+        uint specularBounces = 3;
 
         bool renderUI(Gui::Widgets& widget, std::string ident = "##") {
             bool changed = false;
@@ -160,7 +160,7 @@ private:
             widget.tooltip("Maximal delta bounces (reflection + transmission)");
             changed |= widget.var(("Diffuse Bounces" + ident).c_str(), diffuseBounces, 0u, 254u, 1u);
             widget.tooltip("Maximal diffuse bounces  (reflection + transmission)");
-            changed |= widget.var(("Specular Bounces" + ident).c_str(), speculatBounces, 0u, 254u, 1u);
+            changed |= widget.var(("Specular Bounces" + ident).c_str(), specularBounces, 0u, 254u, 1u);
             widget.tooltip("Maximal specular bounces  (reflection + transmission)");
             return changed;
         }
@@ -170,7 +170,7 @@ private:
             packed |= maxPathLength & 0xFF;
             packed |= (deltaBounces & 0xFF) << 8;
             packed |= (diffuseBounces & 0xFF) << 16;
-            packed |= (speculatBounces & 0xFF) << 24;
+            packed |= (specularBounces & 0xFF) << 24;
             return packed;
         }
     };

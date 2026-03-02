@@ -15,7 +15,7 @@ cbuffer CB
 {
     uint gFrameCount;                      // Current FrameCount for RNG
     float3 gNeeLightTypeSelectProbability; // Emissive, Analytic, EnvMap
-    uint gMaxBounces; // Max indirections
+    PackedPathLength gPackedPathLength; // Max indirections
     uint gRNGNumPass; // Identifier for the pass used to initialize the RNG
     float gSpatialSampleRadius; // Spatial resampling radius
 }
@@ -78,8 +78,9 @@ struct RetracePathData {
     }
 }
 
-bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout RetracePathData rpd, inout RayDesc ray)
+bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout RetracePathData rpd, inout RayDesc ray, out int reflectionLobe)
 {
+    reflectionLobe = -1;
     BSDFSample bsdfSample;
     bool validSample = mi.sample(sd, sg, bsdfSample, true);
     if (validSample) {
@@ -90,6 +91,7 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
         rpd.thp *= bsdfSample.weight;
         rpd.scatterPdf = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
         rpd.pathPdf *= rpd.scatterPdf;
+        reflectionLobe = getLobeType(bsdfSample);
     }
 
     return validSample && any(rpd.thp > 0);
@@ -116,8 +118,12 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
     if ((reservoir.flags.firstHitIsDelta && rpd.lastSurfaceIsDiffuse) || (!reservoir.flags.firstHitIsDelta && !rpd.lastSurfaceIsDiffuse))
         return false;
 
-    if (!sampleNewRay(primSD, primMI, rayDirSg, rpd, ray))
+    int firstHitReflectionLobe = -1;
+    if (!sampleNewRay(primSD, primMI, rayDirSg, rpd, ray, firstHitReflectionLobe))
         return false;
+
+    PackedPathLength currentPathLength = PackedPathLength();
+    updatePathLength(currentPathLength, firstHitReflectionLobe);
     for (uint pathLength = 1; pathLength <= reservoir.pathLength; pathLength++)
     {
         TraceRay(gScene.rtAccel, 0 , 0xff , 0 , rayTypeCount, 0, ray, rayPayload);
@@ -212,9 +218,13 @@ bool randomReplay(ShadingData primSD, ReservoirPT reservoir, inout RetracedSurfa
         rpd.lastFaceN = sd.faceN;
         //Sample ray for next iteration
         if (pathLength < reservoir.pathLength) {
-            if (!sampleNewRay(sd, mi, rayDirSg, rpd, ray)) {
+            int reflectionLobe;
+            if (!sampleNewRay(sd, mi, rayDirSg, rpd, ray, reflectionLobe)) {
                 break;
             }
+            updatePathLength(currentPathLength, firstHitReflectionLobe);
+            if (!currentPathLength.comparePathLengts(gPackedPathLength))
+                break;
         }
     }
 

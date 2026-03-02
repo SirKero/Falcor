@@ -15,8 +15,8 @@ import NextEventEstimationHelper;
 cbuffer CB
 {
     uint gFrameCount; // Current FrameCount for RNG
-    float3 gNeeLightTypeSelectProbability; //Emissive, Analytic, EnvMap
-    uint gMaxBounces;   //Max path length
+    float3 gNeeLightTypeSelectProbability; // Emissive, Analytic, EnvMap
+    PackedPathLength gPackedPathLength;   //Path Length 
 
 }
 
@@ -78,8 +78,9 @@ struct PathData {
     }
 }
 
-bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout PathData pd, inout RayDesc ray)
+bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout PathData pd, inout RayDesc ray, out int lobeType)
 {
+    lobeType = -1;
     BSDFSample bsdfSample;
     bool validSample = mi.sample(sd, sg, bsdfSample, true);
     if (validSample) {
@@ -87,6 +88,8 @@ bool sampleNewRay(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg
         bool disableDeltaPdf = bsdfSample.isLobe(LobeType::Delta) && !kEvalDeltaPdfs; //If true uses 1 for pdf
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
+
+        lobeType = getLobeType(bsdfSample);
 
         if (pd.reconnectIsSet)
             pd.reconThp *= bsdfSample.weight;
@@ -122,7 +125,7 @@ bool addSampleToReservoir(inout ReservoirPT reservoir, float rand, float3 rcThp,
     return selectOther;
 }
 
-float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayDirSg, inout PathData pd, inout ReservoirPT reservoir)
+float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator rayDirSg, inout PathData pd, inout ReservoirPT reservoir, int firstHitReflectionLobe)
 {
     float3 outColor = float3(0);
     RayPayload rayPayload = RayPayload();
@@ -131,7 +134,9 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
     float3 lastOrigin = ray.Origin;
     float3 lastFaceNormal = float3(0, 1, 0);
 
-    for (pd.pathLength = 1 ; pd.pathLength <= gMaxBounces; pd.pathLength++) {
+    PackedPathLength currentPathLength = PackedPathLength();
+    updatePathLength(currentPathLength, firstHitReflectionLobe);
+    for (pd.pathLength = 1; pd.pathLength <= gPackedPathLength.pathLength; pd.pathLength++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
         // Get surface hit info
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
@@ -229,7 +234,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         }
 
         // Scatter ray should be traced for the current iteration. Additionally, emissive reflections are undefined
-        if (pd.pathLength >= gMaxBounces || hitEmissive)
+        if (pd.pathLength >= gPackedPathLength.pathLength || hitEmissive)
             break;
 
         // Sample light (NEE)
@@ -271,9 +276,13 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
 
         // New ray
         pd.lastHitWasDiffuse = !currentIsDelta;
-        if (!sampleNewRay(sd, mi, rayDirSg, pd, ray))
+        int lobeType = -1;
+        if (!sampleNewRay(sd, mi, rayDirSg, pd, ray, lobeType))
             break;
 
+        updatePathLength(currentPathLength, lobeType);
+        if (!currentPathLength.comparePathLengts(gPackedPathLength))
+            break;
     }
 
     // Finalize Reservoir
@@ -351,8 +360,11 @@ void rayGen()
         ray.TMax = FLT_MAX;
         float3 thp = float3(1.0);
 
-        if (sampleNewRay(sd, mi, rayDirSg, pd, ray))
-            outColor = tracePath(ray, sg, rayDirSg, pd, reservoir);
+        int firstHitReflectionLobe = -1;
+        if (sampleNewRay(sd, mi, rayDirSg, pd, ray, firstHitReflectionLobe))
+            outColor = tracePath(ray, sg, rayDirSg, pd, reservoir, firstHitReflectionLobe);
+       
+            
 
         //Set reservoir flag
         reservoir.flags.firstHitIsDelta = firstHitIsDelta;
