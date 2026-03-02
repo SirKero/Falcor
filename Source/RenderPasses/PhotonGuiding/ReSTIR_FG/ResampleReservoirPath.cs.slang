@@ -31,8 +31,8 @@ Texture2D<float4> gView;
 Texture2D<float4> gViewPrev;
 Texture2D<float2> gMVec;
 StructuredBuffer<PathReservoir> gPathReservoirPrev;
-StructuredBuffer<RetracedPath> gRetracedPath;
-StructuredBuffer<RetracedPath> gRetracedPathPrev;
+Texture2D<float4> gRetracedPath;
+Texture2D<float4> gRetracedPathPrev;
 
 RWStructuredBuffer<PathReservoir> gPathReservoir;
 
@@ -71,7 +71,6 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     float w_0 = 0;
     float w_1 = 0;
     float wSum = 0;
-    const uint retracedPathIndex = index2Dto1D(pixel, gFrameDim.x);
 
     // Load reservoir
     PathReservoir rPrev = gPathReservoirPrev[index2Dto1D(reservoirPixel, gFrameDim.x)];
@@ -80,7 +79,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     RetracedPath retracedPath = RetracedPath();
     const bool loadRetracedPath = (RETRACE_LIGHT_PATHS > 0 && !isSpatialResampling) ? true : rCurr.pathLength > 0; //When photon retracing is used, the result for pathLength == 0 is written in the surface
     if (reservoirContributes && loadRetracedPath) {
-        retracedPath = gRetracedPath[retracedPathIndex];
+        retracedPath = RetracedPath(gRetracedPath[pixel]);
     }
 
     if (reservoirContributes)
@@ -144,7 +143,7 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 
     // Load retraced surface for temporal reservoir
     retracedPath = RetracedPath();
     if (prevCanBeSelected && rPrev.pathLength > 0) {
-        retracedPath = gRetracedPathPrev[retracedPathIndex];
+        retracedPath = RetracedPath(gRetracedPathPrev[pixel]);
     }
 
     if (prevCanBeSelected)

@@ -26,8 +26,8 @@ Texture2D<float4> gViewPrev;
 StructuredBuffer<PathReservoir> gPathReservoir;
 RWStructuredBuffer<PathReservoir> gPathReservoirPrev;
 
-RWStructuredBuffer<RetracedPath> gRetraceReservoirPath;         //Retraced path for the current sample
-RWStructuredBuffer<RetracedPath> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
+RWTexture2D<float4> gRetraceReservoirPath;     // Retraced path for the current sample
+RWTexture2D<float4> gRetraceReservoirPathPrev;     //Retraced path for the temporal sample
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -421,7 +421,7 @@ void retracePhotonPath(uint2 pixel, uint2 dispatchDims)
                 retracedPath.jacobian = 1;
             }
         }
-        gRetraceReservoirPath[reservoirIndex] = retracedPath;
+        gRetraceReservoirPath[pixel] = retracedPath.pack();
     }
 
     //Retrace photon path for the reservoirs from the previous frame. Updates the Reservoir
@@ -482,7 +482,7 @@ void retraceCameraPath(uint2 pixel, uint2 dispatchDims)
             #if USE_LIGHT_PATH_RETRACING
             if (reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate)
             {
-                retraceSurface = gRetraceReservoirPath[reservoirIndex];
+                retraceSurface = RetracedPath(gRetraceReservoirPath[pixel]);
                 if (retraceSurface.jacobian < 1)
                     lightPathValid = false;
                 else if (reservoir.flags.isRadianceEstimate)
@@ -509,7 +509,7 @@ void retraceCameraPath(uint2 pixel, uint2 dispatchDims)
                 if(!randomReplay(sd, reservoir, sg, retraceSurface))
                     retraceSurface.F = float3(0);
             }
-            gRetraceReservoirPath[reservoirIndex] = retraceSurface;
+            gRetraceReservoirPath[pixel] = retraceSurface.pack();
         }
 
         //Random Replay for resampled reservoir
@@ -530,7 +530,7 @@ void retraceCameraPath(uint2 pixel, uint2 dispatchDims)
                 if(!randomReplay(sd, resampleReservoir, sg, retraceSurface))
                     retraceSurface.F = float3(0);
             }
-            gRetraceReservoirPathPrev[reservoirIndex] = retraceSurface;
+            gRetraceReservoirPathPrev[pixel] = retraceSurface.pack();
         }
     }
 }

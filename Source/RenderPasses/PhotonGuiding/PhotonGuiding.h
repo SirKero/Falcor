@@ -352,7 +352,7 @@ private:
     ref<Texture> mpEmission;                                   // Emission for paths that travel through highly specular materials (ReSTIR FG)
     ref<Texture> mpResampleMVec;                               // Motion vectors for resampling (includes reflections and refractions)
     ref<Buffer> mpPathReservoir[2];                            // Reservoir storing a path
-    ref<Buffer> mpRetracedPath[2];                             // Buffer for retracing a path
+    ref<Texture> mpRetracedPath[2];                             // Texture for path retracing info
     ref<Texture> mpVBufferPrev;                                // VBuffer previous Frame
     ref<Texture> mpViewPrev;                                   // View Vector previous Frame
     //Caustic ReSTIR Splatting

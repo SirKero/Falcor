@@ -448,7 +448,7 @@ struct PathReservoir {
     }
 }
 
-// Infos on retraced path 64byte (16 floats)
+// Infos on retraced path 16 byte (4 floats)
 struct RetracedPath
 {
     float3 F;
@@ -458,6 +458,17 @@ struct RetracedPath
     {
         F = float3(0);
         jacobian = 1;
+    }
+
+    __init(float4 data)
+    {
+        F = data.xyz;
+        jacobian = data.w;
+    }
+
+    float4 pack()
+    {
+        return float4(F, jacobian);
     }
 }
 

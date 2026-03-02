@@ -953,9 +953,8 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         if (!mpRetracedPath[i] || mResetScreenTex)
         {
             mCanResample = false;
-            mpRetracedPath[i] = Buffer::createStructured(
-                mpDevice, 4 * sizeof(uint), mScreenRes.x * mScreenRes.y,
-                ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None, nullptr, false
+            mpRetracedPath[i] = Texture::create2D(mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA32Float, 1u, 1u,
+                nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
             );
             mpRetracedPath[i]->setName("RetracePath" + std::to_string(i));
         }
@@ -2295,6 +2294,7 @@ void PhotonGuiding::reSTIRRetracePathsPass(RenderContext* pRenderContext, const 
 
         mpScene->raytrace(pRenderContext, mRetracePathsPass.pProgram.get(), mRetracePathsPass.pVars, uint3(mScreenRes, 1));
         pRenderContext->uavBarrier(mpPathReservoir[(reservoirIndex + 1) % 2].get());
+        pRenderContext->uavBarrier(mpRetracedPath[0].get());
     }
 
     int numDispatches = mPathRetraceSeperatePass ? 2 : 1;
