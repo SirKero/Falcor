@@ -74,85 +74,6 @@ struct CameraState {
     }
 }
 
-/*
-float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg) {
-    float3 collectedRadiance = float3(0);
-    // Prepare ray
-    RayDesc ray;
-    ray.Origin = sd.posW;
-    ray.Direction = sd.faceN;
-    ray.TMin = 0;
-    ray.TMax = kPhotonCollectTMax;
-
-    const float photonWeight = M_PI * gNumLightPaths;
-
-    RayQuery<RAY_FLAG_NONE> rayQuery;
-
-    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
-    while (rayQuery.Proceed()) {
-
-        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
-            continue;
-        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
-               
-        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
-
-        // Check if ray is inside photon radius
-        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
-        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
-        if (!hitSphere(photonAABB.center(), radius, sd.posW))
-            continue;
-
-        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
-        float NdotL = dot(photonData.dir, N);
-        // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
-            continue;
-
-        float3 bsdf = mi.eval(sd, photonData.dir, sg);
-        float3 photonRadiance = max( 0, (photonData.flux * bsdf) / (NdotL * radius * radius * photonWeight)); // NdotL needs to be taken out of the bsdf for Photon Mapping
-        collectedRadiance += photonRadiance;
-
-        // Add to the guiding texture
-        float histogramEmission = luminance(photonRadiance);
-        if (histogramEmission <= 0 || photonData.lightIndex < 0)
-            continue;
-
-        if (kGuidingMode == (uint)GuidingMode::Emission || kGuidingMode == (uint)GuidingMode::ReSTIR)
-        {
-            uint currentColor = 0;
-            uint originalValue;
-            [allow_uav_condition]
-            do {
-                InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 0u, currentColor);
-                float color = asfloat(currentColor);
-                uint updatedColor = asuint(color + histogramEmission);
-                InterlockedCompareExchange(gGuidingCounter[photonData.guidingPixel], currentColor, updatedColor, originalValue);
-            } while (originalValue != currentColor);
-        } else if (kGuidingMode == (uint)GuidingMode::Uniform)
-        {
-            InterlockedAdd(gGuidingCounter[photonData.guidingPixel], 1u);
-        } else if (kGuidingMode == (uint)GuidingMode::EmissionDiscretized || kGuidingMode == (uint)GuidingMode::ReSTIRDiscretized)
-        {
-            uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * histogramEmission)),1);
-            InterlockedAdd(gGuidingCounter[photonData.guidingPixel], discretizedEmission);
-        } 
-
-        // Add to light index guiding texture
-        if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::Uniform)
-        {
-            uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
-            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], 1u);
-        } else if (kLightIndexGuidingMode == (uint)GuidingLightIndexMode::DiscretizedEmission || kLightIndexGuidingMode == (uint)GuidingLightIndexMode::ReSTIR)
-        {
-            uint2 lightIndexTexturePixel = index1Dto2D(photonData.lightIndex, gLightIndexGuidingResolution);
-            uint discretizedEmission = max(uint(round(kDiscretizedEmissionFactor * histogramEmission)),1);
-            InterlockedAdd(gLightIndexGuidingCounter[lightIndexTexturePixel], discretizedEmission);
-        }
-    }
-    return collectedRadiance;
-}
-*/
 bool sampleNewRay(ShadingData sd, IMaterialInstance mi, float roughness, inout SampleGenerator sg, inout CameraState camState, inout RayDesc ray)
 {
     // Abort on diffuse surfaces
@@ -297,7 +218,6 @@ void rayGen()
             // Next event estimation for first hit in final gathering
             if (finalGatherFirstHit) {
                 LightSample ls = {};
-                // ShadingData sd, IMaterialInstance mi, float3 lightTypeSelectProbability,  out LightSample ls, inout SampleGenerator sg
                 outColor += nextEventEstimation(sd, mi, gLightTypeSelectProbability, ls, sg) * camState.thp;
             }
         }
