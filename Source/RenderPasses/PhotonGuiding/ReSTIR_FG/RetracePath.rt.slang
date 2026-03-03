@@ -480,29 +480,21 @@ void retraceCameraPath(uint2 pixel, uint2 dispatchDims)
             RetracedPath retraceSurface = RetracedPath();
             bool lightPathValid = true;
             #if USE_LIGHT_PATH_RETRACING
-            if (reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate)
+            if (!isSpatial && (reservoir.flags.isFinalGather || reservoir.flags.isRadianceEstimate))
             {
                 retraceSurface = RetracedPath(gRetraceReservoirPath[pixel]);
                 if (retraceSurface.jacobian < 1)
                     lightPathValid = false;
                 else if (reservoir.flags.isRadianceEstimate)
                     reservoir.samplePosW = retraceSurface.F;
+                retraceSurface.F = float3(0);
             }
             #endif
             // Only retrace if the reservoir is valid and path length > 0. Path length == 0 can only be Final Gather, which is checked during resampling
             if (reservoir.isValid() && reservoir.pathLength > 0 && lightPathValid) {
                 // Get starting surface for temporal retrace
-                HitInfo prevHit;
-                float3 prevViewDir;
-                //Spatial uses the already combined reservoirs and therefore always uses the current surfaces
-                if (isSpatial) {
-                    prevHit = HitInfo(gVBuffer[prevPixel]);
-                    prevViewDir = gView[prevPixel].xyz;
-                }
-                else {
-                    prevHit = HitInfo(gVBufferPrev[prevPixel]);
-                    prevViewDir = gViewPrev[prevPixel].xyz;
-                }
+                HitInfo prevHit = HitInfo(gVBufferPrev[prevPixel]);
+                float3 prevViewDir = gViewPrev[prevPixel].xyz;              
                 ShadingData sd = loadShadingData(prevHit, -prevViewDir, lod);
 
                 // Retrace camera path
@@ -515,12 +507,7 @@ void retraceCameraPath(uint2 pixel, uint2 dispatchDims)
         //Random Replay for resampled reservoir
         if (gSeperatePasses == -1 || gSeperatePasses == 1) {
             const uint resampleReservoirIndex = index2Dto1D(prevPixel, dispatchDims.x);
-            PathReservoir resampleReservoir = PathReservoir();
-            // For spatial the source reservoir is the same for current and other reservoir
-            if (isSpatial)
-                resampleReservoir = gPathReservoir[resampleReservoirIndex];
-            else
-                resampleReservoir = gPathReservoirPrev[resampleReservoirIndex];
+            PathReservoir resampleReservoir = gPathReservoirPrev[resampleReservoirIndex];
 
             RetracedPath retraceSurface = RetracedPath();
             if (resampleReservoir.isValid() && resampleReservoir.pathLength > 0) {
