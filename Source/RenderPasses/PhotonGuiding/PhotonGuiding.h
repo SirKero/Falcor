@@ -239,7 +239,7 @@ private:
     uint2 mCurrentPhotonCount = mNumMaxPhotons;
     float2 mPhotonRadius = float2(0.008f, 0.002f); //Global / Caustic Radius
     bool mUseAdaptivePhotonRadius = true;
-    float2 mAdaptivePhotonRadius = float2(4.f, 4.f);    //Pixel Size scale for adptive radius
+    float2 mAdaptivePhotonRadius = float2(4.f, 2.f);    //Pixel Size scale for adptive radius
     float mNormalizePixelDiagonal = 0.f;                //Diagonal of a pixel in world space at distance 1. Used in adaptive photon radius calculation
 
     bool mPhotonRussianRoulette = true; //Enables Russian Roulette for the photon pass
