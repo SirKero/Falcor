@@ -168,8 +168,22 @@ bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BS
     return valid;
 }
 
-void resampleReservoirReflectOrRefract(inout ReservoirCaustic current, uint2 pixel, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg)
+void resampleReservoirReflectOrRefract(inout ReservoirCaustic current, uint2 pixel, inout SampleGenerator sg)
 {
+    
+    HitInfo currentHit = HitInfo(current.sampleSurface);
+    if (!currentHit.isValid()) {
+        current = ReservoirCaustic();
+        return;
+    }
+
+    //Get Material Info
+    let lod = ExplicitLodTextureSampler(0.0);
+
+    ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
+    let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
+    let currentBsdfProperties = currentMi.getProperties(currentSD);
+
     // Precalculate the targetFunction
     current.targetFunction = evalApproximateBRDFPhoton(currentSD, currentBsdfProperties, current.photonDir) * luminance(current.photonRadiance);
 
@@ -251,15 +265,19 @@ void resampleSplattedReservoir(inout ReservoirCaustic dstR, inout float wSum, in
     }
 }
 
-void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData currentSD, IMaterialInstance currentMi, BSDFProperties currentBsdfProperties, inout SampleGenerator sg)
+void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, inout SampleGenerator sg)
 {
     float currentMIS = 0.0;
     ReservoirCaustic dstR = current;
+    let lod = ExplicitLodTextureSampler(0.0);
     // MIS for current reservoir
     if (current.isValid())
     {
         float p1 = 0.0;
         float p0 = current.targetFunction * current.c;
+        HitInfo currentHit = HitInfo(current.sampleSurface);
+        ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
+        
         // Get mis for temporal reprojection
         float3 toPrevCam = gPrevCamPos - currentSD.posW;
         float distToPrevCam = length(toPrevCam);
@@ -277,6 +295,7 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
         }
 
         if (isVisible) {
+            let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
             // Calc jacobians
             float jacobianWeight, targetFunction;
             p1 = getSplattingMISWeight(toPrevCam, distToPrevCam, gPrevCamForward, current, currentSD, currentMi, sg, jacobianWeight, targetFunction);
@@ -293,7 +312,6 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData
     // Shift the other samples
     uint reservoirIdx = index2Dto1D(pixel, gFrameDim.x);
   
-    let lod = ExplicitLodTextureSampler(0.0);
     const float3 currentCamPosW = gScene.camera.getPosition();
     const float3 currentCamForward = normalize(gScene.camera.data.cameraW);
     float newConfidence = current.c;
@@ -427,25 +445,15 @@ void main(uint2 pixel: SV_DispatchThreadID)
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 2));
 
     const uint reservoirIdx = index2Dto1D(pixel, gFrameDim.x);
+    
     ReservoirCaustic current = gCausticReservoir[reservoirIdx];
-    HitInfo currentHit = HitInfo(current.sampleSurface);
 
-    if (currentHit.isValid()) {
-        // Get Shading Data
-        let lod = ExplicitLodTextureSampler(0.0);
-        ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
-        let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
-        let currentBsdfProperties = currentMi.getProperties(currentSD);
+    if (kEnableLightTraceSplatting && current.pathLength == 0)
+        reservoirSplatting(current, pixel, sg);
+    else
+        resampleReservoirReflectOrRefract(current, pixel, sg);
 
-        // Either photon or light trace resample
-        if (kEnableLightTraceSplatting && current.pathLength == 0)
-            reservoirSplatting(current, pixel, currentSD, currentMi, currentBsdfProperties, sg);
-        else
-            resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
-
-        // Store final reservoir
-        gCausticReservoir[reservoirIdx] = current;
-    }
+    gCausticReservoir[reservoirIdx] = current;
 
     if (kSplattingUseLinkedList)
         gCellCounters[reservoirIdx] = -1;

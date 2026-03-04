@@ -350,7 +350,6 @@ private:
     ref<Buffer> mpFinalGatherReservoir[2];                     // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];                         // Reservoir for the Caustic sample
     ref<Texture> mpEmission;                                   // Emission for paths that travel through highly specular materials (ReSTIR FG)
-    ref<Texture> mpResampleMVec;                               // Motion vectors for resampling (includes reflections and refractions)
     ref<Buffer> mpPathReservoir[2];                            // Reservoir storing a path
     ref<Texture> mpRetracedPath[2];                             // Texture for path retracing info
     ref<Texture> mpVBufferPrev;                                // VBuffer previous Frame

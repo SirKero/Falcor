@@ -970,15 +970,6 @@ void PhotonGuiding::prepareResources(RenderContext* pRenderContext, const Render
         mpEmission->setName("EmissionTexture");
     }
 
-    if (!mpResampleMVec || mResetScreenTex)
-    {
-        mpResampleMVec = Texture::create2D(
-            mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RG32Float, 1u, 1u, nullptr,
-            ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
-        );
-        mpResampleMVec->setName("MVecResampling");
-    }
-
     // Light Trace resources
     if (!mpLightTraceHeadCounter || mResetScreenTex)
     {
@@ -2117,14 +2108,12 @@ void PhotonGuiding::reSTIRGenerateInitialSamplesPass(RenderContext* pRenderConte
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
     var["gCausticPhotonHitInfo"] = mpCausticPhotonHitInfo;
-    var["gMVec"] = renderData[kInputMVec]->asTexture();
    
     // Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
     var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gEmission"] = mpEmission;
-    var["gResamplingMVec"] = mpResampleMVec;
 
     // Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
@@ -2192,7 +2181,7 @@ void PhotonGuiding::reSTIRResampleFGPass(RenderContext* pRenderContext, const Re
 
     // Input Resources
     var["gFinalGatherReservoirPrev"] = mpFinalGatherReservoir[(mFrameCount + 1) % 2];
-    var["gMVec"] = mpResampleMVec;
+    var["gMVec"] = renderData[kInputMVec]->asTexture();
 
     // In-/Output Resources
     var["gFinalGatherReservoir"] = mpFinalGatherReservoir[mFrameCount % 2];
@@ -2444,7 +2433,7 @@ void PhotonGuiding::reSTIRResampleCausticPass(RenderContext* pRenderContext, con
 
     // Input Resources
     var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
-    var["gMVec"] = mpResampleMVec;
+    var["gMVec"] = renderData[kInputMVec]->asTexture();
     
     // In-/Output Resources
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];

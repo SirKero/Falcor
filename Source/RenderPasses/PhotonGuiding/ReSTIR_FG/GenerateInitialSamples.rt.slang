@@ -15,13 +15,11 @@ import RenderPasses.PhotonGuiding.NextEventEstimationHelper;
 import Rendering.RTXDI.RTXDI;
 
 Texture2D<PackedHitInfo> gVBuffer;
-Texture2D<float2> gMVec;
 
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<PathReservoir> gPathReservoir;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 RWTexture2D<float4> gEmission;
-RWTexture2D<float2> gResamplingMVec;
 
 RWTexture2D<int> gLightTraceHeadCounter;
 StructuredBuffer<int> gLightTraceLinkedList; // next pointer
@@ -493,7 +491,6 @@ void rayGen()
    
     ReservoirCaustic causticReservoir = ReservoirCaustic();
    
-    float2 mVec = gMVec[pixel];
     #if ENABLE_RANDOM_REPLAY
         PathReservoir pathReservoir = PathReservoir();
     #else
@@ -527,6 +524,11 @@ void rayGen()
                 photonResampling(sd, bsdfProperties, false, gNumLightPaths , causticReservoir, sg);
         }
 
+        #if ENABLE_RANDOM_REPLAY
+            uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
+            gCausticReservoir[reservoirIndex] = causticReservoir;
+        #endif
+
         pd.specularPath &= !pd.lastHitDiffuse;
         pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08; // 0.08 is the delta threshold used in Falcor. Needed for emission after delta paths
 
@@ -548,16 +550,6 @@ void rayGen()
         float3 mVecPosW = sd.posW;
         if (sampleNewDirection(sd, mi, sg, pd, ray))
             traceFGRay(ray, sg, pd, finalGatherReservoir, causticReservoir, emission, mVecDistance);
-
-        //Update Mvec (we assume the primary ray travels the total reflection distance)
-        if (mVecDistance > 0)
-        {
-            mVecPosW += -viewDir * mVecDistance;
-            // Compute motion vector.
-            float2 pixelPos = pixel + float2(0.5f, 0.5f);
-            float4 prevPosH = mul(gScene.camera.data.prevViewProjMatNoJitter, float4(mVecPosW, 1.f));
-            mVec = calcMotionVector(pixelPos, prevPosH, dispatchDims) + float2(gScene.camera.data.jitterX, -gScene.camera.data.jitterY); // Remove camera jitter from motion vector
-        }
     #endif
     } else {
         // Set invalid RTXDI data
@@ -570,10 +562,9 @@ void rayGen()
 #else
     gFinalGatherReservoir[reservoirIndex] = finalGatherReservoir;
     gEmission[pixel] = float4(emission, 1.0);
-    gResamplingMVec[pixel] = mVec;
-#endif
-
     gCausticReservoir[reservoirIndex] = causticReservoir;
+#endif
+   
     if (kEnableLightTraceSplatting)
         gLightTraceHeadCounter[pixel] = -1; // Set to invalid
 }
