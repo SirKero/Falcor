@@ -122,6 +122,10 @@ PhotonGuiding::PhotonGuiding(ref<Device> pDevice, const Properties& props)
     samplerDesc.setFilterMode(Sampler::Filter::Point, Sampler::Filter::Point, Sampler::Filter::Point);
     mpPointSampler = Sampler::create(mpDevice, samplerDesc);
 
+    //Set caustic settings
+    mResampleSettingsCaustic.samplingRadius = 4.f;
+    mResampleSettingsCaustic.spatialSamples = 0;
+
     mLightBVHOptions = {};
 
 }
@@ -149,7 +153,6 @@ void PhotonGuiding::setScene(RenderContext* pRenderContext, const ref<Scene>& pS
     if (pScene)
     {
         mpScene = pScene;
-        mNormalizedPixelArea = getNormalizedPixelArea();
     }
 }
 
@@ -174,6 +177,7 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
         mGuidingResetAccumulateCount = false;
     }
 
+    mNormalizedPixelArea = getNormalizedPixelArea();
     mOptionsChanged = false;
 
     // Prepare needed Falcor helpers and Buffers/Textures

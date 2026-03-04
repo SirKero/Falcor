@@ -64,7 +64,7 @@ struct ReservoirFlags {
     }
 
     property uint confidence {
-        get { return flags & 0xFF00; }
+        get { return (flags & 0xFF00)>>8; }
         set {
             flags &= ~0xFF00; // Clear bits
             flags |= (newValue & 0xFF) << 8;

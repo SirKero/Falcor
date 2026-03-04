@@ -126,9 +126,9 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
         current.lightIndex = other.lightIndex;
     }
 
-    //Increase confidence weights
-    current.c += other.c;
-    current.c = min(current.c, gConfidenceLimit);
+    // Increase confidence weights
+    uint newC = min(current.c + other.c, 20);
+    current.c = newC;
 
     //Finalize reservoir (wSum -> W)
     if (current.targetFunction > 0)
@@ -168,9 +168,8 @@ bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BS
     return valid;
 }
 
-void resampleReservoirReflectOrRefract(inout ReservoirCaustic current, uint2 pixel, inout SampleGenerator sg)
+void resampleReservoirRadianceEstimate(inout ReservoirCaustic current, uint2 pixel, inout SampleGenerator sg)
 {
-    
     HitInfo currentHit = HitInfo(current.sampleSurface);
     if (!currentHit.isValid()) {
         current = ReservoirCaustic();
@@ -268,11 +267,13 @@ void resampleSplattedReservoir(inout ReservoirCaustic dstR, inout float wSum, in
 void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, inout SampleGenerator sg)
 {
     float currentMIS = 0.0;
-    ReservoirCaustic dstR = current;
+    ReservoirCaustic dstR = ReservoirCaustic();
+    dstR.c = 0;
     let lod = ExplicitLodTextureSampler(0.0);
     // MIS for current reservoir
     if (current.isValid())
     {
+        dstR = current;
         float p1 = 0.0;
         float p0 = current.targetFunction * current.c;
         HitInfo currentHit = HitInfo(current.sampleSurface);
@@ -426,7 +427,8 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, inout Sampl
     }
 
     current = dstR;
-    current.c = clamp(uint(round(newConfidence)), 1, gConfidenceLimit);
+    newConfidence = clamp(uint(round(newConfidence)), 1, gConfidenceLimit);
+    current.c = newConfidence;
 
     // Finalize reservoir (wSum -> W)
     if (current.targetFunction > 0)
@@ -451,7 +453,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (kEnableLightTraceSplatting && current.pathLength == 0)
         reservoirSplatting(current, pixel, sg);
     else
-        resampleReservoirReflectOrRefract(current, pixel, sg);
+        resampleReservoirRadianceEstimate(current, pixel, sg);
 
     gCausticReservoir[reservoirIdx] = current;
 
