@@ -50,6 +50,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
     float distanceToCamera = length(directionToCamera);
     directionToCamera /= distanceToCamera;
+    distanceToCamera -= gScene.camera.data.nearZ; // Remove near
     SceneRayQuery<1> rayQuery;
     const Ray ray = Ray(sd.computeNewRayOrigin(), directionToCamera, 0.f, distanceToCamera);
     if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))

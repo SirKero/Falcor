@@ -290,8 +290,9 @@ void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, inout Sampl
 
         if (isVisible)
         {
+            float visRayDist = distToPrevCam - gScene.camera.data.nearZ; // Remove near
             SceneRayQuery<1> rayQuery;
-            const Ray ray = Ray(currentSD.computeNewRayOrigin(), toPrevCam, 0.0, distToPrevCam);
+            const Ray ray = Ray(currentSD.computeNewRayOrigin(), toPrevCam, 0.0, visRayDist);
             isVisible &= rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
         }
 
