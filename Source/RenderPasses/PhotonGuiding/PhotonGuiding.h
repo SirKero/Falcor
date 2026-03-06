@@ -210,7 +210,7 @@ private:
 
     // Material Settings
     bool mUseLambertianDiffuse = false;         // Enable Lambert Diffuse BRDF instead of Frostbyte
-    float mSpecularRoughnessThreshold = 0.25f; // Any material below this is considered specular
+    float mSpecularRoughnessThreshold = 0.20f; // Any material below this is considered specular
     bool mEvalDeltaPdfs = false;                // If true delta pdfs are properly evaluated (==0), if false they are set to 1.
 
     //
@@ -242,7 +242,7 @@ private:
     float2 mAdaptivePhotonRadius = float2(4.f, 2.f);    //Pixel Size scale for adptive radius
     float mNormalizePixelDiagonal = 0.f;                //Diagonal of a pixel in world space at distance 1. Used in adaptive photon radius calculation
 
-    bool mPhotonRussianRoulette = true; //Enables Russian Roulette for the photon pass
+    bool mPhotonRussianRoulette = false; //Enables Russian Roulette for the photon pass
     
     bool mUseDynamicPhotonDispatchCount = false;   // Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 4000000;     // Max value for dynamically dispatched photons
