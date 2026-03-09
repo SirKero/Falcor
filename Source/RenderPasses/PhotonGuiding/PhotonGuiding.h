@@ -305,8 +305,8 @@ private:
     uint mMinPhotonsPerGuidingTexel = 4; //Minimum number of photons that should be mapped to a guiding texel, else the directional guiding map is not used
     uint mAtlasOptiMinPhotonsPerTexelToCreate = 8; //If the atlas optimization is used, at least this number of photons is needed to create a guiding directional texture
     bool mGuidingUseDistanceBasedMinPhoton = false;
-    float2 mGuidingDBMPMinMaxDistance = float2(1.f, 32.f); //Distance for DBMP(DistanceBasedMinPhoton)
-    uint2 mGuidingDBMPMinMaxPhotons = uint2(32, 1024);     //Photons for DBMP(DistanceBasedMinPhoton)
+    float2 mGuidingDBMPMinMaxDistance = float2(1.f, 16.f); //Distance for DBMP(DistanceBasedMinPhoton)
+    uint2 mGuidingDBMPMinMaxPhotons = uint2(4, 1024);     //Photons for DBMP(DistanceBasedMinPhoton)
     bool mResetGuidingTextures = false;
 
     //Debug
