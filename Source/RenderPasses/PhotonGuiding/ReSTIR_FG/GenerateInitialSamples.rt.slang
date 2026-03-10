@@ -488,7 +488,7 @@ void rayGen()
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     float3 viewDir = -gScene.camera.computeRayPinhole(pixel, dispatchDims).dir;
     float3 outColor = float3(0);
-   
+
     ReservoirCaustic causticReservoir = ReservoirCaustic();
    
     #if ENABLE_RANDOM_REPLAY
@@ -498,6 +498,7 @@ void rayGen()
         float3 emission = float3(0); // Emission on fully specular paths
     #endif
 
+    uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
     if (hitInfo.isValid()) {
         //Set RTXDI data
         let lod = ExplicitLodTextureSampler(0);
@@ -523,9 +524,7 @@ void rayGen()
             else
                 photonResampling(sd, bsdfProperties, false, gNumLightPaths , causticReservoir, sg);
         }
-
         #if ENABLE_RANDOM_REPLAY
-            uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
             gCausticReservoir[reservoirIndex] = causticReservoir;
         #endif
 
@@ -554,9 +553,11 @@ void rayGen()
     } else {
         // Set invalid RTXDI data
         gRTXDI.setInvalidSurfaceData(pixel);
+        #if ENABLE_RANDOM_REPLAY
+            gCausticReservoir[reservoirIndex] = causticReservoir;
+        #endif
     }
 
-    uint reservoirIndex = index2Dto1D(pixel, dispatchDims.x);
 #if ENABLE_RANDOM_REPLAY
     gPathReservoir[reservoirIndex] = pathReservoir;
 #else
