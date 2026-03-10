@@ -285,6 +285,13 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         changed = true;
         mCanResample = false;
         resetRenderPasses();
+        if(mPhotonRenderMode == PhotonRenderMode::ReSTIR_FG)
+        {
+            mEnableLightTraceSplatting = false;
+        }else if(mPhotonRenderMode == PhotonRenderMode::ReSTIR_PathPhoton)
+        {
+            mEnableLightTraceSplatting = true;
+        }
     }
     if (widget.dropdown("Guiding Mode", mGuidingMode))
     {
