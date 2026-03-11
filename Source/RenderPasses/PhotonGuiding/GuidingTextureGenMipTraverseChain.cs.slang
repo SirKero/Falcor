@@ -24,15 +24,16 @@ import SharedEnums;
 #define USE_ATLAS_OPTIMIZATION 0
 #endif
 
-RWTexture2D<COUNTER_FORMAT> gSrcCounter;    // RW for clearing; only used when gCopyFromCounter = true
+Texture2D<COUNTER_FORMAT> gSrcCounter;    // RW for clearing; only used when gCopyFromCounter = true
 Texture2D<COUNTER_FORMAT> gSrcCounterTotal; // Only used when gCopyFromCounter = true
-RWTexture2D<float> gWeightLastFrame; // Only used when gCopyFromCounter = true
+RWTexture2D<float> gWeightLastFrame;        // Only used when gCopyFromCounter = true
+Texture2D<float> gWeightLastFramePingPongRead; //Only used with the atlas optimization
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
 Texture2D<float> gFixedGuidingLightIdxPhotons; //Only used on a certain mip level
 
 Texture2D<uint> gMapGuidingDirectionToLightIndex; //Used when Atlas Optimization is active
-Texture2D<uint> gMapLightIdxToDirGMPrev; //Used when Atlas Optimization is active
+Texture2D<uint> gMapLightIdxToDirGMPrev;          // Used when Atlas Optimization is active
 
 //Histogram accumulate modes
 static const uint kAccumMode_Offline = (uint)(GuidingHistogramAccumulateMode::ResetOnMove);
@@ -48,15 +49,13 @@ cbuffer CB {
     uint gRes;
     bool gCopyFromCounter;
     uint gIterationCount;
-    float gClearValue;
-
     uint gDispatchSize;
+
     bool gFixedGuidingCheckPhotonCount;
     float gAccumValue; // Used in some accumulate modes
-    bool gClearCounter;
-
     uint gLightGMResolution;
     uint gGMResolution;
+
     uint gMapResolution;
 }
 
@@ -100,17 +99,15 @@ void main(uint3 thdID: SV_DispatchThreadID)
             #if !IS_LIGHT_INDEX_TEXTURE
                 totalCounterIndex = pixel / gRes;
             #endif
-            float total = float(gSrcCounterTotal[totalCounterIndex]);
-            float pixelCounterVal = float(gSrcCounter[pixel]);
-            weight = total > 0 ? pixelCounterVal / total : 0.0;
+            
             float oldWeight = 0.0;
             bool oldWeightValid = true;
             if (kAccumMode != kAccumMode_LastFrame) {
-                uint2 prevPixel = pixel;
                 if (kUseAtlasOptimization) //Can only be true on directional guiding resources
                 {
+                    uint2 prevPixel = pixel;
                     oldWeightValid = false;
-                    // Get pixel from last iteration
+                    //Get the recorded counter values and weight from last frame
                     uint lightIndex = gMapGuidingDirectionToLightIndex[pixel / gGMResolution];
                     if (lightIndex < COUNT_LIGHTS)
                     {
@@ -120,13 +117,22 @@ void main(uint3 thdID: SV_DispatchThreadID)
                             prevPixel = prevPixel % gGMResolution;
                             prevPixel += uint2(prevMapIdx % gMapResolution, prevMapIdx / gMapResolution) * gGMResolution;
                             oldWeightValid = true;
+                            oldWeight = gWeightLastFramePingPongRead[prevPixel];
+                            totalCounterIndex = prevPixel / gRes;
+                            float total = float(gSrcCounterTotal[totalCounterIndex]);
+                            float pixelCounterVal = float(gSrcCounter[prevPixel]);
+                            weight = total > 0 ? pixelCounterVal / total : 0.0;
                         }
                     }
                 }
-                if(oldWeightValid)
-                    oldWeight = gWeightLastFrame[prevPixel];
+                else {
+                    oldWeight = gWeightLastFrame[pixel];
+                    float total = float(gSrcCounterTotal[totalCounterIndex]);
+                    float pixelCounterVal = float(gSrcCounter[pixel]);
+                    weight = total > 0 ? pixelCounterVal / total : 0.0;
+                } 
             }
-
+                        
             if (oldWeightValid)
             {
                 if (kAccumMode == kAccumMode_Offline || kAccumMode == kAccumMode_FrameAvrg)
@@ -135,19 +141,6 @@ void main(uint3 thdID: SV_DispatchThreadID)
                     weight = (weight * gAccumValue) + (oldWeight * (1.0 - gAccumValue));
             } else
                 weight = defaultWeight;
-        }
-
-        //Clear the guiding counter texture
-        if (gClearCounter)
-        {
-            COUNTER_FORMAT clearValue = 0;
-            #if IS_LIGHT_INDEX_TEXTURE
-                clearValue = COUNT_LIGHTS > index1D ? (COUNTER_FORMAT)gClearValue : 0.0;
-            #else
-                clearValue = (COUNTER_FORMAT)gClearValue; // Clear
-            #endif
-                
-            gSrcCounter[pixel] = clearValue;    //Write
         }
 
         // Write

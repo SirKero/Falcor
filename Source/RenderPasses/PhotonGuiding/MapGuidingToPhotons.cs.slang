@@ -5,24 +5,28 @@
 Texture2D<float> gSrc;
 RWTexture2D<float> gDst;
 
-// Mapping Resources
-RWTexture2D<uint> gMapLightIdxToDirGM;   // Used if "isLightIdxPass", else it is cleared 
-RWTexture2D<uint> gMapDirToLightIndex;   // Used if "isLightIdxPass", else unused
-RWBuffer<uint> gMapLightIdxToDirCounter; // If "isLightIdxPass" counter is increased, else it is cleared
+#if IS_LIGHT_PASS
+    // Mapping Resources
+    RWTexture2D<uint> gMapLightIdxToDirGM;   // Used if "isLightIdxPass", else it is cleared
+    RWTexture2D<uint> gMapDirToLightIndexRW;   // Used if "isLightIdxPass", else unused
+    RWBuffer<uint> gMapLightIdxToDirCounter; // If "isLightIdxPass" counter is increased, else it is cleared
 
-Texture2D<uint> gMapRead; // If "isLightIdxPass" it is lastFrames gMapLightIdxToDirGM, else gMapDirToLightIndex
-Texture2D<uint> gReservedPhotonsPerLight;
-StructuredBuffer<uint> gReservedPhotons;
+    Texture2D<uint> gMapLightIdxToDirGMPrev; // If "isLightIdxPass" it is lastFrames gMapLightIdxToDirGM, else gMapDirToLightIndex
+    Texture2D<uint> gReservedPhotonsPerLight;
+    StructuredBuffer<uint> gReservedPhotons;
+#else
+    Texture2D<uint> gMapDirToLightIndex; //Mapping for Dir GM to Light Index
+#endif
 
 cbuffer CB {
     uint2 gDispatchDim;
     uint gDistributedPhotons;
-    bool gIsLightIdxPass;
-
     uint gGuidingTextureRes;
+
     uint gLightIdxRes;
     uint gMinPhotonsPerLight; // Guranteed less than kMinPhotonsNeededForLightGuiding
     uint gMapTextureSize;
+    uint _pad;
 }
 
 static const uint kMinPhotonsNeededForLightGuiding = LIGHT_GUIDING_MIN_PHOTONS;
@@ -40,7 +44,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         return;
 
     float numberPhotons = 0;
-    if (gIsLightIdxPass) {
+    #if IS_LIGHT_PASS
         const uint lightIndex = pixel.x + pixel.y * gLightIdxRes;
         //Valid light
         if (lightIndex < COUNT_LIGHTS) {
@@ -60,7 +64,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
             //Get Atlas Map index
             if (kUseAtlasOptimization) {
                 // Qualifies for directional guiding
-                uint prevMapIndex = gMapRead[pixel];
+                uint prevMapIndex = gMapLightIdxToDirGMPrev[pixel];
                 uint mapIndex = kMapIndexMax;
                 bool useMapping = (prevMapIndex < kAtlasOptimizationMaxIndex) && (numberPhotons > kMinPhotonsNeededForLightGuiding); //If previous index is valid the lower amount is fine
                 useMapping |= numberPhotons > kAtlasOptiMinPhotonsToCreate; // Else the higher amount of photons is needed to create the directional guiding texture
@@ -71,25 +75,26 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 {
                     gMapLightIdxToDirGM[pixel] = mapIndex;
                     uint2 mapPixel = uint2(mapIndex % gMapTextureSize, mapIndex / gMapTextureSize);
-                    gMapDirToLightIndex[mapPixel] = lightIndex;
+                    gMapDirToLightIndexRW[mapPixel] = lightIndex;
                 }
             }
         }
             
-    }
-    else {
+    #else
         uint2 lightIndexPixel = uint2(0); // Pixel in light index texture
         uint lightIndex = COUNT_LIGHTS;
         if (kUseAtlasOptimization) {
             uint2 mapPixel = pixel / gGuidingTextureRes;
 
-            lightIndex = gMapRead[mapPixel];
+            lightIndex = gMapDirToLightIndex[mapPixel];
             lightIndexPixel = uint2(lightIndex % gLightIdxRes, lightIndex / gLightIdxRes);
 
             // Clear Prev Atlas optimization resources
+            /*
             bool clearCounter = (pixel.x + pixel.y) == 0;
             if (clearCounter)
                 gMapLightIdxToDirCounter[0] = 0;
+            */
         } else {
             lightIndexPixel = pixel / gGuidingTextureRes;
             lightIndex = lightIndexPixel.x + lightIndexPixel.y * gLightIdxRes;
@@ -107,7 +112,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
                 numberPhotons = 1;
             }
         }
-    }
+    #endif
 
     gDst[pixel] = numberPhotons;
 }

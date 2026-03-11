@@ -334,7 +334,7 @@ private:
     ref<Buffer> mpPhotonCounter;    // Counter
     ref<Buffer> mpPhotonCounterCPU; // Counter CPU readable
     ref<Texture> mpGuidingAtlas[2];                  //Atlas for Guiding Textures for Photon Guiding
-    ref<Texture> mpGuidingAtlasPrevUnblurred;   //Atlas Guiding Textures used for the blur (temporal history needs to be retained)
+    ref<Texture> mpGuidingAtlasPrevUnblurred[2];   //Atlas Guiding Textures used for the blur (temporal history needs to be retained)
     ref<Texture> mpGuidingAtlasBlurHelper;           //Gaussian blur helper (separated)
     ref<Buffer> mpAtlasBlurWeights;                 //Weights for the atlas blur
     ref<Texture> mpRecordGuidingAtlas;            //Atlas texture to record guiding data.
@@ -393,7 +393,7 @@ private:
     ref<ComputePass> mpGuidingCounterReducePass; //Reduce on the guiding counter to obtain the total
     ref<ComputePass> mpGuidingBlurPass[2];         //Blurs the guiding atlas. Horizonal and vertical pass
     ref<ComputePass> mpGuidingLightIndexCounterReducePass;            // Uses same shader as above, but is may need other data formats
-    ref<ComputePass> mpMapGuidingToDistributedPhotonsPass;      //Maps the current guiding texture to the actual number of photons. Also guarantees that 1 photon is distributed per guiding pixel
+    ref<ComputePass> mpMapGuidingToDistributedPhotonsPass[2];      //Maps the current guiding texture to the actual number of photons. Also guarantees that 1 photon is distributed per guiding pixel. One pass for light and one for directional
     ref<ComputePass> mpGetFreePhotonsBasedOnDistPass;      //Uses a distance based metric to reserve photons per light instead of using a fixed value per light
     ref<ComputePass> mpGenerateGuidingMipTraverseChainPass; // Generates the mips for the guiding textures
     ref<ComputePass> mpGenerateLightIndexGuidingMipTraverseChainPass;  // Uses same shader as above, but is may need other data formats
