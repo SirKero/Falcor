@@ -118,7 +118,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
                         uint prevMapIdx = gMapLightIdxToDirGMPrev[lightPixel];
                         if (prevMapIdx < kAtlasOptimizationMaxMapIndex) {
                             prevPixel = prevPixel % gGMResolution;
-                            prevPixel += uint2(prevMapIdx % gMapResolution, prevMapIdx / gMapResolution);
+                            prevPixel += uint2(prevMapIdx % gMapResolution, prevMapIdx / gMapResolution) * gGMResolution;
                             oldWeightValid = true;
                         }
                     }
