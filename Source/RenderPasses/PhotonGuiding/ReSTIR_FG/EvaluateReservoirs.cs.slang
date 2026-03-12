@@ -239,9 +239,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
     #endif
 
         indirectLight += evaluateCausticReservoir(pixel, sg);
+
+        //indirectLight = min(indirectLight, 1000.0); //TODO only for ref to avoid extreme fireflies
         if (!kDisableIndirectLight)
             outColor += indirectLight;
-       
     }else{
         outColor = gScene.envMap.eval(viewDir);
     }
