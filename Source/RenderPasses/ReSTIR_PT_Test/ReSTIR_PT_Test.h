@@ -135,7 +135,7 @@ private:
 
     PathLengthSettings mPathLengthSettings;
     float3 mNeeLightSelectProb = float3(0.33f); //Light selection probability for NEE samples (Emissive, Analytic, EnvMap)
-    float mRoughnessThreshold = 0.25f;  //Threshold for reuse
+    float mRoughnessThreshold = 0.20f;  //Threshold for reuse
     float mJacobianDistanceThreshold = 0.0001f; //Distance Threshold
     bool mEvalDeltaPDFs = false; //If true uses correct delta pdfs for resampling (pdf = 0)
 
