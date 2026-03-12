@@ -687,8 +687,10 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
 
     //Enable Atlas Optimization if enough lights are in the scene
     if (lightCountWasResetted) {
-        if(mEmissiveLightCount + mAnalyticLightCount > mAtlasOptimizationMaxDirectionGuidingMaps * 16)
+        if (mEmissiveLightCount + mAnalyticLightCount > mAtlasOptimizationMaxDirectionGuidingMaps * 16) {
             mUseDirectionAtlasOptimization = true;
+            mGuidingUseDistanceBasedMinPhoton = true;
+        }            
     }
 }
 
