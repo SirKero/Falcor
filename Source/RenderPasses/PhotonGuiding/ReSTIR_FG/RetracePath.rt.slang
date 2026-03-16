@@ -269,7 +269,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         float jacobian = rpd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); //Jacobian for this iteration
 
         // Delta -> Emissive case
-        if (reservoir.flags.isEmissiveHit && pathLength == reservoir.pathLength && rpd.specularPath && hitIsEmissive)
+        if (reservoir.flags.isEmissiveHit && pathLength == reservoir.pathLength && (rpd.specularPath || reservoir.flags.firstHitIsDelta) && hitIsEmissive)
         {
             float misWeight = 1.0;
             float neeEmissiveProbability = gNeeLightSelectProb[kNeeLightTypeEmissive];
