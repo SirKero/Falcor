@@ -141,7 +141,7 @@ bool traceFGRay(RayDesc ray, inout SampleGenerator sg, inout PathData pd, inout 
         // Emissive hits are undefined for final gather rays
         if (any(bsdfProperties.emission > 0) || (pd.lastHitDiffuse && !hitIsDiffuse))
         {
-            if (collectCaustics) // Path is completely specular 
+            if (collectCaustics && pd.firstHitIsDelta) // Path is completely specular 
                 emission += bsdfProperties.emission * pd.thp;
             break;
         }
