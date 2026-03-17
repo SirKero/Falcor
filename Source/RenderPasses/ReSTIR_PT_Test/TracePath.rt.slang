@@ -151,10 +151,10 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 }
                 float3 envMapContribution = misWeight * gScene.envMap.eval(ray.Direction) * pd.reconThp;
                 if (addSampleToReservoir(reservoir, sampleNext1D(sg), envMapContribution, pd.thp)) {
+                    reservoir.pathLength = pd.pathLength;
                     uint pathFlags = (uint)ReservoirPathFlags::isEnvMapMiss;
                     if (!pd.reconnectIsSet) {
                         pd.jacobianRc = pd.scatterPdf;
-                        reservoir.pathLength = pd.pathLength;
                         pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                     }
                     reservoir.jacobianDeterminant = pd.jacobianRc;
@@ -189,6 +189,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 pd.jacobianRc = pd.scatterPdf * abs(dot(sd.faceN, -ray.Direction)) / (rayDist * rayDist); // Reconnection jacobian determinant
                 reservoir.packedSampleWo = pd.packedSampleWo;
                 pd.reconnectIsSet = true;
+                reservoir.rcPathLength = pd.pathLength;
                 pd.rcPathLength = pd.pathLength; //used to set certain values for the reservoir
             }
             else // Set new reconnection surface if last hit was specular
@@ -198,7 +199,6 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         }
 
         // Ray hits emissive (only used after 2nd bounce, as RTXDI handles direct light)
-        
         if (hitEmissive && pd.pathLength > 1) {
             //Get hit in light collection representation
             TriangleHit triangleHit = hit.getTriangleHit();
@@ -217,11 +217,11 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             float3 emissiveRadiance = misWeight * bsdfProperties.emission * pd.reconThp; // Is also w, as primary path space is used (pdf == 1)
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), emissiveRadiance, pd.thp))
             {
+                reservoir.pathLength = pd.pathLength;
                 uint pathFlags = (uint)ReservoirPathFlags::isScatter;
                 if (!pd.reconnectIsSet) {
                     float distToSample = distance(lastOrigin, sd.posW);
                     pd.jacobianRc = pd.scatterPdf * abs(dot(lastFaceNormal, ray.Direction)) / (distToSample * distToSample);
-                    reservoir.pathLength = pd.pathLength;
                     pathFlags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface;
                 }
                 reservoir.jacobianDeterminant = pd.jacobianRc;
@@ -246,10 +246,10 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             //TODO use endIsNEE case if sample is below the distance threshold? 
             if (addSampleToReservoir(reservoir, sampleNext1D(sg), nee, pd.thp) && any(nee > 0))
             {
+                reservoir.pathLength = pd.pathLength;
                 reservoir.sgRCNee = neeSgState;
                 uint pathFlags = (uint)ReservoirPathFlags::isNee;
                 if (!pd.reconnectIsSet) {
-                    reservoir.pathLength = pd.pathLength;
                     pd.jacobianRc = ls.pdf;
                     if (!ls.isInfiniteDistance) {
                         pd.jacobianRc *= abs(dot(sd.faceN, ls.dir)) / (ls.distance * ls.distance);

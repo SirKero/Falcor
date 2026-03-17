@@ -119,7 +119,7 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
     bool reservoirContributes = current.isValid();
     RetracedSurface retracedSurface = RetracedSurface();
     bool retracedSurfaceValid = true; // If the surface is not valid MIS is skipped
-    if (reservoirContributes && current.pathLength > 0)
+    if (reservoirContributes && current.rcPathLength != 1)
         retracedSurfaceValid = loadRetraceSurface(retraceSurfaceIndex, retracedSurface, false);
 
     if (reservoirContributes) {
@@ -135,7 +135,7 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
             float3 thpOther = float3(1);
 
             // Load retraced surface
-            if (current.pathLength > 0 && retracedSurfaceValid) {
+            if (current.rcPathLength != 1 && retracedSurfaceValid) {
                 sdTemporal = loadShadingData(HitInfo(retracedSurface.rcSurface), -retracedSurface.rcViewDir, lod);
                 thpOther = retracedSurface.thp;
             }
@@ -162,7 +162,7 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
     //Load retraced surface for temporal reservoir
     retracedSurface = RetracedSurface();
     retracedSurfaceValid = true; // If the surface is not valid MIS is skipped
-    if (temporalCanBeSelected && temporal.pathLength > 0)
+    if (temporalCanBeSelected && temporal.rcPathLength != 1)
         retracedSurfaceValid = loadRetraceSurface(retraceSurfaceIndex, retracedSurface, true);
 
     if (temporalCanBeSelected) {
@@ -179,7 +179,7 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
             float3 thpOther = float3(1);
 
             // Load retraced surface
-            if (temporal.pathLength > 0 && retracedSurfaceValid) {
+            if (temporal.rcPathLength != 1 && retracedSurfaceValid) {
                 sdCurrent = loadShadingData(HitInfo(retracedSurface.rcSurface), -retracedSurface.rcViewDir, lod);
                 thpOther = retracedSurface.thp;
             }

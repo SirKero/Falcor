@@ -51,8 +51,8 @@ struct ReservoirFlags {
     // Replaces path flag. Assumes that it is already or'ed
     [mutating]
     void setReservoirPathFlags(uint pathFlag) {
-        flags &= ~0xFFFF0000; // Clear all flag bits
-        flags |= pathFlag & 0xFFFF0000;
+        flags &= 0xFFFF; // Clear all flag bits
+        flags |= pathFlag & (~0xFFFF);
     }
 
     property uint pathLength {

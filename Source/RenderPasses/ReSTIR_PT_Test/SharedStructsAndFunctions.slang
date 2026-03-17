@@ -20,14 +20,14 @@ static const int kLobeIsSpecular = 2;
 //
 
 enum ReservoirPathFlags : uint {
-    endIsNee = 0x100,                   //1<<8
-    isNee = 0x200,                      // 1<<9
-    isScatter = 0x400,                  // 1<<10
-    isEnvMapMiss = 0x800,               // 1<<11
-    hasNoReconnectionSurface = 0x1000,  //1<<12
-    isReconnectionPath = 0x2000,        //1<<13
-    isNeeAfterReconnection = 0x4000,    // 1<<14
-    firstHitIsDelta = 0x8000            // 1<<15
+    endIsNee = 0x10000,                 // 1<<16
+    isNee = 0x20000,                    // 1<<17
+    isScatter = 0x40000,                // 1<<18
+    isEnvMapMiss = 0x80000,             // 1<<19
+    hasNoReconnectionSurface = 0x100000, // 1<<20
+    isReconnectionPath = 0x200000,       // 1<<21
+    isNeeAfterReconnection = 0x400000,   // 1<<22
+    firstHitIsDelta = 0x800000            // 1<<23
 }
 
 struct ReservoirFlags {
@@ -40,8 +40,8 @@ struct ReservoirFlags {
     //Replaces path flag. Assumes that it is already or'ed
     [mutating]
     void setReservoirPathFlags(uint pathFlag) {
-        flags &= ~0xFF00; // Clear all flag bits
-        flags |= pathFlag;
+        flags &= 0xFFFF; // Clear all flag bits
+        flags |= pathFlag & (~0xFFFF);
     }
 
     property uint pathLength {
@@ -49,6 +49,14 @@ struct ReservoirFlags {
         set {
             flags &= ~0xFF; // Clear lower bits
             flags |= (newValue & 0xFF);
+        }
+    }
+
+    property uint rcPathLength {
+        get { return (flags & 0xFF00)>>8; }
+        set {
+            flags &= ~0xFF00; // Clear bits
+            flags |= (newValue << 8) & 0xFF00;
         }
     }
 
@@ -144,6 +152,7 @@ struct ReservoirPT
         thp = float3(1);
         weight = 0.0;
         jacobianOutgoing = 1;
+        rcPathLength = 0xFF;
     }
 
     bool isValid() {
@@ -153,6 +162,11 @@ struct ReservoirPT
     property uint pathLength {
         get { return flags.pathLength; }
         set { flags.pathLength = newValue;}
+    }
+
+    property uint rcPathLength {
+        get { return flags.rcPathLength; }
+        set { flags.rcPathLength = newValue;}
     }
 
     property float3 sampleWo {
