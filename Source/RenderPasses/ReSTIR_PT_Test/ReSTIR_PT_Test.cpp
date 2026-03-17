@@ -130,7 +130,9 @@ void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
         changed |= group.checkbox("Enable Resampling", mEnableResampling);
         changed |= group.var("ConfidenceCap", mConfidenceCap, 1u, UINT_MAX, 1u);
         changed |= group.var("SpatialSamples", mSpatialSamples, 0u, 32u, 1u);
-        changed |= group.var("SpatialRadius", mSpatialSampleRadius, 1.f, FLT_MAX, 0.1f);        
+        changed |= group.var("SpatialRadius", mSpatialSampleRadius, 1.f, FLT_MAX, 0.1f);
+
+        changed |= group.checkbox("Enable RC Path Retracing", mRetraceRCPath);
     }
 
     if (auto group = widget.group("RTXDI"))
@@ -321,6 +323,13 @@ void ReSTIR_PT_Test::prepareResources(RenderContext* pRenderContext, const Rende
             );
             mpRetraceSurfaceBuffer[i]->setName("RetraceSurfaceBuffer_" + std::to_string(i));
         }
+
+        if (!mpRetraceRCSurfaceThpTexture[i])
+        {
+            mpRetraceRCSurfaceThpTexture[i] = Texture::create2D(mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA32Float,
+                1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+            mpRetraceRCSurfaceThpTexture[i]->setName("RetraceRCThroughput" + std::to_string(i));
+        }
     }
 
     if (!mpViewPrev)
@@ -462,6 +471,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      mResampleRetracePathPass.pProgram->addDefine("JACOBIAN_DISTANCE_THRESHOLD", std::to_string(mJacobianDistanceThreshold));
      mResampleRetracePathPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
      mResampleRetracePathPass.pProgram->addDefine("EVAL_DELTA_PDFS", mEvalDeltaPDFs ? "1" : "0");
+     mResampleRetracePathPass.pProgram->addDefine("RETRACE_RC_PATH", mRetraceRCPath ? "1" : "0");
      if (mpEmissiveLightSampler)
          mResampleRetracePathPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
@@ -492,10 +502,12 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
 
      var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
      var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
-     var["gRetraceSurfacePrev"] = mpRetraceSurfaceBuffer[(mFrameCount + 1) % 2];
+     var["gRetraceSurfacePrev"] = mpRetraceSurfaceBuffer[1]; //For other sample
 
      var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
-     var["gRetraceSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
+     var["gRetraceSurface"] = mpRetraceSurfaceBuffer[0]; //For current sample
+     var["gRetraceRCPathThp"] = mpRetraceRCSurfaceThpTexture[0];
+     var["gRetraceRCPathThpPrev"] = mpRetraceRCSurfaceThpTexture[1];
 
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
@@ -523,6 +535,7 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
         defines.add(mpSampleGenerator->getDefines());
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
         defines.add("JACOBIAN_DISTANCE_THRESHOLD", std::to_string(mJacobianDistanceThreshold));
+        defines.add("RETRACE_RC_PATH", mRetraceRCPath ? "1" : "0");
 
         mpResamplePass = ComputePass::create(mpDevice, desc, defines, true);
     }
@@ -530,6 +543,7 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
 
     mpResamplePass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGGenNumberRenderPasses));
     mpResamplePass->getProgram()->addDefine("JACOBIAN_DISTANCE_THRESHOLD", std::to_string(mJacobianDistanceThreshold));
+    mpResamplePass->getProgram()->addDefine("RETRACE_RC_PATH", mRetraceRCPath ? "1" : "0");
 
     auto var = mpResamplePass->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
@@ -549,8 +563,10 @@ void ReSTIR_PT_Test::resamplingPass(RenderContext* pRenderContext, const RenderD
     var["gViewPrev"] = mpViewPrev;
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
     var["gReservoirPrev"] = mpReservoirPT[(mFrameCount + 1) % 2];
-    var["gRetracedSurfacePrev"] = mpRetraceSurfaceBuffer[(mFrameCount + 1) % 2];
-    var["gRetracedSurface"] = mpRetraceSurfaceBuffer[mFrameCount % 2];
+    var["gRetracedSurfacePrev"] = mpRetraceSurfaceBuffer[1];
+    var["gRetracedSurface"] = mpRetraceSurfaceBuffer[0];
+    var["gRetraceRCPathThp"] = mpRetraceRCSurfaceThpTexture[0];
+    var["gRetraceRCPathThpPrev"] = mpRetraceRCSurfaceThpTexture[1];
 
     var["gReservoir"] = mpReservoirPT[mFrameCount % 2];
 

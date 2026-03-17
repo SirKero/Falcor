@@ -15,6 +15,8 @@ Texture2D<float2> gMVec;
 StructuredBuffer<ReservoirPT> gReservoirPrev;
 StructuredBuffer<RetracedSurface> gRetracedSurface;
 StructuredBuffer<RetracedSurface> gRetracedSurfacePrev;
+Texture2D<float4> gRetraceRCPathThp;
+Texture2D<float4> gRetraceRCPathThpPrev;
 
 RWStructuredBuffer<ReservoirPT> gReservoir;
 
@@ -32,6 +34,7 @@ cbuffer CB
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const float kJacobianDistanceThreshold = JACOBIAN_DISTANCE_THRESHOLD;
+static const bool kRetraceRCPath = RETRACE_RC_PATH;
 
 bool loadRetraceSurface(uint index, inout RetracedSurface retracedSurface, bool isPrev) {
     if (isPrev)

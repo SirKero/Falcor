@@ -140,6 +140,7 @@ private:
     bool mEvalDeltaPDFs = false; //If true uses correct delta pdfs for resampling (pdf = 0)
 
     bool mEnableResampling = true;
+    bool mRetraceRCPath = true; //Traces the whole path for reconnection surfaces
     uint mConfidenceCap = 20;
     uint mSpatialSamples = 1;
     float mSpatialSampleRadius = 20.f;
@@ -151,7 +152,8 @@ private:
     // Resources
     //
     ref<Buffer> mpReservoirPT[2];   //Path Reservoir
-    ref<Buffer> mpRetraceSurfaceBuffer[2];  //Retrace Surface Data Buffer 
+    ref<Buffer> mpRetraceSurfaceBuffer[2];  //Retrace Surface Data Buffer
+    ref<Texture> mpRetraceRCSurfaceThpTexture[2]; //For retracing the throughput for rc surfaces
     ref<Texture> mpViewPrev;        //Previous frame View Vector
     ref<Texture> mpVBufferPrev;     //Previous frame VBuffer
 

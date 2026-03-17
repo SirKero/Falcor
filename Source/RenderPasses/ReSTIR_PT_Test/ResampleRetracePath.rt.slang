@@ -31,6 +31,9 @@ RWStructuredBuffer<RetracedSurface> gRetraceSurfacePrev;
 StructuredBuffer<ReservoirPT> gReservoir;
 RWStructuredBuffer<RetracedSurface> gRetraceSurface;
 
+RWTexture2D<float4> gRetraceRCPathThp;
+RWTexture2D<float4> gRetraceRCPathThpPrev;
+
 static const bool kUseEmissive = USE_EMISSIVE_LIGHT;
 static const bool kUseAnalytic = USE_ANALYTIC_LIGHT;
 static const bool kUseEnvMap = USE_ENV_BACKROUND;
@@ -41,7 +44,7 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const float kJacobianDistanceThreshold = JACOBIAN_DISTANCE_THRESHOLD;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
-static const bool kRetraceReconnectionSurface = true; //TODO set
+static const bool kRetraceRCPath = RETRACE_RC_PATH;
 
 
 struct RayPayload
