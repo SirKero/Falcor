@@ -192,10 +192,6 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
                 reservoir.rcPathLength = pd.pathLength;
                 pd.rcPathLength = pd.pathLength; //used to set certain values for the reservoir
             }
-            else // Set new reconnection surface if last hit was specular
-            {
-                reservoir.pathLength = pd.pathLength;
-            }
         }
 
         // Ray hits emissive (only used after 2nd bounce, as RTXDI handles direct light)
@@ -275,7 +271,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
         lastFaceNormal = sd.faceN;
 
         // New ray
-        pd.lastHitWasDiffuse = !currentIsDelta;
+        pd.lastHitWasDiffuse = hitIsDiffuse;
         int lobeType = -1;
         if (!sampleNewRay(sd, mi, rayDirSg, pd, ray, lobeType))
             break;
