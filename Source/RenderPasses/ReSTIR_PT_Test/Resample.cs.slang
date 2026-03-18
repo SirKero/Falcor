@@ -44,7 +44,7 @@ bool loadRetraceSurface(uint index, inout RetracedSurface retracedSurface, bool 
     return retracedSurface.isValid();
 }
 
-float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleSurface ,float3 thp, uint otherConfidence, inout SampleGenerator sg)
+float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleSurface ,float3 thp, float3 rcThp, uint otherConfidence, inout SampleGenerator sg)
 {
     float p0 = luminance(r.F);
 
@@ -72,7 +72,7 @@ float reconnectSurface(ReservoirPT r, ShadingData sdOther, ShadingData sdSampleS
     if (jacobian > 0 && (distToSample > kJacobianDistanceThreshold)) {
         if (dispatchShadowRay(sdOther, toSample, distToSample)) {
             float3 bsdf = miOther.eval(sdOther, toSample, sg) / pdf;
-            p1 = luminance(bsdf * jacobian * r.rcThp * thp);
+            p1 = luminance(bsdf * jacobian * rcThp * thp);
         }
     }
 
@@ -136,6 +136,10 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
         } else //Reconnect Surface
         {
             float3 thpOther = float3(1);
+            float3 rcThp = current.rcThp;
+            if (kRetraceRCPath)
+                rcThp = gRetraceRCPathThp[pixel].xyz;
+
 
             // Load retraced surface
             if (current.rcPathLength != 1 && retracedSurfaceValid) {
@@ -145,7 +149,7 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
 
             if (retracedSurfaceValid) {
                 ShadingData sdSampleSurface = loadShadingDataWithPrevHit(HitInfo(current.packedSampleSurface), sdTemporal.posW, lod);
-                mis = reconnectSurface(current, sdTemporal, sdSampleSurface, thpOther, temporal.c, sg);
+                mis = reconnectSurface(current, sdTemporal, sdSampleSurface, thpOther, rcThp, temporal.c, sg);
             }
         }
 
@@ -180,6 +184,9 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
         } else //Reconnect surface
         {
             float3 thpOther = float3(1);
+            float3 rcThp = temporal.rcThp;
+            if (kRetraceRCPath)
+                rcThp = gRetraceRCPathThpPrev[pixel].xyz;
 
             // Load retraced surface
             if (temporal.rcPathLength != 1 && retracedSurfaceValid) {
@@ -201,8 +208,6 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
                 jacobianTemporal *= abs(dot(sdSampleSurface.faceN, -toSample)) / (distToSample * distToSample);
                 jacobianDeterminant = jacobianTemporal / temporal.jacobianDeterminant;
 
-                gDebug[pixel] = float4(pdf,0,0, 1);
-
                 // Jacobian from sample outgoing
                 if (!temporal.flags.isNeeAfterReconnection) {
                     jacobianSampleOut = miSampleSurface.evalPdf(sdSampleSurface, temporal.sampleWo);
@@ -215,7 +220,7 @@ bool resampleReservoir(inout ReservoirPT current, int2 pixel, int2 reservoirPixe
                     } else {
                         thpTemporal = float3(0);
                     }
-                    Ftemporal = temporal.rcThp * thpTemporal * thpOther;
+                    Ftemporal = rcThp * thpTemporal * thpOther;
                 }
             }
         }

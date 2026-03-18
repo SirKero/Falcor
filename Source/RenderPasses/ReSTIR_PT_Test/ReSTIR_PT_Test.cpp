@@ -133,6 +133,9 @@ void ReSTIR_PT_Test::renderUI(Gui::Widgets& widget)
         changed |= group.var("SpatialRadius", mSpatialSampleRadius, 1.f, FLT_MAX, 0.1f);
 
         changed |= group.checkbox("Enable RC Path Retracing", mRetraceRCPath);
+        group.tooltip("Also retraces the path stored in the RC surface. Is needed to stay unbiased on animated scenes");
+        changed |= group.checkbox("Random Replay pass per reservoir", mSeperateRetracePass);
+        group.tooltip("Else, both random replay retrace operations are performed in one shader pass");
     }
 
     if (auto group = widget.group("RTXDI"))
@@ -493,6 +496,7 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
      var["CB"]["gNeeLightTypeSelectProbability"] = mNeeLightSelectProb;
      var["CB"]["gRNGNumPass"] = numResamplingIndex; 
      var["CB"]["gSpatialSampleRadius"] = mSpatialSampleRadius;
+     var["CB"]["gPassIdentifier"] = mSeperateRetracePass ? 1u : 0u;
 
      // Input Resources
      var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -511,6 +515,12 @@ void ReSTIR_PT_Test::tracePathPass(RenderContext* pRenderContext, const RenderDa
 
      // Dispatch Shader
      mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
+
+     // Dispatch second pass if the shader was split
+     if (mSeperateRetracePass) {
+        var["CB"]["gPassIdentifier"] = 2u;
+        mpScene->raytrace(pRenderContext, mResampleRetracePathPass.pProgram.get(), mResampleRetracePathPass.pVars, uint3(mScreenRes, 1));
+     }
 
  }
 

@@ -141,6 +141,7 @@ private:
 
     bool mEnableResampling = true;
     bool mRetraceRCPath = true; //Traces the whole path for reconnection surfaces
+    bool mSeperateRetracePass = true; //If false, traces both random replay paths in one shader
     uint mConfidenceCap = 20;
     uint mSpatialSamples = 1;
     float mSpatialSampleRadius = 20.f;
