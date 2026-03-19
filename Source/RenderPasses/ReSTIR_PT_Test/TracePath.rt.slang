@@ -234,8 +234,7 @@ float3 tracePath(RayDesc ray, inout SampleGenerator sg, inout SampleGenerator ra
             break;
 
         // Sample light (NEE)
-        bool currentIsDelta = bsdfProperties.roughness <= kDeltaRoughnessThreshold;
-        if (!currentIsDelta) {
+        if (hitIsDiffuse) {
             LightSample ls;
             SampleGenerator neeSgState = sg; // Cache sampleGenerator state
             float3 nee = nextEventEstimation(sd, mi, gNeeLightTypeSelectProbability , ls, sg) * pd.reconThp;
