@@ -123,6 +123,10 @@ private:
     std::string mOutputPrefixFolder = "videos";
     std::string mOutputPrefix;
     bool mDeleteDublicatesAtStartAndEnd = true;
+    std::string mEncoderOptions = "-c:v libx265 -preset medium -tune grain -x265-params \"aq-mode=3:aq-strength=1.0:sao=0\""; //"-c:v libx264 -preset medium";
+    std::string mVideoFormat = "yuv420p10le";//"yuv420p";
+    int mCrf = 16; //12;
+
 
     PathPoint mLastFramePathPoint;
     bool mLastFramePathPointValid = false;

@@ -302,6 +302,11 @@ void VideoRecorder::renderUI(RenderContext* pRenderContext, Gui::Widgets& widget
         }
     }
 
+    if (auto g = widget.group("FFMPEG Options")) {
+        g.textbox("Encoder Options", mEncoderOptions);
+        g.var("Constant Rate Facor (CRF)", mCrf, 0, 51 , 1);
+        g.textbox("Out Format" , mVideoFormat);
+    }
     // logic
     updateCamera();
 }
@@ -706,8 +711,8 @@ void VideoRecorder::stopRender()
 
         deleteFile(outputFilename); // delete old file (otherwise ffmpeg will not write anything)
         sprintf_s(
-            buffer, "ffmpeg -r %d -i %s%%04d.bmp -c:v libx264 -preset medium -crf 12 -vf \"fps=%d,format=yuv420p\" \"%s\" 2>&1", mFps,
-            filenameBase.c_str(), mFps, outputFilename.c_str()
+            buffer, "ffmpeg -framerate %d -i %s%%04d.bmp %s -crf %d -pix_fmt %s \"%s\" 2>&1", mFps,
+            filenameBase.c_str(), mEncoderOptions.c_str(), mCrf, mVideoFormat.c_str(), outputFilename.c_str()
         );
 
         // last frame, convert to video
