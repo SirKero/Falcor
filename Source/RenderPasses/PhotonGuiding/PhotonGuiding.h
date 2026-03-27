@@ -63,7 +63,7 @@ private:
     //
 
     //Prepares Falcors light samplers
-    void prepareLightingStructure(RenderContext* pRenderContext);
+    void prepareLightingStructure(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Prepares needed Buffers and Textures and Acceleration Structures
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
@@ -212,6 +212,9 @@ private:
     bool mUseLambertianDiffuse = false;         // Enable Lambert Diffuse BRDF instead of Frostbyte
     float mSpecularRoughnessThreshold = 0.20f; // Any material below this is considered specular
     bool mEvalDeltaPdfs = false;                // If true delta pdfs are properly evaluated (==0), if false they are set to 1.
+
+    //NRD
+    bool mEnableNRDOutputs = false;      //Enables NRD outputs
 
     //
     // Path Tracer

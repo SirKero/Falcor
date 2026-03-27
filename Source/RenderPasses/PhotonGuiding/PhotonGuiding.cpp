@@ -72,9 +72,17 @@ namespace
     //Output textures
     const std::string kOutputColor = "ColorOut";
     const std::string kOutputDebug = "DebugOut";
+    const std::string kOutputNRDDiffuseRadiance = "NRDDiffuseRadiance";
+    const std::string kOutputNRDSpecularRadiance = "NRDSpecularRadiance";
+    const std::string kOutputNRDDiffuseReflectance = "NRDDiffuseReflectance";
+    const std::string kOutputNRDSpecularReflectance = "NRDSpecularReflectance";
     const Falcor::ChannelList kOutputChannels{
         {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float},
-        {kOutputDebug, "gDebug", "Debug Texture", true /*optional*/, ResourceFormat::RGBA32Float}
+        {kOutputDebug, "gDebug", "Debug Texture", true /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputNRDDiffuseRadiance, "gNRDDiffuseRadiance", "NRD demodulated diffuse color (linear)", true /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputNRDSpecularRadiance, "gNRDSpecularRadiance", "NRD demodulated specular color (linear)", true /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputNRDDiffuseReflectance, "gNRDDiffuseReflectance", "NRD primary surface diffuse reflectance", true /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputNRDSpecularReflectance, "gNRDSpecularReflectance", "NRD primary surface specular reflectance", true /*optional*/, ResourceFormat::RGBA32Float}
     };
 
     const std::string kShaderModel = "6_6";
@@ -181,7 +189,7 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     mOptionsChanged = false;
 
     // Prepare needed Falcor helpers and Buffers/Textures
-    prepareLightingStructure(pRenderContext);
+    prepareLightingStructure(pRenderContext, renderData);
 
     //Return if there is no emissive light
     if (mTotalLightCount == 0)
@@ -562,6 +570,8 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
     if (auto group = widget.group("Debug"))
     {
+        if(mEnableNRDOutputs)
+            group.text("NRD Outputs Enabled");
         group.checkbox("Freeze Guiding Texture", mDebugFreezeGuidingTextures);
         group.checkbox("Show Guiding Texture", mDebugShowGuidingTexture);
         if (mDebugShowGuidingTexture)
@@ -588,7 +598,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
     mOptionsChanged = changed;
 }
 
-void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
+void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext, const RenderData& renderData)
 {
     // Make sure that the emissive light is up to date
     auto& pLights = mpScene->getLightCollection(pRenderContext);
@@ -690,7 +700,12 @@ void PhotonGuiding::prepareLightingStructure(RenderContext* pRenderContext)
         if (mEmissiveLightCount + mAnalyticLightCount > mAtlasOptimizationMaxDirectionGuidingMaps * 16) {
             mUseDirectionAtlasOptimization = true;
             mGuidingUseDistanceBasedMinPhoton = true;
-        }            
+        }
+
+        //Check if NRD outputs are enabled
+        if(renderData[kOutputNRDDiffuseRadiance] && renderData[kOutputNRDDiffuseReflectance]
+            && renderData[kOutputNRDSpecularRadiance] && renderData[kOutputNRDSpecularReflectance])
+            mEnableNRDOutputs = true;
     }
 }
 
@@ -2514,6 +2529,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
+        defines.add("USE_NRD", mEnableNRDOutputs ? "1" : "0"); //Cannot change during runtime
         defines.add(getRuntimeDefines());
        
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -2557,6 +2573,14 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
     var["gGuidingCounter"] = mpRecordGuidingAtlas;
     var["gLightIndexGuidingCounter"] = mpRecordLightIndexGuidingTexture;
     var["gMapLightIndexToGuidingDirection"] = mpMapLightIdxToGuidingDirection[mFrameCount % 2];
+
+    //NRD outputs
+    if (mEnableNRDOutputs) {
+        var["gDiffuseRadiance"] = renderData[kOutputNRDDiffuseRadiance]->asTexture();
+        var["gSpecularRadiance"] = renderData[kOutputNRDSpecularRadiance]->asTexture();
+        var["gDiffuseReflectance"] = renderData[kOutputNRDDiffuseReflectance]->asTexture();
+        var["gSpecularReflectance"] = renderData[kOutputNRDSpecularReflectance]->asTexture();
+    }
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
