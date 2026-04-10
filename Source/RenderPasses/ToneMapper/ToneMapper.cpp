@@ -260,10 +260,10 @@ void ToneMapper::execute(RenderContext* pRenderContext, const RenderData& render
         std::stringstream stream;
         stream << exportPath << "\\" << exportFileName;
         stream << std::setfill('0') << std::setw(5) << exportFrameNum;
-        stream << ".png";
+        stream << ".bmp";
         std::filesystem::path path = stream.str();
 
-        pDst->captureToFile(0, 0, path.string(), Bitmap::FileFormat::PngFile, Bitmap::ExportFlags::None);
+        pDst->captureToFile(0, 0, path.string(), Bitmap::FileFormat::BmpFile);
     }
 }
 
