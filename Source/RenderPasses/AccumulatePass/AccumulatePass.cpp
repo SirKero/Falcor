@@ -221,7 +221,19 @@ void AccumulatePass::execute(RenderContext* pRenderContext, const RenderData& re
         accumulate(pRenderContext, pSrc, pDst);
         if (mUseExportImage && mStartExporting)
         {
-            exportImage(pRenderContext, pDst);
+            if (mExportToToneMapper) {
+                auto& dict = renderData.getDictionary();
+                dict[kRenderExportPath] = mFolderPathStr;
+                dict[kRenderExportFileName] = mFileName;
+                dict[kRenderExportNumImage] = (int)mFrameCount;
+            }
+            else {
+                exportImage(pRenderContext, pDst);
+            }
+        }
+        if (mExportToToneMapper && (!mUseExportImage || !mStartExporting)) {
+                auto& dict = renderData.getDictionary();
+                dict[kRenderExportNumImage] = -1;
         }
     }
     else
@@ -395,6 +407,8 @@ void AccumulatePass::renderUI(Gui::Widgets& widget)
             // Export settings
             widget.textbox("StorePath", mFolderPathStr, Gui::TextFlags::FitWindow);
             widget.textbox("FileName", mFileName, Gui::TextFlags::FitWindow);
+            widget.checkbox("Export in ToneMapper", mExportToToneMapper);
+            widget.tooltip("Enables export to tone mapper");
 
             for (uint i = 0; i < mSkipItCount.size(); i++)
             {
@@ -403,8 +417,14 @@ void AccumulatePass::renderUI(Gui::Widgets& widget)
             }
 
             // Reset if export started
-            if (widget.checkbox("Start Exporting", mStartExporting))
-                reset();
+            if (!mStartExporting) {
+                if (widget.button("Start Export")) {
+                    mStartExporting = true;
+                    reset();
+                }
+            }else{
+                mStartExporting = !widget.button("Stop Export");
+            }
         }
     }
 }

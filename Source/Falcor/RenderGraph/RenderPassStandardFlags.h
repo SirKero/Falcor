@@ -61,6 +61,11 @@ static const char kRenderPassTime[] = "_time";
 static const char kRenderGraph[] = "_renderGraph";
 static const char kRenderGlobalClock[] = "_renderGlobalClock";
 
+//Export to other pass for export Accumulate -> ToneMapper
+static const char kRenderExportPath[] = "_renderExportPath";
+static const char kRenderExportFileName[] = "_renderExportFileName";
+static const char kRenderExportNumImage[] = "_renderExportNumImage"; //Export Accumulate -> ToneMapper
+
 //NRD Flags
 static const char kRenderPassEnableNRD[] = "_enableNRD";
 static const char kRenderPassUseNRDDebugLayer[] = "_useNRDDebugLayer";

@@ -125,6 +125,7 @@ protected:
     // Export
     bool mUseExportImage = false; ///< Enable export of images
     bool mStartExporting = false;
+    bool mExportToToneMapper = false; //< Sends to dict flag to export in the tone mapper
     std::vector<int> mSkipItStart = {4000, 1800, 800, 400};
     std::vector<uint> mSkipItCount = {100, 50, 10, 2};
     std::string mFolderPathStr = "";

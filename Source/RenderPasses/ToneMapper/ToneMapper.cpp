@@ -26,6 +26,7 @@
  # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **************************************************************************/
 #include "ToneMapper.h"
+#include "RenderGraph/RenderPassStandardFlags.h"
 #include "Utils/Color/ColorUtils.h"
 #include <fstd/bit.h> // TODO C++20: Replace with <bit>
 
@@ -248,6 +249,22 @@ void ToneMapper::execute(RenderContext* pRenderContext, const RenderData& render
     }
 
     mpToneMapPass->execute(pRenderContext, pFbo);
+
+    //Check if export is enabled in the accumulate pass
+    auto& dict = renderData.getDictionary();
+    auto exportFrameNum = dict.getValue(kRenderExportNumImage, -1);
+    if (exportFrameNum >= 0) {
+        auto exportPath = dict.getValue(kRenderExportPath, std::string(""));
+        auto exportFileName = dict.getValue(kRenderExportFileName, std::string(""));
+
+        std::stringstream stream;
+        stream << exportPath << "\\" << exportFileName;
+        stream << std::setfill('0') << std::setw(5) << exportFrameNum;
+        stream << ".png";
+        std::filesystem::path path = stream.str();
+
+        pDst->captureToFile(0, 0, path.string(), Bitmap::FileFormat::PngFile, Bitmap::ExportFlags::None);
+    }
 }
 
 void ToneMapper::createLuminanceFbo(const ref<Texture>& pSrc)
