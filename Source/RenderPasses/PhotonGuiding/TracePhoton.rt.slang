@@ -277,6 +277,7 @@ bool createGuidingLightSample(float4 randomVal, out PhotonLightSample pls)
     */
 }
 
+// TODO fix the guiding probablity
 bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, out PhotonLightSample pls)
 {
     pls = {};
@@ -365,7 +366,7 @@ bool createGuidingSampleFixed(uint2 pixel, uint dispatchDimX, float2 randomVal, 
         float directionalPhotons = gGuidingTexture.Load(uint3(mipIdx, gGuidingTextureMaxMip));
         useDirectionalGuiding = (tw - directionalPhotons) <= 0 && directionalPhotons >= kFixedPhotonGuidingMinPhotons;    //All photon greater 0 are left over photons from flooring the directional importance
     }
-    
+
     pls.useRandomLightDirection = !useDirectionalGuiding;
 
     //Perform traversal of the directional guiding map
