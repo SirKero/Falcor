@@ -10,6 +10,7 @@ import Rendering.Lights.LightHelpers;
 import Utils.Math.PackedFormats;
 import Utils.Math.FormatConversion;
 import Utils.Color.ColorHelpers;
+import Rendering.PhotonGuiding.PhotonGuiding;
 
 import PhotonData;
 
@@ -25,6 +26,7 @@ Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 StructuredBuffer<AABB> gPhotonAABB[2];
 StructuredBuffer<PhotonDataPacked> gPackedPhotonData[2];
+StructuredBuffer<PhotonGuidingData> gPhotonGuidingData[2];
 Texture2D<PackedHitInfo> gVBufferFirstHit;
 Texture2D<float4> gThp;
 
@@ -34,6 +36,7 @@ RWTexture2D<float4> gColor;
 //Acceleration Structure
 RaytracingAccelerationStructure gPhotonAS;
 
+static const bool kEnablePhotonGuiding = ENABLE_PHOTON_GUIDING;
 
 /** Payload for ray (48B).
 */
@@ -104,8 +107,16 @@ void anyHit(inout RayData rayData : SV_RayPayload, SphereAttribs attribs : SV_In
     let bsdfProperties = bsdf.getProperties(sd);
     float3 f_r = bsdf.eval(sd, pd.dir, rayData.sg); //right sign?
     float NdotL = saturate(dot(bsdfProperties.guideNormal, pd.dir));
+    float3 F = max(0.f, (f_r * pd.flux) / (NdotL * attribs.radius * attribs.radius));
     if (NdotL > 0)
-        rayData.radiance += max(0.f, (f_r * pd.flux) / (NdotL * attribs.radius * attribs.radius));  //Take out the NdotL that is included in the eval function
+        rayData.radiance += F;  //Take out the NdotL that is included in the eval function
+
+    if (kEnablePhotonGuiding) {
+        PhotonGuidingData pgd = gPhotonGuidingData[InstanceIndex()][primIndex];
+
+        gPhotonGuiding.addGuidingContribution(pgd.lightIndex, pgd.guidingPixels, luminance(F));
+    }
+
     IgnoreHit();
 }
 

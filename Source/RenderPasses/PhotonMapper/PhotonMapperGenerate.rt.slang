@@ -37,7 +37,7 @@ cbuffer CB
     float gGenerationLampIntersectGuardStoreProbability; //Percentage a photon is stored
     float2 gRandomRadiusOffset; //Random offset
 
-    int gCausticsBounces; //Number of diffuse bounces allowed for caustic photons
+    int gCausticsBounces; // Number of diffuse bounces allowed for caustic photons
     uint3 _pad;
 };
 
@@ -50,6 +50,7 @@ cbuffer Light{
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<PhotonDataPacked> gPackedPhotonData[2];
+RWStructuredBuffer<PhotonGuidingData> gPhotonGuidingData[2];
 RWStructuredBuffer<uint> gPhotonCounter;
 Texture2D<uint> gPhotonCullingMask;
 
@@ -67,6 +68,7 @@ enum class GenerationFlags // : uint32_t
 
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const uint kUsePhotonCulling = USE_PHOTON_CULLING;
+static const bool kUseGuiding = USE_PHOTON_GUIDING;
 static const uint kRayFlagTerminatedMiss = 1;
 static const uint kRayFlagTerminatedHit = 2;
 
@@ -114,8 +116,11 @@ struct PhotonInfo
 struct PhotonLightSample
 {
     float3 posW;
+    uint lightIndex;
     float3 normal;
+    float rnd0;
     float3 flux;
+    float rnd1;
 };
 
 float3 fromWordlToLocal(const in float3 normal, float3 w)
@@ -158,6 +163,7 @@ bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls ){
     // Test the threshold in the current table entry; pick one of the two options
     triangleIndex = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
 
+    pls.lightIndex = triangleIndex;
     float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * gEmissiveSampler._emissivePower.invWeightsSum;
     
     const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
@@ -199,6 +205,7 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
     //Uniformly sample one of the analytic lights
     float rndLightIdx = float(lightCount) * sampleNext1D(sg);
     uint lightIdx = min(uint(floor(rndLightIdx)), lightCount - 1);
+    pls.lightIndex = lightIdx;
     LightData lightData = gScene.getLight(lightIdx);
 
     //Only Point(+ Spot) lights are supported (due to RTXDI)
@@ -208,6 +215,8 @@ bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample p
     float3 woLocal;
     float3 rnd = sampleNext3D(sg);
     rnd.z = 0;
+    pls.rnd0 = rnd.x;
+    pls.rnd1 = rnd.y;
     float spotAngle = lightData.cosOpeningAngle;
     if (lightData.openingAngle < M_2PI) //If the opening angle is smaller than 2PI it is a spotlight
     {
@@ -344,9 +353,12 @@ void rayGen()
     else { //Emissive light sample
         if (!createLightSample(lightSg, pls))
             return;
-    
+
         float lightDirPDF = 1.0;
-        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(lightSg), lightDirPDF);
+        float2 rnd = sampleNext2D(lightSg);
+        pls.rnd0 = rnd.x;
+        pls.rnd1 = rnd.y;
+        float3 woLocal = sample_cosine_hemisphere_concentric(rnd, lightDirPDF);
 
         if (lightDirPDF <= 0.f)
             return;
@@ -380,7 +392,15 @@ void rayGen()
     uint currentCausticBounces = 0;
     bool storeAsCaustic = false;
     bool reflectedDiffuse = false;
-        
+
+#if USE_PHOTON_GUIDING
+    PhotonGuidingData pgd = {};
+    pgd.lightIndex = pls.lightIndex;
+    pgd.guidingPixels = uint2(64 * pls.rnd0, 64 * pls.rnd1);
+    uint2 lightIdx2D = uint2(pls.lightIndex % 8, pls.lightIndex / 8);
+    pgd.guidingPixels += lightIdx2D * 64;
+#endif
+
     //recursion where the photons are shot
     for (uint i = 0; i < gMaxRecursion && !rayData.terminated; i++)
     {        
@@ -435,8 +455,11 @@ void rayGen()
                     pd.flux = photon.flux;
                     pd.dir = -photon.dir;
                     pd.packedNormal = rayData.packedNormal;
-                
+
                     gPackedPhotonData[photonType][photonIndex] = pd.pack();
+                    #if USE_PHOTON_GUIDING
+                        gPhotonGuidingData[photonType][photonIndex] = pgd;
+                    #endif
                 }
             }
             

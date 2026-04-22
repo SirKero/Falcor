@@ -34,6 +34,7 @@
 #include "Rendering/Lights/EmissiveUniformSampler.h"
 //Accel
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
+#include "Rendering/PhotonGuiding/PhotonGuiding.h"
 
 using namespace Falcor;
 
@@ -104,6 +105,7 @@ private:
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS; // Accel Pointer
+    std::unique_ptr<PhotonGuiding> mpPhotonGuiding; //Guiding
 
     //
     // Parameters
@@ -122,7 +124,7 @@ private:
     float mPhotonRejection = 0.3f;                // Probability a global photon is stored
     uint mNumDispatchedPhotons = 2000000;         // Number of Photons dispatched
     uint mPhotonYExtent = 512;                    // Dispatch Y extend
-    uint2 mNumMaxPhotons = uint2(400000, 100000); // Size of the photon buffer
+    uint2 mNumMaxPhotons = uint2(2000000, 2000000); // Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;
     uint2 mCurrentPhotonCount = uint2(1000000); // Gets data from GPU buffer
     float mASBuildBufferPhotonOverestimate = 1.15f;
@@ -157,12 +159,16 @@ private:
     bool mEnableRandomSize = false;
     float2 mRandomSizeRadiusRange = float2(0.005f, 0.001f);
 
+    //Photon Guiding
+    bool mEnableGuiding = true;
+
     //
     // Buffer and Textures
     //
 
     ref<Buffer> mpPhotonAABB[2];    // Photon AABBs for Acceleration Structure building
     ref<Buffer> mpPhotonData[2];    // Additional Photon data (flux, dir)
+    ref<Buffer> mpPhotonGuidingData[2]; //Per photon data for guiding
     ref<Buffer> mpPhotonCounter;    // Counter for the number of lights
     ref<Buffer> mpPhotonCounterCPU; // For showing the current number of photons in the UI
     ref<Texture> mpPhotonCullingMask; // Mask for photon culling

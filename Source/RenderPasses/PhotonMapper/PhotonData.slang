@@ -67,6 +67,20 @@ struct PhotonData
     }
 };
 
+struct PhotonGuidingData
+{
+    uint lightIndex;
+    uint packedGuidingPixels;
+
+    // Guiding pixels helper
+    property uint2 guidingPixels {
+        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = newValue.x & 0xFFFF;
+            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+        }
+    }
+}
 
 //Helper functions for hash cell calculation
 
