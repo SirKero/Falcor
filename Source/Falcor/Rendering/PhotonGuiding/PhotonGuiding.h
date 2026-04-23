@@ -115,5 +115,8 @@ namespace Falcor
         */ 
         void prepareResources(RenderContext* pRenderContext);
 
+        /* Reduce pass to get light and total contribution
+        */
+        void reduceContributionPass(RenderContext* pRenderContext);
     };
 }

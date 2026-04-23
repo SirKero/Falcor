@@ -6,9 +6,9 @@ namespace Falcor
     namespace
     {
         const std::string kShaderFolder = "Rendering/PhotonGuiding/"; 
-        const std::string kReduceShaderFile = kShaderFolder + "Reduce.cs.slang";
+        const std::string kShaderReduce = kShaderFolder + "Reduce.cs.slang";
 
-
+        const std::string kShaderModel = "6_6";
     }
 
     PhotonGuiding::PhotonGuiding(ref<Device> pDevice, ref<Scene> pScene, RenderContext* pRenderContext)
@@ -196,5 +196,21 @@ namespace Falcor
                 mpReservedPhoton->setName("PhotonGuiding:ReservedPhotonsPerLight");
             }
         }
+    }
+
+    void PhotonGuiding::reduceContributionPass(RenderContext* pRenderContext) {
+        FALCOR_PROFILE(pRenderContext, "ReduceContribution");
+
+        if (!mpReducePass)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kShaderReduce).csEntry("main").setShaderModel(kShaderModel);
+
+            DefineList defines;
+            mpReducePass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        //
+
     }
 } //namespace Falcor
