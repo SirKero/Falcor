@@ -118,5 +118,9 @@ namespace Falcor
         /* Reduce pass to get light and total contribution
         */
         void reduceContributionPass(RenderContext* pRenderContext);
+                
+        /* Render loop used in the reduction pass
+        */
+        void reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMip, const uint dstMip);
     };
 }

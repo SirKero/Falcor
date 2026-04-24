@@ -30,7 +30,8 @@ namespace Falcor
 
     void PhotonGuiding::update(RenderContext* pRenderContext)
     {
-        //TODO
+        reduceContributionPass(pRenderContext);
+
         pRenderContext->clearUAV(mpContributionDirection->getUAV(0).get(), uint4(0));
     }
 
@@ -198,9 +199,43 @@ namespace Falcor
         }
     }
 
+    void PhotonGuiding::reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMipLevel, const uint dstMipLevel)
+    {
+        /* A loop for the reduce pass. Uses work group reduce if there are 5 or more mip levels left and uses a simple mip reduce for the remaining levels.
+        * Could be optimized further, but current state is sufficently fast
+        */
+
+        auto var = mpReducePass->getRootVar();
+        bool useMipReduce = false;      //Mip reduce is used if remaining levels <5
+        uint increments = 5;            //The optimized workgroup reduce can handle exactly 5 levels
+
+        for(uint mip = startMipLevel; mip < dstMipLevel; mip += increments)
+        {
+             //If there are less than 5 levels left, switch to Mip based reduce
+            if (!useMipReduce && (mip + increments) >= dstMipLevel)
+            {
+                increments = 1;
+                useMipReduce = true;
+            }
+            uint dstMip = mip + increments;
+            //Use half resolution of src mip level, as the four nearest samples are always summed
+            uint3 dispatchDims = uint3(pContributionTex->getWidth(mip), pContributionTex->getHeight(mip), 2u) / 2u; 
+
+            //Set shader resources
+            var["CB"]["gDstSize"] = dispatchDims.xy();
+            var["CB"]["gUseMip"] = useMipReduce;
+
+            var["gSrc"].setSrv(pContributionTex->getSRV(mip, 1u));
+            var["gDst"].setUav(pContributionTex->getUAV(dstMip, 0u, 1u));
+
+            mpReducePass->execute(pRenderContext, dispatchDims);
+        }
+    }
+
     void PhotonGuiding::reduceContributionPass(RenderContext* pRenderContext) {
         FALCOR_PROFILE(pRenderContext, "ReduceContribution");
 
+        //Initialize the shader
         if (!mpReducePass)
         {
             Program::Desc desc;
@@ -209,8 +244,22 @@ namespace Falcor
             DefineList defines;
             mpReducePass = ComputePass::create(mpDevice, desc, defines, true);
         }
+                
+        //Depending if the mapping scheme is used or not, different reductions are needed
+        //If it is not used, the directional contribution is reduced to light and then total contribution
+        //When the mapping scheme is used, only the light contribution needs to be reduced to total contribution
+        if(!mOptions.useMappingScheme) //Directional Contribution 2 step reduce (direction->light->total)
+        {
+            const uint mipLevelMax = mpContributionDirection->getMipCount() - 1;
+            const uint mipLevelLight = mMipLevelsDirGM-1;     //Mip level of the light contribution
 
-        //
+            reduceLoop(pRenderContext, mpContributionDirection, 0, mipLevelLight); //(direction->light)
+            reduceLoop(pRenderContext, mpContributionDirection, mipLevelLight, mipLevelMax); //(light->total)
 
+        }else //Light Contribution 1 step reduce (light->total)
+        {
+            const uint mipLevelMax = mpContributionLight->getMipCount() - 1;
+            reduceLoop(pRenderContext, mpContributionLight, 0, mipLevelMax); //(light->total)
+        }        
     }
 } //namespace Falcor
