@@ -281,13 +281,14 @@ target_sources(Falcor PRIVATE
     Rendering/Materials/BSDFs/SpecularMicrofacet.slang
     Rendering/Materials/BSDFs/StandardBSDF.slang
 
-	Rendering/PhotonGuiding/CreateGuidingMaps.cs.slang
 	Rendering/PhotonGuiding/DynamicPhotonMin.cs.slang
 	Rendering/PhotonGuiding/PhotonGuiding.cpp
 	Rendering/PhotonGuiding/PhotonGuiding.h
 	Rendering/PhotonGuiding/PhotonGuiding.slang
 	Rendering/PhotonGuiding/Reduce.cs.slang
-
+	Rendering/PhotonGuiding/UpdateGuidingMaps.cs.slang
+	Rendering/PhotonGuiding/UpdateHistograms.cs.slang
+	
     Rendering/RTXDI/EnvLightUpdater.cs.slang
     Rendering/RTXDI/LightUpdater.cs.slang
     Rendering/RTXDI/PackedTypes.slang

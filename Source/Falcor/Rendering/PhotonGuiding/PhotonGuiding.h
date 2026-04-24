@@ -30,6 +30,10 @@ namespace Falcor
             uint guidingMapResolution = 64;
             uint discretizedContributionFactor = 256;
             uint discretizedContributionMax = 1024;
+            float exponentialMovingAverageFactor = 0.3f;
+            uint reservedPhotonsPerLight = 64;
+            uint reservedPhotonsPerDirection = 1;
+            uint photonNeededForGM = 4096;      //1 Photon per light on 64x64 dir GMs
 
             bool useMappingScheme = false;
             uint mappingDirGMCount = 64;
@@ -50,7 +54,7 @@ namespace Falcor
 
         /* 
         */
-        void update(RenderContext* pRenderContext);
+        void update(RenderContext* pRenderContext, uint maxPhotonsDistributed);
 
         /* Get defines needed for recording the contribution. Can change at runtime
         */
@@ -73,7 +77,7 @@ namespace Falcor
         uint            mMipLevelsDirGM = 0;        //MIP levels for Directional Guiding Map
         uint            mResolutionLightGM = 0;     //Size (x&y) of the texture that includes all lights
         uint            mResolutionDirGM = 0;       //Size (x&y) of the texture that includes all GMs
-
+        uint            mGuidingIterationCount = 0; //Number of guiding iterations
         //
         // Resources
         //
@@ -101,7 +105,8 @@ namespace Falcor
         //
 
         ref<ComputePass> mpReducePass;              //Reduces the Contribution
-
+        ref<ComputePass> mpUpdateHistogramsPass[2];    //Updates the histogram with the normalized contribution. 0=Light, 1=Direction
+        ref<ComputePass> mpUpdateGuidingMapsPass[2];   //Updates the guiding maps with the histograms. 0=Light, 1=Direction
 
         //
         // Internal Functions
@@ -121,6 +126,19 @@ namespace Falcor
                 
         /* Render loop used in the reduction pass
         */
-        void reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMip, const uint dstMip);
+        void reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMip, const uint dstMip, const bool forceMipMapGen = false);
+
+        /*
+        */
+        void updateGuidingMaps(RenderContext* pRenderContext, uint maxPhotonsDistributed);
+
+        /* Caluclates current Histogram weight from the contribution and updates temporally with
+        *  the histogram weight from last frame
+        */
+        void updateHistogramsPass(RenderContext* pRenderContext, bool isDirectionalResource);
+
+        /*
+        */
+        void updateGuidingMapsPass(RenderContext* pRenderContext, uint maxPhotonsDistributed, bool isDirectionalResource);
     };
 }

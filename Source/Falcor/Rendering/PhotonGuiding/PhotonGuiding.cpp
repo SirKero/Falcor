@@ -7,6 +7,8 @@ namespace Falcor
     {
         const std::string kShaderFolder = "Rendering/PhotonGuiding/"; 
         const std::string kShaderReduce = kShaderFolder + "Reduce.cs.slang";
+        const std::string kShaderUpdateHistograms = kShaderFolder + "UpdateHistograms.cs.slang"; 
+        const std::string kShaderUpdateGuidingMaps = kShaderFolder + "UpdateGuidingMaps.cs.slang"; 
 
         const std::string kShaderModel = "6_6";
     }
@@ -28,11 +30,18 @@ namespace Falcor
         clearResources();
     }
 
-    void PhotonGuiding::update(RenderContext* pRenderContext)
+    void PhotonGuiding::update(RenderContext* pRenderContext, uint maxPhotonsDistributed)
     {
+        FALCOR_PROFILE(pRenderContext, "PhotonGuiding_UpdateResources");
+
+        //Get per light and total contribution
         reduceContributionPass(pRenderContext);
 
+        //
+        updateGuidingMaps(pRenderContext, maxPhotonsDistributed);
+
         pRenderContext->clearUAV(mpContributionDirection->getUAV(0).get(), uint4(0));
+        mGuidingIterationCount++;
     }
 
     DefineList PhotonGuiding::getDefines()
@@ -199,15 +208,15 @@ namespace Falcor
         }
     }
 
-    void PhotonGuiding::reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMipLevel, const uint dstMipLevel)
+    void PhotonGuiding::reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMipLevel, const uint dstMipLevel, const bool forceMipMapGen)
     {
         /* A loop for the reduce pass. Uses work group reduce if there are 5 or more mip levels left and uses a simple mip reduce for the remaining levels.
         * Could be optimized further, but current state is sufficently fast
         */
 
         auto var = mpReducePass->getRootVar();
-        bool useMipReduce = false;      //Mip reduce is used if remaining levels <5
-        uint increments = 5;            //The optimized workgroup reduce can handle exactly 5 levels
+        bool useMipReduce = forceMipMapGen;         //Mip reduce is used if remaining levels <5 or if forced
+        uint increments = forceMipMapGen ? 1 : 5; //The optimized workgroup reduce can handle exactly 5 levels
 
         for(uint mip = startMipLevel; mip < dstMipLevel; mip += increments)
         {
@@ -261,5 +270,157 @@ namespace Falcor
             const uint mipLevelMax = mpContributionLight->getMipCount() - 1;
             reduceLoop(pRenderContext, mpContributionLight, 0, mipLevelMax); //(light->total)
         }        
+    }
+
+    void PhotonGuiding::updateGuidingMaps(RenderContext* pRenderContext, uint maxPhotonsDistributed)
+    {
+
+        updateHistogramsPass(pRenderContext, false);
+
+        updateGuidingMapsPass(pRenderContext, maxPhotonsDistributed, false);
+
+        updateHistogramsPass(pRenderContext, true);
+
+        updateGuidingMapsPass(pRenderContext, maxPhotonsDistributed, true);
+    }
+
+    void PhotonGuiding::updateHistogramsPass(RenderContext* pRenderContext, bool isDirectionalResource)
+    {
+        std::string profileName = "UpdateHistogram_";
+        profileName += isDirectionalResource ? "Direction" : "Light";
+        FALCOR_PROFILE(pRenderContext, profileName);
+
+        //Shared runtime defines for Histogram and Guiding Map update
+        auto getRuntimeDefines = [&]()
+        {
+            DefineList defines;
+            defines.add("LIGHT_COUNT", std::to_string(mTotalLightCount));
+            defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
+            return defines;
+        };
+
+        //Get Compute Pass
+        uint passIndex = isDirectionalResource ? 1 : 0;
+        ref<ComputePass>& pUpdateHistogramPass = mpUpdateHistogramsPass[passIndex];
+
+        //Create Shader
+        if (!pUpdateHistogramPass)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kShaderUpdateHistograms).csEntry("main").setShaderModel(kShaderModel);
+
+            DefineList defines;
+            defines.add("IS_DIRECTIONAL", isDirectionalResource ? "1" : "0");
+            defines.add(getRuntimeDefines());
+            
+            pUpdateHistogramPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        pUpdateHistogramPass->getProgram()->addDefines(getRuntimeDefines()); //Update defines
+        auto var = pUpdateHistogramPass->getRootVar();
+
+        //Set resources
+        var["CB"]["gDispatchSize"] = isDirectionalResource ? mResolutionDirGM : mResolutionLightGM;
+        var["CB"]["gIterationCount"] = mGuidingIterationCount;
+        var["CB"]["gDirectionalResourceSize"] = mOptions.guidingMapResolution;
+        var["CB"]["gExponentialMovingAverageFactor"] = mOptions.exponentialMovingAverageFactor;
+
+        // Depending if mapping is used, different contribution textures are used
+        // If mapping is disabled, light contribution is stored at a mipmap level of the directional contribution
+        // else, a seperate resource is bound.
+        if (mOptions.useMappingScheme)
+        {
+            //TODO
+        }
+        else
+        {
+            if (isDirectionalResource)
+            {
+                var["gTotalContribution"].setSrv(mpContributionDirection->getSRV(mMipLevelsDirGM - 1,1u));
+                var["gContribution"].setSrv(mpContributionDirection->getSRV(0,1u));
+                var["gHistogram"] = mpHistogramDirection;
+            }
+            else
+            {
+                var["gTotalContribution"].setSrv(mpContributionDirection->getSRV(mpContributionDirection->getMipCount()-1,1u));
+                var["gContribution"].setSrv(mpContributionDirection->getSRV(mMipLevelsDirGM - 1,1u));
+                var["gHistogram"] = mpHistogramLight;
+            }
+        }
+        
+        uint3 dispatchIndex = isDirectionalResource ?
+            uint3(mResolutionDirGM,mResolutionDirGM,1) :
+            uint3(mResolutionLightGM,mResolutionLightGM,1);
+
+        pUpdateHistogramPass->execute(pRenderContext, dispatchIndex);
+    }
+
+    void PhotonGuiding::updateGuidingMapsPass(RenderContext* pRenderContext, uint maxPhotonsDistributed, bool isDirectionalResource)
+    {
+        std::string profileName = "UpdateGuidingMap_";
+        profileName += isDirectionalResource ? "Direction" : "Light";
+        FALCOR_PROFILE(pRenderContext, profileName);
+
+        //Shared runtime defines for Histogram and Guiding Map update
+        auto getRuntimeDefines = [&]()
+        {
+            DefineList defines;
+            defines.add("LIGHT_COUNT", std::to_string(mTotalLightCount));
+            defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
+            defines.add("RESERVED_PHOTONS_PER_CELL", isDirectionalResource ?
+                std::to_string(mOptions.reservedPhotonsPerDirection) :
+                std::to_string(mOptions.reservedPhotonsPerLight));
+            defines.add("PHOTONS_NEEDED_FOR_DIR_GM", std::to_string(mOptions.photonNeededForGM));
+            return defines;
+        };
+
+        //Get Compute Pass
+        uint passIndex = isDirectionalResource ? 1 : 0;
+        ref<ComputePass>& pUpdateGuidingMapsPass = mpUpdateGuidingMapsPass[passIndex];
+
+        //Create Shader
+        if (!pUpdateGuidingMapsPass)
+        {
+            Program::Desc desc;
+            desc.addShaderLibrary(kShaderUpdateGuidingMaps).csEntry("main").setShaderModel(kShaderModel);
+
+            DefineList defines;
+            defines.add("IS_DIRECTIONAL", isDirectionalResource ? "1" : "0");
+            defines.add(getRuntimeDefines());
+            
+            pUpdateGuidingMapsPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        pUpdateGuidingMapsPass->getProgram()->addDefines(getRuntimeDefines()); //Update defines
+        auto var = pUpdateGuidingMapsPass->getRootVar();
+
+        //Calculate the free photons for the light Guiding Map
+        uint freePhotonsPerLight = maxPhotonsDistributed;
+        if(!isDirectionalResource)
+        {
+            freePhotonsPerLight = maxPhotonsDistributed - mOptions.reservedPhotonsPerLight * mTotalLightCount;
+        }
+
+         //Set resources
+        var["CB"]["gDispatchSize"] = isDirectionalResource ? mResolutionDirGM : mResolutionLightGM;
+        var["CB"]["gIterationCount"] = mGuidingIterationCount;
+        var["CB"]["gDirectionalResourceSize"] = mOptions.guidingMapResolution;
+        var["CB"]["gFreePhotonsLight"] = freePhotonsPerLight;
+
+        auto pGuidingMap = isDirectionalResource ? mpGuidingMapsDirection : mpGuidingMapLight;
+        var["gHistogram"] = isDirectionalResource ? mpHistogramDirection : mpHistogramLight;
+        var["gGuidingMap"] = pGuidingMap;
+        if(isDirectionalResource)
+            var["gGuidingMapLight"] = mpGuidingMapLight;
+
+        uint3 dispatchIndex = isDirectionalResource ?
+            uint3(mResolutionDirGM,mResolutionDirGM,1) :
+            uint3(mResolutionLightGM,mResolutionLightGM,1);
+
+        pUpdateGuidingMapsPass->execute(pRenderContext, dispatchIndex);
+
+        //Reuse the reduce loop to generate MipMaps for the Guiding Maps, that are used for top-down quadtree traversal
+        reduceLoop(pRenderContext, pGuidingMap, 0, pGuidingMap->getMipCount()-1, true);
+
     }
 } //namespace Falcor

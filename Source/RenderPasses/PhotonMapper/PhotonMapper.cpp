@@ -108,9 +108,6 @@ void PhotonMapper::execute(RenderContext* pRenderContext, const RenderData& rend
         mpPhotonGuiding = std::make_unique<PhotonGuiding>(mpDevice, mpScene, pRenderContext);
     }
 
-    if(mpPhotonGuiding)
-        mpPhotonGuiding->update(pRenderContext);
-
     // Prepare used Datas and Buffers
     prepareLighting(pRenderContext);
 
@@ -120,6 +117,9 @@ void PhotonMapper::execute(RenderContext* pRenderContext, const RenderData& rend
 
     // RenderPasses
     handlePhotonCounter(pRenderContext);
+
+    if(mpPhotonGuiding)
+        mpPhotonGuiding->update(pRenderContext, mNumDispatchedPhotons);
 
     traceTransmissiveDelta(pRenderContext, renderData);
 
