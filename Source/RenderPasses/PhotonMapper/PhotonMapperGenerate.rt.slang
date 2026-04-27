@@ -13,6 +13,7 @@ import Utils.Color.ColorHelpers;
 import Rendering.Materials.Microfacet;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
+import Rendering.PhotonGuiding.PhotonGuiding;
 
 import Hash;
 import PhotonData;
@@ -334,45 +335,68 @@ void rayGen()
 
     const float invRejection = 1.f / gRejection;
     const float invInvRejection = 1.f / (1.f - gRejection);
-    
-    SampleGenerator lightSg = SampleGenerator(launchIndex, gFrameCount + 5 * 13); //Sample Generator for the light sampel
+
+    SampleGenerator lightSg = SampleGenerator(launchIndex, gFrameCount + 5 * 13); // Sample Generator for the light sampel
+    float3 photonFlux = float3(0);
     RayDesc ray;
-    PhotonLightSample pls;
-
-#if USE_EMISSIVE_LIGHT
-    if (gFlags & (uint) GenerationFlags::AnalyticLight)
-#endif
-    {   //Analytic light sample
-        float3 sampleDir;
-        if (!createLightSampleAnalytic(lightSg, pls, sampleDir))
-            return;
-    
-        ray.Direction = sampleDir;
-    }
-#if USE_EMISSIVE_LIGHT  
-    else { //Emissive light sample
-        if (!createLightSample(lightSg, pls))
-            return;
-
-        float lightDirPDF = 1.0;
-        float2 rnd = sampleNext2D(lightSg);
-        pls.rnd0 = rnd.x;
-        pls.rnd1 = rnd.y;
-        float3 woLocal = sample_cosine_hemisphere_concentric(rnd, lightDirPDF);
-
-        if (lightDirPDF <= 0.f)
-            return;
-    
-        ray.Direction = normalize(fromLocalToWorld(pls.normal, woLocal));
-        //pls.flux /= lightDirPDF;
-        pls.flux *= M_PI;   //Lambert Emitter
-    }
-#endif    
-    pls.flux /= launchDim.x * launchDim.y; //Division through all dipatched photons
-
-    ray.Origin = pls.posW;
     ray.TMin = 0.0f;
     ray.TMax = 10000.f;
+
+#if USE_PHOTON_GUIDING
+    PhotonGuidingSample pgs = {};
+    if (!gPhotonGuiding.sampleGuidedLightAndDirection(launchIndex, launchDim.x, sampleNext2D(lightSg), pgs))
+        return;
+    PhotonGuidingPhotonLightSample pls = {};
+    if (!gPhotonGuiding.createPhotonSample(pgs, lightSg, pls))
+        return;
+
+    ray.Origin = pls.posW;
+    ray.Direction = pls.dirW;
+    photonFlux = pls.flux;
+    
+    //Temporal Fix
+    PhotonGuidingData pgd = {};
+    pgd.lightIndex = pgs.lightIndex;
+    pgd.guidingPixels = uint2(64 * pgs.directionUV);
+    uint2 lightIdx2D = uint2(pgs.lightIndex % 8, pgs.lightIndex / 8);
+    pgd.guidingPixels += lightIdx2D * 64;
+#else // USE_PHOTON_GUIDING
+    PhotonLightSample pls;
+
+    #if USE_EMISSIVE_LIGHT
+        if (gFlags & (uint)GenerationFlags::AnalyticLight)
+    #endif
+        { // Analytic light sample
+            float3 sampleDir;
+            if (!createLightSampleAnalytic(lightSg, pls, sampleDir))
+                return;
+
+            ray.Direction = sampleDir;
+        }
+    #if USE_EMISSIVE_LIGHT
+        else { // Emissive light sample
+            if (!createLightSample(lightSg, pls))
+                return;
+
+            float lightDirPDF = 1.0;
+            float2 rnd = sampleNext2D(lightSg);
+            pls.rnd0 = rnd.x;
+            pls.rnd1 = rnd.y;
+            float3 woLocal = sample_cosine_hemisphere_concentric(rnd, lightDirPDF);
+
+            if (lightDirPDF <= 0.f)
+                return;
+
+            ray.Direction = normalize(fromLocalToWorld(pls.normal, woLocal));
+            // pls.flux /= lightDirPDF;
+            pls.flux *= M_PI; // Lambert Emitter
+        }
+    #endif
+    pls.flux /= launchDim.x * launchDim.y; // Division through all dipatched photons
+
+    ray.Origin = pls.posW;
+    photonFlux = pls.flux;
+#endif
 
     // Prepare ray payload.
     RayData rayData = RayData.create();
@@ -393,18 +417,10 @@ void rayGen()
     bool storeAsCaustic = false;
     bool reflectedDiffuse = false;
 
-#if USE_PHOTON_GUIDING
-    PhotonGuidingData pgd = {};
-    pgd.lightIndex = pls.lightIndex;
-    pgd.guidingPixels = uint2(64 * pls.rnd0, 64 * pls.rnd1);
-    uint2 lightIdx2D = uint2(pls.lightIndex % 8, pls.lightIndex / 8);
-    pgd.guidingPixels += lightIdx2D * 64;
-#endif
-
     //recursion where the photons are shot
     for (uint i = 0; i < gMaxRecursion && !rayData.terminated; i++)
     {        
-        photon.flux = pls.flux * rayData.thp;
+        photon.flux = photonFlux * rayData.thp;
         TraceRay(gScene.rtAccel, rayFlags, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayData);
 
          //Stop if a light source was hit

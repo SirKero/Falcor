@@ -1,3 +1,26 @@
+#pragma once
+#include "Utils/Math/MathConstants.slangh"
+
+import Scene.RaytracingInline; //TODO this is a bit overkill
+import Utils.Sampling.SampleGenerator;
+import Utils.Geometry.GeometryHelpers;
+import Utils.Math.MathHelpers;
+
+//A sample created from the Guiding Map
+struct PhotonGuidingSample
+{
+    uint lightIndex;           //Light Index
+    float2 directionUV;        // Random value in [0,1] for directional sampling
+    float photonFluxDivFactor; // Scale factor the flux needs to be divided by, as guiding changes the probabilities
+};
+
+//A photon sampled from the scene
+struct PhotonGuidingPhotonLightSample
+{
+    float3 posW;
+    float3 dirW;
+    float3 flux;
+};
 
 struct PhotonGuiding
 {
@@ -13,8 +36,25 @@ struct PhotonGuiding
     RWTexture2D<uint> gContributionLight;           //Contribution for each light. Can be nullptr
     RWTexture2D<uint> gContributionDirection;       // Contribution for all directions
     Texture2D<uint> gMapLightToDirection;           //Mapping from light index -> directional resource, or invalid. Can be nullptr
+
+    // Gen Sample
+    static const uint kTotalLightCount = PHOTON_GUIDING_TOTAL_LIGHT_COUNT;
+    static const uint kTraversalBlockSize = PHOTON_GUIDING_TRAVERSAL_BLOCK_SIZE;
+    static const uint kLightGuidingMapMaxMip = PHOTON_GUIDING_LIGHT_GM_MAX_MIP;
+    static const uint kDirectionGuidingMapMaxMip = PHOTON_GUIDING_DIRECTION_GM_MAX_MIP;
+    static const uint kMinPhotonsForDirectionalGuiding = PHOTON_GUIDING_MIN_PHOTONS_FOR_DIR_GUIDING;
+    static const uint kAnalyticLightIndexOffset = PHOTON_GUIDING_ANALYTIC_LIGHT_OFFSET;
+
+    Texture2D<uint> gGuidingMapLight;       //Light Guiding Map
+    Texture2D<uint> gGuidingMapsDirection;  //Atlas with the directional Guiding Maps
+
+    struct TraversalSample {
+        uint2 pixel;        //Selected pixel of the traversal sample
+        uint photonCount;   //Photon count of the selected cell
+    };
 };
 
+//"Public" Functions
 extension PhotonGuiding
 {
     /*  Records guiding contribution of a photon
@@ -55,6 +95,195 @@ extension PhotonGuiding
         // Record the directional contribution
         InterlockedAdd(gContributionDirection[guidingPixel], discretizedContribution);
     }
+
+    /* Samples a light and direction using the Guiding Maps
+    */
+    bool sampleGuidedLightAndDirection(uint2 pixel, uint dispatchDimX, float2 randomVal, out PhotonGuidingSample pgs)
+    {
+        pgs = {};
+        if (kTotalLightCount == 0)
+            return false;
+
+        // Get 1D index for traversal. For increased locality of samples, we linearize in blocks
+        // Note dispatchSize of the shader should be a multiple of kTraversalBlockSize
+        uint2 blockPixel = pixel % kTraversalBlockSize; //Local block index
+        uint2 blockID = pixel / kTraversalBlockSize;    // 2D-ID for the block
+        uint localBlockIndex = blockPixel.x + blockPixel.y * kTraversalBlockSize;
+        uint blockOffset = blockID.x * (kTraversalBlockSize * kTraversalBlockSize) + blockID.y * dispatchDimX * kTraversalBlockSize; // Note one block size cancels out in the added term
+        uint photonID = localBlockIndex + blockOffset; //Unique photon ID for traversal
+
+        // Get max photons from the highest mip of the light guiding map
+        uint maxPhotons = gGuidingMapLight.Load(uint3(0, 0, kLightGuidingMapMaxMip));
+
+        //Abort early if photon is not distributed by the guiding map
+        if (photonID >= maxPhotons)
+            return false;
+
+        // Top-Down quadtree traversal for the light
+        TraversalSample lightTS = topDownMipMapTraversal(gGuidingMapLight, photonID, kLightGuidingMapMaxMip);
+
+        // Get 1D light index from the mip index after traversal
+        pgs.lightIndex = lightTS.pixel.x + lightTS.pixel.y * gResolutionLightGM;
+
+        // Check, if the light has enough photons to use directional guiding
+        bool useDirectionalGuiding = lightTS.photonCount >= kMinPhotonsForDirectionalGuiding;
+
+        //TODO Check atlas mapping
+
+        // Check if the current photon is directionally guided or should be distributed randomly
+        // The discrepancy between light GM photon count and directional GM photon count is due to the
+        // lower bound approximations for the photon count in each cell
+        if (useDirectionalGuiding)
+        {
+            float dirGMTotalPhotons = gGuidingMapsDirection.Load(uint3(lightTS.pixel, kDirectionGuidingMapMaxMip));
+            useDirectionalGuiding = photonID < dirGMTotalPhotons;
+        }
+
+        // If the directional Guiding Map is valid, traverse to get the corresponding directional cell
+        if (useDirectionalGuiding)
+        {
+            TraversalSample dirTS = topDownMipMapTraversal(gGuidingMapsDirection, photonID, kDirectionGuidingMapMaxMip);
+
+            // Create photon sample from the selected cell
+            uint2 localIndex = dirTS.pixel % gResolutionGM; // Local index
+            float2 uvMin = float2(localIndex) / gResolutionGM;      //UV of top-left of the choosen pixel
+            float2 uvMax = float2(localIndex + 1) / gResolutionGM;  // UV of bottom-right of the choosen pixel
+            pgs.directionUV = uvMin + (uvMax - uvMin) * randomVal;  // Final uv with random jitter within the pixel
+            //Divide factor for the lights flux. 
+            pgs.photonFluxDivFactor = (dirTS.photonCount / maxPhotons) * gResolutionGM * gResolutionGM;
+        } else //Use a random direction instead to create the sample
+        {
+            pgs.directionUV = randomVal;
+            pgs.photonFluxDivFactor = lightTS.photonCount / maxPhotons;
+        }
+
+        return true;
+    }
+
+    bool createPhotonSample(PhotonGuidingSample pgs, inout SampleGenerator sg , out PhotonGuidingPhotonLightSample pls)
+    {
+        pls = {};
+        // Is the light emissive or analytic?
+        bool isAnalytic = pgs.lightIndex >= kAnalyticLightIndexOffset;
+
+        float3 woLocal = float3(0);
+        float3 lightNormal = float3(0);
+
+        if (isAnalytic) //Point or Spot
+        {
+            // Get scenes light data with the analytic index
+            const uint analyticLightIndex = pgs.lightIndex - kAnalyticLightIndexOffset;
+            LightData lightData = gScene.getLight(analyticLightIndex);
+            // Only Point (and Spot) lights are supported
+            if (lightData.type != uint(LightType::Point))
+                return false;
+
+            float spotAngle = lightData.cosOpeningAngle;
+            // Depending on the opening angle, the light is a spot or point light
+            if (lightData.openingAngle < M_2PI) //Spot Light
+            {
+                // TODO support penumbra
+                woLocal = sample_cone(pgs.directionUV, spotAngle);
+            } else // Point Light
+            {
+                spotAngle = 0; //Just to be sure
+                woLocal = sample_sphere(pgs.directionUV);
+            }
+            float invLightPdf = M_2PI * (1.0 - spotAngle);
+
+            if (invLightPdf <= 0.f)
+                return false;
+
+            lightNormal = lightData.dirW;
+            pls.posW = lightData.posW;
+            pls.flux = lightData.intensity * invLightPdf;
+        } else //Emissive Triangle
+        {
+            // Get emissive triangle data
+            const EmissiveTriangle tri = gScene.lightCollection.getTriangle(pgs.lightIndex);
+            const float3 barycentrics = sample_triangle(sampleNext2D(sg)); //Position on the triangle is random
+            pls.posW = tri.getPosition(barycentrics);
+            lightNormal = tri.normal;
+
+            // Sample emissive material of the triangle
+            float2 uv = tri.getTexCoord(barycentrics);
+            pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
+
+            pls.posW = computeRayOrigin(pls.posW, lightNormal); // Offset as this light is real geometry
+
+            // Sample direction in a cosine lobe
+            float lightDirPDF = 1.0;
+            woLocal = sample_cosine_hemisphere_concentric(pgs.directionUV, lightDirPDF);
+            if (lightDirPDF <= 0.) //Invalid direction
+                return false;
+            pls.flux *= M_PI; // Lambert Emitter
+        }
+
+        // Convert direction local -> world
+        float3 bitangent = perp_stark(lightNormal);
+        float3 tangent = cross(bitangent, lightNormal);
+        pls.dirW = woLocal.x * tangent + woLocal.y * bitangent + woLocal.z * lightNormal;
+
+        // Apply flux scale factor
+        pls.flux /= pgs.photonFluxDivFactor;
+        return true;
+    }
+}
+
+//"Private" Functions
+extension PhotonGuiding
+{
+    /* Top-Down Quadtree traversal using mipmaps.
+    */
+    TraversalSample topDownMipMapTraversal(Texture2D<uint> tex, inout uint photonID, const uint maxMipLevel)
+    {
+        // Get the light index by traversing (top-down quadtree traversal) the light Guiding Map
+        uint2 mipIndex = uint2(0);     // Current traversal index (start top left of 2x2 block)
+        uint selectedCellPhotons = 0;  // Photons for the cell after traversal
+
+        // Start traversal at 2nd highest mip level (with size 2x2)
+        [unroll]
+        for (int mipLevel = maxMipLevel - 1; mipLevel >= 0; mipLevel--)
+        {
+            // Update Mip index to one level deeper. Corresponds to top-left of the 2x2 block
+            mipIndex *= 2;
+
+            // Fetch samples in 2x2 block
+            uint4 photonCells;
+            photonCells[0] = tex.Load(uint3(mipIndex.x, mipIndex.y, mipLevel));         // Top-Left
+            photonCells[1] = tex.Load(uint3(mipIndex.x + 1, mipIndex.y, mipLevel));     // Top-Right
+            photonCells[2] = tex.Load(uint3(mipIndex.x, mipIndex.y + 1, mipLevel));     // Bottom-Left
+            photonCells[3] = tex.Load(uint3(mipIndex.x + 1, mipIndex.y + 1, mipLevel)); // Bottom-Right
+
+            // Select one of the four cells using the photonID
+            uint sumPhotons = 0;   // Sum of looked at cells
+            uint selectedCell = 0; // in [0,3]; uses Z-Curve pattern
+            for (; selectedCell < 4; selectedCell++)
+            {
+                uint sumWithCell = sumPhotons + photonCells[selectedCell];
+                if (photonID < sumWithCell)
+                    break;
+                sumPhotons = sumWithCell;
+            }
+
+            // Update photonID for next iteration by subtracting all not choosen looked at photon cells
+            photonID -= sumPhotons;
+
+            // Set mipIndex to choosen cell
+            if (selectedCell == 1 || selectedCell == 3) // Left offset (1,3)
+                mipIndex.x += 1;
+            if (selectedCell > 1) // Bottom offset (2,3)
+                mipIndex.y += 1;
+
+            // End of traversal reached, store cell photon count
+            if (mipLevel == 0)
+                selectedCellPhotons = photonCells[selectedCell];
+        }
+        TraversalSample ts;
+        ts.pixel = mipIndex;
+        ts.photonCount = selectedCellPhotons;
+        return ts;
+    } 
 }
 
 // Global Bound Block

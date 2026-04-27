@@ -50,6 +50,15 @@ namespace Falcor
         defines.add("PHOTON_GUIDING_DISCRETIZED_CONTRIBUTION_FACTOR", std::to_string(mOptions.discretizedContributionFactor));
         defines.add("PHOTON_GUIDING_DISCRETIZED_CONTRIBUTION_MAX", std::to_string(mOptions.discretizedContributionMax));
         defines.add("PHOTON_GUIDING_USE_MAPPED_GM", std::to_string(mOptions.useMappingScheme));
+
+        //Create sample defines
+        defines.add("PHOTON_GUIDING_TOTAL_LIGHT_COUNT", std::to_string(mTotalLightCount));
+        defines.add("PHOTON_GUIDING_TRAVERSAL_BLOCK_SIZE", std::to_string(mOptions.traversalBlockSize));
+        defines.add("PHOTON_GUIDING_LIGHT_GM_MAX_MIP", std::to_string(mpGuidingMapLight->getMipCount() - 1));
+        defines.add("PHOTON_GUIDING_DIRECTION_GM_MAX_MIP", std::to_string(mMipLevelsDirGM - 1));
+        defines.add("PHOTON_GUIDING_MIN_PHOTONS_FOR_DIR_GUIDING", std::to_string(mOptions.photonNeededForGM));
+        defines.add("PHOTON_GUIDING_ANALYTIC_LIGHT_OFFSET", std::to_string(mEmissiveLightCount));
+
         return defines;
     }
 
@@ -64,6 +73,9 @@ namespace Falcor
         var["gContributionLight"] = mpContributionLight;
         var["gContributionDirection"] = mpContributionDirection;
         var["gMapLightToDirection"] = mpMapDirectionToLight;
+
+        var["gGuidingMapLight"] = mpGuidingMapLight;
+        var["gGuidingMapsDirection"] = mpGuidingMapsDirection;
     }
 
     void PhotonGuiding::clearResources()

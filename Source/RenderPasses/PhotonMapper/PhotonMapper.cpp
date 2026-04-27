@@ -513,6 +513,8 @@ void PhotonMapper::generatePhotonsPass(RenderContext* pRenderContext, const Rend
     mGeneratePhotonPass.pProgram->addDefine("USE_PHOTON_CULLING", mUsePhotonCulling ? "1" : "0");
     mGeneratePhotonPass.pProgram->addDefine("USE_REDUCED_PD_FORMAT", mUseReducePhotonDataFormat ? "1" : "0");
     mGeneratePhotonPass.pProgram->addDefine("USE_PHOTON_GUIDING", mEnableGuiding ? "1" : "0");
+    if(mpPhotonGuiding)
+        mGeneratePhotonPass.pProgram->addDefines(mpPhotonGuiding->getDefines());
 
     if (!mGeneratePhotonPass.pVars)
     {
@@ -527,6 +529,8 @@ void PhotonMapper::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
     auto var = mGeneratePhotonPass.pVars->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var);
+    if(mpPhotonGuiding)
+        mpPhotonGuiding->setShaderData(var);
 
     // Set constants (uniforms).
     //

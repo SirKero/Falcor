@@ -35,6 +35,8 @@ namespace Falcor
             uint reservedPhotonsPerDirection = 1;
             uint photonNeededForGM = 4096;      //1 Photon per light on 64x64 dir GMs
 
+            uint traversalBlockSize = 16;
+
             bool useMappingScheme = false;
             uint mappingDirGMCount = 64;
 
