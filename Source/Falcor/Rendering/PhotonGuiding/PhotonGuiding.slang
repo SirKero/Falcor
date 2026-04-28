@@ -57,9 +57,14 @@ struct PhotonGuiding
 //"Public" Functions
 extension PhotonGuiding
 {
+    inline uint2 guidingMapUVToPixel(float2 guidingUV)
+    {
+        return uint2(floor(guidingUV * gResolutionGM));
+    }
+
     /*  Records guiding contribution of a photon
         \param[in] lightIndex: Index of the light the photon was dispatched from
-        \param[in] guidingPixel: Pixel of the directional GM the sample was generated from
+        \param[in] guidingPixel: Local pixel coordinates of the directional GM the sample was generated from
         \param[in] contribution: Contribution of the sample
     */
     void addGuidingContribution(uint lightIndex, uint2 guidingPixel, float contribution)
@@ -72,15 +77,15 @@ extension PhotonGuiding
         uint discretizedContribution = uint(round(kDiscretizedContributionFactor * contribution));
         discretizedContribution = clamp(discretizedContribution, 1, kDiscretizedContributionMax); //Clamp
 
-        //If the mapping is enabled, most lights will not have a directional Guiding Map,
-        //therefore the contribution needs to be recorded per light. Else, light contribution can be inferred
-        //from the directional contribution.
-        //Additionally, if the mapping is valid, the guiding pixel needs to be offset by the mapping
-        //index, as the input guiding pixel is stored in local pixel coordinates when mapping is enabled.
+        // If the mapping is enabled, most lights will not have a directional Guiding Map,
+        // therefore the contribution needs to be recorded per light. Else, light contribution can be inferred
+        // from the directional contribution.
+        // Additionally, if the mapping is valid, the guiding pixel needs to be offset by the mapping
+        // index, as the input guiding pixel is stored in local pixel coordinates when mapping is enabled.
+        uint2 lightCell = uint2(lightIndex % gResolutionLightGM, lightIndex / gResolutionLightGM);
         if (kEnableMapping)
         {
             //Get cell pixel and add contribution
-            uint2 lightCell = uint2(lightIndex % gResolutionLightGM, lightIndex / gResolutionLightGM);
             InterlockedAdd(gContributionLight[lightCell], discretizedContribution);
 
             // Check if mapping is valid and return if it is invalid
@@ -90,6 +95,9 @@ extension PhotonGuiding
 
             // Offset guiding pixel with the mapping index
             guidingPixel += uint2(mapIdx % gMapDirResourcesPerRow, mapIdx / gMapDirResourcesPerRow) * gResolutionGM;
+        } else //Calculate atlas offset for the pixels
+        {
+            guidingPixel += lightCell * gResolutionGM;
         }
 
         // Record the directional contribution
@@ -127,7 +135,7 @@ extension PhotonGuiding
 
         // Check, if the light has enough photons to use directional guiding
         bool useDirectionalGuiding = lightTS.photonCount >= kMinPhotonsForDirectionalGuiding;
-
+        //useDirectionalGuiding = false;
         //TODO Check atlas mapping
 
         // Check if the current photon is directionally guided or should be distributed randomly
@@ -142,19 +150,19 @@ extension PhotonGuiding
         // If the directional Guiding Map is valid, traverse to get the corresponding directional cell
         if (useDirectionalGuiding)
         {
-            TraversalSample dirTS = topDownMipMapTraversal(gGuidingMapsDirection, photonID, kDirectionGuidingMapMaxMip);
+            TraversalSample dirTS = topDownMipMapTraversal(gGuidingMapsDirection, photonID, kDirectionGuidingMapMaxMip, lightTS.pixel);
 
             // Create photon sample from the selected cell
             uint2 localIndex = dirTS.pixel % gResolutionGM; // Local index
             float2 uvMin = float2(localIndex) / gResolutionGM;      //UV of top-left of the choosen pixel
             float2 uvMax = float2(localIndex + 1) / gResolutionGM;  // UV of bottom-right of the choosen pixel
             pgs.directionUV = uvMin + (uvMax - uvMin) * randomVal;  // Final uv with random jitter within the pixel
-            //Divide factor for the lights flux. 
-            pgs.photonFluxDivFactor = (dirTS.photonCount / maxPhotons) * gResolutionGM * gResolutionGM;
+            // Divide factor for the lights flux. Total photon count cancels out, as a photon is divided by the number of light paths
+            pgs.photonFluxDivFactor = float(dirTS.photonCount) * gResolutionGM * gResolutionGM;
         } else //Use a random direction instead to create the sample
         {
             pgs.directionUV = randomVal;
-            pgs.photonFluxDivFactor = lightTS.photonCount / maxPhotons;
+            pgs.photonFluxDivFactor = float(lightTS.photonCount); // Total Photon count cancels out, as a photon is divided by the number of light paths
         }
 
         return true;
@@ -235,10 +243,10 @@ extension PhotonGuiding
 {
     /* Top-Down Quadtree traversal using mipmaps.
     */
-    TraversalSample topDownMipMapTraversal(Texture2D<uint> tex, inout uint photonID, const uint maxMipLevel)
+    TraversalSample topDownMipMapTraversal(Texture2D<uint> tex, inout uint photonID, const uint maxMipLevel, uint2 mipIndex = uint2(0))
     {
         // Get the light index by traversing (top-down quadtree traversal) the light Guiding Map
-        uint2 mipIndex = uint2(0);     // Current traversal index (start top left of 2x2 block)
+        //uint2 mipIndex = uint2(0);     // Current traversal index (start top left of 2x2 block)
         uint selectedCellPhotons = 0;  // Photons for the cell after traversal
 
         // Start traversal at 2nd highest mip level (with size 2x2)

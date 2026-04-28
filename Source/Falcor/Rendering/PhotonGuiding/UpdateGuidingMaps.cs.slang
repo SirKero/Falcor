@@ -5,10 +5,8 @@ RWTexture2D<uint> gGuidingMap;         // The to be updated Guiding Map
 
 cbuffer CB {
     uint gDispatchSize;     //Resolution of the current resource
-    uint gIterationCount;   // At 0 temporal accumulation is disabled
     uint gDirectionalResourceSize; // Resolution of a directional resource
     uint gFreePhotonsLight; //Free photons per light (or total photon count if dynamic Pmin is used)
-
 }
 
 static const bool kUseMapping = USE_MAPPING; // Is mapping enabled

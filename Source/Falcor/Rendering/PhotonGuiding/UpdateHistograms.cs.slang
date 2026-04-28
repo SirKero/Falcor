@@ -19,7 +19,7 @@ inline float getUniformWeight()
 {
     float uniformWeight;
     if (kIsDirectional)
-        uniformWeight = 1.0 / (gDispatchSize * gDispatchSize); // 1 / (Guiding Map Resolution)
+        uniformWeight = 1.0 / (gDirectionalResourceSize * gDirectionalResourceSize); // 1 / (Guiding Map Resolution)
     else
         uniformWeight = 1.0 / kLightCount;
     return uniformWeight;

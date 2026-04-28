@@ -122,13 +122,13 @@ private:
     uint mPhotonMaxBounces = 10;                  // Number of Photon bounces
     uint mMaxCausticBounces = 10;                 // Number of diffuse bounces for a caustic
     float mPhotonRejection = 0.3f;                // Probability a global photon is stored
-    uint mNumDispatchedPhotons = 2000000;         // Number of Photons dispatched
+    uint mNumDispatchedPhotons = 1000000;         // Number of Photons dispatched
     uint mPhotonYExtent = 512;                    // Dispatch Y extend
     uint2 mNumMaxPhotons = uint2(2000000, 2000000); // Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;
     uint2 mCurrentPhotonCount = uint2(1000000); // Gets data from GPU buffer
     float mASBuildBufferPhotonOverestimate = 1.15f;
-    float2 mPhotonCollectionRadiusStart = float2(0.025f, 0.005f);
+    float2 mPhotonCollectionRadiusStart = float2(0.008f, 0.002f);
     float2 mPhotonCollectRadius = mPhotonCollectionRadiusStart; // Radius for collection
     bool mChangePhotonLightBufferSize = false;
     bool mPhotonUseAlphaTest = true;
@@ -146,7 +146,7 @@ private:
     float mCullingCellRadius = 0.1f; // Radius used for the culling cells
 
     const uint kDynamicPhotonDispatchInitValue = 500224; // Start with 500 thousand photons
-    bool mUseDynamicePhotonDispatchCount = true;         // Dynamically change the number of photons to fit the max photon number
+    bool mUseDynamicePhotonDispatchCount = false;         // Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 2000000;            // Max value for dynamically dispatched photons
     float mPhotonDynamicGuardPercentage = 0.08f;  // Determines how much space of the buffer is used to guard against buffer overflows
     float mPhotonDynamicChangePercentage = 0.05f; // The percentage the buffer is increased/decreased per frame

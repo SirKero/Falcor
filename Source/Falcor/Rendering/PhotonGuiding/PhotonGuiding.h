@@ -128,7 +128,7 @@ namespace Falcor
                 
         /* Render loop used in the reduction pass
         */
-        void reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMip, const uint dstMip, const bool forceMipMapGen = false);
+        void reduceLoop(RenderContext* pRenderContext, ref<Texture>& pContributionTex, const uint startMip, const uint dstMip, const bool forceMipMapGen = false);
 
         /*
         */

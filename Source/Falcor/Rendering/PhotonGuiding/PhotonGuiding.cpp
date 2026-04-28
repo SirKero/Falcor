@@ -132,7 +132,7 @@ namespace Falcor
 
             mpGuidingMapsDirection = Texture::create2D(
                 mpDevice, mResolutionDirGM, mResolutionDirGM, ResourceFormat::R32Uint, 1u, mMipLevelsDirGM, nullptr,
-                ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
+                ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
             );
             mpGuidingMapsDirection->setName("PhotonGuiding:GuidingMapsDirection");
         }
@@ -160,7 +160,7 @@ namespace Falcor
             uint mips = mOptions.useMappingScheme ? mMipLevelsDirGM : Texture::kMaxPossible;
             mpContributionDirection = Texture::create2D(
                     mpDevice, mResolutionDirGM, mResolutionDirGM, ResourceFormat::R32Uint, 1u, mips, nullptr,
-                    ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
+                    ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
                 );
             mpContributionDirection->setName("PhotonGuiding:ContributionDirection");
         }
@@ -184,7 +184,7 @@ namespace Falcor
             {
                 mpGuidingMapsDirection = Texture::create2D(
                     mpDevice, mResolutionDirGM, mResolutionDirGM, ResourceFormat::R32Float, 1u, mMipLevelsDirGM, nullptr,
-                    ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess | ResourceBindFlags::RenderTarget
+                    ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
                 );
                 mpGuidingMapsDirection->setName("PhotonGuiding:GuidingMapsDirectionPrev");
             }
@@ -220,7 +220,7 @@ namespace Falcor
         }
     }
 
-    void PhotonGuiding::reduceLoop(RenderContext* pRenderContext, ref<Texture> pContributionTex, const uint startMipLevel, const uint dstMipLevel, const bool forceMipMapGen)
+    void PhotonGuiding::reduceLoop(RenderContext* pRenderContext, ref<Texture>& pContributionTex, const uint startMipLevel, const uint dstMipLevel, const bool forceMipMapGen)
     {
         /* A loop for the reduce pass. Uses work group reduce if there are 5 or more mip levels left and uses a simple mip reduce for the remaining levels.
         * Could be optimized further, but current state is sufficently fast
@@ -415,7 +415,6 @@ namespace Falcor
 
          //Set resources
         var["CB"]["gDispatchSize"] = isDirectionalResource ? mResolutionDirGM : mResolutionLightGM;
-        var["CB"]["gIterationCount"] = mGuidingIterationCount;
         var["CB"]["gDirectionalResourceSize"] = mOptions.guidingMapResolution;
         var["CB"]["gFreePhotonsLight"] = freePhotonsPerLight;
 

@@ -357,9 +357,7 @@ void rayGen()
     //Temporal Fix
     PhotonGuidingData pgd = {};
     pgd.lightIndex = pgs.lightIndex;
-    pgd.guidingPixels = uint2(64 * pgs.directionUV);
-    uint2 lightIdx2D = uint2(pgs.lightIndex % 8, pgs.lightIndex / 8);
-    pgd.guidingPixels += lightIdx2D * 64;
+    pgd.guidingPixels = gPhotonGuiding.guidingMapUVToPixel(pgs.directionUV);
 #else // USE_PHOTON_GUIDING
     PhotonLightSample pls;
 
