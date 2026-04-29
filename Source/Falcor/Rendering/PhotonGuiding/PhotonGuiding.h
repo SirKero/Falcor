@@ -41,7 +41,8 @@ namespace Falcor
             // for every light. Is beneficial in terms of memory and runtime, when a scene contains a large
             // number of lights. 
             bool useMappingScheme = false;  //Mapping enabled. Is automatically switched to true, if the scene contains >1000 lights    
-            uint mappingDirGMCount = 32;    //Maximum number of Guiding Maps that are reserved     
+            uint mappingDirGMCount = 32;    //Maximum number of Guiding Maps that are reserved
+            uint mappingPhotonNeededToCreate = 16384; //Minimum photons needed to create a GM with mapping
 
             bool useDynamicPMin = false;
         };
@@ -88,6 +89,7 @@ namespace Falcor
         uint            mMipLevelsDirGM = 0;        //MIP levels for Directional Guiding Map
         uint            mResolutionLightGM = 0;     //Size (x&y) of the texture that includes all lights
         uint            mResolutionDirGM = 0;       //Size (x&y) of the texture that includes all GMs
+        uint            mResolutionMap = 0;         //Size (x&y) of the map texture
         uint            mGuidingIterationCount = 0; //Number of guiding iterations
 
         int             mTracePhotonNumberOfPhotonsLastFrame = -1;     //Photon count from last frame
@@ -106,7 +108,7 @@ namespace Falcor
         //Resources additionally needed for mapping scheme (>1024 lights)
         ref<Buffer>     mpResourceCounter;          //Resource counter needed for Mapping Index (0) and dynamic Photon Minimum (1)
         ref<Texture>    mpContributionLight;        //Contribution Texture for lights
-        ref<Texture>    mpGuidingMapsDirectionPrev; //Previous frames Guiding Map. Needed as update uses random access in this case
+        ref<Texture>    mpHistogramDirectionPrev;  //Previous frames Histogram. Needed as update uses random access in this case
         ref<Texture>    mpMapLightToDirection;      //Maps light index to a directional Guiding Map or invalid if there is none. Is the size of the light Guiding Map.
         ref<Texture>    mpMapLightToDirectionPrev;  //Light index to directional Guiding Map mapping from previous frame
         ref<Texture>    mpMapDirectionToLight;      //Maps directional Guiding Mapt to light Index. Is the size of all directional Guiding Maps (default 64)

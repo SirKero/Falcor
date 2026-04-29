@@ -30,7 +30,7 @@ struct PhotonGuiding
     static const bool kEnableMapping = PHOTON_GUIDING_USE_MAPPED_GM;
 
     uint gResolutionLightGM;        // Resolution for the light Contribution/Guiding Map
-    uint gMapDirResourcesPerRow;    // Number of directional resources per row if mapping is used
+    uint gMapTextureResolution;    // Number of directional resources per row if mapping is used
     uint gResolutionGM;             // Resolution of a single directional guiding resource
 
     RWTexture2D<uint> gContributionLight;           //Contribution for each light. Can be nullptr
@@ -44,6 +44,7 @@ struct PhotonGuiding
     static const uint kDirectionGuidingMapMaxMip = PHOTON_GUIDING_DIRECTION_GM_MAX_MIP;
     static const uint kMinPhotonsForDirectionalGuiding = PHOTON_GUIDING_MIN_PHOTONS_FOR_DIR_GUIDING;
     static const uint kAnalyticLightIndexOffset = PHOTON_GUIDING_ANALYTIC_LIGHT_OFFSET;
+    static const uint kMapTextureSize = PHOTON_GUIDING_MAP_TEXTURE_SIZE;
 
     Texture2D<uint> gGuidingMapLight;       //Light Guiding Map
     Texture2D<uint> gGuidingMapsDirection;  //Atlas with the directional Guiding Maps
@@ -94,7 +95,7 @@ extension PhotonGuiding
                 return;
 
             // Offset guiding pixel with the mapping index
-            guidingPixel += uint2(mapIdx % gMapDirResourcesPerRow, mapIdx / gMapDirResourcesPerRow) * gResolutionGM;
+            guidingPixel += uint2(mapIdx % gMapTextureResolution, mapIdx / gMapTextureResolution) * gResolutionGM;
         } else //Calculate atlas offset for the pixels
         {
             guidingPixel += lightCell * gResolutionGM;
@@ -136,7 +137,20 @@ extension PhotonGuiding
         // Check, if the light has enough photons to use directional guiding
         bool useDirectionalGuiding = lightTS.photonCount >= kMinPhotonsForDirectionalGuiding;
         //useDirectionalGuiding = false;
-        //TODO Check atlas mapping
+
+        if (kEnableMapping)
+        {
+            uint mapIndex = gMapLightToDirection[lightTS.pixel];
+            //Check if mapping is valid
+            if (mapIndex < kMappingInvalidIndex)
+            {
+                lightTS.pixel = uint2(mapIndex % kMapTextureSize, mapIndex / kMapTextureSize); // Light Index -> Map Index
+            } else //Mapping invalid
+            {
+                useDirectionalGuiding = false; 
+            }
+        }
+
 
         // Check if the current photon is directionally guided or should be distributed randomly
         // The discrepancy between light GM photon count and directional GM photon count is due to the

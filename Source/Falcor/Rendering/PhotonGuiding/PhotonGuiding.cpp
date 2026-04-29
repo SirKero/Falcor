@@ -11,6 +11,11 @@ namespace Falcor
         const std::string kShaderUpdateGuidingMaps = kShaderFolder + "UpdateGuidingMaps.cs.slang"; 
 
         const std::string kShaderModel = "6_6";
+
+        const uint kAutomaticMappingCount = 1000; // Enable mapping if light count is bigger than this value
+        const uint kMappingInvalidIndex = 0xFFFF; // Invalid index for mapping
+        const uint kCounterIndexMapping = 0;      // Counter Buffer Index used in Mapping
+        const uint kCounterIndexDynamicPhoton = 1;// Counter Buffer Index uesd for dynamic minimum photon count
     }
 
     PhotonGuiding::PhotonGuiding(ref<Device> pDevice, ref<Scene> pScene, RenderContext* pRenderContext)
@@ -40,7 +45,28 @@ namespace Falcor
         //
         updateGuidingMaps(pRenderContext, maxPhotonsDistributed);
 
-        pRenderContext->clearUAV(mpContributionDirection->getUAV(0).get(), uint4(0));
+        //Clear Resources
+        {
+            FALCOR_PROFILE(pRenderContext, "ClearResources");
+            //Clear contribution
+            pRenderContext->clearUAV(mpContributionDirection->getUAV(0).get(), uint4(0));
+            //Clear counter
+            if(mOptions.useMappingScheme || mOptions.useDynamicPMin)
+                pRenderContext->clearUAV(mpResourceCounter->getUAV(0).get(), uint4(0));
+            //Clear Mapping Resources
+            if(mOptions.useMappingScheme)
+            {
+                //Swap current and previous (ping-pong)
+                std::swap(mpMapLightToDirectionPrev, mpMapLightToDirection);
+                std::swap(mpHistogramDirection, mpHistogramDirectionPrev);
+
+                //Clear
+                pRenderContext->clearUAV(mpContributionLight->getUAV(0).get(), uint4(0));
+                pRenderContext->clearUAV(mpMapDirectionToLight->getUAV(0).get(), uint4(mTotalLightCount));
+                pRenderContext->clearUAV(mpMapLightToDirection->getUAV(0).get(), uint4(kMappingInvalidIndex));
+            }
+        }
+
         mGuidingIterationCount++;
     }
 
@@ -105,6 +131,7 @@ namespace Falcor
         defines.add("PHOTON_GUIDING_DIRECTION_GM_MAX_MIP", std::to_string(mMipLevelsDirGM - 1));
         defines.add("PHOTON_GUIDING_MIN_PHOTONS_FOR_DIR_GUIDING", std::to_string(mOptions.photonNeededForGM));
         defines.add("PHOTON_GUIDING_ANALYTIC_LIGHT_OFFSET", std::to_string(mEmissiveLightCount));
+        defines.add("PHOTON_GUIDING_MAP_TEXTURE_SIZE", std::to_string(mResolutionMap));
 
         return defines;
     }
@@ -114,12 +141,12 @@ namespace Falcor
         auto var = rootVar["gPhotonGuiding"];
 
         var["gResolutionLightGM"] = mResolutionLightGM;
-        var["gMapDirResourcesPerRow"] = mResolutionDirGM / mOptions.guidingMapResolution;
+        var["gMapTextureResolution"] = mResolutionMap;
         var["gResolutionGM"] = mOptions.guidingMapResolution;
 
         var["gContributionLight"] = mpContributionLight;
         var["gContributionDirection"] = mpContributionDirection;
-        var["gMapLightToDirection"] = mpMapDirectionToLight;
+        var["gMapLightToDirection"] = mpMapLightToDirectionPrev; //Previous is used, as ping pong swap happends at the end of update
 
         var["gGuidingMapLight"] = mpGuidingMapLight;
         var["gGuidingMapsDirection"] = mpGuidingMapsDirection;
@@ -134,7 +161,7 @@ namespace Falcor
         mpContributionDirection = nullptr;
         mpResourceCounter = nullptr;
         mpContributionLight = nullptr;
-        mpGuidingMapsDirectionPrev = nullptr;
+        mpHistogramDirectionPrev = nullptr;
         mpMapLightToDirection = nullptr;
         mpMapLightToDirectionPrev = nullptr;
         mpMapDirectionToLight = nullptr;
@@ -154,6 +181,10 @@ namespace Falcor
             mTotalLightCount = mEmissiveLightCount + mAnalyticLightCount;
 
             clearResources();
+
+            //If total lights > the threshold, enable mapping by default
+            if(mTotalLightCount > kAutomaticMappingCount)
+                mOptions.useMappingScheme = true;
         }
 
         //Create Resources
@@ -199,7 +230,10 @@ namespace Falcor
                 mpDevice, mResolutionDirGM, mResolutionDirGM, ResourceFormat::R32Float, 1u, 1u, nullptr,
                 ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource
             );
-            mpHistogramDirection->setName("PhotonGuiding:HistogramDirection");
+            std::string name = "PhotonGuiding:HistogramDirection";
+            if(mOptions.useMappingScheme)
+                name += "_0";
+            mpHistogramDirection->setName(name);
         }
 
         if (!mpContributionDirection)
@@ -227,31 +261,31 @@ namespace Falcor
                 mpContributionLight->setName("PhotonGuiding:ContributionLight");
             }
 
-            if (!mpGuidingMapsDirectionPrev)
+            if (!mpHistogramDirectionPrev)
             {
-                mpGuidingMapsDirection = Texture::create2D(
+                mpHistogramDirectionPrev = Texture::create2D(
                     mpDevice, mResolutionDirGM, mResolutionDirGM, ResourceFormat::R32Float, 1u, mMipLevelsDirGM, nullptr,
                     ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess
                 );
-                mpGuidingMapsDirection->setName("PhotonGuiding:GuidingMapsDirectionPrev");
+                mpHistogramDirectionPrev->setName("PhotonGuiding:mpHistogramDirection_1");
             }
 
-            if (!mpMapLightToDirection || !mpGuidingMapsDirectionPrev)
+            if (!mpMapLightToDirection || !mpMapLightToDirectionPrev)
             {
                 mpMapLightToDirection = Texture::create2D(mpDevice, mResolutionLightGM, mResolutionLightGM,
                     ResourceFormat::R16Uint, 1u,1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
-                mpMapLightToDirection->setName("PhotonGuiding:MapLightToDirection");
+                mpMapLightToDirection->setName("PhotonGuiding:MapLightToDirection_0");
                 
                 mpMapLightToDirectionPrev = Texture::create2D(mpDevice, mResolutionLightGM, mResolutionLightGM,
                     ResourceFormat::R16Uint, 1u,1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
-                mpMapLightToDirectionPrev->setName("PhotonGuiding:MapLightToDirectionPrev");
+                mpMapLightToDirectionPrev->setName("PhotonGuiding:MapLightToDirection_1");
             }
 
             if (!mpMapDirectionToLight)
             {
                 ResourceFormat resourceFormat = mTotalLightCount > 0xFFFF ? ResourceFormat::R32Uint : ResourceFormat::R16Uint;
-                uint size = mResolutionDirGM / mOptions.guidingMapResolution;
-                mpMapDirectionToLight = Texture::create2D(mpDevice, size, size, resourceFormat, 1u, 1u,
+                mResolutionMap = mResolutionDirGM / mOptions.guidingMapResolution;
+                mpMapDirectionToLight = Texture::create2D(mpDevice, mResolutionMap, mResolutionMap, resourceFormat, 1u, 1u,
                     nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
                 mpMapDirectionToLight->setName("PhotonGuiding::MapDirectionToLight");
             }
@@ -355,6 +389,8 @@ namespace Falcor
             DefineList defines;
             defines.add("LIGHT_COUNT", std::to_string(mTotalLightCount));
             defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
+            defines.add("LIGHT_HISTOGRAM_SIZE", std::to_string(mResolutionLightGM));
+            defines.add("MAP_TEXTURE_SIZE", std::to_string(mResolutionMap));
             return defines;
         };
 
@@ -389,7 +425,21 @@ namespace Falcor
         // else, a seperate resource is bound.
         if (mOptions.useMappingScheme)
         {
-            //TODO
+            if(isDirectionalResource)
+            {
+                var["gTotalContribution"].setSrv(mpContributionLight->getSRV(0,1u));
+                var["gContribution"].setSrv(mpContributionDirection->getSRV(0,1u));
+                var["gHistogram"] = mpHistogramDirection;
+
+                var["gHistogramPrev"] = mpHistogramDirectionPrev;
+                var["gMapDirectionGMToLightIndex"] = mpMapDirectionToLight;
+                var["gMapLightIndexToDirectionalGMPrev"] = mpMapLightToDirectionPrev;
+            }else
+            {
+                var["gTotalContribution"].setSrv(mpContributionLight->getSRV(mpContributionLight->getMipCount()-1,1u));
+                var["gContribution"].setSrv(mpContributionLight->getSRV(0,1u));
+                var["gHistogram"] = mpHistogramLight;
+            }
         }
         else
         {
@@ -425,11 +475,16 @@ namespace Falcor
         {
             DefineList defines;
             defines.add("LIGHT_COUNT", std::to_string(mTotalLightCount));
-            defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
             defines.add("RESERVED_PHOTONS_PER_CELL", isDirectionalResource ?
                 std::to_string(mOptions.reservedPhotonsPerDirection) :
                 std::to_string(mOptions.reservedPhotonsPerLight));
             defines.add("PHOTONS_NEEDED_FOR_DIR_GM", std::to_string(mOptions.photonNeededForGM));
+
+            defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
+            defines.add("MAPPING_PHOTONS_NEEDED_TO_CREATE", std::to_string(mOptions.mappingPhotonNeededToCreate));
+            defines.add("MAP_TEXTURE_SIZE", std::to_string(mResolutionDirGM));
+            defines.add("LIGHT_GM_SIZE", std::to_string(mResolutionLightGM));
+
             return defines;
         };
 
@@ -445,6 +500,8 @@ namespace Falcor
 
             DefineList defines;
             defines.add("IS_DIRECTIONAL", isDirectionalResource ? "1" : "0");
+            defines.add("MAPPING_INVALID_INDEX", std::to_string(kMappingInvalidIndex));
+            defines.add("COUNTER_MAPPING_INDEX", std::to_string(kCounterIndexMapping));
             defines.add(getRuntimeDefines());
             
             pUpdateGuidingMapsPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -470,6 +527,18 @@ namespace Falcor
         var["gGuidingMap"] = pGuidingMap;
         if(isDirectionalResource)
             var["gGuidingMapLight"] = mpGuidingMapLight;
+
+        //Bind Mapping Resources on the light pass
+        if(mOptions.useMappingScheme )
+        {
+            var["gMapDirGMToLightIndex"] = mpMapDirectionToLight;
+            if(!isDirectionalResource) //Light pass exclusive resources
+            {
+                var["gMapLightIndexToDirGMPrev"] = mpMapLightToDirectionPrev;
+                var["gMapLightIndexToDirGM"] = mpMapLightToDirection;
+                var["gCounter"] = mpResourceCounter;
+            }
+        }
 
         uint3 dispatchIndex = isDirectionalResource ?
             uint3(mResolutionDirGM,mResolutionDirGM,1) :
