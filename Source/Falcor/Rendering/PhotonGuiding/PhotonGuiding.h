@@ -27,21 +27,25 @@ namespace Falcor
         /* Options/UI struct with resonable defaults
         */
         struct Options {
-            uint guidingMapResolution = 64;
-            uint discretizedContributionFactor = 256;
-            uint discretizedContributionMax = 1024;
-            float exponentialMovingAverageFactor = 0.3f;
-            uint reservedPhotonsPerLight = 64;
-            uint reservedPhotonsPerDirection = 1;
-            uint photonNeededForGM = 4096;      //1 Photon per light on 64x64 dir GMs
+            uint guidingMapResolution = 64;               // x,y size of a guiding map
+            uint discretizedContributionFactor = 256;     // Factor for the discretization of the contribution
+            uint discretizedContributionMax = 1024;       // Max value a contribution can reach
+            float exponentialMovingAverageFactor = 0.3f;  // Alpha factor for the exponential moving average
+            uint reservedPhotonsPerLight = 64;      // Reserved photons per light
+            uint reservedPhotonsPerDirection = 1;   // Reserved photons per direction cell
+            uint photonNeededForGM = 4096;          // Minimum Photons needed to generate a GM (1 Photon per light on 64x64 dir GMs)
 
-            uint traversalBlockSize = 16;
+            uint traversalBlockSize = 16;   //For traversal, the photonID is linearized in blocks to improve locality 
 
-            bool useMappingScheme = false;
-            uint mappingDirGMCount = 64;
+            //Mapping scheme options, that only maps a small number of directional Guiding Maps instead of one
+            // for every light. Is beneficial in terms of memory and runtime, when a scene contains a large
+            // number of lights. 
+            bool useMappingScheme = false;  //Mapping enabled. Is automatically switched to true, if the scene contains >1000 lights    
+            uint mappingDirGMCount = 32;    //Maximum number of Guiding Maps that are reserved     
 
             bool useDynamicPMin = false;
         };
+
         /*
         */
         PhotonGuiding(
@@ -57,6 +61,11 @@ namespace Falcor
         /* 
         */
         void update(RenderContext* pRenderContext, uint maxPhotonsDistributed);
+
+        /*  Return optimal dispatch size for the photon tracing shader. Ensures that linearization of the
+            photonID does not break
+        */
+        uint2 getPhotonDispatchSize(uint numberOfPhotons);
 
         /* Get defines needed for recording the contribution. Can change at runtime
         */
@@ -80,6 +89,9 @@ namespace Falcor
         uint            mResolutionLightGM = 0;     //Size (x&y) of the texture that includes all lights
         uint            mResolutionDirGM = 0;       //Size (x&y) of the texture that includes all GMs
         uint            mGuidingIterationCount = 0; //Number of guiding iterations
+
+        int             mTracePhotonNumberOfPhotonsLastFrame = -1;     //Photon count from last frame
+        uint2           mOptimalTracePhotonDispatchDims = uint2(0); //Stored dispatch dims that can be reused if photon count did not change
         //
         // Resources
         //

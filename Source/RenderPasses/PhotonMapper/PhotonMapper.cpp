@@ -585,7 +585,11 @@ void PhotonMapper::generatePhotonsPass(RenderContext* pRenderContext, const Rend
 
     // Get dimensions of ray dispatch.
     uint dispatchedPhotons = mNumDispatchedPhotons;
-    const uint2 targetDim = uint2(std::max(1u, dispatchedPhotons / mPhotonYExtent), mPhotonYExtent);
+    uint2 targetDim = uint2(0);
+    if(mEnableGuiding && mpPhotonGuiding)
+        targetDim = mpPhotonGuiding->getPhotonDispatchSize(mNumDispatchedPhotons);
+    else
+        targetDim = uint2(std::max(1u, dispatchedPhotons / mPhotonYExtent), mPhotonYExtent);
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
 
     // Trace the photons

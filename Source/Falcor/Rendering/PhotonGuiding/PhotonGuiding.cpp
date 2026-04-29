@@ -44,6 +44,53 @@ namespace Falcor
         mGuidingIterationCount++;
     }
 
+    uint2 PhotonGuiding::getPhotonDispatchSize(uint numberOfPhotons)
+    {
+        FALCOR_ASSERT(numberOfPhotons > 0);
+
+        //Check if the optimized dispatch size was calculated last frame
+        if(numberOfPhotons == mTracePhotonNumberOfPhotonsLastFrame)
+            return mOptimalTracePhotonDispatchDims;
+
+        //Convert into block coordinates
+        const uint blockSize = mOptions.traversalBlockSize;
+        const uint blockArea = blockSize * blockSize;
+        //Minimum number of blocks needed
+        const uint requiredBlocks = (numberOfPhotons / blockArea) + 1;
+
+        //Start near the square root
+        uint startY = static_cast<uint>(std::sqrt(requiredBlocks));
+        uint2 bestDims = uint2(0);
+        uint bestArea = std::numeric_limits<uint>::max();
+        uint bestDiff = std::numeric_limits<uint>::max();
+
+        // Search downward from the square root
+        // Loop is aborted, as soon as first local optimum is found (to remain as square as possible)
+        for(uint y = startY; y>= 1; y--)
+        {
+            uint x = (requiredBlocks / y) + 1;
+            uint area = x * y;
+            uint diff = (x>y) ? (x-y) : (y-x);
+
+            if(area < bestArea || (area == bestArea && diff < bestDiff))
+            {
+                bestDims = uint2(x,y);
+                bestDiff = diff;
+                bestArea = area;
+            }
+            else //Abort after first local optimum
+            {
+                break;
+            }
+        }
+
+        //Store result
+        mTracePhotonNumberOfPhotonsLastFrame = numberOfPhotons;
+        mOptimalTracePhotonDispatchDims = bestDims * blockSize;
+        return mOptimalTracePhotonDispatchDims;
+
+    }
+
     DefineList PhotonGuiding::getDefines()
     {
         DefineList defines = {};

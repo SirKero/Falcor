@@ -353,8 +353,8 @@ void rayGen()
     ray.Origin = pls.posW;
     ray.Direction = pls.dirW;
     photonFlux = pls.flux;
-    
-    //Temporal Fix
+
+    //Store guiding data for the Photon
     PhotonGuidingData pgd = {};
     pgd.lightIndex = pgs.lightIndex;
     pgd.guidingPixels = gPhotonGuiding.guidingMapUVToPixel(pgs.directionUV);
