@@ -29,7 +29,11 @@ StructuredBuffer<ReservoirFG> gFinalGatherReservoirPrev;
 
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 
+RWTexture2D<uint2> gFinalGatherReservoirGuidingData;
+Texture2D<uint2> gFinalGatherReservoirGuidingDataPrev;
+
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
 /*  Generalized Balance Heuristic with two samples
     \param[in] Reservoir which sample is used for MIS
@@ -61,7 +65,7 @@ float generalizedBalanceHeuristic(ReservoirFG r, ShadingData otherSD, BSDFProper
     \return True if resampling was successful
 */
 bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFProperties currentProps,
-                                ReservoirFG other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg)
+                         ReservoirFG other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg, inout ReservoirGuidingData rgd, inout ReservoirGuidingData otherRgd)
 {
     //Check if surfaces are similar and resampling can be performed
     float3 toSurfaceOther = currentSD.posW - other.sampleData.posW;
@@ -108,6 +112,8 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
         current.sampleData.radianceOut = other.sampleData.radianceOut;
         current.targetFunction = targetFunctionOther;
         current.jacobianDeterminant = dot(current.sampleData.normal, toSurfaceOther) / (distToSurfaceOther * distToSurfaceOther);
+        if (kUsePhotonGuiding)
+            rgd = otherRgd;
     }
 
     //Increase confidence weights
@@ -135,7 +141,7 @@ bool combineReservoirsFG(inout ReservoirFG current, ShadingData currentSD, BSDFP
     \param[in] Pixel location where the other reservoir is located
     \return True if resampling was successful
 */
-bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg , int2 resamplePixel) {
+bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg, int2 resamplePixel, inout ReservoirGuidingData rgd) {
 
     //Check if reservoir is inside the screen. 
     if (any(resamplePixel < 0) || any(resamplePixel >= gFrameDim))
@@ -148,6 +154,10 @@ bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFPro
         return false;
     }
 
+    ReservoirGuidingData temporalRgd = {};
+    if (kUsePhotonGuiding)
+        temporalRgd = ReservoirGuidingData(gFinalGatherReservoirGuidingDataPrev[resamplePixel]);
+
     //Get shading datas
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData temporalSD = loadShadingData(temporalHit, -temporal.sampleData.sampleView, lod);
@@ -155,7 +165,7 @@ bool resampleReservoir(inout ReservoirFG current, ShadingData currentSD, BSDFPro
     let temporalBsdfProperties = temporalMi.getProperties(temporalSD);
 
     //Combine both reservoirs
-    bool valid = combineReservoirsFG(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg);
+    bool valid = combineReservoirsFG(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg, rgd, temporalRgd);
 
     return valid;
 }
@@ -168,6 +178,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     ReservoirFG current = gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)];
     HitInfo currentHit = HitInfo(current.sampleSurface);
+    ReservoirGuidingData rgd = {};
+    if (kUsePhotonGuiding) {
+        rgd = ReservoirGuidingData(gFinalGatherReservoirGuidingData[pixel]);
+    }
 
     //Current camera hit misses the scene
     if (!currentHit.isValid())
@@ -193,7 +207,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     prevPixelF += rndOffset;
     int2 prevPixel = int2(prevPixelF);
 
-    bool resamplingSuccessfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel);
+    bool resamplingSuccessfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel, rgd);
 
     //
     // Spatiotemporal Resampling
@@ -205,9 +219,11 @@ void main(uint2 pixel: SV_DispatchThreadID)
         float2 spatialPixelF = prevPixelF + spatialOffset;
         int2 spatialPixel = int2(spatialPixelF);
 
-        resampleReservoir(current, currentSD, currentBsdfProperties, sg, spatialPixel);
+        resampleReservoir(current, currentSD, currentBsdfProperties, sg, spatialPixel, rgd);
     }
 
     //Store final reservoir
     gFinalGatherReservoir[index2Dto1D(pixel, gFrameDim.x)] = current;
+    if (kUsePhotonGuiding)
+        gFinalGatherReservoirGuidingData[pixel] = rgd.getData();
 }

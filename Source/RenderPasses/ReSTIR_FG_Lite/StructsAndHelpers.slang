@@ -13,17 +13,26 @@ struct PhotonData {
     float3 flux;        //Incoming flux
     uint pathLenght;    //Length of the photon path
     float3 dir;         //Incoming direction
-    uint _pad2;
+    uint lightIndex;    //Used for guiding. Light index the photon was created from
     float3 normalW;     //Face normal of the photon surface
-    uint _pad3;
+    uint packedGuidingPixels;   //Guiding. Discretized direction the photon was created from
 
     __init() {
         this.dir = float3(0);
         this.normalW = float3(0,1,0);
         this.flux = float3(0);
         this.pathLenght = 0;
-        this._pad2 = 0;
-        this._pad3 = 0;
+        this.lightIndex = 0;
+        this.packedGuidingPixels = 0;
+    }
+
+    // Guiding pixels helper
+    property uint2 guidingPixels {
+        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = newValue.x & 0xFFFF;
+            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+        }
     }
 }
 
@@ -137,6 +146,38 @@ struct ReservoirCaustic {
         return any(photonRadiance > 0);
     }
 }
+
+//Additional data for reservoirs if guiding is used 8B
+struct ReservoirGuidingData
+{
+    uint lightIndex;            //Light Index of the selected sample
+    uint packedGuidingPixels;   //Packed pixels in the guiding map used to create the selected sample
+
+    // Guiding pixels helper
+    property uint2 guidingPixels {
+        get { return uint2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = newValue.x & 0xFFFF;
+            packedGuidingPixels |= (newValue.y & 0xFFFF) << 16;
+        }
+    }
+
+    __init()
+    {
+        this.lightIndex = 0;
+        this.packedGuidingPixels = 0;
+    }
+
+    __init(uint2 data)
+    {
+        this.lightIndex = data.x;
+        this.packedGuidingPixels = data.y;
+    }
+
+    inline uint2 getData() {
+        return uint2(lightIndex, packedGuidingPixels);
+    }
+};
 
 /*  Load shading data from hit and direction
     \param[in] Triangle Hit

@@ -28,7 +28,11 @@ StructuredBuffer<ReservoirCaustic> gCausticReservoirPrev;
 
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 
+RWTexture2D<uint2> gCausticReservoirGuidingData;
+Texture2D<uint2> gCausticReservoirGuidingDataPrev;
+
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
 inline float getPhotonRadius(ReservoirCaustic r) {
     return r.pathLength == 0 ? gPhotonRadius.y : gPhotonRadius.x;
@@ -65,7 +69,7 @@ float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFP
     \return True if resampling was successful
 */
 bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData currentSD, BSDFProperties currentProps,
-                                ReservoirCaustic other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg)
+                                ReservoirCaustic other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg, inout ReservoirGuidingData currentRgd, ReservoirGuidingData otherRgd)
 {
     //Check if surfaces are similar and resampling can be performed
     bool normalThreshold = dot(otherSD.faceN, currentSD.faceN) < gNormalThreshold;
@@ -105,6 +109,8 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
         current.photonDir = other.photonDir;
         current.photonRadiance = other.photonRadiance;
         current.targetFunction = targetFunctionOther;
+        if (kUsePhotonGuiding)
+            currentRgd = otherRgd;
     }
 
     //Increase confidence weights
@@ -132,7 +138,7 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
     \param[in] Pixel location where the other reservoir is located
     \return True if resampling was successful
 */
-bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg , int2 resamplePixel) {
+bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg , int2 resamplePixel, inout ReservoirGuidingData rgd) {
 
     //Check if reservoir is inside the screen. 
     if (any(resamplePixel < 0) || any(resamplePixel >= gFrameDim))
@@ -145,6 +151,10 @@ bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BS
         return false;
     }
 
+    ReservoirGuidingData temporalRgd = {};
+    if (kUsePhotonGuiding)
+        temporalRgd = ReservoirGuidingData(gCausticReservoirGuidingDataPrev[resamplePixel]);
+
     //Get shading datas
     let lod = ExplicitLodTextureSampler(0.f);
     ShadingData temporalSD = loadShadingData(temporalHit, temporal.sampleSurfaceView, lod);
@@ -152,7 +162,7 @@ bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BS
     let temporalBsdfProperties = temporalMi.getProperties(temporalSD);
 
     //Combine both reservoirs
-    bool valid = combineReservoirsCaustic(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg);
+    bool valid = combineReservoirsCaustic(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg, rgd, temporalRgd);
 
     return valid;
 }
@@ -168,6 +178,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
 
     if (!currentHit.isValid())
         return;
+
+    ReservoirGuidingData rgd = {};
+    if(kUsePhotonGuiding)
+        rgd = ReservoirGuidingData(gCausticReservoirGuidingData[pixel]);
 
     //Get Shading Data
     ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
@@ -188,7 +202,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
     prevPixelF += rndOffset;
     int2 prevPixel = int2(prevPixelF);
 
-    bool resamplingSuccesfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel);
+    bool resamplingSuccesfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel, rgd);
 
     //
     // Spatiotemporal Resampling
@@ -200,9 +214,12 @@ void main(uint2 pixel: SV_DispatchThreadID)
         float2 spatialPixelF = prevPixelF + spatialOffset;
         int2 spatialPixel = int2(spatialPixelF);
 
-        resampleReservoir(current, currentSD, currentBsdfProperties, sg, spatialPixel);
+        resampleReservoir(current, currentSD, currentBsdfProperties, sg, spatialPixel, rgd);
     }
 
     //Store final reservoir
     gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)] = current;
+
+    if (kUsePhotonGuiding)
+        gCausticReservoirGuidingData[pixel] = rgd.getData();
 }

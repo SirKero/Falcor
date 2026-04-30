@@ -8,6 +8,7 @@ import Utils.Sampling.SampleGenerator;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
+import Rendering.PhotonGuiding.PhotonGuiding;
 import StructsAndHelpers;
 
 cbuffer CB
@@ -16,10 +17,9 @@ cbuffer CB
     uint gFrameCount;   // Frame count since scene was loaded.
     float2 gPhotonRadius;//Global/Caustic radius
 
-    uint gDispatchDimension;    //Dispatch dims (x,y identical) 
     float gGlobalRejectionProb; //Rejection Probability for global photons
     bool gUseAnalyticLights;    //true if analytic lights should be used
-    uint _pad;    
+    uint2 _pad;    
 }
 
 #if USE_EMISSIVE_LIGHT // Buffer is only valid if emissive light is enabled
@@ -36,7 +36,6 @@ static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kRussianRoulette = true;  //TODO as option
-
 
 struct RayPayload
 {
@@ -210,35 +209,61 @@ void rayGen()
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5);
     RayDesc ray;
     PhotonLightSample pls;
+    PhotonData photon = PhotonData();
 
-    //Create a photon by sampling from emissive lights or analytic light sources
-#if USE_EMISSIVE_LIGHT
-    if (gUseAnalyticLights)
-#endif
-    { // Analytic light sample
-        float3 sampleDir;
-        if (!createLightSampleAnalytic(sg, pls, sampleDir))
-            return;
+#if USE_PHOTON_GUIDING
 
-        ray.Direction = sampleDir;
-    }
-#if USE_EMISSIVE_LIGHT
-    else { // Emissive light sample
-        if (!createLightSample(sg, pls))
-            return;
+    PhotonGuidingSample pgs = {};
+    /*
+    pgs.lightIndex = (PHOTON_GUIDING_TOTAL_LIGHT_COUNT - 1) * sampleNext1D(sg);
+    pgs.directionUV = sampleNext2D(sg);
+    pgs.photonFluxDivFactor = dispatchDims.x * dispatchDims.y;
+    */
+    
+    if (!gPhotonGuiding.sampleGuidedLightAndDirection(pixel, dispatchDims.x, sampleNext2D(sg), pgs))
+        return;
+    PhotonGuidingPhotonLightSample pgpls = {};
+    if (!gPhotonGuiding.createPhotonSample(pgs, sg, pgpls))
+        return;
 
-        float lightDirPDF = 1.0;
-        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), lightDirPDF);
+    //Set Data
+    pls.posW = pgpls.posW;
+    pls.normal = pgpls.normal;
+    pls.flux = pgpls.flux;
+    ray.Direction = pgpls.dirW;
 
-        if (lightDirPDF <= 0.f)
-            return;
+    // Store guiding data for the Photon
+    photon.lightIndex = pgs.lightIndex;
+    photon.guidingPixels = gPhotonGuiding.guidingMapUVToPixel(pgs.directionUV);
+#else //USE_PHOTON_GUIDING
+        //Create a photon by sampling from emissive lights or analytic light sources
+    #if USE_EMISSIVE_LIGHT
+        if (gUseAnalyticLights)
+    #endif // USE_EMISSIVE_LIGHT
+        { // Analytic light sample
+            float3 sampleDir;
+            if (!createLightSampleAnalytic(sg, pls, sampleDir))
+                return;
 
-        ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-        pls.flux *= M_PI; // Lambert Emitter
-    }
-#endif
+            ray.Direction = sampleDir;
+        }
+    #if USE_EMISSIVE_LIGHT
+        else { // Emissive light sample
+            if (!createLightSample(sg, pls))
+                return;
 
-    pls.flux /= dispatchDims.x * dispatchDims.y; // Division through all dipatched photons
+            float lightDirPDF = 1.0;
+            float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), lightDirPDF);
+
+            if (lightDirPDF <= 0.f)
+                return;
+
+            ray.Direction = fromLocalToWorld(pls.normal, woLocal);
+            pls.flux *= M_PI; // Lambert Emitter
+        }
+    #endif //USE_EMISSIVE_LIGHT
+        pls.flux /= dispatchDims.x * dispatchDims.y; // Division through all dipatched photons
+#endif //USE_PHOTON_GUIDING
     
     //Prepare the rest of the ray
     ray.Origin = pls.posW;
@@ -252,7 +277,6 @@ void rayGen()
     float3 thp = float3(1.0); //Throughput
 
     //Prepare photon
-    PhotonData photon = PhotonData();
     photon.flux = photonStartFlux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;

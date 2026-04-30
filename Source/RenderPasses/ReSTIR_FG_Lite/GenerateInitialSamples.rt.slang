@@ -16,6 +16,8 @@ RaytracingAccelerationStructure gPhotonAS;
 RWStructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 RWTexture2D<float4> gEmission;
+RWTexture2D<uint2> gFinalGatherReservoirPGData;
+RWTexture2D<uint2> gCausticReservoirPGData;
 
 static const float kPhotonCollectTMax = 1e-7;
 
@@ -27,6 +29,7 @@ cbuffer CB
 
 static const bool kAlphaTest = true;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
+static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
 struct RayPayload
 {
@@ -97,6 +100,78 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
     return collectedRadiance;
 }
 
+/*  Alternative to initialize a final gather reservoir, by using photon RIS. Is needed for Photon Guiding,
+    as a representative photon needs to be choosen
+    \param[in/out] Reservoir
+    \param[in] Shading data of the gather query hit point
+    \param[in] Material instance of the gather query hit point
+    \param[in] Shading Normal of the hit point
+    \param[in] Ray Tracing instance mask. Can be used to mask out Global or Caustic Photons
+    \param[in/out] Random Number Generator
+    \param[in/out] Reservoir Guiding Data
+    \return Radiance estimate of the gather point
+*/
+void selectFGSample(inout ReservoirFG r, float pdf, ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg, inout ReservoirGuidingData rgd) {
+    float3 collectedRadiance = float3(0);
+    // Prepare ray
+    RayDesc ray;
+    ray.Origin = sd.posW;
+    ray.Direction = sd.faceN;
+    ray.TMin = 0;
+    ray.TMax = kPhotonCollectTMax;
+
+    let bsdfProperties = mi.getProperties(sd);
+
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+
+    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
+    while (rayQuery.Proceed()) {
+
+        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
+            continue;
+        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
+        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
+
+        // Check if ray is inside photon radius
+        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
+        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
+        if (!hitSphere(photonAABB.center(), radius, sd.posW))
+            continue;
+
+        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
+        float NdotL = dot(photonData.dir, N);
+        // Check for diffent surfaces (e.g. corners)
+        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
+            continue;
+
+        float targetFunction = 0;
+        float3 radianceOut = float3(0);
+        if (NdotL > 0) {
+            float3 bsdf = mi.eval(sd, photonData.dir, sg);
+            radianceOut = (photonData.flux * bsdf) / NdotL;
+            targetFunction = luminance(radianceOut);
+        }
+        float photonDenom = M_PI * radius * radius * pdf;
+        float w = targetFunction / photonDenom;
+
+        r.wSum += w;
+        bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
+        if (selectNew) {
+            r.targetFunction = targetFunction;
+            r.sampleData.radianceOut = radianceOut;
+            rgd.lightIndex = photonData.lightIndex;
+            rgd.packedGuidingPixels = photonData.packedGuidingPixels;
+        }
+    }
+
+    // Finalize Reservoir
+    if (r.targetFunction > 0) {
+        r.wSum /= r.targetFunction;
+    }
+    else
+        r.wSum = 0;
+}
+
 /*  Generates a ray at a hit point
     \param[in] Shading data of the hit point
     \param[in] Material instance of the hit point
@@ -126,7 +201,8 @@ bool generateFGSampleRay(ShadingData sd, IMaterialInstance mi, inout SampleGener
     \param[in/out] Reservoir for photons
     \param[in/out] Random Number Generator
 */
-void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collectGlobalDirect, inout ReservoirCaustic causticReservoir , inout SampleGenerator sg) {
+void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collectGlobalDirect, inout ReservoirCaustic causticReservoir, inout SampleGenerator sg, inout ReservoirGuidingData rgd)
+{
     // Prepare photon collection ray
     RayDesc ray;
     ray.Origin = sd.posW;
@@ -181,6 +257,8 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
             causticReservoir.photonDir = photonData.dir;
             causticReservoir.photonRadiance = photonData.flux;
             causticReservoir.targetFunction = targetFunction;
+            rgd.lightIndex = photonData.lightIndex;
+            rgd.packedGuidingPixels = photonData.packedGuidingPixels;
         }
     }
 
@@ -205,7 +283,8 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
     \param[in/out] Reservoir for the (caustic) photon samples
     \param[in/out] Emission for path with a length > 0
 */
-void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inout float3 thp, inout float pdf, inout bool valid, inout ReservoirFG reservoirFG, inout ReservoirCaustic reservoirCaustic, inout float3 emission) {
+void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inout float3 thp, inout float pdf, inout bool valid, inout ReservoirFG reservoirFG, inout ReservoirCaustic reservoirCaustic, inout float3 emission, inout ReservoirGuidingData rgdFG, inout ReservoirGuidingData rgdCaustic)
+{
     RayPayload rayPayload = RayPayload();
     uint pathLength = 0;
     bool collectCaustics = !prevHitIsRough;
@@ -246,18 +325,23 @@ void traceFGRay(RayDesc ray, inout SampleGenerator sg, bool prevHitIsRough, inou
             reservoirCaustic.sampleSurfaceView = ray.Direction;
             reservoirCaustic.pathLength = pathLength + 1;
             reservoirCaustic.thp = thp;
-            photonResampling(sd, bsdfProperties, true, reservoirCaustic, sg);
+            photonResampling(sd, bsdfProperties, true, reservoirCaustic, sg, rgdCaustic);
             collectCaustics = false;
         }
 
         // Check if this is a valid final gather surface
         if (hitIsRough && prevHitIsRough) {
             //Collect photons, estimate outgoing radiance and finalize the reservoir
-            reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
+            if (kUsePhotonGuiding)
+                selectFGSample(reservoirFG, pdf, sd, mi, bsdfProperties.guideNormal, 0xFF, sg, rgdFG);
+            else {
+                reservoirFG.sampleData.radianceOut = collectPhotons(sd, mi, bsdfProperties.guideNormal, 0xFF, sg);
+                reservoirFG.wSum = 1.0 / pdf;
+            }
             reservoirFG.thp = prevThp;
             reservoirFG.sampleData.posW = sd.posW;
             reservoirFG.sampleData.normal = sd.faceN; // Face normal?
-            reservoirFG.wSum = 1.0 / pdf;
+            
             reservoirFG.c = 1;
             float distanceToSample = distance(ray.Origin, sd.posW);
             reservoirFG.jacobianDeterminant = dot(reservoirFG.sampleData.normal, sd.V) / (distanceToSample * distanceToSample);
@@ -323,7 +407,9 @@ void rayGen()
     float3 outColor = float3(0);
     ReservoirFG finalGatherReservoir = ReservoirFG();
     ReservoirCaustic causticReservoir = ReservoirCaustic();
-    float3 emission = float3(0);    //Emission on fully specular paths
+    float3 emission = float3(0); // Emission on fully specular paths
+    ReservoirGuidingData rgdFG = {};    //Reservoir Guiding Data for FG paths
+    ReservoirGuidingData rgdCaustic = {};    //Reservoir Guiding Data for FG paths
 
     if (hitInfo.isValid()) {
         //Get info for the hit surface
@@ -344,7 +430,7 @@ void rayGen()
         if (hitIsRough) {
             causticReservoir.sampleSurface = hitInfo.getData();
             causticReservoir.sampleSurfaceView = -viewDir;
-            photonResampling(sd, bsdfProperties, false, causticReservoir, sg);
+            photonResampling(sd, bsdfProperties, false, causticReservoir, sg, rgdCaustic);
         }
             
         //Store surface
@@ -359,7 +445,7 @@ void rayGen()
         float fgPdf = 0;
         bool validFGRay = generateFGSampleRay(sd, mi, sg, fgThp, fgPdf, ray);
 
-        traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticReservoir, emission);
+        traceFGRay(ray, sg, hitIsRough, fgThp, fgPdf, validFGRay, finalGatherReservoir, causticReservoir, emission, rgdFG, rgdCaustic);
     } else {
         // Set invalid RTXDI data (ray missed scene)
         gRTXDI.setInvalidSurfaceData(pixel);
@@ -368,4 +454,8 @@ void rayGen()
     gFinalGatherReservoir[index2Dto1D(pixel, dispatchDims.x)] = finalGatherReservoir;
     gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)] = causticReservoir;
     gEmission[pixel] = float4(emission, 1.0);
+    if (kUsePhotonGuiding) {
+        gFinalGatherReservoirPGData[pixel] = rgdFG.getData();
+        gCausticReservoirPGData[pixel] = rgdCaustic.getData();
+    }
 }

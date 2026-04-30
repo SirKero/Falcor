@@ -18,8 +18,20 @@ struct PhotonGuidingSample
 struct PhotonGuidingPhotonLightSample
 {
     float3 posW;
+    float normalX;
     float3 dirW;
+    float normalY;
     float3 flux;
+    float normalZ;
+
+    property float3 normal {
+        get { return float3(normalX, normalY, normalZ); }
+        set {
+            normalX = newValue.x;
+            normalY = newValue.y;
+            normalZ = newValue.z;
+        }
+    }
 };
 
 struct PhotonGuiding
@@ -189,7 +201,6 @@ extension PhotonGuiding
         bool isAnalytic = pgs.lightIndex >= kAnalyticLightIndexOffset;
 
         float3 woLocal = float3(0);
-        float3 lightNormal = float3(0);
 
         if (isAnalytic) //Point or Spot
         {
@@ -216,7 +227,7 @@ extension PhotonGuiding
             if (invLightPdf <= 0.f)
                 return false;
 
-            lightNormal = lightData.dirW;
+            pls.normal = lightData.dirW;
             pls.posW = lightData.posW;
             pls.flux = lightData.intensity * invLightPdf;
         } else //Emissive Triangle
@@ -225,13 +236,13 @@ extension PhotonGuiding
             const EmissiveTriangle tri = gScene.lightCollection.getTriangle(pgs.lightIndex);
             const float3 barycentrics = sample_triangle(sampleNext2D(sg)); //Position on the triangle is random
             pls.posW = tri.getPosition(barycentrics);
-            lightNormal = tri.normal;
+            pls.normal = tri.normal;
 
             // Sample emissive material of the triangle
             float2 uv = tri.getTexCoord(barycentrics);
             pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
 
-            pls.posW = computeRayOrigin(pls.posW, lightNormal); // Offset as this light is real geometry
+            pls.posW = computeRayOrigin(pls.posW, pls.normal); // Offset as this light is real geometry
 
             // Sample direction in a cosine lobe
             float lightDirPDF = 1.0;
@@ -242,9 +253,9 @@ extension PhotonGuiding
         }
 
         // Convert direction local -> world
-        float3 bitangent = perp_stark(lightNormal);
-        float3 tangent = cross(bitangent, lightNormal);
-        pls.dirW = woLocal.x * tangent + woLocal.y * bitangent + woLocal.z * lightNormal;
+        float3 bitangent = perp_stark(pls.normal);
+        float3 tangent = cross(bitangent, pls.normal);
+        pls.dirW = woLocal.x * tangent + woLocal.y * bitangent + woLocal.z * pls.normal;
 
         // Apply flux scale factor
         pls.flux /= pgs.photonFluxDivFactor;

@@ -5,6 +5,7 @@
 #include "Rendering/Lights/EmissiveLightSampler.h"
 
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
+#include "Rendering/PhotonGuiding/PhotonGuiding.h"
 
 using namespace Falcor;
 
@@ -29,7 +30,7 @@ public:
 private:
     struct ResamplingSettings
     {
-        bool enable = true;
+        bool enable = false;
         uint confidenceCap = 20;                // Maximum confidence allowed
         uint spatialSamples = 1;                // Number of spatial samples
         uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found
@@ -73,6 +74,7 @@ private:
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<RTXDI> mpRTXDI;         // Ptr to RTXDI for direct use
     RTXDI::Options mRTXDIOptions;           // Options for RTXDI
+    std::unique_ptr<PhotonGuiding> mpPhotonGuiding; //Photon Guiding
 
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
@@ -111,8 +113,8 @@ private:
     //Photon Distribution
     uint mPhotonMaxBounces = 10;                        // Number of photon bounces
     float mGlobalPhotonRejection = 0.3f;                // Probability a global photon is stored
-    uint mNumDispatchedPhotons = 2000000;               // Number of photons dispatched
-    uint2 mNumMaxPhotons = uint2(400000, 300000);       // Size of the photon buffer
+    uint mNumDispatchedPhotons = 1000000;               // Number of photons dispatched
+    uint2 mNumMaxPhotons = uint2(1000000, 1000000);     // Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;            // For UI, as changing happens with a button
     bool mChangePhotonLightBufferSize = true;           // True if buffer size has changed
     float mASBuildBufferPhotonOverestimate = 1.15f;     // Guard percentage for AS building
@@ -120,21 +122,27 @@ private:
     float2 mPhotonRadius = float2(0.020f, 0.005f);      // Global/Caustic Radius.
     float mPhotonAnalyticRatio = 0.5f;                  // Analytic photon distribution ratio in a mixed light case. E.g. 0.3 -> 30% analytic, 70% emissive
 
-    bool mUseDynamicPhotonDispatchCount = true;         // Dynamically change the number of photons to fit the max photon number
+    bool mUseDynamicPhotonDispatchCount = false;         // Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 4000000;           // Max value for dynamically dispatched photons
     float mPhotonDynamicGuardPercentage = 0.08f;        // Determines how much space of the buffer is used to guard against buffer overflows
     float mPhotonDynamicChangePercentage = 0.04f;       // The percentage the buffer is increased/decreased per frame
+
+    //Photon Guiding
+    bool mUsePhotonGuiding = true;
+    //TODO add guiding contribution record variable? 
 
     //
     // Resources
     //
     ref<Buffer> mpPhotonAABB[2];            // Photon AABBs for Acceleration Structure building
-    ref<Buffer> mpPhotonData[2];            // Additional Photon data (flux, dir)
+    ref<Buffer> mpPhotonData[2];            // Additional Photon data (flux, dir, guiding)
     ref<Buffer> mpPhotonCounter;            // Photon Counter
     ref<Buffer> mpPhotonCounterCPU;         // CPU copy of counter for readback
     ref<Buffer> mpFinalGatherReservoir[2];  // Reservoir for the Final Gather sample
     ref<Buffer> mpCausticReservoir[2];      // Reservoir for the Caustic sample
     ref<Texture> mpEmission;                // Emission for paths that travel through highly specular materials
+    ref<Texture> mpFinalGatherReservoirGuidingData[2];  //Additional Guiding Data for the reservoir
+    ref<Texture> mpCausticReservoirGuidingData[2];      //Additional Guiding Data for the reservoir
 
     //
     // Render Passes/Programs
