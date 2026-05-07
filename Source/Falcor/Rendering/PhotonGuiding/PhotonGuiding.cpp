@@ -582,7 +582,7 @@ namespace Falcor
 
             defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
             defines.add("MAPPING_PHOTONS_NEEDED_TO_CREATE", std::to_string(mOptions.mappingPhotonNeededToCreate));
-            defines.add("MAP_TEXTURE_SIZE", std::to_string(mResolutionDirGM));
+            defines.add("MAP_TEXTURE_SIZE", std::to_string(mResolutionMap));
             defines.add("LIGHT_GM_SIZE", std::to_string(mResolutionLightGM));
 
             return defines;
