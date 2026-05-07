@@ -28,9 +28,11 @@ namespace
 
     //Outputs
     const std::string kOutputColor = "color";
+    const std::string kOutputDebug = "debug";
 
     const Falcor::ChannelList kOutputChannels{
-        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float}
+        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputDebug, "gOutDebug", "DebugTexture", true /*optional*/, ResourceFormat::RGBA32Float},
     };
 
 }; // namespace
@@ -137,6 +139,14 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
         group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
         group.indent(-10.f);
 
+    }
+
+    if (auto group = widget.group("PhotonGuiding"))
+    {
+        if (mpPhotonGuiding)
+        {
+            mpPhotonGuiding->renderUI(group);
+        }
     }
 
     if (auto group = widget.group("RTXDI"))
@@ -298,6 +308,12 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     //End ReSTIR DI frame
     mpRTXDI->endFrame(pRenderContext);
 
+    //(Optional) Debug view
+    if (mpPhotonGuiding) {
+        ref<Texture> debugTexture = renderData[kOutputDebug]->asTexture();
+        mpPhotonGuiding->renderDebugView(pRenderContext, debugTexture);
+    }    
+
     mFrameCount++;
     mCanResample = true;
 }
@@ -406,7 +422,7 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
             if (!mpCausticReservoirGuidingData[i] || mResetScreenTex) {
                 mpCausticReservoirGuidingData[i] = Texture::create2D(mpDevice, mScreenRes.x, mScreenRes.y,
                     ResourceFormat::RG32Uint, 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
-                mpCausticReservoirGuidingData[i]->setName("FinalGatherReservoirGuidingData" + std::to_string(i));
+                mpCausticReservoirGuidingData[i]->setName("CausticReservoirGuidingData" + std::to_string(i));
             }
         }
     }
@@ -677,7 +693,7 @@ void ReSTIR_FG_Lite::generateInitialSamplesPass(RenderContext* pRenderContext, c
 
     if (mUsePhotonGuiding) {
         var["gFinalGatherReservoirPGData"] = mpFinalGatherReservoirGuidingData[mFrameCount % 2];
-        var["gCausticReservoirPGData"] = mpFinalGatherReservoirGuidingData[mFrameCount % 2];
+        var["gCausticReservoirPGData"] = mpCausticReservoirGuidingData[mFrameCount % 2];
     }
 
     //Dispatch Shader
@@ -873,7 +889,7 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
     if (mUsePhotonGuiding) {
         mpPhotonGuiding->setShaderData(var);
         var["gFinalGatherReservoirPGData"] = mpFinalGatherReservoirGuidingData[mFrameCount % 2];
-        var["gCausticReservoirPGData"] = mpFinalGatherReservoirGuidingData[mFrameCount % 2];
+        var["gCausticReservoirPGData"] = mpCausticReservoirGuidingData[mFrameCount % 2];
     }
 
     //Output
