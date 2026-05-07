@@ -30,7 +30,7 @@ public:
 private:
     struct ResamplingSettings
     {
-        bool enable = false;
+        bool enable = true;
         uint confidenceCap = 20;                // Maximum confidence allowed
         uint spatialSamples = 1;                // Number of spatial samples
         uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found

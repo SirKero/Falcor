@@ -17,7 +17,23 @@ namespace Falcor
 
         To use Photon Guiding properly the following steps needs to occur:
 
-        TODO
+        - Create the class after loading the scene
+
+        - Call the "update" function prior to tracing photons
+
+        - Use the "getPhotonDispatchSize" function for the trace photon dispatch size
+
+        - Use the "getDefines" and "setShaderData" functions, to set shader defines and resources. 
+
+        In the shader, import PhotonGuiding.slang (import Rendering.PhotonGuiding.PhotonGuiding;), which allows the usage of the following functions
+
+        - gPhotonGuiding.sampleGuidedLightAndDirection(...)     >> Creates a PhotonGuidingSample from the guiding map (light index and random numbers)
+        - gPhotonGuiding.createPhotonSample(...)                >> Helper to sample the scenes light sources. Sample is stored as a PhotonGuidingPhotonLightSample
+        - gPhotonGuiding.guidingMapUVToPixel(...)               >> Converts the random numbers to Guiding Map Pixels for compact storage
+
+        - gPhotonGuiding.addGuidingContribution(...)            >> Records contribution. Needs light index and guiding pixels
+
+        For more infos on the shader functions, see "PhotonGuiding.slang"
 
     */
     class FALCOR_API PhotonGuiding
@@ -37,14 +53,14 @@ namespace Falcor
 
             uint traversalBlockSize = 16;   //For traversal, the photonID is linearized in blocks to improve locality 
 
-            //Mapping scheme options, that only maps a small number of directional Guiding Maps instead of one
+            // Mapping scheme options, that only maps a small number of directional Guiding Maps instead of one
             // for every light. Is beneficial in terms of memory and runtime, when a scene contains a large
             // number of lights. 
             bool useMappingScheme = false;  //Mapping enabled. Is automatically switched to true, if the scene contains >1000 lights    
             uint mappingDirGMCount = 32;    //Maximum number of Guiding Maps that are reserved
             uint mappingPhotonNeededToCreate = 16384; //Minimum photons needed to create a GM with mapping
 
-            bool useDynamicPMin = false;
+            bool useDynamicPMin = false;    //TODO
 
             bool debugEnable = true;    //Debug view
             bool debugSelectLightHelperMode = false; //Helper mode to select light
@@ -57,7 +73,7 @@ namespace Falcor
             bool debugMappingShowDirectionalGM = false; //Shows the directional GM
         };
 
-        /*
+        /* Creates the class and initial resources based on the scene. Needs to be re-created when switching scenes
         */
         PhotonGuiding(
             ref<Device> pDevice,
@@ -69,7 +85,7 @@ namespace Falcor
         */
         ~PhotonGuiding();
 
-        /* 
+        /* Updates the Guiding Maps and clears the contribution textures
         */
         void update(RenderContext* pRenderContext, uint maxPhotonsDistributed);
 
@@ -163,16 +179,12 @@ namespace Falcor
         */
         void reduceLoop(RenderContext* pRenderContext, ref<Texture>& pContributionTex, const uint startMip, const uint dstMip, const bool forceMipMapGen = false);
 
-        /*
-        */
-        void updateGuidingMaps(RenderContext* pRenderContext, uint maxPhotonsDistributed);
-
         /* Caluclates current Histogram weight from the contribution and updates temporally with
         *  the histogram weight from last frame
         */
         void updateHistogramsPass(RenderContext* pRenderContext, bool isDirectionalResource);
 
-        /*
+        /* Creates the guiding maps from the histogram and number of photons distributed
         */
         void updateGuidingMapsPass(RenderContext* pRenderContext, uint maxPhotonsDistributed, bool isDirectionalResource);
     };

@@ -17,6 +17,17 @@ namespace Falcor
         const uint kMappingInvalidIndex = 0xFFFF; // Invalid index for mapping
         const uint kCounterIndexMapping = 0;      // Counter Buffer Index used in Mapping
         const uint kCounterIndexDynamicPhoton = 1;// Counter Buffer Index uesd for dynamic minimum photon count
+
+        //UI Dropdown lists
+        const Gui::DropdownList kGuidingMapResolutionDropdownList = {
+            {8, "8"},
+            {16, "16"},
+            {32, "32"},
+            {64, "64"},
+            {128, "128"},
+            {256, "256"},
+            {512, "512"}
+        };
     }
 
     PhotonGuiding::PhotonGuiding(ref<Device> pDevice, ref<Scene> pScene, RenderContext* pRenderContext)
@@ -40,11 +51,28 @@ namespace Falcor
     {
         FALCOR_PROFILE(pRenderContext, "PhotonGuiding_UpdateResources");
 
+        //Check if resources needs to be rebuild 
+        prepareResources(pRenderContext);
+
         //Get per light and total contribution
         reduceContributionPass(pRenderContext);
 
         //
-        updateGuidingMaps(pRenderContext, maxPhotonsDistributed);
+        //Update the Guiding Maps.
+        //
+        
+        //First temporally accumulate the light resources
+        updateHistogramsPass(pRenderContext, false);
+
+        //Convert Light Histogram to Light Guiding Map by distributing the photons using the histogram as a guide
+        updateGuidingMapsPass(pRenderContext, maxPhotonsDistributed, false);
+
+        //Update the direction histogram per light (stored in an atlas) 
+        updateHistogramsPass(pRenderContext, true);
+
+        //Distribute the photons from each light to the directions, if enough photons are distributed for a light
+        updateGuidingMapsPass(pRenderContext, maxPhotonsDistributed, true);
+
 
         //Clear Resources
         {
@@ -156,13 +184,39 @@ namespace Falcor
     bool PhotonGuiding::renderUI(Gui::Widgets& widget)
     {
         bool changed = false;
+        widget.text("Tipp: Changing the values will trigger recompilation. \n Use \"Strg+Space\" to stop rendering when changing value. \n Press \"Strg+Space\" again to resume.");
+
+        //TODO Move text on top of dropdown
+        //TODO Add tooltips
+        mRebuildResources |= widget.dropdown("Guiding Map Resolution", kGuidingMapResolutionDropdownList, mOptions.guidingMapResolution);
+        widget.separator();
+        changed |= widget.var("Contribution Discretization Factor", mOptions.discretizedContributionFactor, 1u, UINT_MAX, 1u);
+        changed |= widget.var("Contribution Max Value", mOptions.discretizedContributionMax, mOptions.discretizedContributionFactor, UINT_MAX, 1u);
+        widget.separator();
+        changed |= widget.var("Exponential Moving Average (alpha)", mOptions.exponentialMovingAverageFactor, 0.f, 1.f, 0.0001f);
+        if(auto group = widget.group("Mapping"))
+        {
+            widget.text("Mapping is enabled by default on scenes with more than 1000 light sources");
+            mRebuildResources |= widget.checkbox("Enable", mOptions.useMappingScheme);
+            mRebuildResources |= widget.dropdown("Maximum Directional Resources", kGuidingMapResolutionDropdownList,mOptions.mappingDirGMCount); //"Reuse" Resolution dropdown
+            changed |= widget.var("Min Photon to create a Guiding Map", mOptions.mappingPhotonNeededToCreate, mOptions.photonNeededForGM, UINT_MAX, 1u);
+        }
+        //TODO Dynamic Pmin
+        changed |= widget.var("Reserved Photons per Light", mOptions.reservedPhotonsPerLight, 1u, UINT_MAX, 1u);
+        changed |= widget.var("Reserved Photons per Direction Cell", mOptions.reservedPhotonsPerDirection, 1u, UINT_MAX, 1u);
+        uint minPhotonsNeeded = mOptions.reservedPhotonsPerDirection * mOptions.guidingMapResolution * mOptions.guidingMapResolution;
+        changed |= widget.var("Light Photons needed to create Directional Guiding Map", mOptions.photonNeededForGM, minPhotonsNeeded, UINT_MAX, 1u);
+        widget.separator();
+        widget.dropdown("Trace Photon: Block Size", kGuidingMapResolutionDropdownList, mOptions.traversalBlockSize);
+        
+        changed |= mRebuildResources;
 
         //Debug settings, will not change the "changed" variable, as these settings have no influence over normal rendering
         if (auto group = widget.group("Debug")) {
             group.checkbox("Enable", mOptions.debugEnable);
-
             if(mOptions.debugEnable)
             {
+                group.text("Changing Debug Variables will not trigger recompilation.");
                 //Show Mapping Texture
                 if (mOptions.useMappingScheme)
                 {
@@ -282,9 +336,11 @@ namespace Falcor
 
             clearResources();
 
-            //If total lights > the threshold, enable mapping by default
-            if(mTotalLightCount > kAutomaticMappingCount)
+            //If total lights > the threshold, enable mapping by default. Disable on rebuild
+            if((mTotalLightCount > kAutomaticMappingCount) && !mRebuildResources)
                 mOptions.useMappingScheme = true;
+
+            mRebuildResources = false;
         }
 
         //Create Resources
@@ -463,18 +519,6 @@ namespace Falcor
             const uint mipLevelMax = mpContributionLight->getMipCount() - 1;
             reduceLoop(pRenderContext, mpContributionLight, 0, mipLevelMax); //(light->total)
         }        
-    }
-
-    void PhotonGuiding::updateGuidingMaps(RenderContext* pRenderContext, uint maxPhotonsDistributed)
-    {
-
-        updateHistogramsPass(pRenderContext, false);
-
-        updateGuidingMapsPass(pRenderContext, maxPhotonsDistributed, false);
-
-        updateHistogramsPass(pRenderContext, true);
-
-        updateGuidingMapsPass(pRenderContext, maxPhotonsDistributed, true);
     }
 
     void PhotonGuiding::updateHistogramsPass(RenderContext* pRenderContext, bool isDirectionalResource)
