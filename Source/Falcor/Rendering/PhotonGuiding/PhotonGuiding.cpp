@@ -8,7 +8,8 @@ namespace Falcor
         const std::string kShaderFolder = "Rendering/PhotonGuiding/"; 
         const std::string kShaderReduce = kShaderFolder + "Reduce.cs.slang";
         const std::string kShaderUpdateHistograms = kShaderFolder + "UpdateHistograms.cs.slang"; 
-        const std::string kShaderUpdateGuidingMaps = kShaderFolder + "UpdateGuidingMaps.cs.slang"; 
+        const std::string kShaderUpdateGuidingMaps = kShaderFolder + "UpdateGuidingMaps.cs.slang";
+        const std::string kShaderDebug = kShaderFolder + "DebugView.cs.slang";
 
         const std::string kShaderModel = "6_6";
 
@@ -150,6 +151,105 @@ namespace Falcor
 
         var["gGuidingMapLight"] = mpGuidingMapLight;
         var["gGuidingMapsDirection"] = mpGuidingMapsDirection;
+    }
+
+    bool PhotonGuiding::renderUI(Gui::Widgets& widget)
+    {
+        bool changed = false;
+
+        //Debug settings, will not change the "changed" variable, as these settings have no influence over normal rendering
+        if (auto group = widget.group("Debug")) {
+            group.checkbox("Enable", mOptions.debugEnable);
+
+            if(mOptions.debugEnable)
+            {
+                //Show Mapping Texture
+                if (mOptions.useMappingScheme)
+                {
+                    group.checkbox("Mapping show directional Guiding Maps", mOptions.debugMappingShowDirectionalGM);
+                    group.tooltip("Shows the mapped directional guiding resources. WARNING: Can flicker due to random index assigment for each frame");
+                }
+
+                //Select Light Index
+                group.var("Selected Light Index", mOptions.debugSelectedLightIndex, -1, int(mTotalLightCount) - 1, 1);
+                group.tooltip("-1 -> disabled. Otherwise it shows the GM of the selected light. Enable the Light Helper for easier selection of the Guiding Map that should be magnified.");
+                group.checkbox("Select Light Helper", mOptions.debugSelectLightHelperMode);
+                group.tooltip("Enables a helper mode to vizualize which light is currently selected");
+                if(mOptions.debugSelectLightHelperMode)
+                    group.rgbColor("Light Helper Color",mOptions.debugSelectLightHelperModeColor);
+
+                //Color and scale for GMs
+                group.var("Scale Light Guiding Map", mOptions.debugLightGMScaleFactor, 0.f, FLT_MAX, 0.001f);
+                group.rgbColor("Light Guiding Map Color", mOptions.debugLightGMColor);
+                group.var("Scale Direction Guiding Maps", mOptions.debugDirGMScaleFactor, 0.f, FLT_MAX, 0.001f);
+                group.rgbColor("Direction Guiding Maps Color", mOptions.debugDirGMColor);
+            }
+        }
+
+        return changed;
+    }
+
+    void PhotonGuiding::renderDebugView(RenderContext* pRenderContext, ref<Texture>& dstTexture)
+    {
+        if(!mOptions.debugEnable || !dstTexture)
+            return;
+
+        FALCOR_PROFILE(pRenderContext, "DebugView");
+
+        auto getRuntimeDefines = [&](){
+            DefineList defines;
+            defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
+            defines.add("LIGHT_COUNT", std::to_string(mTotalLightCount));
+            defines.add("LIGHT_GM_SIZE", std::to_string(mResolutionLightGM));
+            defines.add("DIR_GM_SIZE", std::to_string(mResolutionDirGM));
+            defines.add("GUIDING_TEXTURE_SIZE", std::to_string(mOptions.guidingMapResolution));
+            defines.add("MAP_TEXTURE_SIZE", std::to_string(mResolutionMap));
+            return defines;
+        };
+
+        //Create Compute Pass
+        if (!mpDebugViewPass) {
+            Program::Desc desc;
+            desc.addShaderLibrary(kShaderDebug).csEntry("main").setShaderModel(kShaderModel);
+
+            DefineList defines;
+            defines.add("MAPPING_INVALID_INDEX", std::to_string(kMappingInvalidIndex));
+            defines.add(getRuntimeDefines());
+
+            mpDebugViewPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        mpDebugViewPass->getProgram()->addDefines(getRuntimeDefines()); //Update Runtime defines
+
+        auto var = mpDebugViewPass->getRootVar();
+
+        uint3 dispatchDim = uint3(dstTexture->getWidth(), dstTexture->getHeight(), 1);
+
+        //Determine color scales
+        float dirGMColorScale = mOptions.debugDirGMScaleFactor * mOptions.guidingMapResolution * mOptions.guidingMapResolution;
+        if (mTracePhotonNumberOfPhotonsLastFrame > 0)
+            dirGMColorScale /= mTracePhotonNumberOfPhotonsLastFrame;
+        float lightGMColorScale = mOptions.debugLightGMScaleFactor;
+        lightGMColorScale /= mOptions.reservedPhotonsPerDirection * mOptions.guidingMapResolution * mOptions.guidingMapResolution;
+
+        var["CB"]["gDispatchSize"] = dispatchDim.xy();
+        var["CB"]["gSelectedLightIndex"] = mOptions.debugSelectedLightIndex;
+        var["CB"]["gMinCountToCreateGM"] = mOptions.photonNeededForGM;
+        var["CB"]["gScaleLightGM"] = lightGMColorScale;
+        var["CB"]["gColorLightGM"] = mOptions.debugLightGMColor;
+        var["CB"]["gScaleDirGM"] = dirGMColorScale;
+        var["CB"]["gColorDirGM"] = mOptions.debugDirGMColor;
+        var["CB"]["gMappingShowDirectionalGM"] = mOptions.debugMappingShowDirectionalGM;
+        var["CB"]["gSelectLightModeColor"] = mOptions.debugSelectLightHelperModeColor;
+        var["CB"]["gUseLightSelectModeHelper"] = mOptions.debugSelectLightHelperMode;
+
+        var["gGuidingMapLight"] = mpGuidingMapLight;
+        var["gGuidingMapDirection"] = mpGuidingMapsDirection;
+        var["gMapLightToDirection"] = mpMapLightToDirectionPrev; //Previous is used, as ping pong swap happends at the end of update
+
+        var["gDebug"] = dstTexture;
+
+        mpDebugViewPass->execute(pRenderContext, dispatchDim);
     }
 
     void PhotonGuiding::clearResources()

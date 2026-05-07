@@ -45,6 +45,16 @@ namespace Falcor
             uint mappingPhotonNeededToCreate = 16384; //Minimum photons needed to create a GM with mapping
 
             bool useDynamicPMin = false;
+
+            bool debugEnable = true;    //Debug view
+            bool debugSelectLightHelperMode = false; //Helper mode to select light
+            float3 debugSelectLightHelperModeColor = float3(0,0,1); //Helper mode color
+            int debugSelectedLightIndex = -1;   // Selected Light index
+            float debugLightGMScaleFactor = 1.0;
+            float3 debugLightGMColor = float3(0,1,0);
+            float debugDirGMScaleFactor = 1.0;
+            float3 debugDirGMColor = float3(1,0,0);
+            bool debugMappingShowDirectionalGM = false; //Shows the directional GM
         };
 
         /*
@@ -75,6 +85,14 @@ namespace Falcor
         /* Set shader data for recording the contribution
         */
         void setShaderData(const ShaderVar& rootVar);
+
+        /* Get render UI for Photon Guiding. Returns true if any settings where changed
+        */
+        bool renderUI(Gui::Widgets& widget);
+
+        /* Renders a debug view into dstTexture. Unordered Access View flag needs to be set in dstTexture
+        */
+        void renderDebugView(RenderContext* pRenderContext, ref<Texture>& dstTexture);
 
     private:
         ref<Scene>      mpScene;    //< Current scene 
@@ -123,6 +141,7 @@ namespace Falcor
         ref<ComputePass> mpReducePass;              //Reduces the Contribution
         ref<ComputePass> mpUpdateHistogramsPass[2];    //Updates the histogram with the normalized contribution. 0=Light, 1=Direction
         ref<ComputePass> mpUpdateGuidingMapsPass[2];   //Updates the guiding maps with the histograms. 0=Light, 1=Direction
+        ref<ComputePass> mpDebugViewPass;              //Debug view
 
         //
         // Internal Functions

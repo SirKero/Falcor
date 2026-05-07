@@ -281,6 +281,7 @@ target_sources(Falcor PRIVATE
     Rendering/Materials/BSDFs/SpecularMicrofacet.slang
     Rendering/Materials/BSDFs/StandardBSDF.slang
 
+	Rendering/PhotonGuiding/DebugView.cs.slang
 	Rendering/PhotonGuiding/DynamicPhotonMin.cs.slang
 	Rendering/PhotonGuiding/PhotonGuiding.cpp
 	Rendering/PhotonGuiding/PhotonGuiding.h
