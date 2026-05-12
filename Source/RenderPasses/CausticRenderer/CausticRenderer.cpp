@@ -373,6 +373,8 @@ void CausticRenderer::lightingPass(RenderContext* pRenderContext, const RenderDa
     var["CB"]["gEmissiveStrength"] = mOptions.emissiveStrength;
     var["CB"]["gEnvMapStrength"] = mOptions.envMapStrength;
     var["CB"]["gImagePlaneDist"] = getImagePlaneDistance();
+    auto& cameraData = mpScene->getCamera()->getData();
+    var["CB"]["gFovY"] = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
 
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -395,8 +397,15 @@ float CausticRenderer::getImagePlaneDistance()
     float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
 
     //This should be right
-    const float tanHalfAngle = std::tan(fovY / 2.f); 
-    return mScreenRes.x / (2.f * tanHalfAngle);
+    //const float tanHalfAngle = std::tan(fovY / 2.f); 
+    //return mScreenRes.x / (2.f * tanHalfAngle);
+
+    float h = tan(fovY / 2.f) * 2.f;
+    float w = h * cameraData.aspectRatio;
+    float wPix = w / mScreenRes.x;
+    float hPix = h / mScreenRes.y;
+
+    return wPix * hPix;
 
     //
     /*
