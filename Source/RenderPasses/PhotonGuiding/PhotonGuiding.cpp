@@ -274,6 +274,20 @@ void PhotonGuiding::execute(RenderContext* pRenderContext, const RenderData& ren
     if (mDebugShowGuidingTexture)
         debugPass(pRenderContext, renderData);
 
+    if (mEnableSPPM)
+    {
+        if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::CameraMoved) || mSPPMFramesCameraStill == 0)
+        {
+            mSPPMFramesCameraStill = 0;
+            mPhotonRadius = mSPPMStartRadius;
+        }
+
+        float itF = static_cast<float>(mSPPMFramesCameraStill);
+        mPhotonRadius *= sqrt((itF + mSPPMAlpha) / (itF + 1.0f));
+
+        mSPPMFramesCameraStill++;
+    }
+
     mFrameCount++;
     mGuidingAccumulateCount++;
 
@@ -367,6 +381,22 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
             group.indent(10.f);
             changed |= group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
             group.indent(-10.f);
+
+            if(group.checkbox("Use SPPM", mEnableSPPM))
+            {
+                if(mEnableSPPM)
+                    mSPPMStartRadius = mPhotonRadius;
+                else
+                    mPhotonRadius = mSPPMStartRadius;
+                changed = true;
+            }
+
+            if(mEnableSPPM)
+            {
+                group.var("SPPM Alpha", mSPPMAlpha, 0.f, 1.f, 0.0001f);
+                if(group.button("Reset SPPM"))
+                    mSPPMFramesCameraStill = 0;
+            }
         }
       
 

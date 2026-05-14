@@ -252,6 +252,12 @@ private:
     float mPhotonDynamicGuardPercentage = 0.08f;  // Determines how much space of the buffer is used to guard against buffer overflows
     float mPhotonDynamicChangePercentage = 0.04f; // The percentage the buffer is increased/decreased per frame
 
+    //Stochastic Progressive photon mapping
+    bool mEnableSPPM = false;
+    float2 mSPPMStartRadius = mPhotonRadius;
+    float mSPPMAlpha = 2.f / 3.f;
+    uint mSPPMFramesCameraStill = 0;
+
     //
     // ReSTIR FG
     //
@@ -264,6 +270,7 @@ private:
     bool mPathResamplingStopAfterDiffuseSpecular = true;   //Enables tracing the path if a specular hit occured after the first diffuse hit. This case is usually covered by caustics.
     bool mPathRetraceSeperatePass = true;                  //Seperate pass for retracing the current and other reservoir sample
     bool mUseNEEatFGPoint = false;                          //Does not store direct photons (pathLenght = 0) and produces a NEE sample at the FG point 
+
 
     // Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();
