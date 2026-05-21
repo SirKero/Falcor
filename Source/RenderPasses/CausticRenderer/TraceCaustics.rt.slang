@@ -86,7 +86,9 @@ bool generateLightSample(bool isEmissive, inout SampleGenerator sg, out LightSam
         woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), lightDirPDF);
         if (lightDirPDF <= 0.) // Invalid direction
             return false;
-        ls.flux *= M_PI; // Lambert Emitter (or reduced cos/pdf)
+        ls.flux *= M_PI;               // Lambert Emitter (or reduced cos/pdf)
+        ls.flux *= lightCount;         // Inv light select pdf
+        ls.flux /= gEmissiveLightProb; //Probability to select an emissive light
     } else
     {
         const uint lightCount = gScene.getLightCount();
@@ -111,6 +113,8 @@ bool generateLightSample(bool isEmissive, inout SampleGenerator sg, out LightSam
         ls.normal = lightData.dirW;
         ls.posW = lightData.posW;
         ls.flux = lightData.intensity * invLightPdf;
+        ls.flux *= lightCount;               //Inv light select pdf
+        ls.flux /= 1.0 - gEmissiveLightProb; //Probability to select an analytic light
     }
 
     // Local to world direction
