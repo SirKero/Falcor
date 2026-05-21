@@ -27,6 +27,7 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
+
     struct ResamplingSettings
     {
         bool enable = true;
@@ -36,25 +37,59 @@ private:
         float samplingRadius = 20.f;            // Sampling radius in pixel
     };
 
+    struct PathLengthSettings {
+        uint bounces = 10;  //Total Bounces
+        uint diffuse = 3;   //Max Diffuse Bounces on the path
+        uint specular = 3;  //Max Specular Bounces on the path
+        uint delta = 10;    //Max Delta Bounces on the Path
+
+        const uint pack() const
+        {
+            return (bounces & 0xFF) | ((diffuse & 0xFF) << 8) | ((specular & 0xFF) << 16) | ((delta & 0xFF) << 24);
+        }
+    };
+
+    struct Options {
+
+        //
+        //Photon Tracing settings
+        //
+        PathLengthSettings photonPathLenght = {};       //Photon Path Length
+        uint photonsDispatched = 1000000;               //Number of photons, that are distributed each frame
+        uint photonBufferSizeGlobal = 1000000;          //Maximum global photons that can be stored
+        uint photonBufferSizeCaustic = 1000000;         //Maximum caustic photons that can be stored
+        float photonMixedLightRatio = 0.5f;             //Ratio if both analytic and emissive lights are used. 0 -> 0% Analytic, 100% Emissive
+        //Radius
+        bool photonUseAdaptiveRadius = true;            //Uses a photon radius that is dependent on the (linear) distance to the camera
+        float2 photonAdaptiveRadius = float2(4.f, 2.f); //(Global|Caustic) Pixel Size scale for adptive radius
+        float2 photonRadius = float2(0.008f, 0.002f);   //(Global|Caustic) Fixed World Space Radius
+        //Optimization
+        float photonGlobalRejection = 0.3f;             // Fixed probability that a global photon is not stored
+        float photonASBuildBufferOverestimate = 1.15f; // Guard percentage for AS building (Uses (delayed) CPU Photon Counter to estimate)
+
+        //
+        // Material Options
+        //
+
+        bool useLambertianDiffuseBSDF = true;           // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
+        float specularRoughnessThreshold = 0.25f;       // Any material below this is considered specular
+        bool evaluateDeltaPDFs = false;                 // If set on true, delta pdfs are evaluated (always 0), else they are set to 1
+        bool enableAlphaTest = true;                    // Alpha Test
+    };
+
     //Initializes the emissive sampler used to sample photons
     void prepareLightingStructure(RenderContext* pRenderContext);
 
-    //Initializes and handles all textures and buffers
+    //Initializes and updates all textures and buffers
     void prepareResources(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Handles the photon acceleration structure
-    void preparePhotonAccelerationStructure();
-
     //Traces the photons and builds the photon Acceleration Structure
-    void tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData, bool analyticOnly = false, bool buildAS = true);
+    void tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    // Handles readback of the photon counter and adjusts dispatched photons dynamically
-    void handlePhotonCounter(RenderContext* pRenderContext);
-
-    //Generates the initial Samples for the reservoirs (FG) and initializes RTXDI surfaces
+    //Generates the initial Path Samples, collects Caustic Backprojections and initialized RTXDI Surfaces
     void generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Splat the reservoirs from last frame into the current frame
+    //Splats Caustic reservoirs from last frame to current frame
     void splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Sort the splatted reservoirs so they can be used in the resampling pass
@@ -66,10 +101,10 @@ private:
     //Reservoir Resampling for Path Reservoirs
     void resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
-    //Reservoir Resampling for Caustic Samples
+    //Reservoir Resampling for Caustic Reservoirs
     void resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Evaluate Reservoirs
+    //Evaluate all Reservoirs (Path, Caustic and RTXDI)
     void evaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Get Materials defines
@@ -87,24 +122,19 @@ private:
     RTXDI::Options mRTXDIOptions;           // Options for RTXDI
 
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
-    std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Accel Pointer
+    std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Photon Accleration Structure
 
     //
     // Parameters
     //
+    Options mOptions = {};                     //Options for the renderer
     uint mFrameCount = 0;
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
 
-    // Material Settings
-    bool mUseLambertianDiffuse = true;          // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
-    float mSpecularRoughnessThreshold = 0.25f;  // Any material below this is considered specular
-    bool mEvaluateDeltaPDFs = false;            // If set on true, delta pdfs are evaluated (always 0), else they are set to 1
-
     // Light
     bool mHasLights = false;           // True if the scene has any light sources
-    bool mHasAnalyticLights = false;   // True if there are analytic lights
     bool mMixedLights = false;         // True if analytic and emissive lights are in the scene
 
     //ReSTIR-FG Reservoirs
@@ -130,21 +160,8 @@ private:
     bool mEnableLightTraceSplatting = true;
 
     //Photon Distribution
-    uint mPhotonMaxBounces = 10;                        // Number of photon bounces
-    float mGlobalPhotonRejection = 0.3f;                // Probability a global photon is stored
-    uint mNumDispatchedPhotons = 2000000;               // Number of photons dispatched
-    uint2 mNumMaxPhotons = uint2(400000, 300000);       // Size of the photon buffer
-    uint2 mNumMaxPhotonsUI = mNumMaxPhotons;            // For UI, as changing happens with a button
-    bool mChangePhotonLightBufferSize = true;           // True if buffer size has changed
-    float mASBuildBufferPhotonOverestimate = 1.15f;     // Guard percentage for AS building
-    uint2 mCurrentPhotonCount = mNumMaxPhotons;
-    float2 mPhotonRadius = float2(0.020f, 0.005f);      // Global/Caustic Radius.
-    float mPhotonAnalyticRatio = 0.5f;                  // Analytic photon distribution ratio in a mixed light case. E.g. 0.3 -> 30% analytic, 70% emissive
-
-    bool mUseDynamicPhotonDispatchCount = true;         // Dynamically change the number of photons to fit the max photon number
-    uint mPhotonDynamicDispatchMax = 4000000;           // Max value for dynamically dispatched photons
-    float mPhotonDynamicGuardPercentage = 0.08f;        // Determines how much space of the buffer is used to guard against buffer overflows
-    float mPhotonDynamicChangePercentage = 0.04f;       // The percentage the buffer is increased/decreased per frame
+    uint2 mPhotonCountUI = uint2(mOptions.photonBufferSizeGlobal, mOptions.photonBufferSizeCaustic);
+    bool mPhotonBufferSizeChanged = false;
 
     //Debug
     bool mClearDebugTexture = true; 

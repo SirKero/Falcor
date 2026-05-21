@@ -420,8 +420,8 @@ void rayGen()
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
-        if (sampleNewDirection(sd, mi, pathDirSG, pd, ray))
-            tracePath(ray, sg, pathDirSG, pd, pathReservoir);
+        //if (sampleNewDirection(sd, mi, pathDirSG, pd, ray))
+        //    tracePath(ray, sg, pathDirSG, pd, pathReservoir);
 
     } else {
         // Set invalid RTXDI data

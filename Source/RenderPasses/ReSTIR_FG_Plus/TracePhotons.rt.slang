@@ -13,23 +13,17 @@ import StructsAndHelpers;
 
 cbuffer CB
 {
-    uint gMaxBounces;   // Max number of bounces allowed
-    uint gFrameCount;   // Frame count since scene was loaded.
-    float2 gPhotonRadius;//Global/Caustic radius
+    uint gFrameCount;                     // Frame count since scene was loaded.
+    float2 gPhotonRadius;                 // Global/Caustic radius
+    PackedPathLength gPackedPathLength;   // Packed Path Length
 
-    uint gDispatchDimension;    //Dispatch dims (x,y identical) 
-    float gGlobalRejectionProb; //Rejection Probability for global photons
-    bool gUseAnalyticLights;    //true if analytic lights should be used
-    uint _pad;
+    float gGlobalRejectionProb; // Rejection Probability for global photons
+    uint gDispatchDimension;    // Dispatch dims (x,y identical) 
+    uint2 gScreenDimensions;    //Camera screen dimensions in pixels for backprojection
 
-    uint2 gScreenDimensions;    //Screen dimensions for backprojection
+    float gMixedLightsAnalyticProbability;  //Probablity that a analytic light is choosen when mixed lights are utilized
+    float gNormalizedPixelDiagonal;         //Approximated pixel diagonal at distance 1
 }
-
-#if USE_EMISSIVE_LIGHT // Buffer is only valid if emissive light is enabled
-cbuffer Light {
-    EmissiveLightSampler gEmissiveSampler;
-}
-#endif
 
 RWStructuredBuffer<AABB> gPhotonAABB[2];
 RWStructuredBuffer<PhotonData> gPhotonData[2];
@@ -38,20 +32,18 @@ RWStructuredBuffer<uint> gPhotonCounter;
 RWTexture2D<int> gLightTraceHeadCounter;
 RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
 
-static const bool kAlphaTest = true;
+static const bool kAlphaTest = ENABLE_ALPHA_TEST;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-static const bool kRussianRoulette = true; // TODO as option
-static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
-
+static const bool kUseEmissive = USE_EMISSIVE_LIGHTS;
+static const bool kUseAnalytic = USE_ANALYTIC_LIGHTS;
+static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 
 struct RayPayload
 {
     PackedHitInfo packedHitInfo; //< Hit Info
 
-    /** Create ray payload with default parameters.
-     */
     __init()
     {
         this.packedHitInfo = {};
@@ -61,99 +53,106 @@ struct RayPayload
 //Helper struct to generate a photon form the lightSources
 struct PhotonLightSample {
     float3 posW;
-    float3 normal;
+    float normalX;
+    float3 dirW;
+    float normalY;
     float3 flux;
+    float normalZ;
+
+    property float3 normal {
+        get { return float3(normalX, normalY, normalZ); }
+        set {
+            normalX = newValue.x;
+            normalY = newValue.y;
+            normalZ = newValue.z;
+        }
+    }
 };
 
-// transforms direction from local to world space
-float3 fromLocalToWorld(const in float3 normal, float3 w)
+float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)
 {
-    // transform from local space -> random dir vector in world space
-    float3 bitangent = perp_stark(normal);
-    float3 tangent = cross(bitangent, normal);
-
-    return w.x * tangent + w.y * bitangent + w.z * normal;
+    float adaptiveRadius = 1.0;
+    if (kUseAdaptivePhotonRadius)
+    {
+        float distToCamera = distance(hitPos, gScene.camera.getPosition());
+        adaptiveRadius = (gNormalizedPixelDiagonal * distToCamera) / 2.0;
+    }
+    return adaptiveRadius * gPhotonRadius[photonTypeIdx];
 }
 
-#if USE_EMISSIVE_LIGHT // Function is only valid if the emissive sampler is set
-bool createLightSample(inout SampleGenerator sg, out PhotonLightSample pls) {
-    pls = {};
-    if (gScene.lightCollection.isEmpty())
-        return false;
-
-    // Randomly pick a triangle out of the global list with uniform probability
-    const uint triangleCount = gScene.lightCollection.triangleCount;
-    // Safety precaution as the result of the multiplication may be rounded to triangleCount even if uLight < 1.0 when triangleCount is large.
-    uint triangleIndex = min((uint)(sampleNext1D(sg) * triangleCount), triangleCount - 1);
-
-    uint2 packed = gEmissiveSampler._emissivePower.triangleAliasTable[triangleIndex];
-    float threshold = f16tof32(packed.x >> 16u);
-    uint selectAbove = ((packed.x & 0xFFFFu) << 8u) | ((packed.y >> 24u) & 0xFFu);
-    uint selectBelow = packed.y & 0xFFFFFFu;
-
-    // Test the threshold in the current table entry; pick one of the two options
-    triangleIndex = (sampleNext1D(sg) >= threshold) ? selectAbove : selectBelow;
-
-    float triangleSelectionPdf = gScene.lightCollection.fluxData[triangleIndex].flux * gEmissiveSampler._emissivePower.invWeightsSum;
-
-    const EmissiveTriangle tri = gScene.lightCollection.getTriangle(triangleIndex);
-    const float3 barycentrics = sample_triangle(sampleNext2D(sg));
-    pls.posW = tri.getPosition(barycentrics);
-    pls.normal = tri.normal;
-
-    // Get Flux
-    float2 uv = tri.getTexCoord(barycentrics);
-    pls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
-
-    pls.posW = computeRayOrigin(pls.posW, pls.normal); //Offset as this light is real geometry
-    pls.flux /= triangleSelectionPdf;
-
-    return true;
-}
-#endif
-
-bool createLightSampleAnalytic(inout SampleGenerator sg, out PhotonLightSample pls, out float3 sampledDir)
+bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
 {
-    pls = {};
-    sampledDir = float3(0);
-    const uint lightCount = gScene.getLightCount();
-    if (lightCount == 0)
-        return false;
-    // Uniformly sample one of the analytic lights
-    float rndLightIdx = float(lightCount) * sampleNext1D(sg);
-    uint lightIdx = min(uint(floor(rndLightIdx)), lightCount - 1);
-    LightData lightData = gScene.getLight(lightIdx);
+    ls = {};
 
-    // Only Point(+ Spot) lights are supported (due to RTXDI)
-    if (lightData.type != uint(LightType::Point))
-        return false;
-    float invLightPdf;
-    float3 woLocal;
-    float3 rnd = sampleNext3D(sg);
-    rnd.z = 0;
-    float spotAngle = lightData.cosOpeningAngle;
-    if (lightData.openingAngle < M_2PI) // If the opening angle is smaller than 2PI it is a spotlight
+    float3 woLocal = float3(0);
+    bool isEmissive = kUseEmissive;
+    if (kUseAnalytic && kUseEmissive)
     {
-        spotAngle = cos(lightData.openingAngle - lightData.penumbraAngle * rnd.z);
-        woLocal = sample_cone(rnd.xy, spotAngle);
+        isEmissive = sampleNext1D(sg) > gMixedLightsAnalyticProbability;
     }
-    else // Pointlight
+
+    if (isEmissive)
     {
-        woLocal = sample_sphere(rnd.xy);
+        const uint lightCount = gScene.lightCollection.triangleCount;
+        const uint selectedLight = min(uint(floor(lightCount * sampleNext1D(sg))), lightCount - 1);
+        // Get emissive triangle data
+        const EmissiveTriangle tri = gScene.lightCollection.getTriangle(selectedLight);
+        const float3 barycentrics = sample_triangle(sampleNext2D(sg)); // Sample random triangle position
+        ls.posW = tri.getPosition(barycentrics);
+        ls.normal = tri.normal;
+
+        // Sample emissive material of the triangle
+        float2 uv = tri.getTexCoord(barycentrics);
+        ls.flux = gScene.materials.evalEmissive(tri.materialID, uv) * tri.area;
+
+        ls.posW = computeRayOrigin(ls.posW, ls.normal); // Offset as this light is real geometry
+
+        // Sample random direction in a cosine lobe
+        float lightDirPDF = 1.0;
+        woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), lightDirPDF);
+        if (lightDirPDF <= 0.) // Invalid direction
+            return false;
+        ls.flux *= M_PI;               // Lambert Emitter (or reduced cos/pdf)
+        ls.flux *= lightCount;         // Inv light select pdf
+        if (kUseAnalytic && kUseEmissive)
+            ls.flux /= 1.0 - gMixedLightsAnalyticProbability; // Probability to select an emissive light
+    } else
+    {
+        const uint lightCount = gScene.getLightCount();
+        const uint selectedLight = min(uint(floor(lightCount * sampleNext1D(sg))), lightCount - 1);
+        LightData lightData = gScene.getLight(selectedLight);
+        // Only Point (and Spot) lights are supported
+        if (lightData.type != uint(LightType::Point))
+            return false;
+
+        float spotAngle = lightData.cosOpeningAngle;
+        float2 rndDir = sampleNext2D(sg); // Random direction variable
+        // Depending on the opening angle, the light is a spot or point light
+        if (lightData.openingAngle < M_2PI) // Spot Light
+        {
+            woLocal = sample_cone(rndDir, spotAngle);
+        } else // Point Light
+        {
+            spotAngle = 0; // Just to be sure
+            woLocal = sample_sphere(rndDir);
+        }
+        float invLightPdf = M_2PI * (1.0 - spotAngle);
+        ls.normal = lightData.dirW;
+        ls.posW = lightData.posW;
+        ls.flux = lightData.intensity * invLightPdf;
+        ls.flux *= lightCount; // Inv light select pdf
+        if (kUseAnalytic && kUseEmissive)
+            ls.flux /= gMixedLightsAnalyticProbability; // Probability to select an emissive light
     }
-    invLightPdf = M_2PI * (1.f - spotAngle);
 
-    if (invLightPdf <= 0.f)
-        return false;
+    // Local to world direction
+    // Convert direction local -> world
+    float3 bitangent = perp_stark(ls.normal);
+    float3 tangent = cross(bitangent, ls.normal);
+    ls.dirW = woLocal.x * tangent + woLocal.y * bitangent + woLocal.z * ls.normal;
 
-    invLightPdf *= lightCount; // Take the select pdf into account
-
-    // Fill the photon light struct
-    pls.posW = lightData.posW;
-    pls.normal = lightData.dirW;
-    pls.flux = lightData.intensity * invLightPdf;
-
-    sampledDir = fromLocalToWorld(pls.normal, woLocal);
+    //Divide by the number of light paths
+    ls.flux /= gDispatchDimension * gDispatchDimension;
     return true;
 }
 
@@ -224,70 +223,41 @@ void rayGen()
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 dispatchDims = DispatchRaysDimensions().xy;
 
-    const float invRejection = 1.f / gGlobalRejectionProb;
-
-    uint rngOffset = gUseAnalyticLights ? 1 : 0;
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + rngOffset);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
     RayDesc ray;
     PhotonLightSample pls;
 
-    //Create a photon by sampling from emissive lights or analytic light sources
-#if USE_EMISSIVE_LIGHT
-    if (gUseAnalyticLights)
-#endif
-    { // Analytic light sample
-        float3 sampleDir;
-        if (!createLightSampleAnalytic(sg, pls, sampleDir))
-            return;
-
-        ray.Direction = sampleDir;
-    }
-#if USE_EMISSIVE_LIGHT
-    else { // Emissive light sample
-        if (!createLightSample(sg, pls))
-            return;
-
-        float lightDirPDF = 1.0;
-        float3 woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), lightDirPDF);
-
-        if (lightDirPDF <= 0.f)
-            return;
-
-        ray.Direction = fromLocalToWorld(pls.normal, woLocal);
-        pls.flux *= M_PI; // Lambert Emitter
-    }
-#endif
-
-    pls.flux /= dispatchDims.x * dispatchDims.y; // Division through all dipatched photons
+    if (!generateLightSample(sg, pls))
+        return;
     
-    //Prepare the rest of the ray
+    //Prepare Ray and Payload
     ray.Origin = pls.posW;
-    ray.TMin = 0.0f;
+    ray.Direction = pls.dirW;
+    ray.TMin = 0.0;
     ray.TMax = FLT_MAX;
     RayPayload rayPayload = RayPayload();
-    
+
+    //Loop Variables
     bool storeAsCaustic = false;
     bool reflectedDiffuse = false;
-    float3 photonStartFlux = pls.flux;
-    float3 thp = float3(1.0); //Throughput
-
+    PackedPathLength pathLengthInfo = PackedPathLength();
     PhotonData photon = PhotonData();
-    photon.flux = photonStartFlux;
+    photon.flux = pls.flux;
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
-
+    
     // Main Loop
-    for (uint i = 0; i < gMaxBounces; i++) {
+    for (uint i = 0; i < gPackedPathLength.pathLength; i++) {
+        //Trace Ray
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
 
+        //Handle Hit
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         if (!hit.isValid())
             return;
 
-        // Get shading infos
+        // Get Material and Properties
         let lod = ExplicitLodTextureSampler(0);
-
-        // Get Material properties
         uint hints = (uint)MaterialInstanceHints::AdjustShadingNormal;
         ShadingData sd = loadShadingData(hit, -ray.Direction, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, hints);
@@ -297,58 +267,57 @@ void rayGen()
         // Store Photon
         photon.normalW = sd.getOrientedFaceNormal();
         reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        float3 tmpPhotonFlux = photon.flux; //Rejection probability can cahnge the flux, therefore we temporally store the flux here 
         if (reflectedDiffuse) {
             PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
             bool storePhoton = true;
             if (photonType == PhotonType::Global) {
                 storePhoton = sampleNext1D(sg) <= gGlobalRejectionProb;
-                photon.flux *= invRejection;
+                photon.flux /= gGlobalRejectionProb;
             }
             if (storePhoton) {
                 uint photonTypeIdx = (uint)photonType;
                 uint photonInsertIndex = 0;
                 InterlockedAdd(gPhotonCounter[photonTypeIdx], 1u, photonInsertIndex);
-                if (photonInsertIndex <= kPhotonBufferSize[photonTypeIdx])
+                if (photonInsertIndex < kPhotonBufferSize[photonTypeIdx])
                 {
-                    // photon.flux = float3(1, 0, 0);
-                    AABB photonAABB = AABB(sd.posW - gPhotonRadius[photonTypeIdx], sd.posW + gPhotonRadius[photonTypeIdx]);
+                    float photonRadius = getPhotonRadius(photonTypeIdx, sd.posW);
+                    AABB photonAABB = AABB(sd.posW - photonRadius, sd.posW + photonRadius);
                     gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
                     gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
-                    if (kEnableLightTrace) {
-                        if (photonType == PhotonType::Caustic)
-                            causticPhotonBackprojection(photonInsertIndex, sd);
-                    }
-                   
+                    if (photonType == PhotonType::Caustic)
+                        causticPhotonBackprojection(photonInsertIndex, sd);
                 }
             }
         }
+        // Restore flux
+        photon.flux = tmpPhotonFlux;
 
         //Photon Bounce for next iteration
         BSDFSample bsdfSample;
         bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+
+        // Path Length
+        if (bsdfSample.isLobe(LobeType::Delta))
+            pathLengthInfo.deltaBounces = pathLengthInfo.deltaBounces + 1;
+        else if (bsdfSample.isLobe(LobeType::Diffuse))
+            pathLengthInfo.diffuseBounces = pathLengthInfo.diffuseBounces + 1;
+        else if (bsdfSample.isLobe(LobeType::Specular))
+            pathLengthInfo.specularBounces = pathLengthInfo.specularBounces + 1;
+        validSample &= pathLengthInfo.comparePathLengts(gPackedPathLength);
+
         if (!validSample)
             return;
+
+        //Prepare next ray and update photon
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
-        thp *= bsdfSample.weight;
-
-        // RussianRoulette
-        const float rrVal = (thp.x + thp.y + thp.z) / 3.0;
-        const float prob = max(0.f, 1.f - rrVal);
-        if (sampleNext1D(sg) < prob)
-        {
-            return; // Photon is absorbed
-        }
-        else
-        {
-            thp /= (1.f - prob);
-        }
+        photon.flux *= bsdfSample.weight;
 
         // Update Photon
         storeAsCaustic = !reflectedDiffuse;
         photon.dir = -ray.Direction;
-        photon.flux = photonStartFlux * thp;
         photon.pathLenght++;
     }
 }
