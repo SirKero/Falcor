@@ -30,6 +30,7 @@
 #include "RenderGraph/RenderPass.h"
 #include "Rendering/Lights/EmissiveLightSampler.h"
 #include "Rendering/Lights/LightBVHSampler.h"
+#include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 
 
 using namespace Falcor;
@@ -82,6 +83,12 @@ private:
         float probAnalyticEmissive = 0.5f; //Probablility to generate from analytic / emissive if scene contains both
         float causticRoughnessThreshold = 0.25f;    //Roughness threshold, when a surface is considered specular
 
+        //Caustic Photon Settings
+        bool photonUseAdaptiveRadius = true;            //Uses a photon radius that is dependent on the (linear) distance to the camera
+        float photonAdaptiveRadius = 2.f;               //Pixel Size scale for adptive radius
+        float photonRadius = 0.002f;   // Fixed World Space Radius
+        float photonASBuildBufferOverestimate = 1.15f; // Guard percentage for AS building (Uses (delayed) CPU Photon Counter to estimate)
+
         //Direct Light
         bool evalAllAnalytic = true;    //Evals all analytic lights, else a random one in choosen
         float ambient = 0.2f;            //Ambient Factor
@@ -97,6 +104,7 @@ private:
     //
     ref<Scene> mpScene;                     // Scene Pointer
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
+    std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Photon Acceleration Structure
 
     //Light Sampler
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
@@ -118,9 +126,11 @@ private:
 
     //Resources
     ref<Texture> mpCausticHead;         //Head buffer, containing the first index of the linked list
-    ref<Buffer> mpCausticsLinkedList;   //Contains all backprojected caustic data
+    ref<Buffer> mpCausticsData;         //Contains all backprojected caustic data
     ref<Buffer> mpCounter;              //Global counter buffer
     ref<Buffer> mpCounterCPU;           //Global counter buffer CPU read copy
+
+    ref<Buffer> mpCausticAABB;          //For Acceleration Structure Collection
 
     //
     // Render Passes/Programs

@@ -17,14 +17,19 @@ cbuffer CB
 
     uint2 gScreenDimensions;    //Screen dimensions for backprojection
     float gRoughnessThreshold;  //Roughness threshold for defining a diffuse surface
-    float gEmissiveLightProb;   //Probablilty to create an emissive sample. 0->Analytic sample, 1->Emissive
+    float gEmissiveLightProb;   // Probablilty to create an emissive sample. 0->Analytic sample, 1->Emissive
+
+    float gPhotonRadius;           // Caustic Photon radius
+    float gNormalizedPixelDiagonal; // Approximated pixel diagonal at distance 1
 }
 
 RWTexture2D<int> gCausticHead;
-RWStructuredBuffer<CausticData> gCausticLinkedList;
+RWStructuredBuffer<CausticData> gCausticData;
+RWStructuredBuffer<AABB> gCausticAABB;
 RWStructuredBuffer<uint> gCounter;
 
 static const bool kAlphaTest = true;
+static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 
 //Ray Payload using Falcors hit struct
 struct RayPayload
@@ -58,6 +63,17 @@ struct LightSample
         }
     }
 };
+
+float getPhotonRadius(const float3 hitPos)
+{
+    float adaptiveRadius = 1.0;
+    if (kUseAdaptivePhotonRadius)
+    {
+        float distToCamera = distance(hitPos, gScene.camera.getPosition());
+        adaptiveRadius = (gNormalizedPixelDiagonal * distToCamera) / 2.0;
+    }
+    return adaptiveRadius * gPhotonRadius;
+}
 
 bool generateLightSample(bool isEmissive, inout SampleGenerator sg, out LightSample ls)
 {
@@ -237,28 +253,33 @@ void rayGen()
         // Store caustic if this hit is diffuse and the last was specular
         if (isDiffuse && lastHitSpecular)
         {
+            // Get insert index for the data
+            uint causticInsertIndex = 0;
+            InterlockedAdd(gCounter[kCounterLightPaths], 1u, causticInsertIndex);
+            //Data
+            CausticData cd = CausticData();
+            cd.packedHit = hit.getData();
+            cd.flux = flux;
+            cd.pathLength = i;
+            cd.wi = ray.Direction;
+
             // If the caustic is visible, it can be backprojected
             uint2 backprojectedPixel = uint2(0);
             if (isVisibleByCamera(sd, backprojectedPixel))
             {
-                CausticData cd = CausticData();
-                cd.packedHit = hit.getData();
-                cd.flux = flux;
-                cd.pathLength = i;
-                cd.wi = ray.Direction;
-
-                //Get insert index to the linked list
-                uint causticInsertIndex = 0;
-                InterlockedAdd(gCounter[kCounterLightPaths], 1u, causticInsertIndex);
-
                 //Set Head Buffer and get next pointer
                 int nodeNext = -1;
                 InterlockedExchange(gCausticHead[backprojectedPixel], causticInsertIndex, nodeNext);
 
                 //Store caustic data
                 cd.next = nodeNext;
-                gCausticLinkedList[causticInsertIndex] = cd;                               
             }
+            gCausticData[causticInsertIndex] = cd;
+
+            // Store Caustic AABB
+            float photonRadius = getPhotonRadius(sd.posW);
+            AABB photonAABB = AABB(sd.posW - photonRadius, sd.posW + photonRadius);
+            gCausticAABB[causticInsertIndex] = photonAABB;
         }
 
         //Sample bounce

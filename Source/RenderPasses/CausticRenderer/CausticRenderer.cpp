@@ -131,6 +131,7 @@ void CausticRenderer::renderUI(Gui::Widgets& widget)
     {
         changed |= group.var("Light Paths", mOptions.lightPaths, 32u, UINT_MAX, 1u);
         mResetCausticBuffers |= group.var("Caustic Buffer Size", mOptions.lightBufferSize, 32u, UINT_MAX, 1u);
+        group.text("Stored Caustics: " + std::to_string(mCausticsStored));
 
         group.var("Max Path Length", mOptions.maxPathLength, 0u, 1024u, 1u);
         group.var("Max Diffuse Bounces", mOptions.diffuseBounces, 0u, 1024u, 1u);
@@ -138,6 +139,18 @@ void CausticRenderer::renderUI(Gui::Widgets& widget)
         group.tooltip("All surfaces below the threshold can create caustics. The caustics are only stored on diffuse surfaces");
         if(mSceneHasMixedLights)
             group.var("Probability analytic/emissive", mOptions.probAnalyticEmissive, 0.f, 1.f, 0.0001f);
+
+        group.checkbox("Use Adaptive Radius", mOptions.photonUseAdaptiveRadius);
+        if(mOptions.photonUseAdaptiveRadius)
+        {
+            changed |= group.var("Adaptive Scale (Global/Caustic)", mOptions.photonAdaptiveRadius, 0.f, FLT_MAX, 0.0001f);
+        }
+        else
+        {
+            changed |= group.var("Radius (Global/Caustic)", mOptions.photonRadius, 0.f, FLT_MAX, 0.000001f, false, "%.6f");
+        }
+        group.var("Acceleration Structure Build Overestimate", mOptions.photonASBuildBufferOverestimate, 1.f, FLT_MAX, 0.001f);
+        group.tooltip("Percentage the CPU photon count value (which is delayed by 1-3 frames) is overestimated to improve acceleration structure build time.");
     }
 
     if(auto group = widget.group("Direct Light Settings"))
@@ -172,7 +185,9 @@ void CausticRenderer::prepareResources(RenderContext* pRenderContext, const Rend
     if(mResetCausticBuffers)
     {
         mpCausticHead.reset();
-        mpCausticsLinkedList.reset();
+        mpCausticsData.reset();
+        mpCausticAABB.reset();
+        mpPhotonAS.reset();
         mResetCausticBuffers = false;
     }
 
@@ -189,12 +204,20 @@ void CausticRenderer::prepareResources(RenderContext* pRenderContext, const Rend
         pRenderContext->clearUAV(mpCausticHead->getUAV(0).get(), uint4(clearVal));
     }
 
-    if (!mpCausticsLinkedList)
+    if (!mpCausticsData)
     {
-        mpCausticsLinkedList = Buffer::createStructured(mpDevice, sizeof(uint) * 12, mOptions.lightBufferSize,
+        mpCausticsData = Buffer::createStructured(mpDevice, sizeof(uint) * 12, mOptions.lightBufferSize,
             ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource,
             Buffer::CpuAccess::None, nullptr, false);
-        mpCausticsLinkedList->setName("CausticRenderer:CausticLinkedList");
+        mpCausticsData->setName("CausticRenderer:CausticData");
+    }
+
+    if(!mpCausticAABB)
+    {
+        mpCausticAABB = Buffer::createStructured(mpDevice, sizeof(AABB), mOptions.lightBufferSize,
+            ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false);
+        mpCausticAABB->setName("CausticRenderer:CausticAABB");
     }
 
     if (!mpCounter)
@@ -211,6 +234,15 @@ void CausticRenderer::prepareResources(RenderContext* pRenderContext, const Rend
             ResourceBindFlags::None,
             Buffer::CpuAccess::Read, nullptr, false);
         mpCounterCPU->setName("CausticRenderer:GlobalCounterCPURead");
+    }
+
+    // Create the Photon Acceleration Structure
+    if (!mpPhotonAS)
+    {
+        mpPhotonAS = std::make_unique<CustomAccelerationStructure>(
+            mpDevice, mOptions.lightBufferSize, mpCausticAABB->getGpuAddress(), CustomAccelerationStructure::BuildMode::FastBuild,
+            CustomAccelerationStructure::UpdateMode::None
+        );
     }
 
     //Light Sampler
@@ -289,12 +321,13 @@ void CausticRenderer::traceCausticsPass(RenderContext* pRenderContext, const Ren
         }
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
+        defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
 
         mCausticTracePass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
 
     //Runtime defines
-    //mCausticTracePass.pProgram->addDefine();
+    mCausticTracePass.pProgram->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
 
     // Program Vars
     if (!mCausticTracePass.pVars)
@@ -310,6 +343,21 @@ void CausticRenderer::traceCausticsPass(RenderContext* pRenderContext, const Ren
     //Probablity to generate a emissive light path
     float emissiveLightProb = mSceneHasMixedLights ? mOptions.probAnalyticEmissive : mpScene->useAnalyticLights() ? 0.f : 1.f;
 
+        //Approximated pixel diagonal at length 1 for adaptive photon radius
+    float approxPixelDiagonal = 0.f;
+    if (mOptions.photonUseAdaptiveRadius)
+    {
+        // Update Image plane distance
+        auto& cameraData = mpScene->getCamera()->getData();
+        // Get normalized pixel area
+        float h = cameraData.frameHeight / cameraData.focalLength; //Normalized Frame height
+        float w = h * cameraData.aspectRatio;
+        float wPix = w / mScreenRes.x;
+        float hPix = h / mScreenRes.y;
+
+        approxPixelDiagonal = sqrt((wPix * wPix) + (hPix * hPix));
+    }
+
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gLightPaths"] = dispatchDims.x * dispatchDims.y;
     var["CB"]["gRoughnessThreshold"] = mOptions.causticRoughnessThreshold;
@@ -318,13 +366,35 @@ void CausticRenderer::traceCausticsPass(RenderContext* pRenderContext, const Ren
     var["CB"]["gDiffuseBounces"] = mOptions.diffuseBounces;
     var["CB"]["gScreenDimensions"] = mScreenRes;
 
+    var["CB"]["gPhotonRadius"] = mOptions.photonUseAdaptiveRadius ? mOptions.photonAdaptiveRadius : mOptions.photonRadius;
+    var["CB"]["gNormalizedPixelDiagonal"] = approxPixelDiagonal;
+
     var["gCausticHead"] = mpCausticHead;
-    var["gCausticLinkedList"] = mpCausticsLinkedList;
+    var["gCausticData"] = mpCausticsData;
+    var["gCausticAABB"] = mpCausticAABB;
     var["gCounter"] = mpCounter;
 
     mpScene->raytrace(pRenderContext, mCausticTracePass.pProgram.get(), mCausticTracePass.pVars, dispatchDims);
 
     pRenderContext->uavBarrier(mpCausticHead.get());
+
+    //
+    //Build the AS for that frame
+    //
+
+    //Clear values after the counter
+    mpPhotonAS->clearAABBBuffers(pRenderContext, mpCausticAABB, true, mpCounter); //Clears unused slots (Works as counter uses slot 0)
+
+    // Copy the PhotonCounter to a CPU Buffer (asynchronous, read GPU value can be a couple of frames old)
+    pRenderContext->copyBufferRegion(mpCounterCPU.get(), 0, mpCounter.get(), 0, sizeof(uint));
+    void* data = mpCounterCPU->map(Buffer::MapType::Read);
+    std::memcpy(&mCausticsStored, data, sizeof(uint));
+    mpCounterCPU->unmap();
+        
+    //Build acceleration structure
+    uint currentPhotons = mFrameCount > 0 ? uint(mCausticsStored * mOptions.photonASBuildBufferOverestimate) : mOptions.lightBufferSize;
+    uint photonBuildSize = std::min(mOptions.lightBufferSize, currentPhotons);
+    mpPhotonAS->update(pRenderContext, photonBuildSize);
 }
 
 void CausticRenderer::lightingPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -377,11 +447,13 @@ void CausticRenderer::lightingPass(RenderContext* pRenderContext, const RenderDa
     var["CB"]["gFovY"] = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
 
     //Input
+    mpPhotonAS->bindTlas(var, "gPhotonAS");
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gView"] = renderData[kInputView]->asTexture();
 
     var["gCausticHead"] = mpCausticHead;
-    var["gCausticLinkedList"] = mpCausticsLinkedList;
+    var["gCausticData"] = mpCausticsData;
+    var["gCausticAABB"] = mpCausticAABB;
 
     var["gOutColor"] = renderData[kOutputColor]->asTexture();
 

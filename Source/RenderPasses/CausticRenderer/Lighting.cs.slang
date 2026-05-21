@@ -8,11 +8,14 @@ import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndFunctions;
 
+RaytracingAccelerationStructure gPhotonAS;
+
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
 RWTexture2D<int> gCausticHead;
-StructuredBuffer<CausticData> gCausticLinkedList;
+StructuredBuffer<CausticData> gCausticData;
+StructuredBuffer<AABB> gCausticAABB;
 
 RWTexture2D<float4> gOutColor;
 
@@ -104,7 +107,7 @@ float3 collectBackprojectedCaustics(uint2 pixel, inout SampleGenerator sg)
     while (headIndex >= 0)
     {
         // Get Caustic data
-        CausticData cd = gCausticLinkedList[headIndex];
+        CausticData cd = gCausticData[headIndex];
         HitInfo causticHit = HitInfo(cd.packedHit);
         if (!causticHit.isValid()) //This should not trigger
             break;
@@ -151,6 +154,49 @@ float3 collectBackprojectedCaustics(uint2 pixel, inout SampleGenerator sg)
     return outColor;
 }
 
+// Checks if the ray start point is inside the sphere.
+bool hitSphere(const float3 center, const float radius, const float3 p)
+{
+    float3 radiusTest = p - center;
+    return dot(radiusTest, radiusTest) < radius * radius;
+}
+
+float3 photonRadianceEstimate(ShadingData sd, IMaterialInstance mi, float3 N, inout SampleGenerator sg)
+{
+    float3 outColor = float3(0);
+
+    // Prepare ray
+    RayDesc ray;
+    ray.Origin = sd.posW;
+    ray.Direction = sd.faceN;
+    ray.TMin = 0;
+    ray.TMax = 1e-10;    //Small constant
+
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, 0xFF, ray);
+    while (rayQuery.Proceed()) {
+
+        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
+            continue;
+        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
+
+        // Check if ray is inside photon radius
+        AABB photonAABB = gCausticAABB[primIdx];
+        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
+        if (!hitSphere(photonAABB.center(), radius, sd.posW))
+            continue;
+
+        CausticData cd = gCausticData[primIdx];
+        float NdotL = dot(-cd.wi, N);
+
+        float3 bsdf = mi.eval(sd, -cd.wi, sg);
+        float3 photonRadiance = max(0, (cd.flux * bsdf) / (M_PI * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        outColor += photonRadiance; 
+    }
+
+    return outColor;
+}
+
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
 {
@@ -181,8 +227,9 @@ void main(uint2 pixel: SV_DispatchThreadID)
         outColor += evaluateEmissiveLight(sd, mi, sg);
 
         // Caustics
-        //outColor = float3(0);
-        outColor += collectBackprojectedCaustics(pixel, sg);
+        // outColor = float3(0);
+        // outColor += collectBackprojectedCaustics(pixel, sg);
+        outColor += photonRadianceEstimate(sd, mi, bsdfProperties.guideNormal, sg);
 
     }else //Miss
     {
