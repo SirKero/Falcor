@@ -9,7 +9,8 @@ target_sources(ReSTIR_FG_Plus PRIVATE
     EvaluateReservoirs.cs.slang
 
     StructsAndHelpers.slang
-	PhotonHelper.slang
+    PhotonHelper.slang
+    NextEventEstimationHelper.slang
 
     ResamplePathReservoir.cs.slang
     ResampleReservoirCaustic.cs.slang

@@ -11,22 +11,26 @@ StructuredBuffer<AABB> gPhotonAABB[2];
 RaytracingAccelerationStructure gPhotonAS;
 
 static const float kPhotonCollectTMax = 1e-7;
+static const uint kPhotonInstanceMaskGlobal = 0x01;
+static const uint kPhotonInstanceMaskCaustic = 0x02;
+static const uint kPhotonInstanceMaskAll = 0xFF;
+static const uint kPhotonTypeIndexCaustic = 1;
 
 struct PhotonSample {
     float3 posW;
     float radius;
     float3 normal;
-    float weight;
-    float3 radiance;
-    float approxRadiance;
+    uint photonType;
+    float3 F;
+    float approxF;
 
     __init() {
         posW = float3(0);
         radius = 0;
         normal = float3(0);
-        weight = 0;
-        radiance = float3(0);
-        approxRadiance = 0;
+        photonType = 0;
+        F = float3(0);
+        approxF = 0;
     }
 }
 
@@ -37,7 +41,7 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
     return dot(radiusTest, radiusTest) < radius * radius;
 }
 
-void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
+void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyCaustics, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
     photonSample = PhotonSample();
     RayDesc ray;
     ray.Origin = sd.posW;
@@ -45,8 +49,10 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
     ray.TMin = 0;
     ray.TMax = kPhotonCollectTMax;
 
-    RayQuery<RAY_FLAG_NONE> rayQuery;
+    uint instanceMask = collectOnlyCaustics ? kPhotonInstanceMaskCaustic : kPhotonInstanceMaskAll;
 
+    float weight = 0;
+    RayQuery<RAY_FLAG_NONE> rayQuery;
     rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
     while (rayQuery.Proceed()) {
 
@@ -79,20 +85,24 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         float3 F = max(0, (photonData.flux * bsdf) / (M_PI * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
         float approxF = luminance(F);
-        photonSample.weight += approxF;
-        bool selected = (sampleNext1D(sg) * photonSample.weight) < approxF;
+        weight += approxF;
+        bool selected = (sampleNext1D(sg) * weight) < approxF;
         if (selected) {
             photonSample.posW = photonPosW;
             photonSample.radius = radius;
             photonSample.normal = photonData.normalW;
-            photonSample.radiance = F;
-            photonSample.approxRadiance = approxF;
+            photonSample.F = F;
+            photonSample.approxF = approxF;
+            photonSample.photonType = instanceIdx;
         }
     }
 
     // Finalize RIS
-    if (photonSample.approxRadiance > 0)
-        photonSample.weight /= photonSample.approxRadiance;
+    if (photonSample.approxF > 0)
+    {
+        weight /= photonSample.approxF;
+        photonSample.F *= weight;
+    }  
 }
 
 float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, inout SampleGenerator sg, bool collectOnlyDirectGlobal = false) {

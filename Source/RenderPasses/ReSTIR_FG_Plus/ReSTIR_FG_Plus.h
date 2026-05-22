@@ -3,6 +3,8 @@
 #include "RenderGraph/RenderPass.h"
 #include "Rendering/RTXDI/RTXDI.h"
 #include "Rendering/Lights/EmissiveLightSampler.h"
+#include "Rendering/Lights/LightBVHSampler.h"
+#include "Rendering/Lights/EnvMapSampler.h"
 
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
 
@@ -11,7 +13,7 @@ using namespace Falcor;
 class ReSTIR_FG_Plus : public RenderPass
 {
 public:
-    FALCOR_PLUGIN_CLASS(ReSTIR_FG_Plus, "ReSTIR_FG_Plus", "More lightweight implementation of ReSTIR-FG with less options");
+    FALCOR_PLUGIN_CLASS(ReSTIR_FG_Plus, "ReSTIR_FG_Plus", "Real-Time Global Illumination with Caustics");
 
     static ref<ReSTIR_FG_Plus> create(ref<Device> pDevice, const Properties& props) { return make_ref<ReSTIR_FG_Plus>(pDevice, props); }
 
@@ -68,6 +70,18 @@ private:
         float photonASBuildBufferOverestimate = 1.15f; // Guard percentage for AS building (Uses (delayed) CPU Photon Counter to estimate)
 
         //
+        // Camera Path Tracing Settings
+        //
+
+        uint cameraMaxPathLength = 10;
+
+        //
+        // Resample Settings
+        //
+
+        float jacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
+
+        //
         // Material Options
         //
 
@@ -76,6 +90,9 @@ private:
         bool evaluateDeltaPDFs = false;                 // If set on true, delta pdfs are evaluated (always 0), else they are set to 1
         bool enableAlphaTest = true;                    // Alpha Test
     };
+
+    //Resets all render passes
+    void resetAllRenderPasses();
 
     //Initializes the emissive sampler used to sample photons
     void prepareLightingStructure(RenderContext* pRenderContext);
@@ -123,6 +140,7 @@ private:
 
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Photon Accleration Structure
+    std::unique_ptr<EnvMapSampler> mpEnvMapSampler;               // Env Map Sampler
 
     //
     // Parameters
@@ -136,21 +154,30 @@ private:
     // Light
     bool mHasLights = false;           // True if the scene has any light sources
     bool mMixedLights = false;         // True if analytic and emissive lights are in the scene
+    EmissiveLightSamplerType mEmissiveLightSamplerType = EmissiveLightSamplerType::LightBVH; //Emissive Sampler Type
+    LightBVHSampler::Options mLightBVHOptions;                                               //(Cached) Options for Light BVH Sampler
+    bool mRebuildLightSampler = false;                                                       //If true, Emissive Sampler is rebuild
+    float3 mNeeLightSelectProb = float3(0.33f);                                              //Probability to select a NEE/Analytic/EnvMapSample
 
-    //ReSTIR-FG Reservoirs
+    //ReSTIR Reservoirs
     ResamplingSettings mResampleSettingsPath = {};
     ResamplingSettings mResampleSettingsCaustic = {};
-
-    uint mFGRayMaxPathLength = 10;                      // Max path length for the final gather ray
     bool mRebuildReservoirBuffer = false;               // Rebuild the reservoir buffer
     bool mClearReservoir = true;                        // Clears both reservoirs
     bool mCanResample = false;                          // Resampling is only allowed if last iterations reservoir was created
+
+
     float mRelativeDepthThreshold = 0.15f;              // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
     float mNormalThreshold = 0.6f;                      // Cosine of maximum angle between both normals allowed
-    float mJacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
+    
     bool mUsePathThreshold = false;                     // Enable resampling only if path length are the same
     bool mUsePhotonsForDirectLightInReflections = true; // Uses photons for direct light in reflections, else the final gather sample is used
     uint mRNGNumPasses = 12;                             // Offset for RNG generator
+
+    //TODO Remove
+    uint mFGRayMaxPathLength = 10;                      // Max path length for the final gather ray
+    float mJacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
+
 
     //Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();

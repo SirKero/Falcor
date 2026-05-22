@@ -43,7 +43,8 @@ enum ReservoirPathFlags : uint {
     isEmissiveHit = 0x800,                 // 1<<11
     isEnvMapHit = 0x1000,                  // 1<<12
     isRadianceEstimate = 0x2000,           // 1<<13
-    hasTwoCollectionPoints = 0x4000,       // 1<<14
+    isCaustic = 0x4000,                    // 1<<14
+    isNEE = 0x8000,       // 1<<15
 }
 
 struct ReservoirFlags {
@@ -116,11 +117,19 @@ struct ReservoirFlags {
         }
     }
 
-    property bool hasTwoCollectionPoints {
-        get { return (flags & (uint)ReservoirPathFlags::hasTwoCollectionPoints) > 0; }
+    property bool isCaustic {
+        get { return (flags & (uint)ReservoirPathFlags::isCaustic) > 0; }
         set {
-            flags &= ~(uint)ReservoirPathFlags::hasTwoCollectionPoints; // Clear bit
-            flags |= (newValue ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0);
+            flags &= ~(uint)ReservoirPathFlags::isCaustic; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isCaustic : 0);
+        }
+    }
+
+    property bool isNEE {
+        get { return (flags & (uint)ReservoirPathFlags::isNEE) > 0; }
+        set {
+            flags &= ~(uint)ReservoirPathFlags::isNEE; // Clear bit
+            flags |= (newValue ? (uint)ReservoirPathFlags::isNEE : 0);
         }
     }
 }
@@ -379,8 +388,27 @@ ShadingData loadShadingDataWithPrevHit(const HitInfo hit, const float3 prevPosW,
     return sd;
 }
 
+
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
+}
+
+/* Evaluate MIS weight with balance heuristic
+   \param[in] n0 Number of samples taken from the first sampling strategy.
+    \param[in] p0 Pdf for the first sampling strategy.
+    \param[in] n1 Number of samples taken from the second sampling strategy.
+    \param[in] p1 Pdf for the second sampling strategy.
+    \return Weight for the contribution from the first strategy (p0).
+*/
+float evalMIS(float n0, float p0, float n1, float p1)
+{
+    float q0 = n0 * p0;
+    float q1 = n1 * p1;
+    float sum = (q0 + q1);
+    if (sum > 0)
+        return q0 / (q0 + q1);
+    else
+        return 0;
 }
 
 // Backprojects to camera with viewProjection matrix

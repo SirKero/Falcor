@@ -6,6 +6,7 @@
 #include "Utils/Math/FalcorMath.h"
 
 #include "Rendering/Lights/EmissivePowerSampler.h"
+#include "Rendering/Lights/EmissiveUniformSampler.h"
 
 namespace
 {
@@ -151,10 +152,9 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
 
     if (auto group = widget.group("ReSTIR FG"))
     {
-        group.var("Final Gather Path Length", mFGRayMaxPathLength, 1u, 64u, 1u);
+        group.var("Max Path Length", mOptions.cameraMaxPathLength, 1u, 64u, 1u);
         group.tooltip(
-            "Path length for a final gather sample. A final gather sample stops when it encounters a rough enough surface (see Material "
-            "Options)"
+            "Maximum Path length for a initial path sample. A path sample stops, when it encounters a diffuse surface"
         );
 
         auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget) {
@@ -220,13 +220,8 @@ void ReSTIR_FG_Plus::setScene(RenderContext* pRenderContext, const ref<Scene>& p
     mpEmissiveLightSampler.reset();
     mpRTXDI.reset();
     mResetScreenTex = true;
-
-    mTracePhotonPass = RayTraceProgramHelper::create();
-    mGenerateInitialSamplesPass = RayTraceProgramHelper::create();
-    mRetracePathReservoirsPass = RayTraceProgramHelper::create();
-    mpResampleReservoirPass.reset();
-    mpResampleReservoirCausticPass.reset();
-    mpEvaluateReservoirsPass.reset();
+    resetAllRenderPasses();
+   
 
     if (mpScene)
     {
@@ -234,8 +229,6 @@ void ReSTIR_FG_Plus::setScene(RenderContext* pRenderContext, const ref<Scene>& p
         {
             logWarning("This render pass only supports triangles. Other types of geometry will be ignored.");
         }
-
-        mNormalizedPixelArea = getNormalizedPixelArea();
     }
 }
 
@@ -286,11 +279,10 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
 
     mpRTXDI->beginFrame(pRenderContext, mScreenRes);
 
-    //Trace Photons. Up to two passes may be executed, depending on the light types in the scene
-    //(one for emissive triangles and one for analytic point/spot lights)
+    //Trace Photons and bulids the photon acceleration structure. Also backprojects caustic photons into the camera
     tracePhotonsPass(pRenderContext, renderData);
 
-    //Initial Samples for ReSTIR FG (1SPP Photon Final Gathering) and inti RTXDI structs
+    //Creates initial Reservoirs samples for Path and Caustic Reservoirs. Also fills the Surface structure for RTXDI
     generateInitialSamplesPass(pRenderContext, renderData);
 
     // ReSTIR DI pass
@@ -335,6 +327,16 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     mCanResample = true;
 }
 
+void ReSTIR_FG_Plus::resetAllRenderPasses()
+{
+    mTracePhotonPass = RayTraceProgramHelper::create();
+    mGenerateInitialSamplesPass = RayTraceProgramHelper::create();
+    mRetracePathReservoirsPass = RayTraceProgramHelper::create();
+    mpResampleReservoirPass.reset();
+    mpResampleReservoirCausticPass.reset();
+    mpEvaluateReservoirsPass.reset();
+}
+
 void ReSTIR_FG_Plus::prepareLightingStructure(RenderContext* pRenderContext)
 {
     // Make sure that the emissive light is up to date
@@ -347,26 +349,75 @@ void ReSTIR_FG_Plus::prepareLightingStructure(RenderContext* pRenderContext)
     mHasLights = analyticUsed || emissiveUsed;
     mMixedLights = emissiveUsed && analyticUsed;
 
+    //Initialize Emissive Light Sampler
     if (emissiveUsed)
     {
-        if (!mpEmissiveLightSampler)
+        if (!mpEmissiveLightSampler || mRebuildLightSampler)
         {
+            resetAllRenderPasses();
             FALCOR_ASSERT(pLights && pLights->getActiveLightCount(pRenderContext) > 0);
-            mpEmissiveLightSampler = std::make_unique<EmissivePowerSampler>(pRenderContext, mpScene);
+            switch (mEmissiveLightSamplerType)
+            {
+            case Falcor::EmissiveLightSamplerType::Uniform:
+                mpEmissiveLightSampler = std::make_unique<EmissiveUniformSampler>(pRenderContext, mpScene);
+                break;
+            case Falcor::EmissiveLightSamplerType::LightBVH:
+                mpEmissiveLightSampler = std::make_unique<LightBVHSampler>(pRenderContext, mpScene, mLightBVHOptions);
+                break;
+            case Falcor::EmissiveLightSamplerType::Power:
+                mpEmissiveLightSampler = std::make_unique<EmissivePowerSampler>(pRenderContext, mpScene);
+                break;
+            case Falcor::EmissiveLightSamplerType::Null:
+            default:
+                FALCOR_UNREACHABLE();
+                break;
+            }
+
+            mRebuildLightSampler = false;
         }
     }
     else
     {
         if (mpEmissiveLightSampler)
         {
+            if (auto lightBVHSampler = dynamic_cast<LightBVHSampler*>(mpEmissiveLightSampler.get()))
+            {
+                mLightBVHOptions = lightBVHSampler->getOptions();
+            }
             mpEmissiveLightSampler = nullptr;
-            mTracePhotonPass.pVars.reset();
+            resetAllRenderPasses();
         }
     }
+
     if (mpEmissiveLightSampler)
-    {
         mpEmissiveLightSampler->update(pRenderContext);
+
+    //Initialize Enviroment Map sampler
+    if (is_set(mpScene->getUpdates(), Scene::UpdateFlags::EnvMapChanged))
+    {
+        mpEnvMapSampler = nullptr;
     }
+
+    if (mpScene->useEnvLight())
+    {
+        if (!mpEnvMapSampler)
+        {
+            mpEnvMapSampler = std::make_unique<EnvMapSampler>(mpDevice, mpScene->getEnvMap());
+        }
+    }
+    else
+    {
+        if (mpEnvMapSampler)
+        {
+            mpEnvMapSampler = nullptr;
+            resetAllRenderPasses();
+        }
+    }
+
+    //Update NEE selection probability
+    mNeeLightSelectProb =
+        float3(mpScene->useEmissiveLights() ? 1.f : 0.f, mpScene->useAnalyticLights() ? 1.f : 0.f, mpScene->useEnvLight() ? 1.f : 0.f);
+    mNeeLightSelectProb /= mNeeLightSelectProb.x + mNeeLightSelectProb.y + mNeeLightSelectProb.z;
 }
 
 void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const RenderData& renderData)
@@ -376,7 +427,6 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
     if (screenDims.x != mScreenRes.x || screenDims.y != mScreenRes.y)
     {
         mScreenRes = screenDims;
-        mNormalizedPixelArea = getNormalizedPixelArea();
         mResetScreenTex = true;
     }
 
@@ -704,6 +754,15 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
 {
     FALCOR_PROFILE(pRenderContext, "InitialSamples");
 
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add(mpRTXDI->getDefines());
+        defines.add(getMaterialDefines());
+        defines.add("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        return defines;
+    };
+
     //Init Shader
     if (!mGenerateInitialSamplesPass.pProgram)
     {
@@ -730,11 +789,9 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     }
 
     //Defines that can change on runtime
-    mGenerateInitialSamplesPass.pProgram->addDefines(mpRTXDI->getDefines());
-    mGenerateInitialSamplesPass.pProgram->addDefines(getMaterialDefines());
-    mGenerateInitialSamplesPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
-    mGenerateInitialSamplesPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
-    mGenerateInitialSamplesPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+    mGenerateInitialSamplesPass.pProgram->addDefines(getRuntimeDefines());
+    if (mpEmissiveLightSampler)
+        mGenerateInitialSamplesPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     //Program Vars
     if (!mGenerateInitialSamplesPass.pVars)
@@ -743,13 +800,23 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     FALCOR_ASSERT(mGenerateInitialSamplesPass.pVars);
     auto var = mGenerateInitialSamplesPass.pVars->getRootVar();
 
+    //Update Normalized pixel area for backprojection
+    mNormalizedPixelArea = getNormalizedPixelArea();
+
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
+    var["CB"]["gMaxPathLength"] = mOptions.cameraMaxPathLength;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+    var["CB"]["gJacobianDistanceThreshold"] = mOptions.jacobianDistanceThreshold;
+    var["CB"]["gNeeSelectProbabilites"] = mNeeLightSelectProb;
 
     //RTXDI Resources
     mpRTXDI->setShaderData(var);
+    // NEE Structures for Path Resampling 
+    if (mpEmissiveLightSampler)
+        mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+    if (mpEnvMapSampler)
+        mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
 
     //Input Resources
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();

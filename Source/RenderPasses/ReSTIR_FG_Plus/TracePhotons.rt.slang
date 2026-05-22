@@ -7,8 +7,6 @@ import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Sampling.SampleGenerator;
 import Rendering.Lights.LightHelpers;
-import Rendering.Lights.EmissiveLightSampler;
-import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
 
 cbuffer CB
