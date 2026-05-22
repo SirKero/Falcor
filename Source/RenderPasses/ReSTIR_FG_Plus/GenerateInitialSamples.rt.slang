@@ -15,17 +15,11 @@ import NextEventEstimationHelper;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
-RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
 RWStructuredBuffer<PathReservoir> gPathReservoir;
-
-RWTexture2D<int> gLightTraceHeadCounter;
-StructuredBuffer<int> gLightTraceLinkedList; // next pointer
 
 RWTexture2D<float4> gDebug;
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-static const uint kCausticInstanceMask = 2;
-static const uint kAllPhotonInstanceMask = 0xFF;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 
@@ -33,7 +27,6 @@ cbuffer CB
 {
     uint gFrameCount;           // Frame count since scene was loaded.
     uint gMaxPathLength; // Max path length for a Final Gather sample
-    float gNormalizedPixelArea;       // Pixel area at distance 1 used in light trace
     float gJacobianDistanceThreshold; // Jacobian distance threshold. Connection can only be performed if distance is greater
     float3 gNeeSelectProbabilites; //(Emissive/Analytic/EnvMap)Light selection probabilities for NEE samples.
 }
@@ -331,70 +324,6 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
         pathReservoir.weight /= luminance(pathReservoir.F);
 }
 
-//
-//Caustics
-//
-
-void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r , inout SampleGenerator sg)
-{
-    float3 outColor = float3(0);
-    r.c = 1;
-    // Get head buffer index
-    int headIndex = gLightTraceHeadCounter[pixel];
-    if (headIndex == -1)
-        return;
-
-    let lod = ExplicitLodTextureSampler(0);
-
-    uint count = 0;
-    while (headIndex != -1)
-    {
-        // Get Photon Data
-        PhotonData photonData = gPhotonData[1][headIndex];
-        HitInfo photonHit = HitInfo(photonData.hitInfo);
-
-        ShadingData sd = loadShadingData(photonHit, photonData.dir, lod);
-        let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
-
-        float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
-        float distanceToCamera = length(directionToCamera);
-        directionToCamera /= distanceToCamera;
-
-        // Camera pdf
-        const float3 camForward = normalize(gScene.camera.data.cameraW);
-        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
-
-        const float3 bsdf = mi.eval(sd, directionToCamera, sg);
-
-        float targetFunction = luminance(photonData.flux * bsdf);
-        float w = targetFunction / cameraPdf;
-
-        r.wSum += w;
-        bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
-        if (selectNew) {
-            r.sampleSurface = photonData.hitInfo;
-            r.sampleSurfaceView = photonData.dir;
-            r.photonPosW = sd.posW;
-            r.photonDir = photonData.dir;
-            r.photonRadiance = photonData.flux;
-            r.targetFunction = targetFunction;
-            r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
-        }
-
-        // Update head index
-        int newHeadIndex = gLightTraceLinkedList[headIndex];
-        headIndex = newHeadIndex;
-    }
-
-    // Finalize Reservoir
-    if (r.targetFunction > 0) {
-        r.wSum /= r.targetFunction;
-    }
-    else
-        r.wSum = 0;
-
-}
-
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
 {
@@ -436,7 +365,6 @@ void rayGen()
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     float3 viewDir = gView[pixel].xyz;
     float3 outColor = float3(0);
-    ReservoirCaustic causticReservoir = ReservoirCaustic();
     PathReservoir pathReservoir = PathReservoir();
 
     //When first hit is valid
@@ -468,14 +396,6 @@ void rayGen()
         pd.prevPosW = sd.posW;
         pd.prevFaceN = sd.faceN;
 
-        // Handle Caustics on direct hit TODO move to seperate shader
-        // Init Caustic reservoir if photons can be collected at the current surface
-        if (pd.lastHitDiffuse) {
-            causticReservoir.sampleSurface = hitInfo.getData();
-            causticReservoir.sampleSurfaceView = viewDir;
-            lightTraceResampling(pixel, causticReservoir, pd.sg);
-        }
-
         RayDesc ray = {};
         ray.TMin = 0;
         ray.TMax = FLT_MAX;
@@ -487,6 +407,4 @@ void rayGen()
     }
 
     gPathReservoir[index2Dto1D(pixel, dispatchDims.x)] = pathReservoir;
-    gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)] = causticReservoir;
-    gLightTraceHeadCounter[pixel] = -1; //Set to invalid
 }

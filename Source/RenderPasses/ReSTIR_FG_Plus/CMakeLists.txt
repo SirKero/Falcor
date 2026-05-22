@@ -6,6 +6,7 @@ target_sources(ReSTIR_FG_Plus PRIVATE
 
     TracePhotons.rt.slang
     GenerateInitialSamples.rt.slang
+    BackprojectCaustics.cs.slang
     EvaluateReservoirs.cs.slang
 
     StructsAndHelpers.slang

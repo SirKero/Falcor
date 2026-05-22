@@ -13,6 +13,7 @@ namespace
     const std::string kShaderFolder = "RenderPasses/ReSTIR_FG_Plus/";
     const std::string kShaderTracePhotons = kShaderFolder + "TracePhotons.rt.slang";
     const std::string kShaderGenInitialSamples = kShaderFolder + "GenerateInitialSamples.rt.slang";
+    const std::string kShaderBackprojectCaustics = kShaderFolder + "BackprojectCaustics.cs.slang";
     const std::string kShaderRetraceReservoirs = kShaderFolder + "RetraceReservoirs.rt.slang";
     const std::string kShaderResamplingPathReservoir = kShaderFolder + "ResamplePathReservoir.cs.slang";
     const std::string kShaderResamplingReservoirCaustic = kShaderFolder + "ResampleReservoirCaustic.cs.slang";
@@ -282,6 +283,9 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     //Trace Photons and bulids the photon acceleration structure. Also backprojects caustic photons into the camera
     tracePhotonsPass(pRenderContext, renderData);
 
+    //Caustic Backprojection
+    backprojectCausticsPass(pRenderContext, renderData);
+
     //Creates initial Reservoirs samples for Path and Caustic Reservoirs. Also fills the Surface structure for RTXDI
     generateInitialSamplesPass(pRenderContext, renderData);
 
@@ -332,6 +336,7 @@ void ReSTIR_FG_Plus::resetAllRenderPasses()
     mTracePhotonPass = RayTraceProgramHelper::create();
     mGenerateInitialSamplesPass = RayTraceProgramHelper::create();
     mRetracePathReservoirsPass = RayTraceProgramHelper::create();
+    mpBackprojectCausticSamplesPass.reset();
     mpResampleReservoirPass.reset();
     mpResampleReservoirCausticPass.reset();
     mpEvaluateReservoirsPass.reset();
@@ -456,7 +461,7 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         if (!mpPhotonData[i])
         {
             mpPhotonData[i] = Buffer::createStructured(
-                mpDevice, sizeof(float) * 16, photonBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(float) * 12, photonBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
@@ -522,6 +527,16 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
             Buffer::CpuAccess::None, nullptr, false
         );
         mpLightTraceLinkedList->setName("LightTraceLinkedList");
+        pRenderContext->clearUAV(mpLightTraceLinkedList->getUAV(0).get(), uint4(uint(-1)));
+    }
+
+    if(!mpPhotonHitInfo)
+    {
+        mpPhotonHitInfo = Buffer::createStructured(
+            mpDevice, sizeof(uint) * 4, mOptions.photonBufferSizeCaustic, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            Buffer::CpuAccess::None, nullptr, false
+        );
+        mpPhotonHitInfo->setName("PhotonHitInfo");
     }
 
     //Set Splatting Resources
@@ -700,8 +715,10 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     }
     var["gPhotonCounter"] = mpPhotonCounter;
 
+    //Backprojection
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+    var["gPhotonHitInfo"] = mpPhotonHitInfo;
 
     //Dispatch raytracing shader
     mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1));
@@ -806,7 +823,6 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gMaxPathLength"] = mOptions.cameraMaxPathLength;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
     var["CB"]["gJacobianDistanceThreshold"] = mOptions.jacobianDistanceThreshold;
     var["CB"]["gNeeSelectProbabilites"] = mNeeLightSelectProb;
 
@@ -829,16 +845,62 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     }
 
     //Output Resources
-    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
-
-    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
-    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+    var["gPathReservoir"] = mpPathReservoir[mReservoirIndex % 2];
 
     var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
+}
+
+void ReSTIR_FG_Plus::backprojectCausticsPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "BackprojectCaustics");
+
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add(getMaterialDefines());
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        return defines;
+    };
+
+    //Initialize Compute Pass
+    if(!mpBackprojectCausticSamplesPass)
+    {
+         Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderBackprojectCaustics).csEntry("main").setShaderModel(kShaderModel);
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+        defines.add(getRuntimeDefines());
+       
+        mpBackprojectCausticSamplesPass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpBackprojectCausticSamplesPass);
+    //Runtime defines
+    mpBackprojectCausticSamplesPass->getProgram()->addDefines(getRuntimeDefines());
+
+    //Set vars
+    auto var = mpBackprojectCausticSamplesPass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                    // Sample generator
+
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDimX"] = mScreenRes.x;
+    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
+
+    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
+    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+    var["gPhotonData"] = mpPhotonData[1]; //Caustic photon data
+    var["gPhotonHitInfo"] = mpPhotonHitInfo;
+
+    var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+
+     // Execute
+    mpBackprojectCausticSamplesPass->execute(pRenderContext, uint3(mScreenRes, 1));
 }
 
 void ReSTIR_FG_Plus::splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1228,7 +1290,7 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
     //Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
     var["gView"] = renderData[kInputView]->asTexture();
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gPathReservoir"] = mpPathReservoir[mReservoirIndex % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
 
     //Output

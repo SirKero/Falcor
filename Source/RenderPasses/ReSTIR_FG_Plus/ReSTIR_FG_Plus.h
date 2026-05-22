@@ -103,8 +103,11 @@ private:
     //Traces the photons and builds the photon Acceleration Structure
     void tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Generates the initial Path Samples, collects Caustic Backprojections and initialized RTXDI Surfaces
+    //Generates the initial Path Samples and initialized RTXDI Surfaces
     void generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    //Collects caustic backprojections and initializes the caustic reservoir
+    void backprojectCausticsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Splats Caustic reservoirs from last frame to current frame
     void splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -147,6 +150,7 @@ private:
     //
     Options mOptions = {};                     //Options for the renderer
     uint mFrameCount = 0;
+    uint mReservoirIndex = 0;                  //Track reservoir index for path reservoir
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
@@ -200,6 +204,7 @@ private:
     ref<Texture> mpViewPrev;                // Camera View from last frame
     ref<Buffer> mpPhotonAABB[2];            // Photon AABBs for Acceleration Structure building
     ref<Buffer> mpPhotonData[2];            // Additional Photon data (flux, dir)
+    ref<Buffer> mpPhotonHitInfo;            // Hit info for Photons. Is used for backprojections
     ref<Buffer> mpPhotonCounter;            // Photon Counter
     ref<Buffer> mpPhotonCounterCPU;         // CPU copy of counter for readback
     ref<Buffer> mpCausticReservoir[2];      // Reservoir for the Caustic sample
@@ -241,6 +246,7 @@ private:
     RayTraceProgramHelper mGenerateInitialSamplesPass;  // Trace Final Gather rays and collect photons
     RayTraceProgramHelper mRetracePathReservoirsPass;   // Retrace the path Reservoirs needed for GRIS MIS
 
+    ref<ComputePass> mpBackprojectCausticSamplesPass;   // Backproject the caustic samples
     ref<ComputePass> mpResampleReservoirPass;           // Resampling Pass for the Path Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass;    // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;          // Evaluates ReSTIR DI and FG reservoirs
