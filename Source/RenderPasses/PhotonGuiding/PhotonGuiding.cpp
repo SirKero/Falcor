@@ -452,7 +452,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
 
         changed |= group.checkbox("Use Distance based Min Photons (DBMP) per Light", mGuidingUseDistanceBasedMinPhoton);
         changed |= group.var(
-            "Light Guiding: Min Photons Per Light", mFixedGuidingDispatchReservedPhotons, 32u, mGuidingTextureResolution * mGuidingTextureResolution, 1u
+            "Light Guiding: Min Photons Per Light", mFixedGuidingDispatchReservedPhotons, 1u, mGuidingTextureResolution * mGuidingTextureResolution, 1u
         );
         changed |= group.var("DBMP Min/Max Distance", mGuidingDBMPMinMaxDistance, 0.f, FLT_MAX, 0.0001f);
         changed |= group.var("DBMP Min/Max Photons", mGuidingDBMPMinMaxPhotons, 1, UINT_MAX, 1u);
