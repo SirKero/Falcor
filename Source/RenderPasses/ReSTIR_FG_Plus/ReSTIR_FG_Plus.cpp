@@ -12,9 +12,8 @@ namespace
 {
     const std::string kShaderFolder = "RenderPasses/ReSTIR_FG_Plus/";
     const std::string kShaderTracePhotons = kShaderFolder + "TracePhotons.rt.slang";
-    const std::string kShaderGenInitialSamples = kShaderFolder + "GenerateInitialSamples.rt.slang";
+    const std::string kShaderTraceCamera = kShaderFolder + "TraceCamera.rt.slang";
     const std::string kShaderBackprojectCaustics = kShaderFolder + "BackprojectCaustics.cs.slang";
-    const std::string kShaderRetraceReservoirs = kShaderFolder + "RetraceReservoirs.rt.slang";
     const std::string kShaderResamplingPathReservoir = kShaderFolder + "ResamplePathReservoir.cs.slang";
     const std::string kShaderResamplingReservoirCaustic = kShaderFolder + "ResampleReservoirCaustic.cs.slang";
     const std::string kShaderEvaluateReservoirs = kShaderFolder + "EvaluateReservoirs.cs.slang";
@@ -287,7 +286,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     backprojectCausticsPass(pRenderContext, renderData);
 
     //Creates initial Reservoirs samples for Path and Caustic Reservoirs. Also fills the Surface structure for RTXDI
-    generateInitialSamplesPass(pRenderContext, renderData);
+    traceCameraPass(pRenderContext, renderData);
 
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
@@ -334,8 +333,9 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
 void ReSTIR_FG_Plus::resetAllRenderPasses()
 {
     mTracePhotonPass = RayTraceProgramHelper::create();
-    mGenerateInitialSamplesPass = RayTraceProgramHelper::create();
-    mRetracePathReservoirsPass = RayTraceProgramHelper::create();
+    mTraceCameraPass = RayTraceProgramHelper::create();
+    mShiftCameraPathPass[0] = RayTraceProgramHelper::create();
+    mShiftCameraPathPass[1] = RayTraceProgramHelper::create();
     mpBackprojectCausticSamplesPass.reset();
     mpResampleReservoirPass.reset();
     mpResampleReservoirCausticPass.reset();
@@ -767,7 +767,7 @@ float ReSTIR_FG_Plus::getNormalizedPixelArea()
     return wPix * hPix;
 }
 
-void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData)
+void ReSTIR_FG_Plus::traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "InitialSamples");
 
@@ -781,19 +781,19 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     };
 
     //Init Shader
-    if (!mGenerateInitialSamplesPass.pProgram)
+    if (!mTraceCameraPass.pProgram)
     {
         RtProgram::Desc desc;
         desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderGenInitialSamples);
+        desc.addShaderLibrary(kShaderTraceCamera);
         desc.setMaxPayloadSize(sizeof(float) * 4);
         desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
         desc.setMaxTraceRecursionDepth(1);
         if (!mpScene->hasProceduralGeometry())
             desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
 
-        mGenerateInitialSamplesPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-        auto& sbt = mGenerateInitialSamplesPass.pBindingTable;
+        mTraceCameraPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mTraceCameraPass.pBindingTable;
         sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
         sbt->setMiss(0, desc.addMiss("miss"));
 
@@ -802,20 +802,25 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
             sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
         }
 
-        mGenerateInitialSamplesPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
+        DefineList defines = {};
+        defines.add(mpScene->getSceneDefines());
+        defines.add("IS_SHIFT", "0");
+        defines.add("SHIFT_IS_CURRENT", "0");
+
+        mTraceCameraPass.pProgram = RtProgram::create(mpDevice, desc, defines);
     }
 
     //Defines that can change on runtime
-    mGenerateInitialSamplesPass.pProgram->addDefines(getRuntimeDefines());
+    mTraceCameraPass.pProgram->addDefines(getRuntimeDefines());
     if (mpEmissiveLightSampler)
-        mGenerateInitialSamplesPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+        mTraceCameraPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
 
     //Program Vars
-    if (!mGenerateInitialSamplesPass.pVars)
-        mGenerateInitialSamplesPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+    if (!mTraceCameraPass.pVars)
+        mTraceCameraPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
 
-    FALCOR_ASSERT(mGenerateInitialSamplesPass.pVars);
-    auto var = mGenerateInitialSamplesPass.pVars->getRootVar();
+    FALCOR_ASSERT(mTraceCameraPass.pVars);
+    auto var = mTraceCameraPass.pVars->getRootVar();
 
     //Update Normalized pixel area for backprojection
     mNormalizedPixelArea = getNormalizedPixelArea();
@@ -850,7 +855,7 @@ void ReSTIR_FG_Plus::generateInitialSamplesPass(RenderContext* pRenderContext, c
     var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     //Dispatch Shader
-    mpScene->raytrace(pRenderContext, mGenerateInitialSamplesPass.pProgram.get(), mGenerateInitialSamplesPass.pVars, uint3(mScreenRes, 1));
+    mpScene->raytrace(pRenderContext, mTraceCameraPass.pProgram.get(), mTraceCameraPass.pVars, uint3(mScreenRes, 1));
 }
 
 void ReSTIR_FG_Plus::backprojectCausticsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1034,76 +1039,9 @@ void ReSTIR_FG_Plus::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
     }
 }
 
-void ReSTIR_FG_Plus::retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
+void ReSTIR_FG_Plus::shiftCameraPathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
-    FALCOR_PROFILE(pRenderContext, "Retrace Reservoir");
-    // Init Shader
-    if (!mRetracePathReservoirsPass.pProgram)
-    {
-        RtProgram::Desc desc;
-        desc.addShaderModules(mpScene->getShaderModules());
-        desc.addShaderLibrary(kShaderRetraceReservoirs);
-        desc.setMaxPayloadSize(sizeof(float) * 4);
-        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
-        desc.setMaxTraceRecursionDepth(1);
-        if (!mpScene->hasProceduralGeometry())
-            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
-
-        mRetracePathReservoirsPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
-        auto& sbt = mRetracePathReservoirsPass.pBindingTable;
-        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
-        sbt->setMiss(0, desc.addMiss("miss"));
-
-        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
-        {
-            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
-        }
-
-        mRetracePathReservoirsPass.pProgram = RtProgram::create(mpDevice, desc, mpScene->getSceneDefines());
-    }
-
-    // Defines that can change on runtime
-    mRetracePathReservoirsPass.pProgram->addDefines(getMaterialDefines());
-    mRetracePathReservoirsPass.pProgram->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
-    mRetracePathReservoirsPass.pProgram->addDefine("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
-    mRetracePathReservoirsPass.pProgram->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
-
-    // Program Vars
-    if (!mRetracePathReservoirsPass.pVars)
-        mRetracePathReservoirsPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
-
-    FALCOR_ASSERT(mRetracePathReservoirsPass.pVars);
-    auto var = mRetracePathReservoirsPass.pVars->getRootVar();
-
-    // Constant Buffer
-    var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gFGRayMaxPathLength"] = mFGRayMaxPathLength;
-    var["CB"]["gNumResamplingPass"] = numPass; //Current path iteration starting from 0 (temporal)
-    var["CB"]["gSpatialSampleRadius"] = mResampleSettingsPath.samplingRadius;
-
-    // Input Resources
-    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
-    var["gView"] = renderData[kInputView]->asTexture();
-    var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
-    var["gVBufferPrev"] = mpVBufferPrev;
-    var["gViewPrev"] = mpViewPrev;
-
-    mpPhotonAS->bindTlas(var, "gPhotonAS");
-    for (uint32_t i = 0; i < 2; i++)
-    {
-        var["gPhotonAABB"][i] = mpPhotonAABB[i];
-        var["gPhotonData"][i] = mpPhotonData[i];
-    }
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
-    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
-
-    // Output Resources
-    var["gRetraceReservoirPath"] = mpReservoirRetrace[0];
-    var["gRetraceReservoirPathPrev"] = mpReservoirRetrace[1];
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
-
-    // Dispatch Shader
-    mpScene->raytrace(pRenderContext, mRetracePathReservoirsPass.pProgram.get(), mRetracePathReservoirsPass.pVars, uint3(mScreenRes, 1));
+    
 }
 
 void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)

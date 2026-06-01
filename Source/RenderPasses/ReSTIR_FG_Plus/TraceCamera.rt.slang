@@ -15,9 +15,16 @@ import NextEventEstimationHelper;
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
-RWStructuredBuffer<PathReservoir> gPathReservoir;
-
 RWTexture2D<float4> gDebug;
+
+// Additional I/O for shift mapping
+#if IS_SHIFT
+Texture2D<float2> gMVec;
+RWTexture2D<float4> gShiftData;
+StructuredBuffer<PathReservoir> gPathReservoir;
+#else
+RWStructuredBuffer<PathReservoir> gPathReservoir;
+#endif
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
@@ -31,10 +38,21 @@ cbuffer CB
     float3 gNeeSelectProbabilites; //(Emissive/Analytic/EnvMap)Light selection probabilities for NEE samples.
 }
 
+#if IS_SHIFT
+cbuffer ShiftCB
+{
+    uint gNumResamplingPass;            // Identifier for the resampling pass
+    float gSpatialSampleRadius;         // Spatial resample radius
+}
+#endif
+
 static const bool kAlphaTest = ENABLE_ALPHA_TEST;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kUseEnvBackground = USE_ENV_BACKGROUND;
+
+// Defines Shift
+static const bool kShiftIsCurrent = SHIFT_IS_CURRENT;   //True if the working reservoir is the shifted one
 
 struct RayPayload
 {
@@ -356,18 +374,75 @@ void closestHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersec
     rayData.packedHitInfo = HitInfo(triangleHit).getData();
 }
 
-[shader("raygeneration")]
-void rayGen()
+#if IS_SHIFT
+void shiftCameraReservoir()
+{
+    int2 pixel = DispatchRaysIndex().xy;
+    uint2 dispatchDims = DispatchRaysDimensions().xy;
+
+    // Init Sample Generator for selecting the reservoir
+    SampleGenerator sgSelectReservoir = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3));
+    // Sample generator for bsdf evaluation
+    //SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 1);
+
+    // Reproject last frames reservoir (temporal) or randomly sample in a disc (spatial)
+    bool isSpatial = gNumResamplingPass > 0;
+    float2 reservoirPixelF = float2(pixel) + 0.5; // Start from pixel center
+    float2 u = sampleNext2D(sgSelectReservoir); //Random value
+    if (isSpatial)
+    {
+        float2 spatialOffset = gSpatialSampleRadius * sample_disk_concentric(u);
+        reservoirPixelF += spatialOffset;
+    } else //Temporal
+    {
+        float2 motionOffset = gMVec[pixel] * float2(dispatchDims);
+        reservoirPixelF += motionOffset + (u - 0.5); //Motion + random subpixel offset
+    }
+    int2 reservoirPixel = int2(reservoirPixelF);
+
+    // If reservoir pixel is outside of the screen, it will not be selected during resampling either
+    if (any(reservoirPixel < 0) || any(reservoirPixel >= dispatchDims))
+        return;
+
+    // If the working reservoir is the one beeing shifted, swap pixel and reservoir index
+    if (kShiftIsCurrent)
+    {
+        int2 tmp = reservoirPixel;
+        reservoirPixel = pixel;
+        pixel = tmp;
+    }
+
+    // Get Surface, view and reservoir
+    HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
+    float3 viewDir = gView[pixel].xyz;
+    PathReservoir pathReservoir = gPathReservoir[index2Dto1D(reservoirPixel, dispatchDims.x)];
+
+    // When first hit is valid
+    if (hitInfo.isValid() && pathReservoir.isValid())
+    {
+        //TODO Init Trace and SG
+    }
+
+    //Swap back the write index
+    if (kShiftIsCurrent)
+        pixel = reservoirPixel;
+
+    //TODO write to Shift Data
+}
+#else // IS_SHIFT
+
+/* Creates a camera ray and initializes the reservoir
+ */
+void generateCameraRay()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 dispatchDims = DispatchRaysDimensions().xy;
 
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
     float3 viewDir = gView[pixel].xyz;
-    float3 outColor = float3(0);
     PathReservoir pathReservoir = PathReservoir();
 
-    //When first hit is valid
+    // When first hit is valid
     if (hitInfo.isValid()) {
         // Init Materials and Sample Generators
         PathData pd = PathData();
@@ -407,4 +482,17 @@ void rayGen()
     }
 
     gPathReservoir[index2Dto1D(pixel, dispatchDims.x)] = pathReservoir;
+}
+#endif // IS_SHIFT
+
+
+[shader("raygeneration")]
+void rayGen()
+{
+    #if IS_SHIFT
+        shiftCameraReservoir();
+    #else
+        generateCameraRay();
+    #endif
+
 }

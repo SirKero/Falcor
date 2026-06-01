@@ -5,7 +5,7 @@ target_sources(ReSTIR_FG_Plus PRIVATE
     ReSTIR_FG_Plus.h
 
     TracePhotons.rt.slang
-    GenerateInitialSamples.rt.slang
+    TraceCamera.rt.slang
     BackprojectCaustics.cs.slang
     EvaluateReservoirs.cs.slang
 
@@ -16,7 +16,6 @@ target_sources(ReSTIR_FG_Plus PRIVATE
     ResamplePathReservoir.cs.slang
     ResampleReservoirCaustic.cs.slang
 
-    RetraceReservoirs.rt.slang
     SortSplatReservoirs.cs.slang
     TemporalSplatReservoir.cs.slang
 )

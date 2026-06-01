@@ -85,7 +85,7 @@ private:
         // Material Options
         //
 
-        bool useLambertianDiffuseBSDF = true;           // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
+        bool useLambertianDiffuseBSDF = false;           // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
         float specularRoughnessThreshold = 0.25f;       // Any material below this is considered specular
         bool evaluateDeltaPDFs = false;                 // If set on true, delta pdfs are evaluated (always 0), else they are set to 1
         bool enableAlphaTest = true;                    // Alpha Test
@@ -104,7 +104,7 @@ private:
     void tracePhotonsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Generates the initial Path Samples and initialized RTXDI Surfaces
-    void generateInitialSamplesPass(RenderContext* pRenderContext, const RenderData& renderData);
+    void traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Collects caustic backprojections and initializes the caustic reservoir
     void backprojectCausticsPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -115,8 +115,8 @@ private:
     //Sort the splatted reservoirs so they can be used in the resampling pass
     void sortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Retrace Path Reservoirs with Path Length > 0 (or if final gather sample should be updated)
-    void retraceReservoirPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
+    //Shifts the Camera path reservoirs with Path Length > 0 by performing a retrace
+    void shiftCameraPathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
     //Reservoir Resampling for Path Reservoirs
     void resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
@@ -243,8 +243,8 @@ private:
     };
 
     RayTraceProgramHelper mTracePhotonPass;             // Trace Photons and build AS
-    RayTraceProgramHelper mGenerateInitialSamplesPass;  // Trace Final Gather rays and collect photons
-    RayTraceProgramHelper mRetracePathReservoirsPass;   // Retrace the path Reservoirs needed for GRIS MIS
+    RayTraceProgramHelper mTraceCameraPass;             // Trace Camera rays and collect photons
+    RayTraceProgramHelper mShiftCameraPathPass[2];      // Retrace the path Reservoirs needed for GRIS
 
     ref<ComputePass> mpBackprojectCausticSamplesPass;   // Backproject the caustic samples
     ref<ComputePass> mpResampleReservoirPass;           // Resampling Pass for the Path Reservoirs
