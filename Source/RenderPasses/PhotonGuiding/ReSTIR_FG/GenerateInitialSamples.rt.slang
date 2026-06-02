@@ -111,7 +111,7 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
 
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
-        pd.lastHitSpecular &= bsdfSample.isLobe(LobeType::Specular);
+        pd.lastHitSpecular &= bsdfSample.isLobe(LobeType::Specular) && !pd.lastHitReconnectionCandidate;
         pd.deltaPath &= bsdfSample.isLobe(LobeType::Delta);
     }
 
@@ -290,11 +290,15 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             const bool isFinalGather = pd.lastHitReconnectionCandidate && hitIsReconnectionSurface; // If the last two hits are diffuse, the hit is a final gather surface
             PhotonSample photonSample;
             int photonHitType = -1;
+            if (!hitIsReconnectionSurface)
+                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
             if (kUseNEEForPathReservoirs)
-                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, !isFinalGather, gNumLightPaths, sg, photonSample, false);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
             else
-                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, false, gNumLightPaths, sg, photonSample, !isFinalGather);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather);
 
+            if (!hitIsReconnectionSurface)
+                sd.mtl.setActiveLobes((uint)LobeType::All);
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
                 pathReservoir.pathLength = isFinalGather ? pd.pathLength - 1 : pd.pathLength;
@@ -366,6 +370,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         if (!sampleNewDirection(sd, mi, rayDirectionSG, pd, ray)) {
             break;
         }
+
     }
 
     // Finalize Reservoir
@@ -400,6 +405,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
         
         ShadingData sd = loadShadingData(photonHit, -photonData.dir, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
+        let bsdfProperties = mi.getProperties(sd);
 
         float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
         float distanceToCamera = length(directionToCamera);
@@ -409,7 +415,8 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
         const float3 camForward = normalize(gScene.camera.data.cameraW);
         const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
 
-        //sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
+        if(bsdfProperties.roughness <= kRoughnessThreshold)
+            sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
         float targetFunction = luminance(photonData.flux * bsdf) / gNumLightPaths;

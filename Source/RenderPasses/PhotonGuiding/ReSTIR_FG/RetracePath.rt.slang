@@ -123,7 +123,7 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
 
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
-        pd.specularPath &= bsdfSample.isLobe(LobeType::Specular);
+        pd.specularPath &= bsdfSample.isLobe(LobeType::Specular) && !pd.lastHitReconnectionCandidate;
         pd.deltaPath &= bsdfSample.isLobe(LobeType::Delta);
     }
   

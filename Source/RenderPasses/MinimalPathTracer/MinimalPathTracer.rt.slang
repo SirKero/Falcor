@@ -395,6 +395,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
 
         if (gShowLobesAtHit == 0)
         {
+            
             uint lobes = mi.getLobeTypes(sd);
             if ((lobes & (uint)LobeType::Diffuse) > 0)
                 outLobe.x += 1;
@@ -437,7 +438,8 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
 
         if (gShowLobesAtHit == 0)
         {
-            if ((rayData.lobe & (uint)LobeType::Specular) > 0)
+            let bsdfProperties = mi.getProperties(sd);
+            if ((rayData.lobe & (uint)LobeType::Specular) > 0 && bsdfProperties.roughness > 0.2) 
                 outLobe.y += 1;
         }
 

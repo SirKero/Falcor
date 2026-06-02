@@ -126,7 +126,7 @@ void addToGuidingTexture(PhotonData photonData, float emission) {
     }    
 }
 
-int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyCaustics, uint numLightPaths, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
+int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, uint instanceMask, uint numLightPaths, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
     int photonHitType = -1; // -1 = None, 0 = Global, 1 = Caustic
     photonSample = PhotonSample();
     RayDesc ray;
@@ -138,7 +138,6 @@ int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyCa
     #if ENABLE_PHOTON_RETRACING
         uint2 choosenPhotonInstanceAndPrimIndex = uint2(0);
     #endif
-    uint instanceMask = collectOnlyCaustics ? 0x02 : 0xFF;
 
     RayQuery<RAY_FLAG_NONE> rayQuery;
     rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
@@ -169,9 +168,6 @@ int photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyCa
         // Check for diffent surfaces (e.g. corners)
         if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
             continue;
-
-        //if (collectOnlyCaustics)
-        //    sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
         float divident = (photonWeight * radius * radius * NdotL);
