@@ -70,8 +70,9 @@ struct PathData {
     uint pathLength; // Current path length
 
     bool lastHitDiffuse;
-    bool specularPath;    // True if the full path is specular
-    bool firstHitIsDelta; // True if the first hit is delta (less roughness than threshold)
+    bool lastHitReconnectionCandidate;
+    bool lastHitSpecular;    // True if the full path is specular
+    bool deltaPath; // True if the first hit is delta (less roughness than threshold)
 
     __init() {
         thp = float3(1);
@@ -79,8 +80,9 @@ struct PathData {
         F = float3(0);
         pathLength = 0;
         lastHitDiffuse = true;
-        specularPath = true;
-        firstHitIsDelta = false;
+        lastHitSpecular = true;
+        deltaPath = true;
+        lastHitReconnectionCandidate = false;
     }
 }
 
@@ -109,6 +111,8 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
 
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
+        pd.lastHitSpecular &= bsdfSample.isLobe(LobeType::Specular);
+        pd.deltaPath &= bsdfSample.isLobe(LobeType::Delta);
     }
 
     return validSample;
@@ -141,7 +145,7 @@ bool traceFGRay(RayDesc ray, inout SampleGenerator sg, inout PathData pd, inout 
         // Emissive hits are undefined for final gather rays
         if (any(bsdfProperties.emission > 0) || (pd.lastHitDiffuse && !hitIsDiffuse))
         {
-            if (collectCaustics && pd.firstHitIsDelta) // Path is completely specular 
+            if (collectCaustics && pd.deltaPath) // Path is completely specular 
                 emission += bsdfProperties.emission * pd.thp;
             break;
         }
@@ -219,7 +223,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
         // Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI except the primary hit is delta
         if (!hit.isValid()) {
-            if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta) || lastHitUseNEE) {
+            if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.deltaPath) || lastHitUseNEE) {
                 float misWeight = 1.0;
                 if (kUseEnvLight && pd.lastHitDiffuse) {
                     float lightPdf = gNeeLightSelectProb[kNeeLightTypeEnvMap] * gEnvMapSampler.evalPdf(ray.Direction);
@@ -245,12 +249,14 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         let bsdfProperties = mi.getProperties(sd);
         float rayDist = distance(ray.Origin, sd.posW);
         bool jacobianDistanceThreshold = rayDist > gJacobianDistanceThreshold;
-        bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold && jacobianDistanceThreshold;
+        bool hitIsDiffuse = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0;
+        bool hitIsReconnectionSurface = hitIsDiffuse && bsdfProperties.roughness > kRoughnessThreshold && jacobianDistanceThreshold ;
+        //bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold && jacobianDistanceThreshold;
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // Jacobian for this iteration
 
         // Specular Path -> Emissive. Path Length == 1 is covered by ReSTIR DI except the primary hit is delta
-        if ((pd.pathLength > 1 && pd.specularPath) || (pd.pathLength == 1 && pd.firstHitIsDelta) || lastHitUseNEE) {
+        if ((pd.pathLength > 1 && pd.lastHitSpecular) || (pd.pathLength == 1 && pd.deltaPath) || lastHitUseNEE) {
             float misWeight = 1.0;
             float neeEmissiveProbability = gNeeLightSelectProb[kNeeLightTypeEmissive];
             if(neeEmissiveProbability > 0 && pd.lastHitDiffuse)
@@ -275,19 +281,19 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             }
         }
 
-        // Stop on emissive hits (reflections are undefined) or when first diffuse -> specular bounce if the setting is enabled
-        if (hitIsEmissive || (kStopPathAfterDiffuseSpecular && !hitIsDiffuse && pd.lastHitDiffuse))
+        // Stop on emissive hits
+        if (hitIsEmissive)
             break;
 
         // If surface is diffuse do radiance estimate (photon types are depended on the current path state)
         if (hitIsDiffuse) {
-            const bool isFinalGather = pd.lastHitDiffuse; // If the last two hits are diffuse, the hit is a final gather surface
+            const bool isFinalGather = pd.lastHitReconnectionCandidate && hitIsReconnectionSurface; // If the last two hits are diffuse, the hit is a final gather surface
             PhotonSample photonSample;
             int photonHitType = -1;
             if (kUseNEEForPathReservoirs)
-                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, !isFinalGather, gNumLightPaths, sg, photonSample, false);
             else
-                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, false, gNumLightPaths, sg, photonSample, !isFinalGather);
 
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
@@ -352,7 +358,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         }
 
         pd.lastHitDiffuse = hitIsDiffuse;
-        pd.specularPath &= !hitIsDiffuse;
+        pd.lastHitReconnectionCandidate = hitIsReconnectionSurface;
         prevPosW = sd.posW;
         prevFaceN = sd.faceN;
 
@@ -403,6 +409,7 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
         const float3 camForward = normalize(gScene.camera.data.cameraW);
         const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
 
+        //sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
         float targetFunction = luminance(photonData.flux * bsdf) / gNumLightPaths;
@@ -513,7 +520,9 @@ void rayGen()
 
         gRTXDI.setSurfaceData(pixel, sd.computeNewRayOrigin(), bsdfProperties.guideNormal, bsdfProperties.diffuseReflectionAlbedo, bsdfProperties.specularReflectance, bsdfProperties.roughness, distanceToSurface);
 
-        pd.lastHitDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        uint miLobe = mi.getLobeTypes(sd);
+        pd.lastHitDiffuse = (miLobe & (uint)LobeType::Diffuse) > 0;
+        pd.lastHitReconnectionCandidate = pd.lastHitDiffuse && bsdfProperties.roughness > kRoughnessThreshold;
 
         // Init Caustic reservoir if photons can be collected at the current surface
         if (pd.lastHitDiffuse) {
@@ -528,8 +537,8 @@ void rayGen()
             gCausticReservoir[reservoirIndex] = causticReservoir;
         #endif
 
-        pd.specularPath &= !pd.lastHitDiffuse;
-        pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08; // 0.08 is the delta threshold used in Falcor. Needed for emission after delta paths
+        // pd.specularPath &=mi.getLobe(sd) & (uint)LobeType::Specular;
+        //pd.firstHitIsDelta = ((miLobe & (uint)LobeType::Delta) > 0) && ((miLobe & (uint)LobeType::Diffuse) == 0); // 0.08 is the delta threshold used in Falcor. Needed for emission after delta paths
 
         // Distribute a Final Gather ray
         RayDesc ray = {};

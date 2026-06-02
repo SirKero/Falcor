@@ -71,6 +71,9 @@ private:
     bool                        mComputeDirect = true;          ///< Compute direct illumination (otherwise indirect only).
     bool                        mUseImportanceSampling = true;  ///< Use importance sampling for materials.
 
+    bool                        mShowLobes = false;
+    uint                        mShowLobesAtHit = 0;            ///< Lobe test
+
     // Runtime data
     uint                        mFrameCount = 0;                ///< Frame count since scene was loaded.
     bool                        mOptionsChanged = false;

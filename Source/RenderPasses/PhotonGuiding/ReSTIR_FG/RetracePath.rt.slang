@@ -79,6 +79,9 @@ struct RetracePathData {
     bool retraceSuccessful; // True if the retraced path matches the one used to generate the reservoir
     uint flags;             // debug flags
 
+    bool deltaPath;
+    bool lastHitReconnectionCandidate;
+
     __init() {
         thp = float3(1);
         scatterPDF = 0;
@@ -87,6 +90,8 @@ struct RetracePathData {
         lastHitDiffuse = true;
         specularPath = true;
         retraceSuccessful = false;
+        deltaPath = true;
+        lastHitReconnectionCandidate = false;
         flags = 0;
     }
 }
@@ -118,6 +123,8 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
 
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
+        pd.specularPath &= bsdfSample.isLobe(LobeType::Specular);
+        pd.deltaPath &= bsdfSample.isLobe(LobeType::Delta);
     }
   
     return validSample;
@@ -184,7 +191,7 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, out float3 samplePosW, out
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
-        lastHitSpecular = bsdfProperties.roughness <= kRoughnessThreshold;
+        lastHitSpecular = bsdfSample.isLobe(LobeType::Specular) || bsdfSample.isLobe(LobeType::Delta);
 
         thp *= bsdfSample.weight;
         // Russian roulette
@@ -220,14 +227,14 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
     let primProperties = primMI.getProperties(primSD);
     RayPayload rayPayload = RayPayload();
     rpd.lastHitDiffuse = primProperties.roughness > kRoughnessThreshold;
-    rpd.specularPath &= !rpd.lastHitDiffuse;
-    bool firstHitIsDelta = primProperties.roughness < 0.08;
-
-    if ((reservoir.flags.firstHitIsDelta && rpd.lastHitDiffuse) || (!reservoir.flags.firstHitIsDelta && !rpd.lastHitDiffuse))
-        return false;
+    rpd.lastHitDiffuse = (primMI.getLobeTypes(primSD) & (uint)LobeType::Diffuse) > 0;
+    rpd.lastHitReconnectionCandidate = rpd.lastHitDiffuse && primProperties.roughness > kRoughnessThreshold;
 
     if (!sampleNewDirection(primSD, primMI, rayDirSg, rpd, ray))
         return false;
+
+    //if ((reservoir.flags.firstHitIsDelta && !rpd.deltaPath) || (!reservoir.flags.firstHitIsDelta && rpd.deltaPath))
+    //    return false;
 
     bool triedToSetFGSurface = false;
     bool isFirstCollectionSurface = true;
@@ -242,7 +249,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         //Scene Miss
         if (!hit.isValid()) {
             bool validEnvSample = reservoir.flags.isEnvMapHit && pathLength == reservoir.pathLength;
-            validEnvSample &= reservoir.pathLength > 1 || (pathLength == 1 && firstHitIsDelta);
+            validEnvSample &= reservoir.pathLength > 1 || (pathLength == 1 && rpd.deltaPath);
             if (validEnvSample) {
                 float misWeight = 1.0;
                 if (kUseEnvLight && rpd.lastHitDiffuse) {
@@ -264,7 +271,8 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         let bsdfProperties = mi.getProperties(sd);
         float rayDist = distance(ray.Origin, sd.posW);
         bool jacobianDistanceThreshold = rayDist > gJacobianDistanceThreshold;
-        bool hitIsDiffuse = (bsdfProperties.roughness > kRoughnessThreshold) && jacobianDistanceThreshold; // Either diffuse surface or emissive hit
+        bool hitIsDiffuse = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0;
+        bool hitIsReconnectionSurface = hitIsDiffuse && bsdfProperties.roughness > kRoughnessThreshold && jacobianDistanceThreshold;
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float jacobian = rpd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); //Jacobian for this iteration
 
@@ -300,7 +308,7 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
             retracedPath.jacobian = jacobian;
             float3 toSample = float3(0);
             float distToSample = -1;
-            if (reservoir.flags.isFinalGather)
+            if (reservoir.flags.isFinalGather && hitIsReconnectionSurface)
             {
                 toSample = reservoir.samplePosW - sd.posW;
                 distToSample = length(toSample);
@@ -355,7 +363,6 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
         // Sample new ray
         triedToSetFGSurface |= rpd.lastHitDiffuse; // If 1 diffuse surface was encountered, it was tried to set the Final Gather surface
         rpd.lastHitDiffuse = hitIsDiffuse;
-        rpd.specularPath &= !hitIsDiffuse;
         prevPosW = sd.posW;
         prevFaceN = sd.faceN;
 

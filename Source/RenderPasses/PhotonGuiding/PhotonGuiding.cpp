@@ -623,6 +623,7 @@ void PhotonGuiding::renderUI(Gui::Widgets& widget)
         }
         changed |= group.checkbox("Disable Direct Light", mDebugDisableDirectLight);
         changed |= group.checkbox("Disable Indirect Light", mDebugDisableIndirectLight);
+        changed |= group.checkbox("Disable Caustics", mDebugDisableCaustic);
         changed |= group.checkbox("ReSTIR FG+ Show Paths", mDebugPathRetracingShowPaths);
     }
     mOptionsChanged = changed;
@@ -2538,6 +2539,7 @@ void PhotonGuiding::reSTIREvaluateReservoirsPass(RenderContext* pRenderContext, 
         defines.add("GUIDING_DISCRETIZED_EMISSION_MAX", std::to_string(mGuidingDiscretizedEmissionMax));
         defines.add("DEBUG_DISABLE_DIRECT_LIGHT", std::to_string(mDebugDisableDirectLight));
         defines.add("DEBUG_DISABLE_INDIRECT_LIGHT", std::to_string(mDebugDisableIndirectLight));
+        defines.add("DEBUG_DISABLE_CAUSTIC", std::to_string(mDebugDisableCaustic));
         defines.add(
             "ENABLE_RANDOM_REPLAY", mPhotonRenderMode == Falcor::PhotonGuidingSharedEnums::PhotonRenderMode::ReSTIR_PathPhoton ? "1" : "0"
         );

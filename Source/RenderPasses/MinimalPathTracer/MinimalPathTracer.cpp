@@ -40,7 +40,7 @@ namespace
 
     // Ray tracing settings that affect the traversal stack size.
     // These should be set as small as possible.
-    const uint32_t kMaxPayloadSizeBytes = 72u;
+    const uint32_t kMaxPayloadSizeBytes = 76u;
     const uint32_t kMaxRecursionDepth = 2u;
 
     const char kInputViewDir[] = "viewW";
@@ -166,6 +166,8 @@ void MinimalPathTracer::execute(RenderContext* pRenderContext, const RenderData&
     auto var = mTracer.pVars->getRootVar();
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPRNGDimension"] = dict.keyExists(kRenderPassPRNGDimension) ? dict[kRenderPassPRNGDimension] : 0u;
+    var["CB"]["gShowLobes"] = mShowLobes;
+    var["CB"]["gShowLobesAtHit"] = mShowLobesAtHit;
 
     // Bind I/O buffers. These needs to be done per-frame as the buffers may change anytime.
     auto bind = [&](const ChannelDesc& desc)
@@ -200,6 +202,9 @@ void MinimalPathTracer::renderUI(Gui::Widgets& widget)
 
     dirty |= widget.checkbox("Use importance sampling", mUseImportanceSampling);
     widget.tooltip("Use importance sampling for materials", true);
+
+    dirty |= widget.checkbox("Show Lobes", mShowLobes);
+    dirty |= widget.var("Show Lobes at Hit", mShowLobesAtHit);
 
     // If rendering options that modify the output have changed, set flag to indicate that.
     // In execute() we will pass the flag to other passes for reset of temporal data etc.

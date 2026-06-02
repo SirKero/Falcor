@@ -67,6 +67,8 @@ cbuffer CB
 {
     uint        gFrameCount;        // Frame count since scene was loaded.
     uint        gPRNGDimension;     // First available PRNG dimension.
+    bool        gShowLobes;         // Vizualize Lobes
+    uint        gShowLobesAtHit;    // Bounce for lobes
 }
 
 // Inputs
@@ -103,7 +105,8 @@ struct ScatterRayData
     bool    terminated;     ///< Set to true when path is terminated.
     float3  thp;            ///< Current path throughput. This is updated at each path vertex.
     uint    pathLength;     ///< Path length in number of path segments (0 at origin, 1 at first secondary hit, etc.). Max 2^31.
-    float3  origin;         ///< Next path segment origin.
+    float3 origin;          ///< Next path segment origin.
+    uint lobe;              ///< last sampled lobe
     float3  direction;      ///< Next path segment direction.
 
     SampleGenerator sg;     ///< Per-ray state for the sample generator (up to 16B).
@@ -118,6 +121,7 @@ struct ScatterRayData
         this.thp = float3(1, 1, 1);
         this.origin = float3(0, 0, 0);
         this.direction = float3(0, 0, 0);
+        this.lobe = 0;
         this.sg = sg;
     }
 };
@@ -279,6 +283,7 @@ bool generateScatterRay(const ShadingData sd, const IMaterialInstance mi, bool i
     BSDFSample bsdfSample;
     if (mi.sample(sd, rayData.sg, bsdfSample, kUseImportanceSampling))
     {
+        rayData.lobe = bsdfSample.lobeType;
         rayData.origin = rayOrigin;
         if (!isCurveHit && bsdfSample.isLobe(LobeType::Transmission))
         {
@@ -369,6 +374,7 @@ void handleHit(const HitInfo hit, inout ScatterRayData rayData)
 float3 tracePath(const uint2 pixel, const uint2 frameDim)
 {
     float3 outColor = float3(0.f);
+    float3 outLobe = float3(0.f);
 
     const float3 primaryRayOrigin = gScene.camera.getPosition();
     const float3 primaryRayDir = getPrimaryRayDir(pixel, frameDim, gScene.camera);
@@ -386,6 +392,13 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
 
         // Create material instance at shading point.
         let mi = gScene.materials.getMaterialInstance(sd, lod);
+
+        if (gShowLobesAtHit == 0)
+        {
+            uint lobes = mi.getLobeTypes(sd);
+            if ((lobes & (uint)LobeType::Diffuse) > 0)
+                outLobe.x += 1;
+        }
 
         // Create sample generator.
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount);
@@ -422,6 +435,12 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         // Generate scatter ray.
         if (!generateScatterRay(sd, mi, isCurveHit, rayOrigin, rayData)) rayData.terminated = true;
 
+        if (gShowLobesAtHit == 0)
+        {
+            if ((rayData.lobe & (uint)LobeType::Specular) > 0)
+                outLobe.y += 1;
+        }
+
         // Follow path into the scene and compute its total contribution.
         for (uint depth = 0; depth <= kMaxBounces && !rayData.terminated; depth++)
         {
@@ -438,6 +457,9 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         // Background pixel.
         outColor = kUseEnvBackground ? gScene.envMap.eval(primaryRayDir) : kDefaultBackgroundColor;
     }
+
+    if (gShowLobes)
+        outColor = outLobe;
 
     return outColor;
 }

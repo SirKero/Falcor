@@ -51,6 +51,7 @@ static const uint kDiscretizedEmissionFactor = GUIDING_DISCRETIZED_EMISSION_FACT
 static const uint kDiscretizedEmissionMax = GUIDING_DISCRETIZED_EMISSION_MAX;
 static const bool kDisableDirectLight = DEBUG_DISABLE_DIRECT_LIGHT;
 static const bool kDisableIndirectLight = DEBUG_DISABLE_INDIRECT_LIGHT;
+static const bool kDisableCaustic = DEBUG_DISABLE_CAUSTIC;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseOptimizedAtlas = USE_OPTIMIZED_ATLAS;
 static const float kDemodulateMinReflectance = 0.01f;
@@ -239,11 +240,16 @@ void evalAllReservoirs(uint2 pixel, HitInfo hitInfo, float3 viewDir)
         indirectLight += gEmission[pixel].xyz;
     #endif
 
-        indirectLight += evaluateCausticReservoir(pixel, sg);
-
-        // indirectLight = min(indirectLight, 1000.0); //TODO only for ref to avoid extreme fireflies
         if (!kDisableIndirectLight)
             outColor += indirectLight;
+
+        float3 caustic = evaluateCausticReservoir(pixel, sg);
+        if (!kDisableCaustic)
+            outColor += caustic;
+        
+
+        // indirectLight = min(indirectLight, 1000.0); //TODO only for ref to avoid extreme fireflies
+       
     } else {
         outColor = gScene.envMap.eval(viewDir);
     }

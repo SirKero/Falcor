@@ -569,7 +569,7 @@ void rayGen()
     RayPayload rayPayload = RayPayload();
     
     bool storeAsCaustic = false;
-    bool reflectedDiffuse = false;
+    bool isDiffuse = false;
     float3 photonStartFlux = pls.flux / pls.guidingPdf;
     float3 thp = float3(1.0); //Throughput
 
@@ -602,9 +602,11 @@ void rayGen()
 
         if (any(bsdfProperties.emission > 0))
             break;
-                   
+
         photon.normalW = sd.getOrientedFaceNormal();
-        reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        uint lobes = mi.getLobeTypes(sd);
+        // isDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
+        isDiffuse = (lobes & (uint)LobeType::DiffuseReflection) > 0;
         if (kUseJacobianToMarkCaustic) {
             float rayDistance = distance(ray.Origin, sd.posW);
             if(rayDistance < gJacobianDistanceThreshold) {
@@ -613,7 +615,7 @@ void rayGen()
         }
 
         // Store Photon
-        bool storePhoton = reflectedDiffuse;
+        bool storePhoton = isDiffuse;
         if (kStoreOnlyIndirectPhotons)
             storePhoton &= i > 0;
         if (storePhoton) {
@@ -677,7 +679,8 @@ void rayGen()
         }
        
         // Update Photon
-        storeAsCaustic = !reflectedDiffuse;
+        //storeAsCaustic = !isDiffuse;
+        storeAsCaustic = bsdfSample.isLobe(LobeType::Specular) || bsdfSample.isLobe(LobeType::Delta);
         photon.dir = -ray.Direction;
         photon.flux = photonStartFlux * thp;
         photon.pathLength = i + 1;

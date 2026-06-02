@@ -64,7 +64,7 @@ bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, o
     RayPayload rayPayload = RayPayload();
     const uint targetPathLength = reservoir.photonRetraceData.pathLength;
     bool validPhoton = false;
-    bool lastHitSpecular = false;
+    bool isCaustic = false;
 
     for (uint i = 0; i <= targetPathLength; i++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -83,7 +83,7 @@ bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, o
             photonHit = hit;
             photonView = ray.Direction;
             photonFlux *= thp;
-            validPhoton = lastHitSpecular;
+            validPhoton = isCaustic;
             break;
         }
 
@@ -98,7 +98,7 @@ bool randomReplayPhotonPath(ReservoirCaustic reservoir, out HitInfo photonHit, o
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
-        lastHitSpecular = bsdfProperties.roughness <= kRoughnessThreshold;
+        isCaustic = bsdfSample.isLobe(LobeType::Specular) || bsdfSample.isLobe(LobeType::Delta);
 
         thp *= bsdfSample.weight;
         // Russian roulette
