@@ -281,24 +281,24 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             }
         }
 
-        // Stop on emissive hits
-        if (hitIsEmissive)
+        // Stop on emissive hits or if reconnection surface -> specular (these are covered by caustic photons and nee)
+        if (hitIsEmissive || (kStopPathAfterDiffuseSpecular && !hitIsReconnectionSurface && pd.lastHitReconnectionCandidate))
             break;
 
         // If surface is diffuse do radiance estimate (photon types are depended on the current path state)
         if (hitIsDiffuse) {
+            //On specular paths, only evaluate the diffuse path of the surface
+            if (!hitIsReconnectionSurface)
+                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
             const bool isFinalGather = pd.lastHitReconnectionCandidate && hitIsReconnectionSurface; // If the last two hits are diffuse, the hit is a final gather surface
             PhotonSample photonSample;
             int photonHitType = -1;
-            if (!hitIsReconnectionSurface)
-                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
             if (kUseNEEForPathReservoirs)
                 photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
             else
                 photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather);
 
-            if (!hitIsReconnectionSurface)
-                sd.mtl.setActiveLobes((uint)LobeType::All);
+            
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
                 pathReservoir.pathLength = isFinalGather ? pd.pathLength - 1 : pd.pathLength;
@@ -359,6 +359,10 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                 break;
 
             isFirstCollectionSurface = false;
+
+            //Revert back to evaluating all lobes after this 
+            if (!hitIsReconnectionSurface)
+                sd.mtl.setActiveLobes((uint)LobeType::All);
         }
 
         pd.lastHitDiffuse = hitIsDiffuse;
@@ -369,8 +373,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         // Calc new ray direction
         if (!sampleNewDirection(sd, mi, rayDirectionSG, pd, ray)) {
             break;
-        }
-
+        }         
     }
 
     // Finalize Reservoir

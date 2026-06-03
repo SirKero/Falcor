@@ -393,12 +393,11 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         // Create material instance at shading point.
         let mi = gScene.materials.getMaterialInstance(sd, lod);
 
-        if (gShowLobesAtHit == 0)
+        uint lobes = mi.getLobeTypes(sd);
+        bool hasDiffuseLobe = (lobes & (uint)LobeType::Diffuse) > 0;
+        if (gShowLobesAtHit == 0 && hasDiffuseLobe)
         {
-            
-            uint lobes = mi.getLobeTypes(sd);
-            if ((lobes & (uint)LobeType::Diffuse) > 0)
-                outLobe.x += 1;
+            outLobe.x += 0;
         }
 
         // Create sample generator.
@@ -439,7 +438,10 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         if (gShowLobesAtHit == 0)
         {
             let bsdfProperties = mi.getProperties(sd);
-            if ((rayData.lobe & (uint)LobeType::Specular) > 0 && bsdfProperties.roughness > 0.2) 
+            bool resampleCandidate = hasDiffuseLobe && bsdfProperties.roughness > 0.2;
+            bool isSpecularLobe = (rayData.lobe & (uint)LobeType::Specular) > 0;
+            bool isDiffuseLobe = (rayData.lobe & (uint)LobeType::Diffuse) > 0;
+            if (isSpecularLobe && !resampleCandidate)
                 outLobe.y += 1;
         }
 

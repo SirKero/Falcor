@@ -305,6 +305,8 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
 
         // Collect photons or set reconnection surface
         if (hitIsDiffuse && pathLength == reservoir.pathLength) {
+            if (!hitIsReconnectionSurface)
+                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
             retracedPath.jacobian = jacobian;
             float3 toSample = float3(0);
             float distToSample = -1;
