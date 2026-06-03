@@ -397,7 +397,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
         bool hasDiffuseLobe = (lobes & (uint)LobeType::Diffuse) > 0;
         if (gShowLobesAtHit == 0 && hasDiffuseLobe)
         {
-            outLobe.x += 0;
+            outLobe.x += 1;
         }
 
         // Create sample generator.
@@ -441,7 +441,7 @@ float3 tracePath(const uint2 pixel, const uint2 frameDim)
             bool resampleCandidate = hasDiffuseLobe && bsdfProperties.roughness > 0.2;
             bool isSpecularLobe = (rayData.lobe & (uint)LobeType::Specular) > 0;
             bool isDiffuseLobe = (rayData.lobe & (uint)LobeType::Diffuse) > 0;
-            if (isSpecularLobe && !resampleCandidate)
+            if (isDiffuseLobe)
                 outLobe.y += 1;
         }
 

@@ -123,8 +123,9 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
 
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
-        pd.specularPath &= bsdfSample.isLobe(LobeType::Specular) && !pd.lastHitReconnectionCandidate;
-        pd.deltaPath &= bsdfSample.isLobe(LobeType::Delta);
+        bool isDeltaLobe = bsdfSample.isLobe(LobeType::Delta);
+        pd.specularPath &= (bsdfSample.isLobe(LobeType::Specular) || isDeltaLobe) && !pd.lastHitDiffuse;
+        pd.deltaPath &= isDeltaLobe;
     }
   
     return validSample;
@@ -305,8 +306,6 @@ bool randomReplay(ShadingData primSD, PathReservoir reservoir, inout SampleGener
 
         // Collect photons or set reconnection surface
         if (hitIsDiffuse && pathLength == reservoir.pathLength) {
-            if (!hitIsReconnectionSurface)
-                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
             retracedPath.jacobian = jacobian;
             float3 toSample = float3(0);
             float distToSample = -1;

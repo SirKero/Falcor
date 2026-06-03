@@ -111,8 +111,9 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout SampleGenera
 
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
-        pd.lastHitSpecular &= bsdfSample.isLobe(LobeType::Specular) && !pd.lastHitReconnectionCandidate;
-        pd.deltaPath &= bsdfSample.isLobe(LobeType::Delta);
+        bool isDeltaLobe = bsdfSample.isLobe(LobeType::Delta);
+        pd.lastHitSpecular &= (bsdfSample.isLobe(LobeType::Specular) || isDeltaLobe) && !pd.lastHitDiffuse;
+        pd.deltaPath &= isDeltaLobe;
     }
 
     return validSample;
@@ -282,26 +283,24 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
         }
 
         // Stop on emissive hits or if reconnection surface -> specular (these are covered by caustic photons and nee)
-        if (hitIsEmissive || (kStopPathAfterDiffuseSpecular && !hitIsReconnectionSurface && pd.lastHitReconnectionCandidate))
+        if (hitIsEmissive) // || (kStopPathAfterDiffuseSpecular && !hitIsReconnectionSurface && pd.lastHitReconnectionCandidate))
             break;
 
         // If surface is diffuse do radiance estimate (photon types are depended on the current path state)
         if (hitIsDiffuse) {
-            //On specular paths, only evaluate the diffuse path of the surface
-            if (!hitIsReconnectionSurface)
-                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
-            const bool isFinalGather = pd.lastHitReconnectionCandidate && hitIsReconnectionSurface; // If the last two hits are diffuse, the hit is a final gather surface
+            // On specular paths, only evaluate the diffuse path of the surface
+            const bool isReconnectionSurface = pd.lastHitReconnectionCandidate && hitIsReconnectionSurface; // If the last two hits are diffuse, it is a reconnection surface
+            const bool collectGlobalPhotons = !pd.lastHitSpecular || isReconnectionSurface; //If a diffuse surface was encounterd, we use radiance estimate for the remaining paths
             PhotonSample photonSample;
             int photonHitType = -1;
             if (kUseNEEForPathReservoirs)
-                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, isFinalGather ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, collectGlobalPhotons ? 0xFF : 0x02, gNumLightPaths, sg, photonSample, false);
             else
-                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isFinalGather);
+                photonHitType = photonRIS(sd, mi, bsdfProperties.guideNormal, 0xFF, gNumLightPaths, sg, photonSample, !isReconnectionSurface);
 
-            
             float3 radianceEstimate = photonSample.radiance * photonSample.weight;
             if (addSampleToPathReservoir(pathReservoir, sampleNext1D(sg), radianceEstimate, pd.thp) && photonSample.approxRadiance > 0) {
-                pathReservoir.pathLength = isFinalGather ? pd.pathLength - 1 : pd.pathLength;
+                pathReservoir.pathLength = isReconnectionSurface ? pd.pathLength - 1 : pd.pathLength;
                 pathReservoir.jacobian = jacobian;
                 pathReservoir.guidingPixels = photonSample.guidingPixels;
                 pathReservoir.lightIndex = photonSample.lightIndex;
@@ -315,8 +314,8 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
                     photonRetraceData.startSeed = getStartSeedPhotonDirSG(gFrameCount, kRNGNumPasses);
                     pathReservoir.photonRetraceData = photonRetraceData;
                 #endif
-                
-                if (isFinalGather) {
+
+                if (isReconnectionSurface) {
                     flags |= (uint)ReservoirPathFlags::isFinalGather;
                     pathReservoir.samplePosW = sd.posW;
                     pathReservoir.sampleNormal = sd.faceN;
@@ -333,7 +332,7 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             }
 
             // Next event estimation after specular hits used for direct light
-            if ((kUseNEEForPathReservoirs && !isFinalGather) || kUseNeeAtFGHit) {
+            if ((kUseNEEForPathReservoirs && !collectGlobalPhotons) || kUseNeeAtFGHit) {
                 SampleGenerator neeSgState = sg; // Cache sampleGenerator state
                 LightSample ls;
                 float3 nee = nextEventEstimation(sd, mi, gNeeLightSelectProb, ls, sg);
@@ -354,8 +353,8 @@ void tracePath(RayDesc ray, float3 prevFaceN , inout SampleGenerator sg, inout S
             } else
                 lastHitUseNEE = false;
 
-            //Tracing is always stopped after final gather
-            if (isFinalGather)
+            // Tracing is always stopped after global photons were collected
+            if (collectGlobalPhotons)
                 break;
 
             isFirstCollectionSurface = false;
@@ -418,8 +417,8 @@ void lightTraceResampling(uint2 pixel, inout ReservoirCaustic r, inout SampleGen
         const float3 camForward = normalize(gScene.camera.data.cameraW);
         const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
 
-        if(bsdfProperties.roughness <= kRoughnessThreshold)
-            sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
+        //if(bsdfProperties.roughness <= kRoughnessThreshold)
+        //    sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
 
         float targetFunction = luminance(photonData.flux * bsdf) / gNumLightPaths;
