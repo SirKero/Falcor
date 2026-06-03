@@ -328,6 +328,7 @@ private:
     bool mDebugShowLightIndexGuidingTex = false;
     bool mDebugDisableDirectLight = false;
     bool mDebugDisableIndirectLight = false;
+    bool mDebugDisableCaustics = false;
     bool mDebugPathRetracingShowPaths = false;
     float3 mDebugColorDirGM = float3(1,0,0);
     float3 mDebugColorLightGM = float3(0,1,0);
