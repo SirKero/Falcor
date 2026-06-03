@@ -184,7 +184,7 @@ bool randomReplayPhotonPath(PathReservoir reservoirs, out float3 samplePosW, out
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
-        lastHitSpecular = bsdfProperties.roughness < kRoughnessThreshold;
+        lastHitSpecular = bsdfProperties.roughness <= kRoughnessThreshold;
 
         thp *= bsdfSample.weight;
         // Russian roulette
