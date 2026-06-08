@@ -26,7 +26,9 @@ cbuffer CB
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
+static const bool kDisableDirectLight = DISABLE_DIRECT;
+static const bool kDisableIndirectLight = DISABLE_INDIRECT;
+static const bool kDisableCaustics = DISABLE_CAUSTICS;
 
 float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
@@ -41,19 +43,10 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
     let bsdfProperties = mi.getProperties(sd);
 
-    // Light Trace
-    if (kEnableLightTrace) {
-        float3 directionToCamera = normalize(gScene.camera.getPosition() - sd.posW);
-        outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg);
-    } else {
-        float NdotL = dot(bsdfProperties.guideNormal, causticReservoir.photonDir);
-        if (NdotL > 0) {
-            outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, causticReservoir.photonDir, sg);
-            outColor /= NdotL;
-            outColor *= causticReservoir.thp;
-        }
-    }
-
+    //Backprojected Caustic
+    float3 directionToCamera = normalize(gScene.camera.getPosition() - sd.posW);
+    outColor = causticReservoir.wSum * causticReservoir.photonRadiance * mi.eval(sd, directionToCamera, sg);
+   
     return outColor;
 }
 
@@ -77,7 +70,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         let bsdfProperties = mi.getProperties(sd);
 
         // Add Emissive
-        outColor += bsdfProperties.emission;
+        float3 directLight = bsdfProperties.emission;
 
         //Eval ReSTIR DI
         float dist = 1.f;
@@ -91,16 +84,25 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
         if (rtxdiValid)
         {
-            outColor += mi.eval(sd, dir, sg) * Li;
+            directLight += mi.eval(sd, dir, sg) * Li;
         }
 
+        if (!kDisableDirectLight)
+            outColor += directLight;
+
         //Evaluate directly visible caustics
-        outColor += evaluateCausticReservoir(pixel, sg);
+        float3 caustic = evaluateCausticReservoir(pixel, sg);
+        if (!kDisableCaustics)
+            outColor += caustic;
 
         // Evaluate Path Reservoir
         PathReservoir pathReservoir = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
-        outColor += pathReservoir.F * pathReservoir.weight;
-    }else{
+        float3 indirectLight = pathReservoir.F * pathReservoir.weight;
+        if (!kDisableIndirectLight)
+            outColor += indirectLight;
+
+    }else
+    {
         outColor = gScene.envMap.eval(viewDir);
     }
 

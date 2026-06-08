@@ -90,6 +90,14 @@ private:
         float specularRoughnessThreshold = 0.25f;       // Any material below this is considered specular
         bool evaluateDeltaPDFs = false;                 // If set on true, delta pdfs are evaluated (always 0), else they are set to 1
         bool enableAlphaTest = true;                    // Alpha Test
+
+        //
+        // Debug Options
+        //
+
+        bool debugDisableDirectLight = false;           // Disable direct light in eval
+        bool debugDisableIndirectLight = false;         // Disable indirect light without backprojected caustics in eval
+        bool debugDisableCaustics = false;              // Disable backprojected caustics in eval
     };
 
     //Resets all render passes

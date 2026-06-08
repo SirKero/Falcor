@@ -218,6 +218,9 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
     if (auto group = widget.group("Debug"))
     {
         group.checkbox("Clear Debug Texture", mClearDebugTexture);
+        changed |= group.checkbox("Disable Direct Light", mOptions.debugDisableDirectLight);
+        changed |= group.checkbox("Disable Indirect Light", mOptions.debugDisableIndirectLight);
+        changed |= group.checkbox("Disable (Backprojected) Caustics", mOptions.debugDisableCaustics);
     }
 }
 
@@ -1194,6 +1197,18 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
 {
     FALCOR_PROFILE(pRenderContext, "EvaluateReservoirs");
 
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add(getMaterialDefines());
+        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add(mpRTXDI->getDefines());
+        defines.add("DISABLE_DIRECT", mOptions.debugDisableDirectLight ? "1" : "0");
+        defines.add("DISABLE_INDIRECT", mOptions.debugDisableIndirectLight ? "1" : "0");
+        defines.add("DISABLE_CAUSTICS", mOptions.debugDisableCaustics ? "1" : "0");
+        return defines;
+    };
+
     // Create compute pass
     if (!mpEvaluateReservoirsPass)
     {
@@ -1205,22 +1220,13 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-        defines.add(mpRTXDI->getDefines());
-        defines.add(getMaterialDefines());
-        defines.add("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
-        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add(getRuntimeDefines());
 
         mpEvaluateReservoirsPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpEvaluateReservoirsPass);
-
     //Runtime Defines
-    mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
-    mpEvaluateReservoirsPass->getProgram()->addDefines(getMaterialDefines());
-    mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-    mpEvaluateReservoirsPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
-    mpEvaluateReservoirsPass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+    mpEvaluateReservoirsPass->getProgram()->addDefines(getRuntimeDefines());
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();
