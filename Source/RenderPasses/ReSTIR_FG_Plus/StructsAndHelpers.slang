@@ -137,10 +137,7 @@ struct ReservoirFlags {
 struct PathReservoir {
     SampleGenerator sgPathDirections; // Sample Generator for random direction (float4)
 
-    //SampleGenerator sgRCNee; // For replaying NEE decisions
-
-    float3 samplePosW;      // Sample Position
-    float sampleRadius;     //For radiance estimate
+    uint4 sampleData;       // Sample date used for sample position,radius or RNG seed 
 
     float jacobian;    //(stored) jacobian determinant at the first hit
     ReservoirFlags flags;      // path length and flags
@@ -154,9 +151,7 @@ struct PathReservoir {
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
-        // sgRCNee = SampleGenerator(uint2(0), 0);
-        samplePosW = float3(0);
-        sampleRadius = 0;
+        sampleData = 0;
         jacobian = 1;
         packedSampleNormal = float2(0);
         flags = ReservoirFlags();
@@ -173,6 +168,16 @@ struct PathReservoir {
     property uint pathLength {
         get { return flags.pathLength; }
         set { flags.pathLength = newValue;}
+    }
+
+    property float3 samplePosW {
+        get { return float3(asfloat(sampleData.x), asfloat(sampleData.y), asfloat(sampleData.z));}
+        set { sampleData.xyz = uint3(asuint(newValue.x), asuint(newValue.y), asuint(newValue.z));}
+    }
+
+    property float sampleRadius {
+        get { return asfloat(sampleData.w);}
+        set { sampleData.w = asuint(newValue);}
     }
 
     property float3 sampleNormal {

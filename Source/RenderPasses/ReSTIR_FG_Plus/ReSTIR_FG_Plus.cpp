@@ -304,6 +304,12 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
+    const uint resampleIterations = 1 + mOptions.pathNumberSpatialSamples;
+    for(uint i=0; i<resampleIterations; i++)
+    {
+        shiftCameraPathPass(pRenderContext, renderData, i);
+    }
+
     //Reservoir Splatting
     /*
     if (mEnableLightTraceSplatting)
@@ -340,6 +346,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     mTemporalCameraForward = math::normalize(camData.cameraW);
 
     mFrameCount++;
+    mReservoirIndex++;
     mCanResample = true;
 }
 
@@ -865,8 +872,6 @@ void ReSTIR_FG_Plus::traceCameraPass(RenderContext* pRenderContext, const Render
     //Output Resources
     var["gPathReservoir"] = mpPathReservoir[mReservoirIndex % 2];
 
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
-
     //Dispatch Shader
     mpScene->raytrace(pRenderContext, mTraceCameraPass.pProgram.get(), mTraceCameraPass.pVars, uint3(mScreenRes, 1));
 }
@@ -1054,7 +1059,91 @@ void ReSTIR_FG_Plus::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
 
 void ReSTIR_FG_Plus::shiftCameraPathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
-    
+    FALCOR_PROFILE(pRenderContext, "ShiftPathReservoir");
+
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add(getMaterialDefines());
+        defines.add("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        return defines;
+    };
+
+    //Perform shift for current and previous sample
+    for(uint i=0; i<2; i++)
+    {
+        auto& pass = mShiftCameraPathPass[i];
+        //Init Shader
+        if (!pass.pProgram)
+        {
+            RtProgram::Desc desc;
+            desc.addShaderModules(mpScene->getShaderModules());
+            desc.addShaderLibrary(kShaderTraceCamera);
+            desc.setMaxPayloadSize(sizeof(float) * 4);
+            desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+            desc.setMaxTraceRecursionDepth(1);
+            if (!mpScene->hasProceduralGeometry())
+                desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+            pass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+            auto& sbt = pass.pBindingTable;
+            sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+            sbt->setMiss(0, desc.addMiss("miss"));
+
+            if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+            {
+                sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+            }
+
+            DefineList defines = {};
+            defines.add(mpScene->getSceneDefines());
+            defines.add("IS_SHIFT", "1");
+            defines.add("SHIFT_IS_CURRENT", i==0 ? "1" : "0");
+
+            pass.pProgram = RtProgram::create(mpDevice, desc, defines);
+        }
+        //Defines that can change on runtime
+        pass.pProgram->addDefines(getRuntimeDefines());
+        if (mpEmissiveLightSampler)
+            pass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+
+        //Program Vars
+        if (!pass.pVars)
+            pass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+
+        FALCOR_ASSERT(pass.pVars);
+        auto var = pass.pVars->getRootVar();
+
+        //Constant Buffer
+        var["CB"]["gFrameCount"] = mFrameCount;
+        var["CB"]["gMaxPathLength"] = mOptions.cameraMaxPathLength;
+        var["CB"]["gJacobianDistanceThreshold"] = mOptions.jacobianDistanceThreshold;
+        var["CB"]["gNeeSelectProbabilites"] = mNeeLightSelectProb;
+
+        var["ShiftCB"]["gNumResamplingPass"] = numPass;
+        var["ShiftCB"]["gSpatialSampleRadius"] = mOptions.pathSpatialResamplingRadius;
+
+        // NEE Structures for Path Resampling 
+        if (mpEmissiveLightSampler)
+            mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
+        if (mpEnvMapSampler)
+            mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
+
+        //Input Resources
+        ref<Texture> vbufferTex = i==0 ? mpVBufferPrev : renderData[kInputVBuffer]->asTexture();
+         ref<Texture> viewTex = i==0 ? mpViewPrev : renderData[kInputView]->asTexture();
+        var["gVBuffer"] = vbufferTex;
+        var["gView"] = viewTex;
+        var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+        var["gPathReservoir"] = mpPathReservoir[(mReservoirIndex + i) % 2];
+
+        //Output Resources
+        var["gShiftData"] = mpReservoirRetrace[i];
+        var["gDebug"] = renderData[kOutputDebug]->asTexture();
+
+        //Dispatch Shader
+        mpScene->raytrace(pRenderContext, pass.pProgram.get(), pass.pVars, uint3(mScreenRes, 1));
+    } 
 }
 
 void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
@@ -1116,8 +1205,6 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
 
     // In-/Output Resources
     var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
-
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();

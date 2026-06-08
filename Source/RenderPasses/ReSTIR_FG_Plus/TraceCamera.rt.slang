@@ -5,23 +5,26 @@
 import Scene.Raytracing;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
-import Rendering.RTXDI.RTXDI;
+import Utils.Math.MathHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
 import StructsAndHelpers;
-import PhotonHelper;
 import NextEventEstimationHelper;
+//These resources are only needed for initial sample generation
+#if !IS_SHIFT
+import Rendering.RTXDI.RTXDI;
+import PhotonHelper;
+#endif
 
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
-
-RWTexture2D<float4> gDebug;
 
 // Additional I/O for shift mapping
 #if IS_SHIFT
 Texture2D<float2> gMVec;
 RWTexture2D<float4> gShiftData;
 StructuredBuffer<PathReservoir> gPathReservoir;
+RWTexture2D<float4> gDebug;
 #else
 RWStructuredBuffer<PathReservoir> gPathReservoir;
 #endif
@@ -53,6 +56,7 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kUseEnvBackground = USE_ENV_BACKGROUND;
 
 // Defines Shift
+static const bool kIsShift = IS_SHIFT;
 static const bool kShiftIsCurrent = SHIFT_IS_CURRENT;   //True if the working reservoir is the shifted one
 
 struct RayPayload
@@ -87,21 +91,30 @@ struct PathData {
     float3 thp;             //Throughput
     float scatterPDF;       //scatter pdf for last hit
 
-    float3 F;               //Accumulated path radiance
+    float3 prevPosW; // PosW from last frame
     uint flags;             //Path Lenght and Flags
 
-    float3 prevPosW;        //PosW from last frame
-    float3 prevFaceN;       //Face Normal from last frame
+    float3 prevFaceN;       // Face Normal from last frame
+    bool _pad;              // Padding
+
+#if IS_SHIFT
+    float3 F;               // Accumulated path radiance
+    float jacobian;         // Jacobian used in retracing
+#endif
 
     __init() {
         thp = float3(1);
         scatterPDF = 0;
-        F = float3(0);
         flags = 0;
         deltaPath = true;
         specularPath = true;
         prevPosW = float3(0);
         prevFaceN = float3(0);
+        _pad = 0;
+    #if IS_SHIFT
+        F = float3(0);   
+        jacobian = 0;
+    #endif
     }
 
     property uint pathLength {
@@ -204,7 +217,8 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
     const bool firstHitIsDelta = pd.deltaPath;
     //Ray Tracing Loop
     RayPayload rayPayload = RayPayload();
-    for (pd.pathLength = 1; pd.pathLength <= gMaxPathLength; pd.pathLength = pd.pathLength + 1)
+    const uint maxPathLength = kIsShift ? pathReservoir.pathLength : gMaxPathLength;
+    for (pd.pathLength = 1; pd.pathLength <= maxPathLength; pd.pathLength = pd.pathLength + 1)
     {
         // Trace ray and get surface info
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
@@ -213,7 +227,10 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
         // Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI except the primary hit is delta
         if (!hit.isValid())
         {
-            if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.deltaPath))
+            bool validEnvMapSample = (pd.pathLength > 1) || (pd.pathLength == 1 && pd.deltaPath);
+            if (kIsShift) //Additionally check if reservoir took the same path
+                validEnvMapSample &= pathReservoir.flags.isEnvMapHit && (pd.pathLength == pathReservoir.pathLength);
+            if (validEnvMapSample)
             {
                 float misWeight = 1;
                 // If last hit could have generated a Enviroment sample, calculate MIS weight
@@ -224,13 +241,19 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                 }
                 float3 envMapContribution = kUseEnvMap ? gScene.envMap.eval(ray.Direction) * misWeight : float3(0);
 
-                if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), envMapContribution, pd.thp))
-                {
-                    pathReservoir.jacobian = pd.scatterPDF;
-                    uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEnvMapHit;
-                    flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                    pathReservoir.flags.setReservoirPathFlags(flags);
-                }
+                //Either store shift data or add the sample to the reservoir
+                #if IS_SHIFT
+                    pd.F = envMapContribution * pd.thp;
+                    pd.jacobian = pd.scatterPDF;
+                #else
+                    if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), envMapContribution, pd.thp))
+                    {
+                        pathReservoir.jacobian = pd.scatterPDF;
+                        uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEnvMapHit;
+                        flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                        pathReservoir.flags.setReservoirPathFlags(flags);
+                    }
+                #endif
             }
             break; //End Loop
         }
@@ -256,7 +279,11 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
         // Handle Emissive Hit. The sample is evaluated if the whole path has diffuse surfaces to
         // collect photons or if NEE was used in the last iteration.
         // Path length == 1 is covered by RTXDI, except when the first hit was delta
-        if (pd.pathLength > 1 && pd.specularPath || (pd.pathLength == 1 && pd.deltaPath) || pd.lastHitNee)
+        bool validEmissiveHitSample = hitIsEmissive;
+        validEmissiveHitSample &= pd.pathLength > 1 && pd.specularPath || (pd.pathLength == 1 && pd.deltaPath) || pd.lastHitNee;
+        if (kIsShift)
+            validEmissiveHitSample &= pathReservoir.flags.isEmissiveHit && (pd.pathLength == pathReservoir.pathLength);
+        if (validEmissiveHitSample)
         {
             float misWeight = 1.0;
             float neeEmissiveProbability = gNeeSelectProbabilites[kNeeLightTypeEmissive];
@@ -272,14 +299,21 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                 misWeight = evalMIS(1.0, pd.scatterPDF, 1.0, neePDF);
             }
             float3 emissiveContribution = bsdfProperties.emission * misWeight;
-            if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), emissiveContribution, pd.thp))
-            {
-                pathReservoir.jacobian = jacobian;
-                uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEmissiveHit;
-                flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                pathReservoir.flags.setReservoirPathFlags(flags);
-                pathReservoir.pathLength = pd.pathLength;
-            }
+
+            // Either store shift data or add the sample to the reservoir
+            #if IS_SHIFT
+                pd.F = emissiveContribution * pd.thp;
+                pd.jacobian = jacobian;
+            #else //IS_SHIFT
+                if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), emissiveContribution, pd.thp))
+                {
+                    pathReservoir.jacobian = jacobian;
+                    uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEmissiveHit;
+                    flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                    pathReservoir.flags.setReservoirPathFlags(flags);
+                    pathReservoir.pathLength = pd.pathLength;
+                }
+            #endif //IS_SHIFT
         }
 
         //Stop on emissive hits, as reflection is undefined
@@ -296,55 +330,118 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
             // Can be classified as "Radiance Estimate" if it is no reconnection surface
             const bool isFinalGather = !pd.specularPath || isReconnectionSurface;
 
-            //Collect Photons
-            PhotonSample photonSample;
-            photonRIS(sd, mi, bsdfProperties.guideNormal, !isFinalGather, pd.sg, photonSample);
-            if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), photonSample.F, pd.thp))
-            {
-                pathReservoir.pathLength = isFinalGather ? pd.pathLength - 1 : pd.pathLength;
-                pathReservoir.jacobian = jacobian;
-                pathReservoir.sampleRadius = photonSample.radius;
-                uint flags = 0;
-                if (photonSample.photonType == kPhotonTypeIndexCaustic)
-                    flags |= (uint)ReservoirPathFlags::isCaustic;
-                //TODO Handle photon retracing
-
-                if (isReconnectionSurface) //Final Gather with Reconnection
+            // Either check if reservoir sample is valid, or perform radiance estimate and NEE (on the first diffuse hit)
+            #if IS_SHIFT
+                if (pd.pathLength == pathReservoir.pathLength)
                 {
-                    flags |= (uint)ReservoirPathFlags::isFinalGather;
-                    pathReservoir.samplePosW = sd.posW;
-                    pathReservoir.sampleNormal = sd.faceN;
-                } else //Radiance Estimate
-                {
-                    flags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
-                    pathReservoir.samplePosW = photonSample.posW;
-                    pathReservoir.sampleNormal = photonSample.normal;
-                    pathReservoir.sampleRadius = photonSample.radius;
-                }
-                flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                pathReservoir.flags.setReservoirPathFlags(flags);
-            }
-
-            // If only caustics where calculated, also do NEE
-            if (!isFinalGather)
-            {
-                LightSample ls;
-                float3 nee = nextEventEstimation(sd, mi, gNeeSelectProbabilites, ls, pd.sg);
-                if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), nee, pd.thp))
-                {
-                    pathReservoir.jacobian = ls.pdf;
-                    if (!ls.isInfiniteDistance) {
-                        pathReservoir.jacobian *= abs(dot(ls.faceN, ls.dir)) / (ls.distance * ls.distance);
+                    float3 toSample = float3(0);
+                    float distToSample = -1;
+                    bool isFinalGatherOrNEE = false;
+                    if (pathReservoir.flags.isFinalGather)
+                    {
+                        //Get PDF and to sample info for new jacobian
+                        toSample = pathReservoir.samplePosW - sd.posW;
+                        distToSample = length(toSample);
+                        toSample /= distToSample;
+                        float pdf = mi.evalPdf(sd, toSample);
+                        // Update jacobian and F
+                        pd.jacobian = abs(dot(pathReservoir.sampleNormal, -toSample)) / (distToSample * distToSample);
+                        pd.jacobian *= pdf;
+                        pd.F = pathReservoir.fgRadiance / pdf; // BSDF and thp are added later
+                        isFinalGatherOrNEE = any(pd.F > 0);
+                    } else if (pathReservoir.flags.isRadianceEstimate)
+                    {
+                        bool isReconnectable = distance(pathReservoir.samplePosW, sd.posW) < pathReservoir.sampleRadius;
+                        if (isReconnectable) {
+                            pd.F = pathReservoir.fgRadiance * pd.thp;
+                            pd.jacobian = jacobian;
+                        }
+                    } else if (pathReservoir.flags.isNEE)
+                    {
+                        SampleGenerator sg = SampleGenerator(pathReservoir.sampleData); // Recreate sample generator
+                        //Recreate light sampling
+                        LightSample ls;
+                        bool validLightSample = generateAndSelectLightSample(sd, gNeeSelectProbabilites, ls, sg);
+                        if (validLightSample && ls.pdf > 0)
+                        {
+                            //Jacobian
+                            pd.jacobian = ls.pdf;
+                            if (!ls.isInfiniteDistance) {
+                                pd.jacobian *= abs(dot(ls.faceN, ls.dir)) / (ls.distance * ls.distance);
+                            }
+                            // MIS
+                            float misWeight = 0;
+                            if (ls.type != kNeeLightTypeAnalytic) {
+                                float scatterPdf = mi.evalPdf(sd, ls.dir);
+                                misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
+                            }
+                            pd.F = ls.Li * misWeight; // BSDF and thp is added later
+                            toSample = ls.dir;
+                            distToSample = ls.distance;
+                            isFinalGatherOrNEE = true;
+                        }
                     }
-                    //TODO dir lights? 
-                    pathReservoir.samplePosW = ls.position;
-                    pathReservoir.sampleNormal = ls.faceN;
-                    uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isNEE;
+
+                    // Add BSDF and thp for Final Gather and NEE
+                    if (isFinalGatherOrNEE)
+                    {
+                        float3 bsdf = mi.eval(sd, toSample, pd.sg);
+                        pd.F *= bsdf * pd.thp;
+                        if (!dispatchShadowRay(sd, toSample, distToSample))
+                            pd.F = float3(0);
+                    }
+                    break;
+                }
+            #else //IS_SHIFT
+                //Collect Photons
+                PhotonSample photonSample;
+                photonRIS(sd, mi, bsdfProperties.guideNormal, !isFinalGather, pd.sg, photonSample);
+                if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), photonSample.F, pd.thp))
+                {
+                    pathReservoir.pathLength = isReconnectionSurface ? pd.pathLength - 1 : pd.pathLength;
+                    pathReservoir.jacobian = jacobian;
+                    pathReservoir.sampleRadius = photonSample.radius;
+                    uint flags = 0;
+                    if (photonSample.photonType == kPhotonTypeIndexCaustic)
+                        flags |= (uint)ReservoirPathFlags::isCaustic;
+                    //TODO Handle photon retracing
+
+                    if (isReconnectionSurface) //Final Gather with Reconnection
+                    {
+                        flags |= (uint)ReservoirPathFlags::isFinalGather;
+                        pathReservoir.samplePosW = sd.posW;
+                        pathReservoir.sampleNormal = sd.faceN;
+                    } else //Radiance Estimate
+                    {
+                        flags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
+                        pathReservoir.samplePosW = photonSample.posW;
+                        pathReservoir.sampleNormal = photonSample.normal;
+                        pathReservoir.sampleRadius = photonSample.radius;
+                    }
                     flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                     pathReservoir.flags.setReservoirPathFlags(flags);
                 }
-                pd.lastHitNee = true;
-            }
+
+                // If only caustics where calculated, also do NEE
+                if (!isFinalGather)
+                {
+                    LightSample ls;
+                    uint4 sgState = pd.sg.getState();
+                    float3 nee = nextEventEstimation(sd, mi, gNeeSelectProbabilites, ls, pd.sg);
+                    if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), nee, pd.thp))
+                    {
+                        pathReservoir.jacobian = ls.pdf;
+                        if (!ls.isInfiniteDistance) {
+                            pathReservoir.jacobian *= abs(dot(ls.faceN, ls.dir)) / (ls.distance * ls.distance);
+                        }
+                        pathReservoir.sampleData = sgState;
+                        uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isNEE;
+                        flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                        pathReservoir.flags.setReservoirPathFlags(flags);
+                    }
+                    pd.lastHitNee = true;
+                }
+            #endif //IS_SHIFT
 
             //Path is stopped after final gather
             if (isFinalGather)
@@ -401,6 +498,27 @@ void closestHit(inout RayPayload rayData: SV_RayPayload, BuiltInTriangleIntersec
     rayData.packedHitInfo = HitInfo(triangleHit).getData();
 }
 
+// Sets surface data for the VBuffer hit.
+// It sets the diffuse surface flags, depending on the classification and previous PosW and FaceN
+inline void setFirstHitSurfaceData(inout PathData pd, const ShadingData sd, const IMaterialInstance mi, const BSDFProperties bsdfProperties)
+{
+    bool roughnessThreshold = bsdfProperties.roughness > kRoughnessThreshold;
+    if (kDiffClassUseLobes) //BSDF Lobes
+    {
+        pd.lastHitDiffuse = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0;
+        pd.lastHitReconnectionSurface = pd.lastHitDiffuse && roughnessThreshold;
+    } else //Roughness Threshold
+    {
+        pd.lastHitDiffuse = roughnessThreshold;
+        pd.lastHitReconnectionSurface = roughnessThreshold;
+        pd.specularPath &= !roughnessThreshold;
+    }
+
+    //Set prev pos and faceN
+    pd.prevPosW = sd.posW;
+    pd.prevFaceN = sd.faceN;
+}
+
 #if IS_SHIFT
 void shiftCameraReservoir()
 {
@@ -409,8 +527,6 @@ void shiftCameraReservoir()
 
     // Init Sample Generator for selecting the reservoir
     SampleGenerator sgSelectReservoir = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3));
-    // Sample generator for bsdf evaluation
-    //SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 1);
 
     // Reproject last frames reservoir (temporal) or randomly sample in a disc (spatial)
     bool isSpatial = gNumResamplingPass > 0;
@@ -445,16 +561,40 @@ void shiftCameraReservoir()
     PathReservoir pathReservoir = gPathReservoir[index2Dto1D(reservoirPixel, dispatchDims.x)];
 
     // When first hit is valid
-    if (hitInfo.isValid() && pathReservoir.isValid())
+    float4 shiftData = float4(0);
+    if (hitInfo.isValid() && pathReservoir.isValid() && pathReservoir.pathLength >= 1)
     {
-        //TODO Init Trace and SG
+        //Init Path Data struct
+        PathData pd = PathData();
+        pd.sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 1); // BSDF SG
+        pd.dirSG = pathReservoir.sgPathDirections;
+
+        //Init first hit surface
+        let lod = ExplicitLodTextureSampler(0);
+        ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
+        let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
+        let bsdfProperties = mi.getProperties(sd);
+
+        //Prepare first hit data
+        setFirstHitSurfaceData(pd, sd, mi, bsdfProperties);
+
+        //Init ray and (re)trace path
+        RayDesc ray = {};
+        ray.TMin = 0;
+        ray.TMax = FLT_MAX;
+        if (sampleNewDirection(sd, mi, pd, ray))
+            tracePath(ray, pd, pathReservoir);
+
+        shiftData = float4(pd.F, pd.jacobian);
     }
 
     //Swap back the write index
     if (kShiftIsCurrent)
         pixel = reservoirPixel;
 
-    //TODO write to Shift Data
+    gShiftData[pixel] = shiftData;
+    if(kShiftIsCurrent)
+        gDebug[pixel] = float4(shiftData.xyz,1);
 }
 #else // IS_SHIFT
 
@@ -487,21 +627,8 @@ void generateCameraRay()
         float distanceToSurface = distance(sd.posW, gScene.camera.getPosition());
         gRTXDI.setSurfaceData(pixel, sd.computeNewRayOrigin(), bsdfProperties.guideNormal, bsdfProperties.diffuseReflectionAlbedo, bsdfProperties.specularReflectance, bsdfProperties.roughness, distanceToSurface);
 
-        // Set diffuse surface (and specular if roughness threshold classification is used)
-        bool roughnessThreshold = bsdfProperties.roughness > kRoughnessThreshold;
-        if (kDiffClassUseLobes)
-        {
-            pd.lastHitDiffuse = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0;
-            pd.lastHitReconnectionSurface = pd.lastHitDiffuse && roughnessThreshold;
-        } else
-        {
-            pd.lastHitDiffuse = roughnessThreshold;
-            pd.lastHitReconnectionSurface = roughnessThreshold;
-            pd.specularPath &= !roughnessThreshold;
-        }
-        
-        pd.prevPosW = sd.posW;
-        pd.prevFaceN = sd.faceN;
+        //Prepare first hit data
+        setFirstHitSurfaceData(pd, sd, mi, bsdfProperties);
 
         RayDesc ray = {};
         ray.TMin = 0;

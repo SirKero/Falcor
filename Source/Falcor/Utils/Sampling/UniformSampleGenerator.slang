@@ -45,6 +45,19 @@ public struct UniformSampleGenerator : ISampleGenerator
         UniformSampleGenerator internal;
     }
 
+    /*
+     *Recreates a sample generator state from state obtained from another sample generator
+     * @param[in] state aquired by the getState() function
+     */
+    __init(uint4 state)
+    {
+        Xoshiro128StarStar tmp;
+        [unroll]
+        for(uint i=0; i<4; i++)
+            tmp.state[i] = state[i];
+        this.rng = tmp;
+    }
+
     /**
      * Initializes the sample generator for a given pixel and sample number.
      * @param[in] pixel Pixel id.
@@ -68,6 +81,18 @@ public struct UniformSampleGenerator : ISampleGenerator
 
         // Create xoshiro128** pseudorandom generator.
         this.rng = createXoshiro128StarStar(seed);
+    }
+
+    /*
+     * Gets current state packed into an uint4
+     */
+    const uint4 getState()
+    {
+        uint4 state;
+        [unroll]
+        for (uint i = 0; i < 4; i++)
+            state[i] = rng.state[i];
+        return state;
     }
 
     /**

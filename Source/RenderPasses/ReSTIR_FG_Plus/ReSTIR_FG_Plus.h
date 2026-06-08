@@ -79,6 +79,8 @@ private:
         // Resample Settings
         //
 
+        uint pathNumberSpatialSamples = 0;                 // Number of spatial samples
+        float pathSpatialResamplingRadius = 20.f;          // Spatial resampling radius
         float jacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
 
         //
