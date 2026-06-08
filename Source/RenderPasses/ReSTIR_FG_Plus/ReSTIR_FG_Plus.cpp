@@ -43,6 +43,8 @@ namespace
         {kOutputDebug, "gDebug", "Debug Texture", false, ResourceFormat::RGBA32Float}
     };
 
+    const Gui::DropdownList kDiffuseClassification = {{0 , "RoughnessThreshold"},{1 , "BSDFLobes"}};
+
 }; // namespace
 
 extern "C" FALCOR_API_EXPORT void registerPlugin(Falcor::PluginRegistry& registry)
@@ -194,8 +196,16 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
         changed |= group.checkbox("Use Lambertian Diffuse BSDF", mOptions.useLambertianDiffuseBSDF);
         group.tooltip("BSDF used by ReSTIR PT and Suffix ReSTIR prototype");
 
-        group.text("Diffuse Classification Roughness Threshold:");
-        group.tooltip("Surfaces with roughness above this threshold are considered diffuse");
+        group.text("Diffuse Surface Classification:");
+        group.tooltip("Determines the diffuse surface classification: \n"
+        "RoughnessThreshold: All surfaces higher than the threshold are considered diffuse \n"
+        "BSDFLobes: Uses BSDF lobes to determine if a path/surface is diffuse");
+        group.indent(10.f);
+        changed |= group.dropdown("##DiffuseClassification", kDiffuseClassification, mOptions.diffuseClassificationBSDFLobes);
+        group.indent(-10.f);
+
+        group.text("Roughness Threshold:");
+        group.tooltip("Used to determine if a reconnection can be performed. Additionally if the classification is choosen, it is also used to determine if a surface is diffuse");
         group.indent(10.f);
         changed |= group.var("##RoughnessThreshold", mOptions.specularRoughnessThreshold, 0.f, 1.f, 0.001f);
         group.indent(-10.f);
@@ -1252,6 +1262,7 @@ DefineList ReSTIR_FG_Plus::getMaterialDefines()
     defines.add("ROUGHNESS_THRESHOLD", std::to_string(mOptions.specularRoughnessThreshold));
     defines.add("ENABLE_ALPHA_TEST" , mOptions.enableAlphaTest ? "1" : "0");
     defines.add("EVAL_DELTA_PDFS", mOptions.evaluateDeltaPDFs ? "1" : "0");
+    defines.add("DIFF_CLASS_USE_LOBES", std::to_string(mOptions.diffuseClassificationBSDFLobes));
     return defines;
 }
 

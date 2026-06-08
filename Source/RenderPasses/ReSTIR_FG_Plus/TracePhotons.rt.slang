@@ -38,6 +38,7 @@ static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kUseEmissive = USE_EMISSIVE_LIGHTS;
 static const bool kUseAnalytic = USE_ANALYTIC_LIGHTS;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
+static const bool kDiffClassUseLobes = DIFF_CLASS_USE_LOBES;
 
 struct RayPayload
 {
@@ -239,7 +240,6 @@ void rayGen()
 
     //Loop Variables
     bool storeAsCaustic = false;
-    bool reflectedDiffuse = false;
     PackedPathLength pathLengthInfo = PackedPathLength();
     PhotonData photon = PhotonData();
     photon.flux = pls.flux;
@@ -265,9 +265,14 @@ void rayGen()
 
         // Store Photon
         photon.normalW = sd.getOrientedFaceNormal();
-        reflectedDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        float3 tmpPhotonFlux = photon.flux; //Rejection probability can cahnge the flux, therefore we temporally store the flux here 
-        if (reflectedDiffuse) {
+        bool storePhotons = false;
+        if (kDiffClassUseLobes)
+            storePhotons = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0; //If surface has diffuse lobes
+        else
+            storePhotons = bsdfProperties.roughness > kRoughnessThreshold; //Use roughness
+
+        float3 tmpPhotonFlux = photon.flux; // Rejection probability can cahnge the flux, therefore we temporally store the flux here
+        if (storePhotons) {
             PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
             bool storePhoton = true;
             if (photonType == PhotonType::Global) {
@@ -317,7 +322,10 @@ void rayGen()
         photon.flux *= bsdfSample.weight;
 
         // Update Photon
-        storeAsCaustic = !reflectedDiffuse;
+        if (kDiffClassUseLobes)
+            storeAsCaustic = bsdfSample.isLobe(LobeType::Specular) || bsdfSample.isLobe(LobeType::Delta);
+        else
+            storeAsCaustic = !storePhotons; //Surfaces below threshold are specular
         photon.dir = -ray.Direction;
         photon.pathLenght++;
     }

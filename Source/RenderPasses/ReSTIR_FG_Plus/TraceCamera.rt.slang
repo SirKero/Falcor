@@ -29,6 +29,7 @@ RWStructuredBuffer<PathReservoir> gPathReservoir;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
+static const bool kDiffClassUseLobes = DIFF_CLASS_USE_LOBES;
 
 cbuffer CB
 {
@@ -68,14 +69,14 @@ struct RayPayload
 
 //PathFlags
 enum PathFlags : uint {
-    firstHitIsDelta = 0x100,          // 1<<8
-    firstHitIsDiffuse = 0x200,        // 1<<9
-    specularPath = 0x400,             // 1<<10
-    lastHitDiffuse = 0x800,           // 1<<11
-    lastHitNee = 0x1000,              // 1<<12
-    unused0 = 0x2000,                 // 1<<13
-    unused1 = 0x4000,                 // 1<<14
-    unused2 = 0x8000,                 // 1<<15
+    deltaPath = 0x100,                  // 1<<8
+    lastHitReconnectionSurface = 0x200, // 1<<9
+    specularPath = 0x400,               // 1<<10
+    lastHitDiffuse = 0x800,             // 1<<11
+    lastHitNee = 0x1000,                // 1<<12
+    unused0 = 0x2000,                   // 1<<13
+    unused1 = 0x4000,                   // 1<<14
+    unused2 = 0x8000,                   // 1<<15
 }
 
 //Struct with all needed path data
@@ -97,6 +98,8 @@ struct PathData {
         scatterPDF = 0;
         F = float3(0);
         flags = 0;
+        deltaPath = true;
+        specularPath = true;
         prevPosW = float3(0);
         prevFaceN = float3(0);
     }
@@ -109,19 +112,19 @@ struct PathData {
         }
     }
 
-    property bool firstHitIsDelta {
-        get { return (flags & (uint)PathFlags::firstHitIsDelta) > 0; }
+    property bool deltaPath {
+        get { return (flags & (uint)PathFlags::deltaPath) > 0; }
         set {
-            flags &= ~(uint)PathFlags::firstHitIsDelta; // Clear bit
-            flags |= (newValue ? (uint)PathFlags::firstHitIsDelta : 0);
+            flags &= ~(uint)PathFlags::deltaPath; // Clear bit
+            flags |= (newValue ? (uint)PathFlags::deltaPath : 0);
         }
     }
 
-    property bool firstHitIsDiffuse {
-        get { return (flags & (uint)PathFlags::firstHitIsDiffuse) > 0; }
+    property bool lastHitReconnectionSurface {
+        get { return (flags & (uint)PathFlags::lastHitReconnectionSurface) > 0; }
         set {
-            flags &= ~(uint)PathFlags::firstHitIsDiffuse; // Clear bit
-            flags |= (newValue ? (uint)PathFlags::firstHitIsDiffuse : 0);
+            flags &= ~(uint)PathFlags::lastHitReconnectionSurface; // Clear bit
+            flags |= (newValue ? (uint)PathFlags::lastHitReconnectionSurface : 0);
         }
     }
 
@@ -156,13 +159,21 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout PathData pd,
     BSDFSample bsdfSample;
     bool validSample = mi.sample(sd, pd.dirSG, bsdfSample, true /*ImportanceSampling*/);
     if (validSample) {
-        bool transmission = bsdfSample.isLobe(LobeType::Transmission);
-        bool disableDeltaPdf = bsdfSample.isLobe(LobeType::Delta) && !kEvalDeltaPdfs; // If true uses 1 for pdf
+        const bool deltaLobe = bsdfSample.isLobe(LobeType::Delta);
+        const bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+        const bool disableDeltaPdf = deltaLobe && !kEvalDeltaPdfs; // If true uses 1 for pdf
+
+        //Update Ray
         ray.Origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
         ray.Direction = bsdfSample.wo;
 
+        //Update Path Data
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
+        pd.deltaPath &= deltaLobe;
+        //If lobes are used, update specular here
+        if (kDiffClassUseLobes)
+            pd.specularPath &= bsdfSample.isLobe(LobeType::Specular) || deltaLobe;
     }
   
     return validSample;
@@ -189,6 +200,9 @@ bool addSampleToReservoir(inout PathReservoir reservoir, float rand, float3 radi
 
 void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir)
 {
+    // If first reflection was delta, it is a delta path
+    const bool firstHitIsDelta = pd.deltaPath;
+    //Ray Tracing Loop
     RayPayload rayPayload = RayPayload();
     for (pd.pathLength = 1; pd.pathLength <= gMaxPathLength; pd.pathLength = pd.pathLength + 1)
     {
@@ -199,7 +213,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
         // Scene miss (evaluate enviroment map). Path Lengh == 1 is covered by ReSTIR DI except the primary hit is delta
         if (!hit.isValid())
         {
-            if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.firstHitIsDelta))
+            if ((pd.pathLength > 1) || (pd.pathLength == 1 && pd.deltaPath))
             {
                 float misWeight = 1;
                 // If last hit could have generated a Enviroment sample, calculate MIS weight
@@ -214,8 +228,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                 {
                     pathReservoir.jacobian = pd.scatterPDF;
                     uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEnvMapHit;
-                    flags |= pd.firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
-                    // flags |= isFirstCollectionSurface ? (uint)ReservoirPathFlags::hasTwoCollectionPoints : 0;
+                    flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                     pathReservoir.flags.setReservoirPathFlags(flags);
                 }
             }
@@ -228,15 +241,22 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
         float rayDist = distance(ray.Origin, sd.posW);
-        bool jacobianDistanceThreshold = rayDist > gJacobianDistanceThreshold;
-        bool hitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold && jacobianDistanceThreshold;
         bool hitIsEmissive = any(bsdfProperties.emission > 0);
         float jacobian = pd.scatterPDF * abs(dot(ray.Direction, sd.faceN)) / (rayDist * rayDist); // Jacobian for this iteration
+        //Diffuse Surface and Reconnection Surface
+        bool jacobianDistanceThreshold = rayDist > gJacobianDistanceThreshold;
+        bool roughnessThreshold = bsdfProperties.roughness > kRoughnessThreshold;
+        bool hitIsDiffuse;
+        if (kDiffClassUseLobes)
+            hitIsDiffuse = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0;
+        else
+            hitIsDiffuse = roughnessThreshold;
+        bool hitIsReconnectionSurface = hitIsDiffuse && jacobianDistanceThreshold && roughnessThreshold;
 
-        // Handle Emissive Hit. The sample is evaluated if the whole path is below the reconnection
-        // threshold or if NEE was used in the last iteration.
+        // Handle Emissive Hit. The sample is evaluated if the whole path has diffuse surfaces to
+        // collect photons or if NEE was used in the last iteration.
         // Path length == 1 is covered by RTXDI, except when the first hit was delta
-        if (pd.pathLength > 1 && pd.specularPath || (pd.pathLength == 1 && pd.firstHitIsDelta) || pd.lastHitNee)
+        if (pd.pathLength > 1 && pd.specularPath || (pd.pathLength == 1 && pd.deltaPath) || pd.lastHitNee)
         {
             float misWeight = 1.0;
             float neeEmissiveProbability = gNeeSelectProbabilites[kNeeLightTypeEmissive];
@@ -256,7 +276,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
             {
                 pathReservoir.jacobian = jacobian;
                 uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isEmissiveHit;
-                flags |= pd.firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                 pathReservoir.flags.setReservoirPathFlags(flags);
                 pathReservoir.pathLength = pd.pathLength;
             }
@@ -270,10 +290,15 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
         pd.lastHitNee = false; //Reset flag
         if (hitIsDiffuse)
         {
-            const bool isFinalGather = pd.lastHitDiffuse; // If the last two hits are diffuse, the hit is a final gather surface
+            //If the surface is a reconnection candidate
+            const bool isReconnectionSurface = pd.lastHitReconnectionSurface && hitIsReconnectionSurface;
+            // Use final gather, if this is the secound diffuse surface that is enounted on the path
+            // Can be classified as "Radiance Estimate" if it is no reconnection surface
+            const bool isFinalGather = !pd.specularPath || isReconnectionSurface;
+
+            //Collect Photons
             PhotonSample photonSample;
             photonRIS(sd, mi, bsdfProperties.guideNormal, !isFinalGather, pd.sg, photonSample);
-
             if (addSampleToReservoir(pathReservoir, sampleNext1D(pd.sg), photonSample.F, pd.thp))
             {
                 pathReservoir.pathLength = isFinalGather ? pd.pathLength - 1 : pd.pathLength;
@@ -284,7 +309,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     flags |= (uint)ReservoirPathFlags::isCaustic;
                 //TODO Handle photon retracing
 
-                if (isFinalGather)
+                if (isReconnectionSurface) //Final Gather with Reconnection
                 {
                     flags |= (uint)ReservoirPathFlags::isFinalGather;
                     pathReservoir.samplePosW = sd.posW;
@@ -296,7 +321,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     pathReservoir.sampleNormal = photonSample.normal;
                     pathReservoir.sampleRadius = photonSample.radius;
                 }
-                flags |= pd.firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                 pathReservoir.flags.setReservoirPathFlags(flags);
             }
 
@@ -315,7 +340,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     pathReservoir.samplePosW = ls.position;
                     pathReservoir.sampleNormal = ls.faceN;
                     uint flags = (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isNEE;
-                    flags |= pd.firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
+                    flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;
                     pathReservoir.flags.setReservoirPathFlags(flags);
                 }
                 pd.lastHitNee = true;
@@ -328,7 +353,9 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
 
         //Update flags
         pd.lastHitDiffuse = hitIsDiffuse;
-        pd.specularPath = pd.specularPath & !hitIsDiffuse;
+        pd.lastHitReconnectionSurface = hitIsReconnectionSurface;
+        if(!kDiffClassUseLobes) //For threshold, lobes are evaluated in sampleNewDirection
+            pd.specularPath &= !hitIsDiffuse;
         pd.prevPosW = sd.posW;
         pd.prevFaceN = sd.faceN;
 
@@ -460,14 +487,19 @@ void generateCameraRay()
         float distanceToSurface = distance(sd.posW, gScene.camera.getPosition());
         gRTXDI.setSurfaceData(pixel, sd.computeNewRayOrigin(), bsdfProperties.guideNormal, bsdfProperties.diffuseReflectionAlbedo, bsdfProperties.specularReflectance, bsdfProperties.roughness, distanceToSurface);
 
-        // Set Flags and data
-        pd.firstHitIsDelta = bsdfProperties.roughness <= 0.08;
-        pd.firstHitIsDiffuse = bsdfProperties.roughness > kRoughnessThreshold;
-        pd.lastHitDiffuse = pd.firstHitIsDiffuse;
-        pd.specularPath = !pd.firstHitIsDiffuse;
-        pd.lastHitNee = false;
-        pathReservoir.flags.firstHitIsDelta = pd.firstHitIsDelta;
-
+        // Set diffuse surface (and specular if roughness threshold classification is used)
+        bool roughnessThreshold = bsdfProperties.roughness > kRoughnessThreshold;
+        if (kDiffClassUseLobes)
+        {
+            pd.lastHitDiffuse = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0;
+            pd.lastHitReconnectionSurface = pd.lastHitDiffuse && roughnessThreshold;
+        } else
+        {
+            pd.lastHitDiffuse = roughnessThreshold;
+            pd.lastHitReconnectionSurface = roughnessThreshold;
+            pd.specularPath &= !roughnessThreshold;
+        }
+        
         pd.prevPosW = sd.posW;
         pd.prevFaceN = sd.faceN;
 

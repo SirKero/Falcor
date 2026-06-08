@@ -85,7 +85,8 @@ private:
         // Material Options
         //
 
-        bool useLambertianDiffuseBSDF = false;           // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
+        bool useLambertianDiffuseBSDF = false;          // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
+        uint diffuseClassificationBSDFLobes = 0;        // If == 1 uses BSDF lobes to determine if a surface is diffuse
         float specularRoughnessThreshold = 0.25f;       // Any material below this is considered specular
         bool evaluateDeltaPDFs = false;                 // If set on true, delta pdfs are evaluated (always 0), else they are set to 1
         bool enableAlphaTest = true;                    // Alpha Test

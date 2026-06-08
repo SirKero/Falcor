@@ -43,7 +43,7 @@ enum ReservoirPathFlags : uint {
     isEnvMapHit = 0x1000,                  // 1<<12
     isRadianceEstimate = 0x2000,           // 1<<13
     isCaustic = 0x4000,                    // 1<<14
-    isNEE = 0x8000,       // 1<<15
+    isNEE = 0x8000,                        // 1<<15
 }
 
 struct ReservoirFlags {
