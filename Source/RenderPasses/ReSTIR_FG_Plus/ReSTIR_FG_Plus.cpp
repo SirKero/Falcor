@@ -163,7 +163,7 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
         {
             group2.checkbox("Enable Resampling", mOptions.enablePathResampling);
             group2.var("Confidence Cap", mOptions.pathConfidenceCap);
-            group2.var("Spatial Samples", mOptions.pathSpatialResamplingRadius);
+            group2.var("Spatial Samples", mOptions.pathNumberSpatialSamples);
             group2.var("Spatial Sample Radius", mOptions.pathSpatialResamplingRadius);
         }
 
@@ -313,8 +313,12 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
 
     //Resampling with Path Reservoirs
     const uint resampleIterations = 1 + mOptions.pathNumberSpatialSamples;
-    for(uint i=0; i<resampleIterations && mOptions.enablePathResampling; i++)
+    for(uint i=0; i<resampleIterations && mOptions.enablePathResampling && mCanResample; i++)
     {
+        //Ping-Pong swap for spatial resampling. Not used for first iteration (temporal)
+        if(i != 0)
+            mReservoirIndex++;
+        
         //Shift and resample path reservoirs
         shiftCameraPathPass(pRenderContext, renderData, i);
         resampleReservoirsPass(pRenderContext, renderData, i);
@@ -1147,12 +1151,13 @@ void ReSTIR_FG_Plus::shiftCameraPathPass(RenderContext* pRenderContext, const Re
             mpEnvMapSampler->setShaderData(var["Light"]["gEnvMapSampler"]);
 
         //Input Resources
-        ref<Texture> vbufferTex = i==0 ? mpVBufferPrev : renderData[kInputVBuffer]->asTexture();
-         ref<Texture> viewTex = i==0 ? mpViewPrev : renderData[kInputView]->asTexture();
+        ref<Texture> vbufferTex = i==0 && numPass == 0 ? mpVBufferPrev : renderData[kInputVBuffer]->asTexture();
+        ref<Texture> viewTex = i==0 && numPass == 0 ? mpViewPrev : renderData[kInputView]->asTexture();
+        uint reservoirIndex = numPass == 0 ? (mReservoirIndex + i) % 2 : (mReservoirIndex + 1) % 2;
         var["gVBuffer"] = vbufferTex;
         var["gView"] = viewTex;
         var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
-        var["gPathReservoir"] = mpPathReservoir[(mReservoirIndex + i) % 2];
+        var["gPathReservoir"] = mpPathReservoir[reservoirIndex];
 
         //Output Resources
         var["gShiftData"] = mpReservoirShiftData[i];

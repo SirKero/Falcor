@@ -80,7 +80,7 @@ private:
         //
 
         bool enablePathResampling = true;                  // Is enabled
-        uint pathNumberSpatialSamples = 0;                 // Number of spatial samples
+        uint pathNumberSpatialSamples = 1;                 // Number of spatial samples
         float pathSpatialResamplingRadius = 20.f;          // Spatial resampling radius
         uint pathConfidenceCap = 20;                       // Confidence cap for path reservoirs
 
