@@ -33,7 +33,6 @@ Texture2D<float4> gShiftDataOther;
 
 //Outputs
 RWStructuredBuffer<PathReservoir> gPathReservoir;
-RWTexture2D<float4> gDebug;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -130,7 +129,6 @@ bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, PathR
         }
         else // Reconnection for path lenght == 0
         {
-            return false;
             // Get Material Instance for current surface
             let lod = ExplicitLodTextureSampler(0.f);
             let mi = gScene.materials.getMaterialInstance(sdCurr, lod, kMIHints);

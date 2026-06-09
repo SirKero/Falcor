@@ -369,7 +369,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                                 pd.jacobian *= abs(dot(ls.faceN, ls.dir)) / (ls.distance * ls.distance);
                             }
                             // MIS
-                            float misWeight = 0;
+                            float misWeight = 1;
                             if (ls.type != kNeeLightTypeAnalytic) {
                                 float scatterPdf = mi.evalPdf(sd, ls.dir);
                                 misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
@@ -391,7 +391,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     }
                     break;
                 }
-            #else //IS_SHIFT
+            #else //IS_SHIFT, Collect photons and do NEE
                 //Collect Photons
                 PhotonSample photonSample;
                 photonRIS(sd, mi, bsdfProperties.guideNormal, !isFinalGather, pd.sg, photonSample);

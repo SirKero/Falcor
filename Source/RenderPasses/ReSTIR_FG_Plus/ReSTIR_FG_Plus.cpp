@@ -1219,7 +1219,6 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
 
     // In-/Output Resources
     var["gPathReservoir"] = mpPathReservoir[mReservoirIndex % 2];
-    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();
