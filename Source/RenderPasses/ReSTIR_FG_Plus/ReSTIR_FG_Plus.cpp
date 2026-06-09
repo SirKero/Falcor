@@ -152,13 +152,22 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
         }
     }
 
-    if (auto group = widget.group("ReSTIR FG"))
+    if (auto group = widget.group("ReSTIR-FG+"))
     {
         group.var("Max Path Length", mOptions.cameraMaxPathLength, 1u, 64u, 1u);
         group.tooltip(
             "Maximum Path length for a initial path sample. A path sample stops, when it encounters a diffuse surface"
         );
 
+        if (auto group2 = group.group("Path Resampling Options"))
+        {
+            group2.checkbox("Enable Resampling", mOptions.enablePathResampling);
+            group2.var("Confidence Cap", mOptions.pathConfidenceCap);
+            group2.var("Spatial Samples", mOptions.pathSpatialResamplingRadius);
+            group2.var("Spatial Sample Radius", mOptions.pathSpatialResamplingRadius);
+        }
+
+        //TODO remove
         auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget) {
             widget.checkbox("Enable Resampling", settings.enable);
             widget.var("Confidence Cap", settings.confidenceCap, 1u, UINT_MAX, 1u);
@@ -169,10 +178,7 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
             widget.var("Spatial Sample Radius", settings.samplingRadius, 0.f, FLT_MAX, 1.f);
         };
 
-        if (auto group2 = group.group("Resampling FG options"))
-        {
-            resampleUI(mResampleSettingsPath, group2);
-        }
+        
         if (auto group2 = group.group("Resampling Caustic options"))
         {
             resampleUI(mResampleSettingsCaustic, group2);
@@ -182,11 +188,12 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
 
         group.separator();
         group.text("Surface Rejection Options:");
-        group.var("Normal Rejection Threshold", mNormalThreshold, 0.f, 1.0f, 0.001f);
+        group.var("Normal Rejection Threshold", mOptions.normalAngleThreshold, 0.f, 1.0f, 0.001f);
         group.tooltip("Threshold of dot product between both reservoir face normals");
-        group.var("Sample Distance Threshold", mJacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
-        group.checkbox("Use Path Threshold", mUsePathThreshold);
-        group.tooltip("Only resamples if the surfaces used for generating the Final Gather samples have the same path length. Always enabled for caustic collection");
+        group.var("Sample Distance Threshold", mOptions.jacobianDistanceThreshold, 0.f, FLT_MAX, 0.001f);
+        group.tooltip("Minimal distance a sample needs to travel to allow reconnection.");
+        group.var("Relative depth threshold", mOptions.relativeDepthThreshold, 0.f, 10.0f, 0.001f);
+        group.tooltip("Only resamples if relative depth is similar. E.g. 0.15 -> relative depth should be a maximum of 15% different");
 
         mClearReservoir = group.button("Clear Reservoirs");
     }
@@ -304,10 +311,13 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
+    //Resampling with Path Reservoirs
     const uint resampleIterations = 1 + mOptions.pathNumberSpatialSamples;
-    for(uint i=0; i<resampleIterations; i++)
+    for(uint i=0; i<resampleIterations && mOptions.enablePathResampling; i++)
     {
+        //Shift and resample path reservoirs
         shiftCameraPathPass(pRenderContext, renderData, i);
+        resampleReservoirsPass(pRenderContext, renderData, i);
     }
 
     //Reservoir Splatting
@@ -503,6 +513,13 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPathReservoir[i]->setName("PathReservoir_" + std::to_string(i));
+        }
+        if(!mpReservoirShiftData[i] || mResetScreenTex)
+        {
+            mpReservoirShiftData[i] = Texture::create2D(
+                mpDevice, mScreenRes.x, mScreenRes.y, ResourceFormat::RGBA32Float, 1u, 1u, nullptr,
+                ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+            mpReservoirShiftData[i]->setName("ReservoirShiftData" + std::to_string(i));
         }
         if (!mpReservoirRetrace[i] || mResetScreenTex)
         {
@@ -1138,8 +1155,7 @@ void ReSTIR_FG_Plus::shiftCameraPathPass(RenderContext* pRenderContext, const Re
         var["gPathReservoir"] = mpPathReservoir[(mReservoirIndex + i) % 2];
 
         //Output Resources
-        var["gShiftData"] = mpReservoirRetrace[i];
-        var["gDebug"] = renderData[kOutputDebug]->asTexture();
+        var["gShiftData"] = mpReservoirShiftData[i];
 
         //Dispatch Shader
         mpScene->raytrace(pRenderContext, pass.pProgram.get(), pass.pVars, uint3(mScreenRes, 1));
@@ -1148,7 +1164,16 @@ void ReSTIR_FG_Plus::shiftCameraPathPass(RenderContext* pRenderContext, const Re
 
 void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)
 {
-    FALCOR_PROFILE(pRenderContext, "Resampling Path Reservoirs");
+    FALCOR_PROFILE(pRenderContext, "ResamplePathReservoirs");
+
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add(getMaterialDefines());
+        defines.add("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        return defines;
+    };
+
     //Initialize compute pass
     if (!mpResampleReservoirPass)
     {
@@ -1160,23 +1185,14 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
-        defines.add(getMaterialDefines());
-        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add(getRuntimeDefines());
 
         mpResampleReservoirPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirPass);
-    mpResampleReservoirPass->getProgram()->addDefines(getMaterialDefines()); // Runtime define
-    mpResampleReservoirPass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses)); // Runtime define
+    mpResampleReservoirPass->getProgram()->addDefines(getRuntimeDefines()); // Runtime defines
 
-    //Return early if there is no previous reservoir or resampling is disabled
-    if ((!mCanResample) || !mResampleSettingsPath.enable)
-    {
-        return;
-    }
-
-    // Set variables
+    // Set shader variables
     auto var = mpResampleReservoirPass->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
     mpSampleGenerator->setShaderData(var);                 // Sample generator
@@ -1184,13 +1200,11 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
-    var["CB"]["gConfidenceLimit"] = mResampleSettingsPath.confidenceCap;
-    var["CB"]["gSpatialRadius"] = mResampleSettingsPath.samplingRadius;
-    var["CB"]["gSpatialSamples"] = mResampleSettingsPath.spatialSamples;
-    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsPath.disocclusionBoostExtraSamples;
-    var["CB"]["gNormalThreshold"] = mNormalThreshold;
-    var["CB"]["gJacobianDistanceThreshold"] = mJacobianDistanceThreshold;
-    var["CB"]["gUsePathThreshold"] = mUsePathThreshold;
+    var["CB"]["gConfidenceCap"] = mOptions.pathConfidenceCap;
+    var["CB"]["gSpatialRadius"] = mOptions.pathSpatialResamplingRadius;
+    var["CB"]["gNormalThreshold"] = mOptions.normalAngleThreshold;
+    var["CB"]["gJacobianDistanceThreshold"] = mOptions.jacobianDistanceThreshold;
+    var["CB"]["gRelativeDepthThreshold"] = mOptions.relativeDepthThreshold;
     var["CB"]["gNumResamplingPass"] = numPass;
 
     // Input Resources
@@ -1199,12 +1213,13 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
     var["gView"] = renderData[kInputView]->asTexture();
     var["gViewPrev"] = mpViewPrev;
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
-    var["gPathReservoirPrev"] = mpPathReservoir[(mFrameCount + 1) % 2];
-    var["gRetracedPath"] = mpReservoirRetrace[0];
-    var["gRetracedPathPrev"] = mpReservoirRetrace[1];
+    var["gPathReservoirOther"] = mpPathReservoir[(mReservoirIndex + 1) % 2];
+    var["gShiftData"] = mpReservoirShiftData[0];
+    var["gShiftDataOther"] = mpReservoirShiftData[1];
 
     // In-/Output Resources
-    var["gPathReservoir"] = mpPathReservoir[mFrameCount % 2];
+    var["gPathReservoir"] = mpPathReservoir[mReservoirIndex % 2];
+    var["gDebug"] = renderData[kOutputDebug]->asTexture();
 
     // Execute Compute Pass
     const uint2 targetDim = renderData.getDefaultTextureDims();

@@ -9,219 +9,175 @@ import StructsAndHelpers;
 
 cbuffer CB
 {
-    uint gFrameCount; // Current it for sample gen
-    uint2 gFrameDim;  // Frame Dimensions
-    uint gConfidenceLimit;  //Confidence Limit
+    uint gFrameCount;                   // Current iteration for sample gen
+    uint2 gFrameDim;                    // Frame Dimensions
+    uint gConfidenceCap;                //Confidence Cap
 
-    uint gSpatialSamples;                   //Number of spatial samples
-    uint gDisocclusionBoostSpatialSamples;  //How many extra spatial samples if temporal resampling fails
-    float gSpatialRadius;   //radius for spatial resampling
-    float gNormalThreshold; // Normal Threshold
+    float gSpatialRadius;               // Radius for spatial resampling
+    float gNormalThreshold;             // Normal angle threshold
+    float gJacobianDistanceThreshold;   // Jacobian distance threshold
+    float gRelativeDepthThreshold;      // Relative depth treshold
 
-    float gJacobianDistanceThreshold; // Jacobian distance threshold
-    bool gUsePathThreshold;           // Enables and disables path threshold
-    uint gNumResamplingPass;
-    uint _pad;
+    uint gNumResamplingPass;            // Resampling iteration. == 0 -> Temporal, else Spatial
 }
 
+//Inputs
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<PackedHitInfo> gVBufferPrev;
 Texture2D<float4> gView;
 Texture2D<float4> gViewPrev;
 Texture2D<float2> gMVec;
-StructuredBuffer<PathReservoir> gPathReservoirPrev;
-StructuredBuffer<RetracedPath> gRetracedPath;
-StructuredBuffer<RetracedPath> gRetracedPathPrev;
+StructuredBuffer<PathReservoir> gPathReservoirOther;
+Texture2D<float4> gShiftData;
+Texture2D<float4> gShiftDataOther;
 
+//Outputs
 RWStructuredBuffer<PathReservoir> gPathReservoir;
-
 RWTexture2D<float4> gDebug;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
-/* Evaluate MIS weight
-   \param[in] n0 Number of samples taken from the first sampling strategy.
-    \param[in] p0 Pdf for the first sampling strategy.
-    \param[in] n1 Number of samples taken from the second sampling strategy.
-    \param[in] p1 Pdf for the second sampling strategy.
-    \return Weight for the contribution from the first strategy (p0).
-*/
-float evalMIS(float n0, float p0, float n1, float p1)
-{
-    // Currently only balance heuristic
-    float q0 = n0 * p0;
-    float q1 = n1 * p1;
-    float sum = (q0 + q1);
-    if (sum > 0)
-        return q0 / (q0 + q1);
-    else
-        return 0;
-}
+bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, PathReservoir rOther, int2 pixel, ShadingData sdCurr, ShadingData sdOther, inout SampleGenerator sg) {
 
-bool resampleReservoir(inout PathReservoir reservoir, PathReservoir rCurr, int2 pixel, int2 reservoirPixel, HitInfo firstHit, inout SampleGenerator sg) {
+    // For spatial resampling, check if surfaces are similar
+    const bool isSpatialResampling = gNumResamplingPass > 0;
+    if (isSpatialResampling) {
+        const float3 cameraPos = gScene.camera.getPosition();
+        float currentDepth = distance(cameraPos, sdCurr.posW);
+        float temporalDepth = distance(cameraPos, sdOther.posW);
+        bool normalThreshold = abs(dot(sdCurr.getOrientedFaceNormal(), sdOther.getOrientedFaceNormal())) < gNormalThreshold;
+        bool depthThreshold = abs(currentDepth - temporalDepth) > gRelativeDepthThreshold * currentDepth;
 
-    // Check if reservoir is inside the screen.
-    if (any(reservoirPixel < 0) || any(reservoirPixel >= gFrameDim))
-        return false;
+        if (normalThreshold || depthThreshold)
+            return false;
+    }
 
-    HitInfo prevHit = HitInfo(gVBufferPrev[reservoirPixel]);
-
-    if (!prevHit.isValid())
-        return false;
-
-    // Check if primary surfaces are similar (only for spatial resampling)
-    let lod = ExplicitLodTextureSampler(0);
-    ShadingData sdCurrent = loadShadingData(firstHit, gView[pixel].xyz, lod);
-    ShadingData sdPrev = loadShadingData(prevHit, gViewPrev[reservoirPixel].xyz, lod);
-
-    // Needed reservoir variables
+    // Init needed reservoir variables
     float w_0 = 0;
     float w_1 = 0;
     float wSum = 0;
-    const uint retracedPathIndex = index2Dto1D(pixel, gFrameDim.x);
 
-    // Load reservoir
-    PathReservoir rPrev = gPathReservoirPrev[index2Dto1D(reservoirPixel, gFrameDim.x)];
-
+    // Get w for current reservoir. This involves calculating the correct MIS weight with the shifted reservoir sample.
     bool reservoirContributes = rCurr.isValid();
-    RetracedPath retracedPath = RetracedPath();
-    bool retracedPathValid = true; // If the path is not valid, the path was not possible and MIS weight is 1
-    if (reservoirContributes && rCurr.pathLength > 0) {
-        retracedPath = gRetracedPath[retracedPathIndex];
-        retracedPathValid &= retracedPath.flags > 0; //A valid path has flags set
-    }
-
     if (reservoirContributes)
     {
         //Calc MIS weight
         float mis = 1;
-        if (rCurr.flags.hasNoReconnectionSurface) {
-            float3 retracedF = retracedPath.F * (retracedPath.jacobian / rCurr.jacobian);
-            mis = evalMIS(rCurr.c, luminance(rCurr.F), rPrev.c, luminance(retracedF));
-            
-        }else
-        {
-            float3 thpOther = float3(1);
-
-            // Load other reconnection surface if path length > 0
-            if (rCurr.pathLength > 0 && retracedPathValid) {
-                sdPrev = loadShadingData(HitInfo(retracedPath.rcSurface), retracedPath.rcViewDir, lod);
-                thpOther = retracedPath.rcThp;
-            }
-
-            if (retracedPathValid) {
-                float p0 = luminance(rCurr.F);
-
-                let miPrev = gScene.materials.getMaterialInstance(sdPrev, lod, kMIHints);
-                float p1 = 0;
-                float3 toSample = rCurr.samplePosW - sdPrev.posW;
-                float distToSample = length(toSample);
-                toSample /= distToSample;
-                // Jacobian to Sample
-                float pdf = miPrev.evalPdf(sdPrev, toSample);
-                float jacobianNew = abs(dot(rCurr.sampleNormal, -toSample)) / (distToSample * distToSample);
-                jacobianNew *= pdf;
-                float jacobian = jacobianNew / rCurr.jacobian;
-                float3 pathRadiance = float3(0);
-
-                if (jacobian > 0 && (distToSample > gJacobianDistanceThreshold)) {
-                    if (dispatchShadowRay(sdPrev, toSample, distToSample)) {
-                        float3 bsdf = miPrev.eval(sdPrev, toSample, sg) / pdf;
-                        pathRadiance += bsdf * jacobian * rCurr.fgRadiance * thpOther;
-                    }
-                }
-                p1 = luminance(pathRadiance);
-
-                mis = evalMIS(rCurr.c, p0, rPrev.c, p1);
+        // For path >0, shift is already calculated
+        if (rCurr.pathLength > 0) {
+            float4 shiftData = gShiftData[pixel]; // xyz = F, w = jacobian
+            if (shiftData.w > 0) {
+                float3 shiftedF = shiftData.xyz * (shiftData.w / rCurr.jacobian);
+                mis = evalMIS(rCurr.c, luminance(rCurr.F), rOther.c, luminance(shiftedF));
             }
         }
+        else //Reconnection for path lenght == 0
+        {
+            //Get Material Instance for the surface of the other reservoir
+            let lod = ExplicitLodTextureSampler(0.f);
+            let mi = gScene.materials.getMaterialInstance(sdOther, lod, kMIHints);
 
+            // Calculate new jacobian
+            float3 toSample = rCurr.samplePosW - sdOther.posW;
+            float distToSample = length(toSample);
+            toSample /= distToSample;
+            float pdf = mi.evalPdf(sdOther, toSample);
+            float jacobianNew = abs(dot(rCurr.sampleNormal, -toSample)) / (distToSample * distToSample);
+            jacobianNew *= pdf;
+
+            float jacobian = jacobianNew / rCurr.jacobian;
+            float3 F = float3(0);
+
+            //BSDF and Visibility test
+            if (jacobian > 0 && (distToSample > gJacobianDistanceThreshold)) {
+                if (dispatchShadowRay(sdOther, toSample, distToSample)) {
+                    float3 bsdf = mi.eval(sdOther, toSample, sg) / pdf;
+                    F += bsdf * jacobian * rCurr.fgRadiance;
+                }
+            }
+
+            //Calc MIS weight
+            mis = evalMIS(rCurr.c, luminance(rCurr.F), rOther.c, luminance(F));
+        }
+
+        //New w_0
         w_0 = mis * luminance(rCurr.F) * rCurr.weight;
         wSum += w_0;
     }
 
-    if (reservoirContributes && (w_0 > 0) && !isinf(w_0) && !isnan(w_0))
+    if (w_0 > 0)
         reservoir = rCurr;
-    
-    // Temporal Reservoir
-    float3 Fprev = float3(0);
-    float jacobianPrev = 1;
-    bool prevCanBeSelected = rPrev.isValid();
-    prevCanBeSelected &= !isnan(rPrev.weight) && !isinf(rPrev.weight);
-    // Load retraced surface for temporal reservoir
-    retracedPath = RetracedPath();
-    retracedPathValid = true; // If the surface is not valid MIS is skipped
-    if (prevCanBeSelected && rPrev.pathLength > 0) {
-        retracedPath = gRetracedPathPrev[retracedPathIndex];
-        retracedPathValid &= retracedPath.flags > 0; // A valid path has flags set
-    }
 
-    if (prevCanBeSelected)
+    //Calculate w for the resampled reservoir. Requires shifting the reservoir to current sample space
+    float3 Fother = float3(0);
+    float jacobianOther = 1;
+    bool otherCanBeSelected = rOther.isValid();
+    otherCanBeSelected &= !isnan(rOther.weight) && !isinf(rOther.weight);
+    if (otherCanBeSelected)
     {
-        float jacobianDeterminant = 1.0;
-        if (rPrev.flags.hasNoReconnectionSurface) {
-            if (retracedPathValid) {
-                jacobianPrev = retracedPath.jacobian;
-                jacobianDeterminant = (jacobianPrev / rPrev.jacobian);
-                Fprev = retracedPath.F;
-            }
-        } else
-        {
-            float3 thpPrev = float3(1);
-            // Load retraced surface
-            if (rPrev.pathLength > 0 && retracedPathValid) {
-                sdCurrent = loadShadingData(HitInfo(retracedPath.rcSurface), retracedPath.rcViewDir, lod);
-                thpPrev = retracedPath.rcThp;
-            }
+        float jacobian = 0.0;
+        // For path >0, shift is already calculated
+        if (rOther.pathLength > 0) {
+            float4 shiftData = gShiftDataOther[pixel]; // xyz = F, w = jacobian
 
-            // Reconnect
-            if (retracedPathValid) {
-                let miPrev = gScene.materials.getMaterialInstance(sdCurrent, lod, kMIHints);
-                float3 toSample = rPrev.samplePosW - sdCurrent.posW;
-                float distToSample = length(toSample);
-                toSample /= distToSample;
-                // Jacobian from reconnect surface to other sample
-                float pdf = miPrev.evalPdf(sdCurrent, toSample);
-                jacobianPrev = abs(dot(rPrev.sampleNormal, -toSample)) / (distToSample * distToSample);
-                jacobianPrev *= pdf;
-                jacobianDeterminant = jacobianPrev / rPrev.jacobian;
-
-                gDebug[pixel] = float4(jacobianPrev, rPrev.jacobian, jacobianDeterminant , 1);
-  
-                float3 bsdf = float3(0);
-                if (jacobianDeterminant > 0 && (distToSample > gJacobianDistanceThreshold)) {
-                    if (dispatchShadowRay(sdCurrent, toSample, distToSample)) {
-                        bsdf = miPrev.eval(sdCurrent, toSample, sg) / pdf;
-                    }
-                    Fprev = rPrev.fgRadiance * bsdf * thpPrev;
-                }
-
+            if (shiftData.w > 0)
+            {
+                jacobianOther = shiftData.w;
+                jacobian = jacobianOther / rOther.jacobian;
+                Fother = shiftData.xyz;
             }
         }
+        else // Reconnection for path lenght == 0
+        {
+            return false;
+            // Get Material Instance for current surface
+            let lod = ExplicitLodTextureSampler(0.f);
+            let mi = gScene.materials.getMaterialInstance(sdCurr, lod, kMIHints);
 
-        float estFprev = luminance(Fprev) * jacobianDeterminant;
-        float mis = evalMIS(rPrev.c, luminance(rPrev.F), rCurr.c, estFprev);
-        w_1 = mis * estFprev * rPrev.weight;
-        
+            // Calculate new jacobian
+            float3 toSample = rOther.samplePosW - sdCurr.posW;
+            float distToSample = length(toSample);
+            toSample /= distToSample;
+            float pdf = mi.evalPdf(sdCurr, toSample);
+            jacobianOther = abs(dot(rOther.sampleNormal, -toSample)) / (distToSample * distToSample);
+            jacobianOther *= pdf;
+            jacobian = jacobianOther / rOther.jacobian;
+
+            // BSDF and Visibility test
+            if (jacobian > 0 && (distToSample > gJacobianDistanceThreshold)) {
+                if (dispatchShadowRay(sdCurr, toSample, distToSample)) {
+                    float3 bsdf = mi.eval(sdCurr, toSample, sg) / pdf;
+                    Fother = rOther.fgRadiance * bsdf;
+                }
+            }            
+        }
+        float estFprev = luminance(Fother) * jacobian;
+        float mis = evalMIS(rOther.c, luminance(rOther.F), rCurr.c, estFprev);
+        w_1 = mis * estFprev * rOther.weight;
+
         wSum += w_1;
     }
 
-    uint cSum = min(rCurr.c + rPrev.c, gConfidenceLimit);
-
-    bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && prevCanBeSelected;
-    if (selectOtherSample) {
-        reservoir = rPrev;
-        reservoir.jacobian = jacobianPrev;
-        reservoir.F = Fprev;
-    }
+    uint cSum = min(rCurr.c + rOther.c, gConfidenceCap);
     
+    //Randomly select new reservoir depending on relative weight
+    bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && otherCanBeSelected;
+    if (selectOtherSample) {
+        reservoir = rOther;
+        reservoir.jacobian = jacobianOther;
+        reservoir.F = Fother;
+    }
+
+
+    //Update c and weight
     reservoir.weight = wSum;
     reservoir.c = cSum;
 
-    float sampleRad = luminance(reservoir.F);
-    if (reservoir.weight > 0 && sampleRad > 0)
-        reservoir.weight /= sampleRad;
+    //Finalize Reservoir
+    float sampleRadiance = luminance(reservoir.F);
+    if (reservoir.weight > 0 && sampleRadiance > 0)
+        reservoir.weight /= sampleRadiance;
     else
         reservoir.weight = 0;
 
@@ -234,33 +190,84 @@ void main(uint2 pixel: SV_DispatchThreadID)
     if (any(pixel >= gFrameDim))
         return;
 
+    //Get current pixels hit and initialize reservoir
     HitInfo hit = HitInfo(gVBuffer[pixel]);
     PathReservoir reservoir = PathReservoir();
 
+    //If hit is valid, perform resampling
     if (hit.isValid()) {
         let lod = ExplicitLodTextureSampler(0.f);
-        SampleGenerator sgPixelOffset = SampleGenerator( pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3)); // Sample generator for the pixel offset (search region) same as RetraceReservoirs
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 2); // Sample generator for bsdf evaluation
 
-        PathReservoir rCurr = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
+        // Sample generator for the pixel offset (search region). Is the same as for the shift in the other shader (TraceCamera.slang)
+        SampleGenerator sgPixelOffset = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3));
+        // Sample generator for bsdf evaluation
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 2);
 
+        //Determine pixel for other reservoir       
         bool isSpatial = gNumResamplingPass > 0;
-        float2 motionOffset = gMVec[pixel] * float2(gFrameDim);
-        float2 prevPixelF = motionOffset + float2(pixel) + 0.5;
-        float2 u = sampleNext2D(sgPixelOffset);
-        if (isSpatial) {
-            float2 spatialOffset = gSpatialRadius * sample_disk_concentric(u);
-            prevPixelF += spatialOffset;
-        } else // Temporal; Add subpixel offset
+        float2 otherPixelF = float2(pixel) + 0.5;
+        //Add motion vectors for temporal resampling
+        if (!isSpatial)
         {
-            prevPixelF += u - 0.5; // [-0.5, 0.5]
+            float2 motionOffset = gMVec[pixel] * float2(gFrameDim);
+            otherPixelF += motionOffset;
+        }
+        float2 u = sampleNext2D(sgPixelOffset);
+        if (isSpatial) // Spatial, sample in disc around current pixel
+        {
+            float2 spatialOffset = gSpatialRadius * sample_disk_concentric(u);
+            otherPixelF += spatialOffset;
+        } else // Temporal, add subpixel offset
+        {
+            otherPixelF += u - 0.5; // [-0.5, 0.5]
+        }
+        int2 otherPixel = int2(otherPixelF);
+
+        //Check if reservoir is in screen
+        bool resamplingValid = any(otherPixel >= 0) || any(otherPixel < gFrameDim);
+        //Load Shading Data of other reservoir
+        ShadingData sdOther;
+        if (resamplingValid) {
+            HitInfo hitOther;
+            float3 viewOther;
+            if (isSpatial)
+            {
+                hitOther = HitInfo(gVBuffer[otherPixel]);
+                viewOther = gView[otherPixel].xyz;
+            }
+            else
+            {
+                hitOther = HitInfo(gVBufferPrev[otherPixel]);
+                viewOther = gViewPrev[otherPixel].xyz;
+            }
+
+            if (hitOther.isValid())
+                sdOther = loadShadingData(hitOther, viewOther, lod);
+            else
+                resamplingValid = false;
         }
 
-        int2 prevPixel = int2(prevPixelF);
+        // Load current reservoir and begin resampling
+        PathReservoir rCurr;
+        if (isSpatial)
+            rCurr = gPathReservoirOther[index2Dto1D(pixel, gFrameDim.x)];
+        else
+            rCurr = gPathReservoir[index2Dto1D(pixel, gFrameDim.x)];
 
-        if (!resampleReservoir(reservoir, rCurr, pixel, prevPixel, hit, sg))
+        //Load other reservoir and current shading data and begin resampling
+        if (resamplingValid)
+        {
+            ShadingData sdCurr = loadShadingData(hit, gView[pixel].xyz, lod);
+
+            PathReservoir rOther = gPathReservoirOther[index2Dto1D(otherPixel, gFrameDim.x)];
+            resamplingValid = resampleReservoir(reservoir, rCurr, rOther, pixel, sdCurr, sdOther, sg);
+        }
+
+        //If resampling was not valid, use the current reservoir
+        if (!resamplingValid)
             reservoir = rCurr;
     }
 
+    //Store reservoir
     gPathReservoir[index2Dto1D(pixel, gFrameDim.x)] = reservoir;   
 }

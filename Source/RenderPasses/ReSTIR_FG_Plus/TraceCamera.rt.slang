@@ -24,7 +24,6 @@ Texture2D<float4> gView;
 Texture2D<float2> gMVec;
 RWTexture2D<float4> gShiftData;
 StructuredBuffer<PathReservoir> gPathReservoir;
-RWTexture2D<float4> gDebug;
 #else
 RWStructuredBuffer<PathReservoir> gPathReservoir;
 #endif
@@ -593,8 +592,6 @@ void shiftCameraReservoir()
         pixel = reservoirPixel;
 
     gShiftData[pixel] = shiftData;
-    if(kShiftIsCurrent)
-        gDebug[pixel] = float4(shiftData.xyz,1);
 }
 #else // IS_SHIFT
 

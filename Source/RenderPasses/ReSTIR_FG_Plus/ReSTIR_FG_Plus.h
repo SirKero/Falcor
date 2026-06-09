@@ -79,9 +79,14 @@ private:
         // Resample Settings
         //
 
+        bool enablePathResampling = true;                  // Is enabled
         uint pathNumberSpatialSamples = 0;                 // Number of spatial samples
         float pathSpatialResamplingRadius = 20.f;          // Spatial resampling radius
+        uint pathConfidenceCap = 20;                       // Confidence cap for path reservoirs
+
         float jacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
+        float normalAngleThreshold = 0.6f;                 // Cosine of maximum angle between both normals allowed
+        float relativeDepthThreshold = 0.15f;              // (TODO)Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
 
         //
         // Material Options
@@ -180,10 +185,6 @@ private:
     bool mRebuildReservoirBuffer = false;               // Rebuild the reservoir buffer
     bool mClearReservoir = true;                        // Clears both reservoirs
     bool mCanResample = false;                          // Resampling is only allowed if last iterations reservoir was created
-
-
-    float mRelativeDepthThreshold = 0.15f;              // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
-    float mNormalThreshold = 0.6f;                      // Cosine of maximum angle between both normals allowed
     
     bool mUsePathThreshold = false;                     // Enable resampling only if path length are the same
     bool mUsePhotonsForDirectLightInReflections = true; // Uses photons for direct light in reflections, else the final gather sample is used
@@ -192,6 +193,8 @@ private:
     //TODO Remove
     uint mFGRayMaxPathLength = 10;                      // Max path length for the final gather ray
     float mJacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
+    float mRelativeDepthThreshold = 0.15f;              // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
+    float mNormalThreshold = 0.6f;                      // Cosine of maximum angle between both normals allowed
 
 
     //Splatting
@@ -220,7 +223,8 @@ private:
     ref<Buffer> mpPhotonCounterCPU;         // CPU copy of counter for readback
     ref<Buffer> mpCausticReservoir[2];      // Reservoir for the Caustic sample
     ref<Buffer> mpPathReservoir[2];         // Reservoir storing the path in primary path space
-    ref<Buffer> mpReservoirRetrace[2];      // Buffer storing the retrace reservoir data
+    ref<Buffer> mpReservoirRetrace[2];      // Buffer storing the retrace reservoir data (TODO Remove)
+    ref<Texture> mpReservoirShiftData[2];   // Shift data for path reservoir (path throughput and jacobian)
 
     ref<Texture> mpLightTraceHeadCounter;   //Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;     //Linked List for light tracing
