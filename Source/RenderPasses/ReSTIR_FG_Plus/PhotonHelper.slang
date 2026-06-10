@@ -79,7 +79,7 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyC
 
         float NdotL = dot(photonData.dir, N);
         // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
+        if ((dot(photonData.faceN, sd.faceN) < 0.6) || (NdotL <= 0))
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);
@@ -90,7 +90,7 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyC
         if (selected) {
             photonSample.posW = photonPosW;
             photonSample.radius = radius;
-            photonSample.normal = photonData.normalW;
+            photonSample.normal = photonData.faceN;
             photonSample.F = F;
             photonSample.approxF = approxF;
             photonSample.photonType = instanceIdx;
@@ -141,7 +141,7 @@ float3 collectPhotons(ShadingData sd, IMaterialInstance mi, float3 N, uint insta
 
         float NdotL = dot(photonData.dir, N);
         // Check for diffent surfaces (e.g. corners)
-        if ((dot(photonData.normalW, sd.faceN) < 0.6) || (NdotL <= 0))
+        if ((dot(photonData.faceN, sd.faceN) < 0.6) || (NdotL <= 0))
             continue;
 
         float3 bsdf = mi.eval(sd, photonData.dir, sg);

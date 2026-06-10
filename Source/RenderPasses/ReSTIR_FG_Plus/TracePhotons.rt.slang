@@ -244,7 +244,10 @@ void rayGen()
     PhotonData photon = PhotonData();
     photon.flux = pls.flux;
     photon.dir = -ray.Direction;
-    photon.normalW = pls.normal;
+    photon.faceN = pls.normal;
+    //Store sample generator data
+    photon.sgStartPixel = pixel;
+    photon.sgSeed = gFrameCount * kRNGNumPasses;
     
     // Main Loop
     for (uint i = 0; i < gPackedPathLength.pathLength; i++) {
@@ -264,7 +267,7 @@ void rayGen()
         let bsdfProperties = mi.getProperties(sd);
 
         // Store Photon
-        photon.normalW = sd.getOrientedFaceNormal();
+        photon.faceN = sd.getOrientedFaceNormal();
         bool storePhotons = false;
         if (kDiffClassUseLobes)
             storePhotons = (mi.getLobeTypes(sd) & (uint)LobeType::Diffuse) > 0; //If surface has diffuse lobes

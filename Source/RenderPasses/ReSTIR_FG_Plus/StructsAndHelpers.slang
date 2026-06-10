@@ -11,23 +11,9 @@ static const float kShadowRayEpsilon = 0.98;
 static const uint kSplattingGlobalCounterElement = 0; //Index for the platting global counter, that counts the total number of elements
 static const uint kSplattingGlobalCounterPrefixSum = 1; //Index for the platting global counter, used for the prefix sum to determine the offsets
 
-struct PhotonData {
-    float3 flux;
-    uint pathLenght;
-    float3 dir;
-    uint _pad2;
-    float3 normalW;
-    uint _pad3;
-
-    __init() {
-        this.dir = float3(0);
-        this.normalW = float3(0,1,0);
-        this.flux = float3(0);
-        this.pathLenght = 0;
-        this._pad2 = 0;
-        this._pad3 = 0;
-    }
-}
+//
+//Enums
+//
 
 enum class PhotonType // : uint32_t
 {
@@ -44,6 +30,38 @@ enum ReservoirPathFlags : uint {
     isRadianceEstimate = 0x2000,           // 1<<13
     isCaustic = 0x4000,                    // 1<<14
     isNEE = 0x8000,                        // 1<<15
+}
+
+//
+// Structs
+//
+
+//Photon representation
+struct PhotonData {
+    float3 flux;                // Energy of the photon
+    uint pathLenght;            // Length of the photon path
+    float3 dir;                 // Incoming direction
+    uint packedSGStartPixel;    // Packed pixel used to initialize the sample generator (for photon shift)
+    float3 faceN;               // World face normal of the hit surface
+    uint sgSeed;                // Seed used to initialize the sample generator (for photon shift)
+
+    __init() {
+        this.dir = float3(0);
+        this.faceN = float3(0, 1, 0);
+        this.flux = float3(0);
+        this.pathLenght = 0;
+        this.packedSGStartPixel = 0;
+        this.sgSeed = 0;
+    }
+
+    // Helper to get the start pixel for recreating the sample generator (for photon shift)
+    property uint2 sgStartPixel
+    {
+        get { return uint2(packedSGStartPixel & 0xFFFF, (packedSGStartPixel >> 16) & 0xFFFF);}
+        set {
+            packedSGStartPixel = (newValue.x & 0xFFFF) | ((newValue.y & 0xFFFF) << 16);
+        }
+    }
 }
 
 struct ReservoirFlags {
@@ -244,7 +262,7 @@ struct FGSampleData {
 
 //Reservoir for a Final Gather Sample 112B
 struct ReservoirFG {
-    PackedHitInfo sampleSurface; // HitSample 16B
+    PackedHitInfo sampleSurface;    // HitSample 16B
     float3 thp;                     // Throughput used at the end
     float targetFunction;           // Store target function
     FGSampleData sampleData;        // Data of the sample
