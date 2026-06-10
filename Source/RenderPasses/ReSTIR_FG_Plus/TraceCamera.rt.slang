@@ -329,6 +329,9 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
             // Can be classified as "Radiance Estimate" if it is no reconnection surface
             const bool isFinalGather = !pd.specularPath || isReconnectionSurface;
 
+            if (isFinalGather && !isReconnectionSurface)
+                sd.mtl.setActiveLobes((uint)LobeType::Diffuse);
+
             // Either check if reservoir sample is valid, or perform radiance estimate and NEE (on the first diffuse hit)
             #if IS_SHIFT
                 if (pd.pathLength == pathReservoir.pathLength)

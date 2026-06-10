@@ -23,13 +23,17 @@ cbuffer CB
     float gNormalizedPixelDiagonal;         //Approximated pixel diagonal at distance 1
 }
 
-RWStructuredBuffer<AABB> gPhotonAABB[2];       //(Global/Caustic) AABBs for the Acceleration Structure
-RWStructuredBuffer<PhotonData> gPhotonData[2]; //(Global/Caustic) Photon Data
-RWStructuredBuffer<PackedHitInfo> gPhotonHitInfo;   //Caustic Photon Hit Info for backprojection
-RWStructuredBuffer<uint> gPhotonCounter;            //Counter
+#if IS_SHIFT
+    RWStructuredBuffer<PathReservoir> gPathReservoir;
+#else
+    RWStructuredBuffer<AABB> gPhotonAABB[2];       //(Global/Caustic) AABBs for the Acceleration Structure
+    RWStructuredBuffer<PhotonData> gPhotonData[2]; //(Global/Caustic) Photon Data
+    RWStructuredBuffer<PackedHitInfo> gPhotonHitInfo;   //Caustic Photon Hit Info for backprojection
+    RWStructuredBuffer<uint> gPhotonCounter;            //Counter
 
-RWTexture2D<int> gLightTraceHeadCounter;        //Head index for the linked list
-RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
+    RWTexture2D<int> gLightTraceHeadCounter;        //Head index for the linked list
+    RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
+#endif
 
 static const bool kAlphaTest = ENABLE_ALPHA_TEST;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
@@ -274,7 +278,7 @@ void rayGen()
         else
             storePhotons = bsdfProperties.roughness > kRoughnessThreshold; //Use roughness
 
-        float3 tmpPhotonFlux = photon.flux; // Rejection probability can cahnge the flux, therefore we temporally store the flux here
+        float3 tmpPhotonFlux = photon.flux; // Rejection probability can change the flux, therefore we temporally store the flux here
         if (storePhotons) {
             PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
             bool storePhoton = true;
