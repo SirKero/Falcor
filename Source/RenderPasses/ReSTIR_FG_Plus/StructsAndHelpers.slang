@@ -38,29 +38,46 @@ enum ReservoirPathFlags : uint {
 
 //Photon representation
 struct PhotonData {
-    float3 flux;                // Energy of the photon
-    uint pathLenght;            // Length of the photon path
-    float3 dir;                 // Incoming direction
-    uint packedSGStartPixel;    // Packed pixel used to initialize the sample generator (for photon shift)
-    float3 faceN;               // World face normal of the hit surface
-    uint sgSeed;                // Seed used to initialize the sample generator (for photon shift)
+    float3 flux;                          // Energy of the photon
+    uint packedSGStartPixelAndPathLength; // Packed path lenght (upper 8 bits) and sample generator initial pixel (for photon shift)
+    float3 dir;                           // Incoming direction
+    uint sgSeed;                          // Seed used to initialize the sample generator (for photon shift)
+    float3 faceN;                         // World face normal of the hit surface
+    uint _pad;
 
     __init() {
         this.dir = float3(0);
         this.faceN = float3(0, 1, 0);
         this.flux = float3(0);
-        this.pathLenght = 0;
-        this.packedSGStartPixel = 0;
+        this.packedSGStartPixelAndPathLength = 0;
         this.sgSeed = 0;
+        this._pad = 0;
+    }
+
+    //Helper to get path length
+    property uint pathLenght
+    {
+        get { return (packedSGStartPixelAndPathLength >> 24) & 0xFF;}
+        set {
+            packedSGStartPixelAndPathLength &= 0xFFFFFF; // Clear upper 8 bits
+            packedSGStartPixelAndPathLength |= (newValue.x & 0xFF) << 24;
+        }
     }
 
     // Helper to get the start pixel for recreating the sample generator (for photon shift)
     property uint2 sgStartPixel
     {
-        get { return uint2(packedSGStartPixel & 0xFFFF, (packedSGStartPixel >> 16) & 0xFFFF);}
+        get { return uint2(packedSGStartPixelAndPathLength & 0xFFF, (packedSGStartPixelAndPathLength >> 12) & 0xFFF);}
         set {
-            packedSGStartPixel = (newValue.x & 0xFFFF) | ((newValue.y & 0xFFFF) << 16);
+            packedSGStartPixelAndPathLength &= 0xFF000000; //Clear lower 24 bits
+            packedSGStartPixelAndPathLength |= (newValue.x & 0xFFF) | ((newValue.y & 0xFFF) << 12);
         }
+    }
+
+    //Packs data for retracing photon paths
+    uint2 packPhotonRetraceData()
+    {
+        return uint2(packedSGStartPixelAndPathLength, sgSeed);
     }
 }
 
@@ -155,17 +172,20 @@ struct ReservoirFlags {
 struct PathReservoir {
     SampleGenerator sgPathDirections; // Sample Generator for random direction (float4)
 
-    uint4 sampleData;       // Sample date used for sample position,radius or RNG seed 
+    uint4 sampleData;           // Sample date used for sample position,radius or RNG seed in NEE
 
-    float jacobian;    //(stored) jacobian determinant at the first hit
+    float jacobian;            //(stored) jacobian determinant at the first hit
     ReservoirFlags flags;      // path length and flags
     float2 packedSampleNormal;
 
-    float3 F; // Complete radiance of the path
-    uint c;   // Confidence Weight
+    float3 F;                  // Complete radiance of the path
+    uint c;                    // Confidence Weight
 
-    float3 fgRadiance;      // Radiance estimate for the final gather point. Can be reused
-    float weight;           // Unbiased contribution weight  
+    float3 fgRadiance;         // Radiance estimate for the final gather point. Can be reused
+    float weight;              // Unbiased contribution weight
+
+    uint2 packedPhotonRetraceData;   // Packed sample generator and path length for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
+    uint2 packedGuidingData;   // Packed data needed for guiding. Unused if guiding is disabled 
 
     __init() {
         sgPathDirections = SampleGenerator(uint2(0), 0);
@@ -177,11 +197,11 @@ struct PathReservoir {
         c = 1;
         fgRadiance = float3(0);
         weight = 0.0;
+        packedPhotonRetraceData = uint2(0);
+        packedGuidingData = uint2(0);
     }
 
-    bool isValid() {
-        return weight > 0 && jacobian > 0 && any(F > 0);
-    }
+    //Packed properties helpers
 
     property uint pathLength {
         get { return flags.pathLength; }
@@ -203,9 +223,13 @@ struct PathReservoir {
         set { packedSampleNormal = ndir_to_oct_snorm(newValue);}
     }
 
+    //Functions
+    bool isValid() {
+        return weight > 0 && jacobian > 0 && any(F > 0);
+    }
 }
 
-//Infos on retraced path 64byte (16 floats)
+//Infos on retraced path 64byte (16 floats) TODO remove
 struct RetracedPath
 {
     float3 F;
@@ -231,7 +255,7 @@ struct RetracedPath
     }
 }
 
-//Data for the FG sample 64B
+//Data for the FG sample 64B TODO remove
 struct FGSampleData {
     float3 posW;        //Position
     float normalX;
@@ -260,7 +284,7 @@ struct FGSampleData {
     }
 }
 
-//Reservoir for a Final Gather Sample 112B
+//Reservoir for a Final Gather Sample 112B TODO remove
 struct ReservoirFG {
     PackedHitInfo sampleSurface;    // HitSample 16B
     float3 thp;                     // Throughput used at the end
@@ -386,6 +410,25 @@ struct PackedPathLength
         valid &= diffuseBounces < max.diffuseBounces;
         return valid;
     }
+}
+
+/** Creates a sample generator from packed photon sg data (see PhotonData struct)
+  * \param[in] Packed photon retrace data
+  * \return the sample generator that was used to create this photon path
+*/
+SampleGenerator createPhotonSGFromPacked(uint2 packedPhotonRetraceData)
+{
+    uint2 pixel = uint2(packedPhotonRetraceData.x & 0xFFF, (packedPhotonRetraceData.x >> 12) & 0xFFF); // See PhotonData->sgStartPixel
+    return SampleGenerator(pixel, packedPhotonRetraceData.y);
+}
+
+/** Extracts the path lenght from the packed retrace data
+ * \param[in] Packed photon retrace data
+ * \return photon path length
+ */
+uint getPhotonPathLengthFromPacked(uint2 packedPhotonRetraceData)
+{
+    return (packedPhotonRetraceData.x >> 24) & 0xFF;
 }
 
 //Load in shading data from hit and direction

@@ -3,6 +3,7 @@
 #include "Utils/Math/MathConstants.slangh"
 
 import Scene.Raytracing;
+import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Utils.Math.MathHelpers;
@@ -13,19 +14,23 @@ import NextEventEstimationHelper;
 //These resources are only needed for initial sample generation
 #if !IS_SHIFT
 import Rendering.RTXDI.RTXDI;
-import PhotonHelper;
 #endif
 
+//Shared I/O for generation and shift
 Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
-// Additional I/O for shift mapping
+//Pass specific I/O
 #if IS_SHIFT
-Texture2D<float2> gMVec;
-RWTexture2D<float4> gShiftData;
-StructuredBuffer<PathReservoir> gPathReservoir;
+    Texture2D<float2> gMVec;
+    RWTexture2D<float4> gShiftData;
+    StructuredBuffer<PathReservoir> gPathReservoir;
 #else
-RWStructuredBuffer<PathReservoir> gPathReservoir;
+    RWStructuredBuffer<PathReservoir> gPathReservoir;
+    //Photon Collection
+    StructuredBuffer<PhotonData> gPhotonData[2];
+    StructuredBuffer<AABB> gPhotonAABB[2];
+    RaytracingAccelerationStructure gPhotonAS;
 #endif
 
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
@@ -35,12 +40,14 @@ static const bool kDiffClassUseLobes = DIFF_CLASS_USE_LOBES;
 
 cbuffer CB
 {
-    uint gFrameCount;           // Frame count since scene was loaded.
+    uint gFrameCount;              // Frame count since scene was loaded.
+    float3 gNeeSelectProbabilites; //(Emissive/Analytic/EnvMap)Light selection probabilities for NEE samples.
+
     uint gMaxPathLength; // Max path length for a Final Gather sample
     float gJacobianDistanceThreshold; // Jacobian distance threshold. Connection can only be performed if distance is greater
-    float3 gNeeSelectProbabilites; //(Emissive/Analytic/EnvMap)Light selection probabilities for NEE samples.
 }
 
+//Additonal shift data
 #if IS_SHIFT
 cbuffer ShiftCB
 {
@@ -49,10 +56,18 @@ cbuffer ShiftCB
 }
 #endif
 
+//Shared defines
 static const bool kAlphaTest = ENABLE_ALPHA_TEST;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
 static const bool kUseEnvBackground = USE_ENV_BACKGROUND;
+
+// Photon Collection Defines
+static const float kPhotonCollectTMax = 1e-7;
+static const uint kPhotonInstanceMaskGlobal = 0x01;
+static const uint kPhotonInstanceMaskCaustic = 0x02;
+static const uint kPhotonInstanceMaskAll = 0xFF;
+static const uint kPhotonTypeIndexCaustic = 1;
 
 // Defines Shift
 static const bool kIsShift = IS_SHIFT;
@@ -165,7 +180,110 @@ struct PathData {
     }
 }
 
+//Photon collection specific functions. Only needed for sample generation
+#if !IS_SHIFT
 
+//Photon Sample 
+struct PhotonSample {
+    float3 posW;
+    float radius;
+    float3 F;
+    uint photonType;
+    uint2 packedPhotonRetraceData;    // Packed sample generator for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
+    uint2 packedGuidingData; // Packed data needed for guiding. Unused if guiding is disabled
+
+    __init() {
+        posW = float3(0);
+        radius = 0;
+        photonType = 0;
+        F = float3(0);
+        packedPhotonRetraceData = uint2(0);
+        packedGuidingData = uint2(0);
+    }
+}
+
+// Checks if the ray start point is inside the sphere.
+bool hitSphere(const float3 center, const float radius, const float3 p)
+{
+    float3 radiusTest = p - center;
+    return dot(radiusTest, radiusTest) < radius * radius;
+}
+
+void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyCaustics, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
+    photonSample = PhotonSample();
+    RayDesc ray;
+    ray.Origin = sd.posW;
+    ray.Direction = sd.faceN;
+    ray.TMin = 0;
+    ray.TMax = kPhotonCollectTMax;
+
+    uint instanceMask = collectOnlyCaustics ? kPhotonInstanceMaskCaustic : kPhotonInstanceMaskAll;
+
+    float weight = 0;
+    float choosenApproxF = 0;
+    RayQuery<RAY_FLAG_NONE> rayQuery;
+    rayQuery.TraceRayInline(gPhotonAS, RAY_FLAG_NONE, instanceMask, ray);
+    while (rayQuery.Proceed()) {
+
+        if (rayQuery.CandidateType() != CANDIDATE_PROCEDURAL_PRIMITIVE)
+            continue;
+        const uint instanceIdx = rayQuery.CandidateInstanceIndex();
+        const uint primIdx = rayQuery.CandidatePrimitiveIndex();
+
+        // Check if ray is inside photon radius
+        AABB photonAABB = gPhotonAABB[instanceIdx][primIdx];
+        float3 photonPosW = photonAABB.center();
+        float radius = (photonAABB.maxPoint.x - photonAABB.minPoint.x) / 2.0;
+        if (!hitSphere(photonPosW, radius, sd.posW))
+            continue;
+
+        PhotonData photonData = gPhotonData[instanceIdx][primIdx];
+
+        // If direct global photons should be collected and the photon is global, check the path length
+        if (collectOnlyDirectGlobal)
+        {
+            if (((PhotonType)instanceIdx == PhotonType::Global) && (photonData.pathLenght > 0))
+                continue;
+        }
+
+        float NdotL = dot(photonData.dir, N);
+        // Check for diffent surfaces (e.g. corners)
+        if ((dot(photonData.faceN, sd.faceN) < 0.6) || (NdotL <= 0))
+            continue;
+
+        float3 bsdf = mi.eval(sd, photonData.dir, sg);
+        float3 F = max(0, (photonData.flux * bsdf) / (M_PI * radius * radius * NdotL)); // NdotL needs to be taken out of the bsdf for Photon Mapping
+        float approxF = luminance(F);
+        weight += approxF;
+        bool selected = (sampleNext1D(sg) * weight) < approxF;
+        if (selected) {
+            choosenApproxF = approxF;
+            photonSample.posW = photonPosW;
+            photonSample.radius = radius;
+            photonSample.F = F;
+            photonSample.photonType = instanceIdx;
+            photonSample.packedPhotonRetraceData = photonData.packPhotonRetraceData();
+        }
+    }
+
+    // Finalize RIS
+    if (choosenApproxF > 0)
+    {
+        weight /= choosenApproxF;
+        photonSample.F *= weight;
+    }
+}
+
+#endif //!IS_SHIFT
+
+
+/* Samples new direction and sets flags
+   \param[in] Shading data of the current surface
+   \param[in] MaterialInstance of the current surface
+   \param[inout] PathData of the path
+   \param[inout] Ray for the new direction
+   \return true if sampling was succesfull
+*/
 bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout PathData pd, inout RayDesc ray) {
     // Photon Bounce for next iteration
     BSDFSample bsdfSample;
@@ -182,7 +300,7 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout PathData pd,
         //Update Path Data
         pd.thp *= bsdfSample.weight;
         pd.scatterPDF = disableDeltaPdf ? 1.0 : bsdfSample.pdf;
-        pd.deltaPath &= deltaLobe;
+        pd.deltaPath &= deltaLobe;  //Is relevant for RTXDI 
         //If lobes are used, update specular here
         if (kDiffClassUseLobes)
             pd.specularPath &= bsdfSample.isLobe(LobeType::Specular) || deltaLobe;
@@ -196,6 +314,7 @@ bool sampleNewDirection(ShadingData sd, IMaterialInstance mi, inout PathData pd,
     \param[in] rand Random number in [0,1).
     \param[in] rcThp Throughput after reconnection to light source.
     \param[in] thp Throughput until the reconnection surface.
+    \return true if sample was selected as new representative sample
 */
 bool addSampleToReservoir(inout PathReservoir reservoir, float rand, float3 radiance, float3 thp)
 {
@@ -406,7 +525,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     uint flags = 0;
                     if (photonSample.photonType == kPhotonTypeIndexCaustic)
                         flags |= (uint)ReservoirPathFlags::isCaustic;
-                    //TODO Handle photon retracing
+                    pathReservoir.packedPhotonRetraceData = photonSample.packedPhotonRetraceData;
 
                     if (isReconnectionSurface) //Final Gather with Reconnection
                     {
@@ -417,7 +536,6 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     {
                         flags |= (uint)ReservoirPathFlags::hasNoReconnectionSurface | (uint)ReservoirPathFlags::isRadianceEstimate;
                         pathReservoir.samplePosW = photonSample.posW;
-                        pathReservoir.sampleNormal = photonSample.normal;
                         pathReservoir.sampleRadius = photonSample.radius;
                     }
                     flags |= firstHitIsDelta ? 0 : (uint)ReservoirPathFlags::firstHitIsDelta;

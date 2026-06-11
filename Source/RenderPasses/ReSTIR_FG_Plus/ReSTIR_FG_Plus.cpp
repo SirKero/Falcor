@@ -318,6 +318,10 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
         //Ping-Pong swap for spatial resampling. Not used for first iteration (temporal)
         if(i != 0)
             mReservoirIndex++;
+
+        //Shift the photon passes from last frame
+        if(i == 0)
+            shiftPhotonPathPass(pRenderContext, renderData);
         
         //Shift and resample path reservoirs
         shiftCameraPathPass(pRenderContext, renderData, i);
@@ -513,7 +517,7 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         {
             mCanResample = false;
             mpPathReservoir[i] = Buffer::createStructured(
-                mpDevice, 96u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPathReservoir[i]->setName("PathReservoir_" + std::to_string(i));
@@ -704,6 +708,9 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
         }
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
+        defines.add("IS_SHIFT", "0");
+        defines.add("IS_SHIFT_PATH", "0");
+        defines.add("IS_SHIFT_CAUSTIC", "0");
         defines.add(getRuntimeDefines());
 
         mTracePhotonPass.pProgram = RtProgram::create(mpDevice, desc, defines);
@@ -720,11 +727,10 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
 
     //Shader dispatch dims (TODO optimize for non-guiding case, so that similar lights are traced in the same workgroup)
     uint dispatchedPhotons = mOptions.photonsDispatched;
-    uint shaderDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
-    shaderDispatchDim = std::max(32u, shaderDispatchDim);
+    mPhotonDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
+    mPhotonDispatchDim = std::max(32u, mPhotonDispatchDim);
 
     //Approximated pixel diagonal at length 1 for adaptive photon radius
-    float approxPixelDiagonal = 0.f;
     if (mOptions.photonUseAdaptiveRadius)
     {
         // Update Image plane distance
@@ -735,7 +741,7 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
         float wPix = w / mScreenRes.x;
         float hPix = h / mScreenRes.y;
 
-        approxPixelDiagonal = sqrt((wPix * wPix) + (hPix * hPix));
+        mApproximatePixelDiagonal = sqrt((wPix * wPix) + (hPix * hPix));
     }
 
     //Constant Buffer
@@ -743,10 +749,10 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     var["CB"]["gPhotonRadius"] = mOptions.photonUseAdaptiveRadius ? mOptions.photonAdaptiveRadius : mOptions.photonRadius;
     var["CB"]["gPackedPathLength"] = mOptions.photonPathLenght.pack();
     var["CB"]["gGlobalRejectionProb"] = mOptions.photonGlobalRejection;
-    var["CB"]["gDispatchDimension"] = shaderDispatchDim;
+    var["CB"]["gDispatchDimension"] = mPhotonDispatchDim;
     var["CB"]["gScreenDimensions"] = mScreenRes;
     var["CB"]["gMixedLightsAnalyticProbability"] = mOptions.photonMixedLightRatio;
-    var["CB"]["gNormalizedPixelDiagonal"] = approxPixelDiagonal;
+    var["CB"]["gNormalizedPixelDiagonal"] = mApproximatePixelDiagonal;
 
     //Output Buffers
     for (uint32_t i = 0; i < 2; i++)
@@ -762,7 +768,7 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     var["gPhotonHitInfo"] = mpPhotonHitInfo;
 
     //Dispatch raytracing shader
-    mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(shaderDispatchDim, shaderDispatchDim, 1));
+    mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(mPhotonDispatchDim, mPhotonDispatchDim, 1));
 
     pRenderContext->uavBarrier(mpLightTraceHeadCounter.get());
 
@@ -1076,6 +1082,80 @@ void ReSTIR_FG_Plus::sortSplattedReservoirsPass(RenderContext* pRenderContext, c
         FALCOR_ASSERT(targetDim > 0);
         mpSplatSortCellData->execute(pRenderContext, uint3(targetDim, 1, 1));
     }
+}
+
+void ReSTIR_FG_Plus::shiftPhotonPathPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "ShiftPhotonPath");
+
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mOptions.photonBufferSizeGlobal));
+        defines.add("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mOptions.photonBufferSizeCaustic));
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("USE_EMISSIVE_LIGHTS", mpScene->useEmissiveLights()? "1" : "0");
+        defines.add("USE_ANALYTIC_LIGHTS", mpScene->useAnalyticLights()? "1" : "0");
+        defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
+        defines.add(getMaterialDefines());
+
+        return defines;
+    };
+
+    // Init Shader
+    if (!mShiftPhotonPathPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderTracePhotons);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mShiftPhotonPathPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mShiftPhotonPathPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add("IS_SHIFT", "1");
+        defines.add("IS_SHIFT_PATH", "1");
+        defines.add("IS_SHIFT_CAUSTIC", "0");
+        defines.add(getRuntimeDefines());
+
+        mShiftPhotonPathPass.pProgram = RtProgram::create(mpDevice, desc, defines);
+    }
+    //Update Defines
+    mShiftPhotonPathPass.pProgram->addDefines(getRuntimeDefines());
+    
+    // Program Vars
+    if (!mShiftPhotonPathPass.pVars)
+        mShiftPhotonPathPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+    FALCOR_ASSERT(mShiftPhotonPathPass.pVars);
+    auto var = mShiftPhotonPathPass.pVars->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var);
+        
+    //Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gPhotonRadius"] = mOptions.photonUseAdaptiveRadius ? mOptions.photonAdaptiveRadius : mOptions.photonRadius;
+    var["CB"]["gPackedPathLength"] = mOptions.photonPathLenght.pack();
+    var["CB"]["gGlobalRejectionProb"] = mOptions.photonGlobalRejection;
+    var["CB"]["gDispatchDimension"] = mPhotonDispatchDim;
+    var["CB"]["gScreenDimensions"] = mScreenRes;
+    var["CB"]["gMixedLightsAnalyticProbability"] = mOptions.photonMixedLightRatio;
+    var["CB"]["gNormalizedPixelDiagonal"] = mApproximatePixelDiagonal;
+
+    //Output Buffers
+    var["gPathReservoir"] = mpPathReservoir[(mReservoirIndex + 1) % 2]; //Temporal Reservoir
+
+    //Dispatch raytracing shader
+    mpScene->raytrace(pRenderContext, mShiftPhotonPathPass.pProgram.get(), mShiftPhotonPathPass.pVars, uint3(mScreenRes.x, mScreenRes.y, 1));
 }
 
 void ReSTIR_FG_Plus::shiftCameraPathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass)

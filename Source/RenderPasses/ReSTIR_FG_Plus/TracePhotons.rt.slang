@@ -24,7 +24,11 @@ cbuffer CB
 }
 
 #if IS_SHIFT
-    RWStructuredBuffer<PathReservoir> gPathReservoir;
+    #if IS_SHIFT_PATH
+        RWStructuredBuffer<PathReservoir> gPathReservoir;
+    #elif IS_SHIFT_CAUSTIC
+        RWStructuredBuffer<CausticReservoir> gCausticReservoir;
+    #endif
 #else
     RWStructuredBuffer<AABB> gPhotonAABB[2];       //(Global/Caustic) AABBs for the Acceleration Structure
     RWStructuredBuffer<PhotonData> gPhotonData[2]; //(Global/Caustic) Photon Data
@@ -160,6 +164,7 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
     return true;
 }
 
+#if !IS_SHIFT
 //Backprojects the caustic photon and stores it in an linked list to collect all pixels caustic photons with RIS
 bool causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
 {
@@ -189,6 +194,7 @@ bool causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
     gLightTraceLinkedList[photonBufferIndex] = nodeNext;
     return true;
 }
+#endif //!IS_SHIFT
 
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
@@ -228,7 +234,24 @@ void rayGen()
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 dispatchDims = DispatchRaysDimensions().xy;
 
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
+    // Get the sample generator. For shift, the reservoir needs to be loaded
+    // For initial photon tracing, the sample generator is initialized normaly
+    SampleGenerator sg;
+    #if IS_SHIFT
+        #if IS_SHIFT_PATH
+            PathReservoir pathReservoir = gPathReservoir[index2Dto1D(pixel, dispatchDims.x)];
+            // Return early if reservoir is not valid or not a photon path
+            bool isValidPhotonPath = pathReservoir.isValid() && (pathReservoir.flags.isRadianceEstimate || pathReservoir.flags.isFinalGather);
+            if (!isValidPhotonPath)
+                return;
+            sg = createPhotonSGFromPacked(pathReservoir.packedPhotonRetraceData);
+        #elif IS_SHIFT_CAUSTIC
+            //TODO
+        #endif //IS_SHIFT_PATH/_CAUSTIC
+    #else //IS_SHIFT. Initial Photon Tracing
+        sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
+    #endif
+
     RayDesc ray;
     PhotonLightSample pls;
 
@@ -252,9 +275,17 @@ void rayGen()
     //Store sample generator data
     photon.sgStartPixel = pixel;
     photon.sgSeed = gFrameCount * kRNGNumPasses;
-    
+
+    uint maxPathLength = gPackedPathLength.pathLength; 
+    #if IS_SHIFT
+        bool shiftIsValid = false;
+        #if IS_SHIFT_PATH
+            maxPathLength = getPhotonPathLengthFromPacked(pathReservoir.packedPhotonRetraceData);
+        #endif //IS_SHIFT_PATH
+    #endif //IS_SHIFT
+
     // Main Loop
-    for (uint i = 0; i < gPackedPathLength.pathLength; i++) {
+    for (uint i = 0; i <= maxPathLength; i++) {
         //Trace Ray
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
 
@@ -278,6 +309,7 @@ void rayGen()
         else
             storePhotons = bsdfProperties.roughness > kRoughnessThreshold; //Use roughness
 
+        
         float3 tmpPhotonFlux = photon.flux; // Rejection probability can change the flux, therefore we temporally store the flux here
         if (storePhotons) {
             PhotonType photonType = storeAsCaustic ? PhotonType::Caustic : PhotonType::Global;
@@ -286,6 +318,8 @@ void rayGen()
                 storePhoton = sampleNext1D(sg) <= gGlobalRejectionProb;
                 photon.flux /= gGlobalRejectionProb;
             }
+            // Store photon and backproject in initial samples
+            #if !IS_SHIFT
             if (storePhoton) {
                 uint photonTypeIdx = (uint)photonType;
                 uint photonInsertIndex = 0;
@@ -302,6 +336,35 @@ void rayGen()
                     }
                 }
             }
+            #endif // !IS_SHIFT
+
+            //TODO update photon radiance
+            //Shift for path samples (Radiance Estimate)
+            #if IS_SHIFT && IS_SHIFT_PATH
+            if (i == maxPathLength)
+            {
+                //For final gather, it is check if the photon is still within the radius
+                if (pathReservoir.flags.isFinalGather)
+                {
+                    shiftIsValid = distance(pathReservoir.samplePosW, sd.posW) <= pathReservoir.sampleRadius;
+                }
+
+                if (pathReservoir.flags.isRadianceEstimate)
+                {
+                    shiftIsValid = true; // Photon is potentially rejected in path shift
+                    pathReservoir.samplePosW = sd.posW;
+                    pathReservoir.sampleRadius = getPhotonRadius((uint)photonType, sd.posW);
+                }
+                // Check if photon type differs
+                shiftIsValid &= pathReservoir.flags.isCaustic == storeAsCaustic;
+            }
+            break;
+            #endif // IS_SHIFT && IS_SHIFT_PATH
+
+            //Shift for caustic reservoirs (Backprojection)
+            #if IS_SHIFT && IS_SHIFT_CAUSTIC
+
+            #endif // IS_SHIFT && IS_SHIFT_PATH
         }
         // Restore flux
         photon.flux = tmpPhotonFlux;
@@ -320,7 +383,7 @@ void rayGen()
         validSample &= pathLengthInfo.comparePathLengts(gPackedPathLength);
 
         if (!validSample)
-            return;
+            break;
 
         //Prepare next ray and update photon
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
@@ -336,4 +399,13 @@ void rayGen()
         photon.dir = -ray.Direction;
         photon.pathLenght++;
     }
+
+    //Update path reservoir
+    #if IS_SHIFT && IS_SHIFT_PATH
+        //Set weight to zero if shift is invalid
+        if(!shiftIsValid)
+            pathReservoir.weight = 0;
+
+        gPathReservoir[index2Dto1D(pixel, dispatchDims.x)] = pathReservoir;
+    #endif
 }

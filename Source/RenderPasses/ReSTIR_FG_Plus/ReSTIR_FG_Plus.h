@@ -131,6 +131,9 @@ private:
     //Sort the splatted reservoirs so they can be used in the resampling pass
     void sortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
+    //Shifts the photon pass for path reservoirs
+    void shiftPhotonPathPass(RenderContext* pRenderContext, const RenderData& renderData);
+
     //Shifts the Camera path reservoirs with Path Length > 0 by performing a retrace
     void shiftCameraPathPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
@@ -178,6 +181,10 @@ private:
     LightBVHSampler::Options mLightBVHOptions;                                               //(Cached) Options for Light BVH Sampler
     bool mRebuildLightSampler = false;                                                       //If true, Emissive Sampler is rebuild
     float3 mNeeLightSelectProb = float3(0.33f);                                              //Probability to select a NEE/Analytic/EnvMapSample
+
+    //Trace Photon
+    uint mPhotonDispatchDim = 32;  //Dispatch Dims for photon.
+    float mApproximatePixelDiagonal = 1.f; //Approximated pixel diagonal used for adaptive radius. Updated every frame in tracePhoton
 
     //ReSTIR Reservoirs
     ResamplingSettings mResampleSettingsPath = {};
@@ -260,6 +267,8 @@ private:
     RayTraceProgramHelper mTracePhotonPass;             // Trace Photons and build AS
     RayTraceProgramHelper mTraceCameraPass;             // Trace Camera rays and collect photons
     RayTraceProgramHelper mShiftCameraPathPass[2];      // Retrace the path Reservoirs needed for GRIS
+    RayTraceProgramHelper mShiftPhotonPathPass;         // Retrace the photon path
+    RayTraceProgramHelper mShiftCausticPathPass;        // Retrace the caustic path
 
     ref<ComputePass> mpBackprojectCausticSamplesPass;   // Backproject the caustic samples
     ref<ComputePass> mpResampleReservoirPass;           // Resampling Pass for the Path Reservoirs
