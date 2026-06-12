@@ -10,7 +10,7 @@ Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
 StructuredBuffer<PathReservoir> gPathReservoir;
-StructuredBuffer<ReservoirCaustic> gCausticReservoir;
+StructuredBuffer<CausticReservoir> gCausticReservoir;
 
 RWTexture2D<PackedHitInfo> gVBufferPrev;
 RWTexture2D<float4> gViewPrev;
@@ -32,7 +32,7 @@ static const bool kDisableCaustics = DISABLE_CAUSTICS;
 
 float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     float3 outColor = float3(0);
-    ReservoirCaustic causticReservoir = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
+    CausticReservoir causticReservoir = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
     if (!causticReservoir.isValid())
         return outColor;
 

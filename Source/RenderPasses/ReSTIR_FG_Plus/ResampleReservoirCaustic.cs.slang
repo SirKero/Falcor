@@ -12,335 +12,160 @@ cbuffer CB
 {
     uint gFrameCount; // Current it for sample gen
     uint2 gFrameDim;  // Frame Dimensions
-    uint gConfidenceLimit;  //Confidence Limit
-
-    float2 gPhotonRadius;                  // Global / Caustic
-    uint gSpatialSamples;                  // Number of spatial samples
-    uint gDisocclusionBoostSpatialSamples; // How many extra spatial samples if temporal resampling fails
+    uint gConfidenceCap;  //Confidence Cap
 
     float4x4 gPrevCamViewProjection; //Previous Camera view projection for splatting
 
-    float3 gPrevCamPos;   // Previous camera position for splatting
-    float gSpatialRadius; // radius for spatial resampling
+    float3 gPrevCamPos; // Previous camera position for splatting
+    float gNormalizedPixelArea; //For Backprojection PDF
 
-    float3 gPrevCamForward; //Previous camera forward for splatting
-    float gNormalThreshold; // Normal Threshold
-
-    float gNormalizedPixelArea;
-    uint3 _pad;
+    float3 gPrevCamForward; // Previous camera forward for splatting
+    uint _pad;
 }
 
 Texture2D<float2> gMVec;
-StructuredBuffer<ReservoirCaustic> gCausticReservoirPrev;
 
-RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
+StructuredBuffer<CausticReservoir> gCausticReservoirPrev;
+StructuredBuffer<int> gLightTraceLinkedList; // next pointer
 
-// Splatting
-StructuredBuffer<uint> gCellCounters; // Number of reservoirs per pixel
-StructuredBuffer<uint> gCellOffsets;  // Initial offset for the sorted reservoir buffer
-StructuredBuffer<uint2> gSortedReservoirs;   // Buffer of splatted reservoirs
+RWStructuredBuffer<CausticReservoir> gCausticReservoir;
+RWTexture2D<int> gLightTraceHeadCounter; // Head index for the linked list
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-static const bool kEnableLightTrace = ENABLE_LIGHT_TRACE;
 
-inline float getPhotonRadius(ReservoirCaustic r) {
-    return r.pathLength == 0 ? gPhotonRadius.y : gPhotonRadius.x;
-}
-
-inline float evalMISBalanceHeuristic(float p0, float p1) {
-    float sum = (p0 + p1);
-    if (sum > 0)
-        return p0 / sum;
-    else
-        return 0;
-}
-
-// Generalized Balance Heuristic with two samples
-float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFProperties otherProps, uint otherC) {
-    float p0 = r.targetFunction * r.c;
-    float p1 = 0;
-    if (length(otherSD.posW - r.photonPosW) < getPhotonRadius(r))
-        p1 = evalApproximateBRDFPhoton(otherSD, otherProps, r.photonDir) * luminance(r.photonRadiance) * otherC;
-
-    return evalMISBalanceHeuristic(p0, p1);
-}
-
-//Resampling with 2 reservoirs. Finalizes the reservoir afterwards.
-bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData currentSD, BSDFProperties currentProps,
-                                ReservoirCaustic other, ShadingData otherSD, BSDFProperties otherProps, inout SampleGenerator sg)
-{
-    //Check if surfaces are similar and resampling can be performed
-    bool normalThreshold = dot(otherSD.faceN, currentSD.faceN) < gNormalThreshold;
-    bool pathThreshold = (other.pathLength != current.pathLength);
-    bool surfacesPosThreshold = length(currentSD.posW - otherSD.posW) >= (2 * getPhotonRadius(current));
-    if (normalThreshold || pathThreshold || surfacesPosThreshold)
-        return false;
-
-    //Needed reservoir variables
-    float w_0, w_1 = 0;
-    float wSum = 0;
-   
-    //Get ReSTIR weight of current reservoir
-    if (current.isValid()) {
-        float mis = generalizedBalanceHeuristic(current, otherSD, otherProps, other.c);
-        w_0 = mis * current.targetFunction * current.wSum;
-        wSum += w_0;
-    }
-
-    //Calculate ReSTIR weight for other reservoir sample
-    float targetFunctionOther = 0.0;
-    bool otherReservoirValid = other.isValid();
-    if (otherReservoirValid) {
-        // Check if sample is part of the domain
-        if (length(currentSD.posW - other.photonPosW) < getPhotonRadius(other)) {
-            float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c);
-            targetFunctionOther = evalApproximateBRDFPhoton(currentSD, currentProps, other.photonDir) * luminance(other.photonRadiance);
-            w_1 = mis * targetFunctionOther * other.wSum;
-        }
-        wSum += w_1;
-    }
-
-    //Check if other sample is selected and replace in reservoir if it was selected
-    bool selectOtherSample = (sampleNext1D(sg) * wSum) < w_1 && otherReservoirValid;
-    if (selectOtherSample) {
-        current.photonPosW = other.photonPosW;
-        current.photonDir = other.photonDir;
-        current.photonRadiance = other.photonRadiance;
-        current.targetFunction = targetFunctionOther;
-    }
-
-    //Increase confidence weights
-    current.c += other.c;
-    current.c = min(current.c, gConfidenceLimit);
-
-    //Finalize reservoir (wSum -> W)
-    if (current.targetFunction > 0)
-        current.wSum = wSum / current.targetFunction;
-    else
-        current.wSum = 0;
-
-    //If something went wrong, set reservoir to 0
-    if (isnan(current.wSum) || isinf(current.wSum))
-        current.wSum = 0;
-
-    return true;
-}
-
-bool resampleReservoir(inout ReservoirCaustic current, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg , int2 resamplePixel) {
-
-    //Check if reservoir is inside the screen. 
-    if (any(resamplePixel < 0) || any(resamplePixel >= gFrameDim))
-        return false;
-
-    //Fetch the (spatio)temporal reservoir
-    ReservoirCaustic temporal = gCausticReservoirPrev[index2Dto1D(resamplePixel, gFrameDim.x)];
-    HitInfo temporalHit = HitInfo(temporal.sampleSurface);
-    if (!temporalHit.isValid()) {
-        return false;
-    }
-
-    //Get shading datas
-    let lod = ExplicitLodTextureSampler(0.f);
-    ShadingData temporalSD = loadShadingData(temporalHit, temporal.sampleSurfaceView, lod);
-    let temporalMi = gScene.materials.getMaterialInstance(temporalSD, lod, kMIHints);
-    let temporalBsdfProperties = temporalMi.getProperties(temporalSD);
-
-    //Combine both reservoirs
-    bool valid = combineReservoirsCaustic(current, currentSD, currentBsdfProperties, temporal, temporalSD, temporalBsdfProperties, sg);
-
-    return valid;
-}
-
-void resampleReservoirReflectOrRefract(inout ReservoirCaustic current, uint2 pixel, ShadingData currentSD, BSDFProperties currentBsdfProperties, inout SampleGenerator sg)
-{
-    // Precalculate the targetFunction
-    current.targetFunction = evalApproximateBRDFPhoton(currentSD, currentBsdfProperties, current.photonDir) * luminance(current.photonRadiance);
-
-    //
-    // Temporal Resampling
-    //
-
-    // Reproject to the previous pixel using the motion vectors
-    float2 motionOffset = gMVec[pixel] * float2(gFrameDim);
-    float2 prevPixelF = motionOffset + float2(pixel) + float2(0.5);
-    float2 rndOffset = sampleNext2D(sg) - 0.5;
-    prevPixelF += rndOffset;
-    int2 prevPixel = int2(prevPixelF);
-
-    bool resamplingSuccesfull = resampleReservoir(current, currentSD, currentBsdfProperties, sg, prevPixel);
-
-    //
-    // Spatiotemporal Resampling
-    //
-    uint spatialSamples = resamplingSuccesfull ? gSpatialSamples : gSpatialSamples + gDisocclusionBoostSpatialSamples;
-    for (uint i = 0; i < spatialSamples; i++) {
-        // Sample in a disc radius around the reprojected sample
-        float2 spatialOffset = gSpatialRadius * sample_disk_concentric(sampleNext2D(sg));
-        float2 spatialPixelF = prevPixelF + spatialOffset;
-        int2 spatialPixel = int2(spatialPixelF);
-
-        resampleReservoir(current, currentSD, currentBsdfProperties, sg, spatialPixel);
-    }
-}
-
-float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, ReservoirCaustic r ,ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, out float jacobianWeight, out float targetFunction)
+float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, CausticReservoir r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, out float jacobianWeight, out float targetFunction)
 {
     jacobianWeight = getSubpixelLocationJacobian(distToCam, toCam, sd.faceN, camForward);
     float jacobianShifted = jacobianWeight / r.subPixelJacobian;
     const float3 bsdf = mi.eval(sd, toCam, sg);
-    targetFunction = luminance(r.photonRadiance * bsdf);;
+    targetFunction = luminance(r.photonRadiance * bsdf); ;
     float misP = targetFunction * jacobianShifted;
     misP = isnan(misP) ? 0.0f : misP;
     return misP;
 }
 
-void reservoirSplatting(inout ReservoirCaustic current, uint2 pixel, ShadingData currentSD, IMaterialInstance currentMi , BSDFProperties currentBsdfProperties, inout SampleGenerator sg)
+[numthreads(16, 16, 1)]
+void main(uint2 pixel: SV_DispatchThreadID)
 {
-    float currentMIS = 0.0;
-    ReservoirCaustic dstR = current;
-    // MIS for current reservoir
-    if (current.isValid())
+    //Sample Gen and LOD sampler
+    let lod = ExplicitLodTextureSampler(0.0);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 2));
+
+    CausticReservoir rCurr = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
+
+    float wSum = 0;
+    // Shift current to last frame using the previous camera
+    if (rCurr.isValid())
     {
-        float p1 = 0.0;
-        float p0 = current.targetFunction * current.c;
-        // Get mis for temporal reprojection
-        float3 toPrevCam = gPrevCamPos - currentSD.posW;
+        //Get photon surface
+        HitInfo hit = HitInfo(rCurr.sampleSurface);
+        ShadingData sd = loadShadingData(hit, rCurr.sampleSurfaceView, lod);
+
+        //Connect to previous camera
+        float3 toPrevCam = gPrevCamPos - sd.posW;
         float distToPrevCam = length(toPrevCam);
         toPrevCam /= distToPrevCam;
 
-        // Visibility ray and camera view
-        float3 prevScreenPos = getCameraProjection(gPrevCamViewProjection, currentSD.posW);
+        // Check if sample was in projection matrix last frame and if it is visible
+        float3 prevScreenPos = getCameraProjection(gPrevCamViewProjection, sd.posW);
         bool isVisible = (all(prevScreenPos.xyz >= 0) && all(prevScreenPos.xyz < 1));
-
         if (isVisible)
         {
-            SceneRayQuery<1> rayQuery;
-            const Ray ray = Ray(currentSD.computeNewRayOrigin(), toPrevCam, 0.0, distToPrevCam);
-            isVisible &= rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
+            float visRayDist = distToPrevCam - gScene.camera.data.nearZ; // Remove camera near
+            isVisible = dispatchShadowRay(sd, toPrevCam, visRayDist, false);
         }
 
-        if (isVisible) {
-            // Calc jacobians
+        // Calc contribution
+        float p1 = 0;
+        uint c1 = 0;
+        if (isVisible)
+        {
+            let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
+            // Calc jacobian and contribution
             float jacobianWeight, targetFunction;
-            p1 = getSplattingMISWeight(toPrevCam, distToPrevCam, gPrevCamForward, current, currentSD, currentMi, sg, jacobianWeight, targetFunction);
-            // get confidence weight from backprojection
+            p1 = getSplattingMISWeight(toPrevCam, distToPrevCam, gPrevCamForward, rCurr, sd, mi, sg, jacobianWeight, targetFunction);
+            // Get Confidence Weight from the reservoir at the backprojected pixel
             uint2 prevPixel = uint2(floor(prevScreenPos.xy * gFrameDim));
-            ReservoirCaustic prevR = gCausticReservoirPrev[index2Dto1D(prevPixel, gFrameDim.x)];
-            p1 *= prevR.c;
-            
+            CausticReservoir rPrev = gCausticReservoirPrev[index2Dto1D(prevPixel, gFrameDim.x)];
+            c1 = rPrev.c;
         }
-        currentMIS = evalMISBalanceHeuristic(p0,p1);
+        float misWeight = evalMIS(rCurr.targetFunction, rCurr.c, p1, c1);
+        wSum = misWeight * rCurr.targetFunction * rCurr.wSum;
     }
-    float w0 = currentMIS * current.targetFunction * current.wSum;
-    float wSum = w0;
 
-    // Shift the other samples
-    uint reservoirIdx = index2Dto1D(pixel, gFrameDim.x);
-    uint numReservoirs = gCellCounters[reservoirIdx];
-    uint cellOffset = gCellOffsets[reservoirIdx];
-    let lod = ExplicitLodTextureSampler(0.0);
+    // Shift the other samples using a linked list
     const float3 currentCamPosW = gScene.camera.getPosition();
     const float3 currentCamForward = normalize(gScene.camera.data.cameraW);
-    float newConfidence = current.c;
-    for (uint i = 0; i < numReservoirs; i++)
+    const uint currentConfidence = rCurr.c;
+    int headIndex = gLightTraceHeadCounter[pixel];
+    while (headIndex >= 0)
     {
-        uint2 splattedPixel = gSortedReservoirs[cellOffset + i];
-        ReservoirCaustic prevR = gCausticReservoirPrev[index2Dto1D(splattedPixel, gFrameDim.x)];
-        float prevMIS = 0.0;
-        float targetFunc = 0.0;
-        float jacobianToCurrent = 0.0;
-        bool prevReservoirValid = prevR.isValid();
-        if (prevReservoirValid)
+        CausticReservoir rPrev = gCausticReservoirPrev[headIndex];
+        if (rPrev.isValid()) //Should always be true, else it would not be in the linked list
         {
-            //Load surface data
-            ShadingData prevSD = loadShadingData(HitInfo(prevR.sampleSurface), prevR.sampleSurfaceView, lod);
-            let prevMi = gScene.materials.getMaterialInstance(prevSD, lod, kMIHints);
-
-            float p0 = prevR.targetFunction * prevR.c;
-            float p1 = 0.0;
+            // Get photon surface
+            HitInfo hit = HitInfo(rPrev.sampleSurface);
+            ShadingData sd = loadShadingData(hit, rPrev.sampleSurfaceView, lod);
 
             // MIS weight for current (Visibility was already tested in a previous pass)
-            float3 toCurrentCam = currentCamPosW - prevSD.posW;
+            float3 toCurrentCam = currentCamPosW - sd.posW;
             float distToCurrentCam = length(toCurrentCam);
             toCurrentCam /= distToCurrentCam;
 
-            // Calc jacobians
-            p1 = getSplattingMISWeight(toCurrentCam, distToCurrentCam, currentCamForward, prevR, prevSD, prevMi, sg, jacobianToCurrent, targetFunc);
-            p1 *= current.c;
-            prevMIS = evalMISBalanceHeuristic(p0, p1);
+            //Get Contribution
+            let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
+            float subPixelJacobian, targetFunction;
+            float p1 = getSplattingMISWeight(toCurrentCam, distToCurrentCam, gPrevCamForward, rPrev, sd, mi, sg, subPixelJacobian, targetFunction);
+
+            //Calc Reservoir weigth
+            float jacobian = subPixelJacobian / rPrev.subPixelJacobian;
+            float misWeight = evalMIS(rPrev.targetFunction, rPrev.c, p1, currentConfidence); 
+            float w = misWeight * targetFunction * rPrev.wSum * jacobian;
+            wSum += w;
+
+            // Check if the temporal sample replaces the current sample in the reservoir
+            if ((sampleNext1D(sg) * wSum) < w)
+            {
+                rCurr = rPrev;
+                rCurr.targetFunction = targetFunction;
+                rCurr.subPixelJacobian = subPixelJacobian;
+            }
         }
-        float jacobianShift = jacobianToCurrent / prevR.subPixelJacobian;
-        float w1 = prevMIS * targetFunc * prevR.wSum * jacobianShift;
-        wSum += w1;
-        // Check if other sample is selected and replace in reservoir if it was selected
-        bool selectOtherSample = (sampleNext1D(sg) * wSum) < w1 && prevReservoirValid;
-        if (selectOtherSample) {
-            dstR = prevR;
-            dstR.targetFunction = targetFunc;
-            dstR.subPixelJacobian = jacobianToCurrent;
-        }
-        //newConfidence += prevR.c;
+        //Update head index for next iteration
+        int newHeadIndex = gLightTraceLinkedList[headIndex];
+        headIndex = newHeadIndex;
     }
 
     // Use motion vector and bilinear interpolation for new confidence weight
+    float newConfidence = float(currentConfidence);
     float2 prevPixel = float2(pixel) + gMVec[pixel] * gFrameDim;
     int2 prevPixelTopLeft = int2(floor(prevPixel));
     float2 fractionalCoord = saturate(prevPixel - float2(prevPixelTopLeft));
+    [unroll]
     for (uint x = 0; x < 2; x++) {
+        [unroll]
         for (uint y = 0; y < 2; y++)
         {
             int2 prevPixel = prevPixelTopLeft + int2(x, y);
             if (any(prevPixel < 0) || any(prevPixel >= gFrameDim))
                 continue;
 
-            ReservoirCaustic prevReservoir = gCausticReservoirPrev[index2Dto1D(prevPixel, gFrameDim.x)];
-            //Exclude non contributing reservoirs
-            if (prevReservoir.pathLength > 0)
-                continue;
+            CausticReservoir rPrev = gCausticReservoirPrev[index2Dto1D(prevPixel, gFrameDim.x)];
             float bilinearWeight = lerp(1.0 - x, x, fractionalCoord.x) * lerp(1.0 - y, y, fractionalCoord.y);
-            newConfidence += bilinearWeight * prevReservoir.c;
+            newConfidence += bilinearWeight * rPrev.c;
         }
     }
 
-    current = dstR;
-    current.c = clamp(uint(round(newConfidence)), 1, gConfidenceLimit);
-
+    rCurr.c = clamp(uint(round(newConfidence)), 1, gConfidenceCap);
     // Finalize reservoir (wSum -> W)
-    if (current.targetFunction > 0)
-        current.wSum = wSum / current.targetFunction;
+    if (rCurr.targetFunction > 0)
+        rCurr.wSum = wSum / rCurr.targetFunction;
     else
-        current.wSum = 0;
-
-    // If something went wrong, set reservoir to 0
-    if (isnan(current.wSum) || isinf(current.wSum))
-        current.wSum = 0;
-}
-
-[numthreads(16, 16, 1)]
-void main(uint2 pixel: SV_DispatchThreadID)
-{
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 2));
-
-    ReservoirCaustic current = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
-    HitInfo currentHit = HitInfo(current.sampleSurface);
-
-    //Hit background
-    if (!currentHit.isValid())
-        return;
-
-    // Get Shading Data
-    let lod = ExplicitLodTextureSampler(0.0);
-    ShadingData currentSD = loadShadingData(currentHit, current.sampleSurfaceView, lod);
-    let currentMi = gScene.materials.getMaterialInstance(currentSD, lod, kMIHints);
-    let currentBsdfProperties = currentMi.getProperties(currentSD);
-
-    //Either photon or light trace resample
-    if (kEnableLightTrace)
-        reservoirSplatting(current, pixel, currentSD, currentMi, currentBsdfProperties, sg);
-    else
-        resampleReservoirReflectOrRefract(current, pixel, currentSD, currentBsdfProperties, sg);
+        rCurr.wSum = 0;
 
     //Store final reservoir
-    gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)] = current;
+    gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)] = rCurr;
+    // Reset head buffer for linked list
+    gLightTraceHeadCounter[pixel] = -1;
 }

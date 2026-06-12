@@ -166,24 +166,11 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
             group2.var("Spatial Samples", mOptions.pathNumberSpatialSamples);
             group2.var("Spatial Sample Radius", mOptions.pathSpatialResamplingRadius);
         }
-
-        //TODO remove
-        auto resampleUI = [](ResamplingSettings& settings, Gui::Widgets& widget) {
-            widget.checkbox("Enable Resampling", settings.enable);
-            widget.var("Confidence Cap", settings.confidenceCap, 1u, UINT_MAX, 1u);
-            widget.tooltip("Maximum confidence a reservoir can have");
-            widget.var("Spatial Samples", settings.spatialSamples, 0u, 64u, 1u);
-            widget.var("Disocclusion additional spatial samples", settings.disocclusionBoostExtraSamples, 0u, 16u, 1u);
-            widget.tooltip("Extra spatial samples if temporal resampling fails");
-            widget.var("Spatial Sample Radius", settings.samplingRadius, 0.f, FLT_MAX, 1.f);
-        };
-
         
         if (auto group2 = group.group("Resampling Caustic options"))
         {
-            resampleUI(mResampleSettingsCaustic, group2);
-            mClearReservoir |= group2.checkbox("Use Light Trace Splatting for direct", mEnableLightTraceSplatting);
-            group2.tooltip("Enables Light Trace with ReSTIR Splatting for the directly visible caustics");
+            group2.checkbox("Enable Resampling", mOptions.enableCausticResampling);
+            group2.var("Confidence Cap", mOptions.causticConfidenceCap);
         }
 
         group.separator();
@@ -310,6 +297,14 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
 
     // ReSTIR DI pass
     mpRTXDI->update(pRenderContext, pMotionVectors);
+
+    //Resampling with Caustic Reservoirs
+    if(mCanResample && mOptions.enableCausticResampling)
+    {
+        shiftCausticPathPass(pRenderContext, renderData);
+
+        resampleReservoirCausticPass(pRenderContext, renderData);
+    }
 
     //Resampling with Path Reservoirs
     const uint resampleIterations = 1 + mOptions.pathNumberSpatialSamples;
@@ -508,7 +503,7 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         {
             mCanResample = false;
             mpCausticReservoir[i] = Buffer::createStructured(
-                mpDevice, 112u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, 64u, mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
@@ -565,10 +560,12 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         pRenderContext->clearUAV(mpLightTraceHeadCounter->getUAV(0).get(), uint4(uint(-1)));
     }
 
-    if (!mpLightTraceLinkedList)
+    if (!mpLightTraceLinkedList || mResetScreenTex)
     {
+        //Linked list is used for photons and screen backprojection
+        uint linkedListSize = std::max(mOptions.photonBufferSizeCaustic, mScreenRes.x * mScreenRes.y);
         mpLightTraceLinkedList = Buffer::createStructured(
-            mpDevice, sizeof(uint), mOptions.photonBufferSizeCaustic, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+            mpDevice, sizeof(uint), linkedListSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
             Buffer::CpuAccess::None, nullptr, false
         );
         mpLightTraceLinkedList->setName("LightTraceLinkedList");
@@ -951,6 +948,8 @@ void ReSTIR_FG_Plus::backprojectCausticsPass(RenderContext* pRenderContext, cons
 
      // Execute
     mpBackprojectCausticSamplesPass->execute(pRenderContext, uint3(mScreenRes, 1));
+
+    pRenderContext->uavBarrier(mpLightTraceHeadCounter.get());
 }
 
 void ReSTIR_FG_Plus::splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -1311,9 +1310,95 @@ void ReSTIR_FG_Plus::resampleReservoirsPass(RenderContext* pRenderContext, const
     mpResampleReservoirPass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
+void ReSTIR_FG_Plus::shiftCausticPathPass(RenderContext* pRenderContext, const RenderData& renderData)
+{
+    FALCOR_PROFILE(pRenderContext, "ShiftCaustics");
+
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mOptions.photonBufferSizeGlobal));
+        defines.add("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mOptions.photonBufferSizeCaustic));
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("USE_EMISSIVE_LIGHTS", mpScene->useEmissiveLights()? "1" : "0");
+        defines.add("USE_ANALYTIC_LIGHTS", mpScene->useAnalyticLights()? "1" : "0");
+        defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
+        defines.add(getMaterialDefines());
+
+        return defines;
+    };
+
+    // Init Shader
+    if (!mShiftCausticPathPass.pProgram)
+    {
+        RtProgram::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderTracePhotons);
+        desc.setMaxPayloadSize(sizeof(float) * 4);
+        desc.setMaxAttributeSize(mpScene->getRaytracingMaxAttributeSize());
+        desc.setMaxTraceRecursionDepth(1);
+        if (!mpScene->hasProceduralGeometry())
+            desc.setPipelineFlags(RtPipelineFlags::SkipProceduralPrimitives);
+
+        mShiftCausticPathPass.pBindingTable = RtBindingTable::create(1, 1, mpScene->getGeometryCount());
+        auto& sbt = mShiftCausticPathPass.pBindingTable;
+        sbt->setRayGen(desc.addRayGen("rayGen", mpScene->getTypeConformances()));
+        sbt->setMiss(0, desc.addMiss("miss"));
+
+        if (mpScene->hasGeometryType(Scene::GeometryType::TriangleMesh))
+        {
+            sbt->setHitGroup(0, mpScene->getGeometryIDs(Scene::GeometryType::TriangleMesh), desc.addHitGroup("closestHit", "anyHit"));
+        }
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add("IS_SHIFT", "1");
+        defines.add("IS_SHIFT_PATH", "0");
+        defines.add("IS_SHIFT_CAUSTIC", "1");
+        defines.add(getRuntimeDefines());
+
+        mShiftCausticPathPass.pProgram = RtProgram::create(mpDevice, desc, defines);
+    }
+    //Update Defines
+    mShiftCausticPathPass.pProgram->addDefines(getRuntimeDefines());
+    
+    // Program Vars
+    if (!mShiftCausticPathPass.pVars)
+        mShiftCausticPathPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
+    FALCOR_ASSERT(mShiftCausticPathPass.pVars);
+    auto var = mShiftCausticPathPass.pVars->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var);
+        
+    //Constant Buffer
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gPhotonRadius"] = mOptions.photonUseAdaptiveRadius ? mOptions.photonAdaptiveRadius : mOptions.photonRadius;
+    var["CB"]["gPackedPathLength"] = mOptions.photonPathLenght.pack();
+    var["CB"]["gGlobalRejectionProb"] = mOptions.photonGlobalRejection;
+    var["CB"]["gDispatchDimension"] = mPhotonDispatchDim;
+    var["CB"]["gScreenDimensions"] = mScreenRes;
+    var["CB"]["gMixedLightsAnalyticProbability"] = mOptions.photonMixedLightRatio;
+    var["CB"]["gNormalizedPixelDiagonal"] = mApproximatePixelDiagonal;
+
+    //Output Buffers
+    var["gCausticReservoir"] = mpCausticReservoir[(mFrameCount + 1) % 2]; //Temporal Reservoir
+    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
+    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+
+    //Dispatch raytracing shader
+    mpScene->raytrace(pRenderContext, mShiftCausticPathPass.pProgram.get(), mShiftCausticPathPass.pVars, uint3(mScreenRes.x, mScreenRes.y, 1));
+
+}
+
 void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    FALCOR_PROFILE(pRenderContext, "Resampling Caustics");
+    FALCOR_PROFILE(pRenderContext, "ResamplingCaustics");
+
+    auto getRuntimeDefines = [&](){
+        DefineList defines = {};
+        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add(getMaterialDefines());
+
+        return defines;
+    };
+
     // Initialize compute pass
     if (!mpResampleReservoirCausticPass)
     {
@@ -1325,23 +1410,12 @@ void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext,
         DefineList defines;
         defines.add(mpScene->getSceneDefines());
         defines.add(mpSampleGenerator->getDefines());
-        defines.add(mpRTXDI->getDefines());
-        defines.add(getMaterialDefines());
-        defines.add("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
-        defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add(getRuntimeDefines());
 
         mpResampleReservoirCausticPass = ComputePass::create(mpDevice, desc, defines, true);
     }
     FALCOR_ASSERT(mpResampleReservoirCausticPass);
-    mpResampleReservoirCausticPass->getProgram()->addDefines(getMaterialDefines()); //Runtime define
-    mpResampleReservoirCausticPass->getProgram()->addDefine("ENABLE_LIGHT_TRACE", mEnableLightTraceSplatting ? "1" : "0");
-    mpResampleReservoirCausticPass->getProgram()->addDefine("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
-
-    // Return early if there is no previous reservoir or resampling is disabled
-    if ((!mCanResample) || !mResampleSettingsCaustic.enable)
-    {
-        return;
-    }
+    mpResampleReservoirCausticPass->getProgram()->addDefines(getRuntimeDefines()); //Runtime define
 
     // Set variables
     auto var = mpResampleReservoirCausticPass->getRootVar();
@@ -1351,32 +1425,27 @@ void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext,
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
-    var["CB"]["gConfidenceLimit"] = mResampleSettingsCaustic.confidenceCap;
-    var["CB"]["gSpatialRadius"] = mResampleSettingsCaustic.samplingRadius;
-    var["CB"]["gSpatialSamples"] = mResampleSettingsCaustic.spatialSamples;
-    var["CB"]["gDisocclusionBoostSpatialSamples"] = mResampleSettingsCaustic.disocclusionBoostExtraSamples;
-    var["CB"]["gNormalThreshold"] = mNormalThreshold;
-    var["CB"]["gPhotonRadius"] = mOptions.photonRadius;
+    var["CB"]["gConfidenceCap"] = mOptions.causticConfidenceCap;
     var["CB"]["gPrevCamPos"] = mTemporalCameraPosition;
     var["CB"]["gPrevCamViewProjection"] = mTemporalCameraViewProjection;
     var["CB"]["gPrevCamForward"] = mTemporalCameraForward;
     var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     // Input Resources
-    var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
+    var["gCausticReservoirPrev"] = mpCausticReservoir[(mFrameCount + 1) % 2];
+    var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
 
     // In-/Output Resources
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
-
-    var["gCellCounters"] = mpSplattingCellCounter;
-    var["gCellOffsets"] = mpSplattingCellOffsets;
-    var["gSortedReservoirs"] = mpSplattingSortedReservoirs;
+    var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter; //Is cleared
 
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
     mpResampleReservoirCausticPass->execute(pRenderContext, uint3(targetDim, 1));
+
+    pRenderContext->uavBarrier(mpLightTraceHeadCounter.get());
 }
 
 void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData)

@@ -79,10 +79,13 @@ private:
         // Resample Settings
         //
 
-        bool enablePathResampling = true;                  // Is enabled
+        bool enablePathResampling = true;                  // Resampling for paths is enabled
         uint pathNumberSpatialSamples = 1;                 // Number of spatial samples
         float pathSpatialResamplingRadius = 20.f;          // Spatial resampling radius
         uint pathConfidenceCap = 20;                       // Confidence cap for path reservoirs
+
+        bool enableCausticResampling = true;               // Resampling for caustics is enabled
+        uint causticConfidenceCap = 20;                    // Confidence Cap for caustic samples
 
         float jacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
         float normalAngleThreshold = 0.6f;                 // Cosine of maximum angle between both normals allowed
@@ -139,6 +142,9 @@ private:
 
     //Reservoir Resampling for Path Reservoirs
     void resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
+
+    //Shift for the caustic reservoirs
+    void shiftCausticPathPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Reservoir Resampling for Caustic Reservoirs
     void resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData);

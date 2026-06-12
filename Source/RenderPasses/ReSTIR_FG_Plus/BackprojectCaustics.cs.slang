@@ -6,7 +6,7 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import StructsAndHelpers;
 
-RWStructuredBuffer<ReservoirCaustic> gCausticReservoir;
+RWStructuredBuffer<CausticReservoir> gCausticReservoir;
 
 RWTexture2D<int> gLightTraceHeadCounter;     // Is cleared
 StructuredBuffer<int> gLightTraceLinkedList; // next pointer
@@ -26,7 +26,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 [numthreads(16, 16, 1)]
 void main(uint2 pixel: SV_DispatchThreadID)
 {
-    ReservoirCaustic r = ReservoirCaustic();
+    CausticReservoir r = CausticReservoir();
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 3);
     let lod = ExplicitLodTextureSampler(0);
     r.c = 1;
@@ -62,11 +62,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
         if (selectNew) {
             r.sampleSurface = photonHit.getData();
             r.sampleSurfaceView = photonData.dir;
-            r.photonPosW = sd.posW;
-            r.photonDir = photonData.dir;
             r.photonRadiance = photonData.flux;
-            r.targetFunction = targetFunction;
             r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
+            r.packedPhotonRetraceData = photonData.packPhotonRetraceData();
+            r.targetFunction = targetFunction;
         }
 
         // Update head index

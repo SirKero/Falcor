@@ -313,50 +313,33 @@ struct ReservoirFG {
 }
 
 // Reservoir for a CausticSample 112B
-struct ReservoirCaustic {
+struct CausticReservoir {
     PackedHitInfo sampleSurface;    // HitSample 16B
-    float3 thp;                     // Throughput used at the end
-    float targetFunction;           // Store target function
+
     float3 sampleSurfaceView;       // Incoming View
-    float photonDirX;
-    float3 photonPosW;              // Position
-    float photonDirY;
-    float3 photonRadiance;          // Radiance
-    float photonDirZ;      
     float wSum;                     // W and wSum
-    uint c;                         // Confidence weight
-    uint pathLength;                // Path Length
+
+    float3 photonRadiance;          // Radiance
     float subPixelJacobian;         // Sub pixel jacobian for reprojection
+
+    uint2 packedPhotonRetraceData;  // Packed sample generator and path length for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
+    uint c;                         // Confidence weight
+    float targetFunction;           // Target Function for the current reservoir
 
     __init() {
         sampleSurface = {};
-        thp = float3(1);
-        targetFunction = 0;
         sampleSurfaceView = float3(0);
-        photonDirX = 0;
-        photonPosW = float3(0); 
-        photonDirY = 0;
         photonRadiance = float3(0);
-        photonDirZ = 0;
         wSum = 0;
         c = 0;
-        pathLength = 0;
+        packedPhotonRetraceData = uint2(0);
         subPixelJacobian = 0;
-    }
-
-    // Photon dir helper
-    property float3 photonDir {
-        get { return float3(photonDirX, photonDirY, photonDirZ); }
-        set {
-            photonDirX = newValue.x;
-            photonDirY = newValue.y;
-            photonDirZ = newValue.z;
-        }
+        targetFunction = 0;
     }
 
     // Valid check
     bool isValid() {
-        return any(photonRadiance > 0);
+        return any(photonRadiance > 0) && wSum > 0 && subPixelJacobian > 0;
     }
 }
 
@@ -501,10 +484,11 @@ float getSubpixelLocationJacobian(float dist, float3 toCamera, float3 surfaceN, 
     return abs(cosNormal / (distSquared)) / abs(pow(cosSensor, 3));
 }
 
-bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight) {
+bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight, bool applyEpsilon = true) {
     // Create a DXR 1.1 query object to trace a ray (the <1> means use alpha testing)
     SceneRayQuery<1> rayQuery;
-    const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.f, distanceToLight * kShadowRayEpsilon);
+    float distance = applyEpsilon ? distanceToLight * kShadowRayEpsilon : distanceToLight ;
+    const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.0, distance);
     return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
 }
 

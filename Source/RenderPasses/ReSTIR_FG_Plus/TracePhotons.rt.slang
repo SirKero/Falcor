@@ -34,10 +34,9 @@ cbuffer CB
     RWStructuredBuffer<PhotonData> gPhotonData[2]; //(Global/Caustic) Photon Data
     RWStructuredBuffer<PackedHitInfo> gPhotonHitInfo;   //Caustic Photon Hit Info for backprojection
     RWStructuredBuffer<uint> gPhotonCounter;            //Counter
-
-    RWTexture2D<int> gLightTraceHeadCounter;        //Head index for the linked list
-    RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
 #endif
+RWTexture2D<int> gLightTraceHeadCounter;        //Head index for the linked list
+RWStructuredBuffer<int> gLightTraceLinkedList; //next pointer
 
 static const bool kAlphaTest = ENABLE_ALPHA_TEST;
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
@@ -164,7 +163,6 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
     return true;
 }
 
-#if !IS_SHIFT
 //Backprojects the caustic photon and stores it in an linked list to collect all pixels caustic photons with RIS
 bool causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
 {
@@ -194,7 +192,6 @@ bool causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
     gLightTraceLinkedList[photonBufferIndex] = nodeNext;
     return true;
 }
-#endif //!IS_SHIFT
 
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
@@ -246,7 +243,10 @@ void rayGen()
                 return;
             sg = createPhotonSGFromPacked(pathReservoir.packedPhotonRetraceData);
         #elif IS_SHIFT_CAUSTIC
-            //TODO
+            CausticReservoir causticReservoir = gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)];
+            if (!causticReservoir.isValid())
+                return;
+            sg = createPhotonSGFromPacked(causticReservoir.packedPhotonRetraceData);
         #endif //IS_SHIFT_PATH/_CAUSTIC
     #else //IS_SHIFT. Initial Photon Tracing
         sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses);
@@ -281,7 +281,10 @@ void rayGen()
         bool shiftIsValid = false;
         #if IS_SHIFT_PATH
             maxPathLength = getPhotonPathLengthFromPacked(pathReservoir.packedPhotonRetraceData);
-        #endif //IS_SHIFT_PATH
+        #elif IS_SHIFT_CAUSTIC
+            maxPathLength = getPhotonPathLengthFromPacked(causticReservoir.packedPhotonRetraceData);
+        #endif//IS_SHIFT_PATH/CAUSTIC
+        
     #endif //IS_SHIFT
 
     // Main Loop
@@ -357,13 +360,27 @@ void rayGen()
                 }
                 // Check if photon type differs
                 shiftIsValid &= pathReservoir.flags.isCaustic == storeAsCaustic;
+                break;
             }
-            break;
             #endif // IS_SHIFT && IS_SHIFT_PATH
 
             //Shift for caustic reservoirs (Backprojection)
             #if IS_SHIFT && IS_SHIFT_CAUSTIC
-
+            if(i == maxPathLength)
+            {
+                if (storeAsCaustic)
+                {
+                    if (causticPhotonBackprojection(index2Dto1D(pixel, dispatchDims.x), sd))
+                    {
+                        causticReservoir.sampleSurface = hit.getData();
+                        causticReservoir.sampleSurfaceView = photon.dir;
+                        causticReservoir.photonRadiance = photon.flux;
+                        shiftIsValid = true;
+                    }
+                     
+                }
+                break;
+            }
             #endif // IS_SHIFT && IS_SHIFT_PATH
         }
         // Restore flux
@@ -407,5 +424,11 @@ void rayGen()
             pathReservoir.weight = 0;
 
         gPathReservoir[index2Dto1D(pixel, dispatchDims.x)] = pathReservoir;
+    #endif
+
+    //Update Caustic Reservoir
+    #if IS_SHIFT && IS_SHIFT_CAUSTIC
+        if(shiftIsValid)
+            gCausticReservoir[index2Dto1D(pixel, dispatchDims.x)] = causticReservoir;
     #endif
 }
