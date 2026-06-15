@@ -83,6 +83,7 @@ private:
         float probAnalyticEmissive = 0.5f; //Probablility to generate from analytic / emissive if scene contains both
         float causticRoughnessThreshold = 0.25f;    //Roughness threshold, when a surface is considered specular
 
+        bool useBackprojectionForDirect = true;                  //Switches between backprojection and radiance estimate for direct hit 
         //Caustic Photon Settings
         bool photonUseAdaptiveRadius = true;            //Uses a photon radius that is dependent on the (linear) distance to the camera
         float photonAdaptiveRadius = 2.f;               //Pixel Size scale for adptive radius

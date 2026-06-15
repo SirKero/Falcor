@@ -133,12 +133,14 @@ void CausticRenderer::renderUI(Gui::Widgets& widget)
         mResetCausticBuffers |= group.var("Caustic Buffer Size", mOptions.lightBufferSize, 32u, UINT_MAX, 1u);
         group.text("Stored Caustics: " + std::to_string(mCausticsStored));
 
-        group.var("Max Path Length", mOptions.maxPathLength, 0u, 1024u, 1u);
-        group.var("Max Diffuse Bounces", mOptions.diffuseBounces, 0u, 1024u, 1u);
-        group.var("Roughness Threshold", mOptions.causticRoughnessThreshold, 0.f, 0.99f, 0.0001f);
+        changed |= group.var("Max Path Length", mOptions.maxPathLength, 0u, 1024u, 1u);
+        changed |= group.var("Max Diffuse Bounces", mOptions.diffuseBounces, 0u, 1024u, 1u);
+        changed |= group.var("Roughness Threshold", mOptions.causticRoughnessThreshold, 0.f, 0.99f, 0.0001f);
         group.tooltip("All surfaces below the threshold can create caustics. The caustics are only stored on diffuse surfaces");
         if(mSceneHasMixedLights)
             group.var("Probability analytic/emissive", mOptions.probAnalyticEmissive, 0.f, 1.f, 0.0001f);
+
+        changed |= group.checkbox("Use Backprojection for Direct", mOptions.useBackprojectionForDirect);
 
         group.checkbox("Use Adaptive Radius", mOptions.photonUseAdaptiveRadius);
         if(mOptions.photonUseAdaptiveRadius)
@@ -328,6 +330,7 @@ void CausticRenderer::traceCausticsPass(RenderContext* pRenderContext, const Ren
 
     //Runtime defines
     mCausticTracePass.pProgram->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
+    mCausticTracePass.pProgram->addDefine("USE_BACKPROJECTION", mOptions.useBackprojectionForDirect ? "1" : "0");
 
     // Program Vars
     if (!mCausticTracePass.pVars)
@@ -406,6 +409,7 @@ void CausticRenderer::lightingPass(RenderContext* pRenderContext, const RenderDa
         defines.add("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add("EVAL_ALL_ANALYTIC", mOptions.evalAllAnalytic ? "1" : "0");
         defines.add("USE_EMISSIVE_LIGHT", mpScene->useEmissiveLights() ? "1" : "0");
+        defines.add("USE_BACKPROJECTION", mOptions.useBackprojectionForDirect ? "1" : "0");
         return defines;
     };
 

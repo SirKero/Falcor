@@ -30,6 +30,7 @@ RWStructuredBuffer<uint> gCounter;
 
 static const bool kAlphaTest = true;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
+static const bool kUseBackprojection = USE_BACKPROJECTION;
 
 //Ray Payload using Falcors hit struct
 struct RayPayload
@@ -265,14 +266,17 @@ void rayGen()
 
             // If the caustic is visible, it can be backprojected
             uint2 backprojectedPixel = uint2(0);
-            if (isVisibleByCamera(sd, backprojectedPixel))
+            if (kUseBackprojection)
             {
-                //Set Head Buffer and get next pointer
-                int nodeNext = -1;
-                InterlockedExchange(gCausticHead[backprojectedPixel], causticInsertIndex, nodeNext);
+                if (isVisibleByCamera(sd, backprojectedPixel))
+                {
+                    // Set Head Buffer and get next pointer
+                    int nodeNext = -1;
+                    InterlockedExchange(gCausticHead[backprojectedPixel], causticInsertIndex, nodeNext);
 
-                //Store caustic data
-                cd.next = nodeNext;
+                    // Store caustic data
+                    cd.next = nodeNext;
+                }
             }
             gCausticData[causticInsertIndex] = cd;
 

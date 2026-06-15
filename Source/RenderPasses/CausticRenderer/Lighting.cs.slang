@@ -40,6 +40,7 @@ static const float3 kDefaultBackgroundColor = float3(0);
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEvalAllAnalytic = EVAL_ALL_ANALYTIC;
 static const bool kUseEmissiveLights = USE_EMISSIVE_LIGHT;
+static const bool kUseBackprojection = USE_BACKPROJECTION;
 
 //Samples 1 or all analytic lights
 float3 evaluateAnalyticLights(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg)
@@ -119,31 +120,31 @@ float3 collectBackprojectedCaustics(uint2 pixel, inout SampleGenerator sg)
         float distanceToCamera = length(directionToCamera);
         directionToCamera /= distanceToCamera;
 
-        
         // Photon Guiding
-        const float aspect = float(gFrameDim.x) / gFrameDim.y;
-        float h = tan(gFovY / 2.0) * 2.0;
-        float w = h * aspect;
-        float wPix = w / gFrameDim.x;
-        float hPix = h / gFrameDim.y;
-        float pixelExtend = wPix * hPix;
-        const float3 camForward = normalize(gScene.camera.data.cameraW);
-        const float cosAtCamera = abs(dot(-directionToCamera, camForward));
-        float cameraPDF = distanceToCamera * distanceToCamera * gImagePlaneDist * pow(cosAtCamera, 3);
-
-        /*
-        // VCM style (Brighter than photon guiding)
-        const float tanHalfAngle = tan(gFovY / 2.0);
-        const float imagePlaneDist = gFrameDim.x / (2.0 *tanHalfAngle);
-        const float cosToCamera = dot(sd.faceN, directionToCamera);
-        const float3 camForward = normalize(gScene.camera.data.cameraW);
-        const float cosAtCamera = dot(camForward, -directionToCamera);
-        const float imagePointToCameraDist = imagePlaneDist / cosAtCamera;
-        const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
-        const float imageToSurfaceFactor = imageToSolidAngleFactor * abs(cosToCamera) / (distanceToCamera * distanceToCamera);
-        const float cameraPDF = 1.0 / imageToSurfaceFactor;
-        */
-
+        float cameraPDF = 1.0;
+        if (false)
+        {
+            const float aspect = float(gFrameDim.x) / gFrameDim.y;
+            float h = tan(gFovY / 2.0) * 2.0;
+            float w = h * aspect;
+            float wPix = w / gFrameDim.x;
+            float hPix = h / gFrameDim.y;
+            float pixelExtend = wPix * hPix;
+            const float3 camForward = normalize(gScene.camera.data.cameraW);
+            const float cosAtCamera = abs(dot(-directionToCamera, camForward));
+            cameraPDF = distanceToCamera * distanceToCamera * pixelExtend * pow(cosAtCamera, 3);
+        } else {
+            // VCM style (Brighter than photon guiding)
+            const float tanAngle = gScene.camera.data.frameHeight / gScene.camera.data.focalLength;
+            const float imagePlaneDist = gFrameDim.y / tanAngle;
+            const float3 camForward = normalize(gScene.camera.data.cameraW);
+            const float cosAtCamera = dot(camForward, -directionToCamera);
+            const float imagePointToCameraDist = imagePlaneDist / cosAtCamera;
+            const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
+            const float imageToSurfaceFactor = imageToSolidAngleFactor / (distanceToCamera * distanceToCamera);
+            cameraPDF = 1.0 / imageToSurfaceFactor;
+        }
+        
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
         outColor += (bsdf * cd.flux) / cameraPDF;
 
@@ -227,9 +228,10 @@ void main(uint2 pixel: SV_DispatchThreadID)
         outColor += evaluateEmissiveLight(sd, mi, sg);
 
         // Caustics
-        // outColor = float3(0);
-        // outColor += collectBackprojectedCaustics(pixel, sg);
-        outColor += photonRadianceEstimate(sd, mi, bsdfProperties.guideNormal, sg);
+        if(kUseBackprojection)
+            outColor += collectBackprojectedCaustics(pixel, sg);
+        else
+            outColor += photonRadianceEstimate(sd, mi, bsdfProperties.guideNormal, sg);
 
     }else //Miss
     {
