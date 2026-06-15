@@ -163,38 +163,6 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
     return true;
 }
 
-//Backprojects the caustic photon and stores it in an linked list to collect all pixels caustic photons with RIS
-/*
-bool causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
-{
-    // Check if position is in camera view
-    float4 screenPos = mul(gScene.camera.getViewProj(), float4(sd.posW, 1));
-    screenPos /= screenPos.w;
-    screenPos.y *= -1;
-    screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
-    if (any(screenPos.xy < 0) || any(screenPos.xy >= 1) || screenPos.z < 0 || screenPos.z > 1)
-        return false;
-
-    // If the photon is in screen it is assumed that it will contribute something
-    // Check visibility with ray query
-    float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
-    float distanceToCamera = length(directionToCamera);
-    directionToCamera /= distanceToCamera;
-
-    SceneRayQuery<1> rayQuery;
-    const Ray ray = Ray(sd.computeNewRayOrigin(), directionToCamera, 0.f, distanceToCamera);
-    if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
-        return false;
-
-    // Caustic photon is a valid sample, add to the linked list for the RIS pass later
-    uint2 currentPixel = uint2(floor(screenPos.xy * gScreenDimensions));
-    int nodeNext = -1;
-    InterlockedExchange(gLightTraceHeadCounter[currentPixel], photonBufferIndex, nodeNext);
-    gLightTraceLinkedList[photonBufferIndex] = nodeNext;
-    return true;
-}
-*/
-
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
 {

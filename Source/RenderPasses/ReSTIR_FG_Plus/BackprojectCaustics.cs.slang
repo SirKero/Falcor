@@ -25,9 +25,9 @@ import StructsAndHelpers;
 
 cbuffer CB
 {
-    uint gFrameCount; // Current it for sample gen
-    uint2 gScreenDims;                //Frame Dims in X for linear reservoir buffer offset
-    float gNormalizedPixelArea;
+    uint gFrameCount;          // Current it for sample gen
+    uint2 gScreenDims;         //Screen dimensions
+    float _pad;
 }
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
@@ -79,12 +79,12 @@ void initializeCausticReservoir(const uint2 pixel)
         float distanceToCamera = length(directionToCamera);
         directionToCamera /= distanceToCamera;
         const float3 camForward = normalize(gScene.camera.data.cameraW);
-        const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
+        const float backprojectJacobian = getBackprojectJacobian(gScreenDims.y, directionToCamera, distanceToCamera);
 
         // Eval BSDF, targetFunction and reservoir weight
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
         float targetFunction = luminance(photonData.flux * bsdf);
-        float w = targetFunction / cameraPdf;
+        float w = targetFunction * backprojectJacobian;
 
         r.wSum += w;
         bool selectNew = (sampleNext1D(sg) * r.wSum) < w;
@@ -92,7 +92,7 @@ void initializeCausticReservoir(const uint2 pixel)
             r.sampleSurface = photonHit.getData();
             r.sampleSurfaceView = photonData.dir;
             r.photonRadiance = photonData.flux;
-            r.subPixelJacobian = getSubpixelLocationJacobian(distanceToCamera, directionToCamera, sd.faceN, camForward);
+            r.subPixelJacobian = backprojectJacobian * dot(directionToCamera, sd.getOrientedFaceNormal()); //Cos normal is included in BSDF
             r.packedPhotonRetraceData = photonData.packPhotonRetraceData();
             r.targetFunction = targetFunction;
         }

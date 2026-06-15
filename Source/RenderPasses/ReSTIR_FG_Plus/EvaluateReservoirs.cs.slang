@@ -20,7 +20,7 @@ cbuffer CB
 {
     uint gFrameCount;         // Current it for sample gen
     uint2 gFrameDim;          // Frame Dimensions for camera dir
-    float gNormalizedPixelArea;
+    float _pad;
 }
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;

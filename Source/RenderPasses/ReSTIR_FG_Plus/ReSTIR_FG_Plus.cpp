@@ -778,24 +778,6 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     mpPhotonAS->update(pRenderContext, photonBuildSize);
 }
 
-float ReSTIR_FG_Plus::getNormalizedPixelArea()
-{
-    if (!mpScene)
-        return 1.0;
-
-    // Update Image plane distance
-    auto& cameraData = mpScene->getCamera()->getData();
-    float fovY = focalLengthToFovY(cameraData.focalLength, cameraData.frameHeight);
-
-    // Get normalized pixel area
-    float h = tan(fovY / 2.f) * 2.f;
-    float w = h * cameraData.aspectRatio;
-    float wPix = w / mScreenRes.x;
-    float hPix = h / mScreenRes.y;
-
-    return wPix * hPix;
-}
-
 void ReSTIR_FG_Plus::traceCameraPass(RenderContext* pRenderContext, const RenderData& renderData)
 {
     FALCOR_PROFILE(pRenderContext, "InitialSamples");
@@ -850,9 +832,6 @@ void ReSTIR_FG_Plus::traceCameraPass(RenderContext* pRenderContext, const Render
 
     FALCOR_ASSERT(mTraceCameraPass.pVars);
     auto var = mTraceCameraPass.pVars->getRootVar();
-
-    //Update Normalized pixel area for backprojection
-    mNormalizedPixelArea = getNormalizedPixelArea();
 
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
@@ -922,7 +901,6 @@ void ReSTIR_FG_Plus::backprojectCausticsPass(RenderContext* pRenderContext, cons
 
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gScreenDims"] = mScreenRes;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
@@ -1279,7 +1257,6 @@ void ReSTIR_FG_Plus::backprojectTemporalCausticReservoirsPass(RenderContext* pRe
 
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gScreenDims"] = mScreenRes;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
@@ -1334,7 +1311,6 @@ void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext,
     var["CB"]["gPrevCamPos"] = mTemporalCameraPosition;
     var["CB"]["gPrevCamViewProjection"] = mTemporalCameraViewProjection;
     var["CB"]["gPrevCamForward"] = mTemporalCameraForward;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     // Input Resources
     var["gMVec"] = renderData[kInputMotionVectors]->asTexture();
@@ -1396,7 +1372,6 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDim"] = mScreenRes;
-    var["CB"]["gNormalizedPixelArea"] = mNormalizedPixelArea;
 
     //RTXDI resources
     mpRTXDI->setShaderData(var);

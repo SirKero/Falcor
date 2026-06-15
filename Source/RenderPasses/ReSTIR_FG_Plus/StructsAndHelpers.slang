@@ -385,20 +385,18 @@ float3 getCameraProjection(float4x4 viewProjection, float3 posW) {
     return screenPos.xyz;
 }
 
-// Returns the Camera backproject PDF
-float getCameraBackprojectPDF(float3 directionToCamera, float distanceToCamera, float3 camForward, float normalizedPixelArea)
+// Jacobian for backprojection. Cos from surface normal and directionToCamera is excluded.
+float getBackprojectJacobian(uint frameDimY, float3 directionToCamera, float distanceToCamera)
 {
-    const float cosAtCamera = dot(-directionToCamera, camForward);
-    return distanceToCamera * distanceToCamera * normalizedPixelArea * pow(cosAtCamera, 3);
-}
+    const float tanAngle = gScene.camera.data.frameHeight / gScene.camera.data.focalLength;
+    const float imagePlaneDist = frameDimY / tanAngle;
+    const float3 camForward = normalize(gScene.camera.data.cameraW);
+    const float cosAtCamera = dot(camForward, -directionToCamera);
+    const float imagePointToCameraDist = imagePlaneDist / cosAtCamera;
+    const float imageToSolidAngleFactor = (imagePointToCameraDist * imagePointToCameraDist) / cosAtCamera;
+    const float imageToSurfaceFactor = imageToSolidAngleFactor / (distanceToCamera * distanceToCamera);
 
-// Returns the Jacobian determinant for a subpixel location
-float getSubpixelLocationJacobian(float dist, float3 toCamera, float3 surfaceN, float3 camForward)
-{
-    float distSquared = dist * dist;
-    float cosNormal = dot(toCamera, surfaceN);
-    float cosSensor = dot(-toCamera, camForward);
-    return abs(cosNormal / (distSquared)) / abs(pow(cosSensor, 3));
+    return imageToSurfaceFactor;
 }
 
 bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight, bool applyEpsilon = true) {

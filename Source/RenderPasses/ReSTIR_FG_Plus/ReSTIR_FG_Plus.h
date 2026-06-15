@@ -154,9 +154,6 @@ private:
     //Get Materials defines
     DefineList getMaterialDefines();
 
-    //Gets normalized pixel area for back projection
-    float getNormalizedPixelArea();
-
     //
     // Pointers
     //
@@ -206,8 +203,6 @@ private:
     float4x4 mTemporalCameraViewProjection = float4x4::identity();
     float3 mTemporalCameraPosition = float3(0);
     float3 mTemporalCameraForward = float3(0);
-    float mNormalizedPixelArea = 1.0; //For light trace
-    bool mEnableLightTraceSplatting = true;
 
     //Photon Distribution
     uint2 mPhotonCountUI = uint2(mOptions.photonBufferSizeGlobal, mOptions.photonBufferSizeCaustic);

@@ -17,10 +17,10 @@ cbuffer CB
     float4x4 gPrevCamViewProjection; //Previous Camera view projection for splatting
 
     float3 gPrevCamPos; // Previous camera position for splatting
-    float gNormalizedPixelArea; //For Backprojection PDF
+    uint _pad;
 
     float3 gPrevCamForward; // Previous camera forward for splatting
-    uint _pad;
+    uint _pad2;
 }
 
 Texture2D<float2> gMVec;
@@ -36,7 +36,8 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
 float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, CausticReservoir r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, out float jacobianWeight, out float targetFunction)
 {
-    jacobianWeight = getSubpixelLocationJacobian(distToCam, toCam, sd.faceN, camForward);
+    jacobianWeight = getBackprojectJacobian(gFrameDim.y, toCam, distToCam);
+    jacobianWeight *= dot(toCam, sd.getOrientedFaceNormal());
     float jacobianShifted = jacobianWeight / r.subPixelJacobian;
     const float3 bsdf = mi.eval(sd, toCam, sg);
     targetFunction = luminance(r.photonRadiance * bsdf);
