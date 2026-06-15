@@ -197,9 +197,9 @@ void main(uint2 pixel: SV_DispatchThreadID)
         let lod = ExplicitLodTextureSampler(0.f);
 
         // Sample generator for the pixel offset (search region). Is the same as for the shift in the other shader (TraceCamera.slang)
-        SampleGenerator sgPixelOffset = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3));
+        SampleGenerator sgPixelOffset = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 5 + (gNumResamplingPass * 3));
         // Sample generator for bsdf evaluation
-        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 2);
+        SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 7 + (gNumResamplingPass * 3));
 
         //Determine pixel for other reservoir       
         bool isSpatial = gNumResamplingPass > 0;

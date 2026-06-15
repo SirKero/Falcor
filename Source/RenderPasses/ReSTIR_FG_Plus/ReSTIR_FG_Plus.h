@@ -128,12 +128,6 @@ private:
     //Collects caustic backprojections and initializes the caustic reservoir
     void backprojectCausticsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
-    //Splats Caustic reservoirs from last frame to current frame
-    void splatTemporalReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
-
-    //Sort the splatted reservoirs so they can be used in the resampling pass
-    void sortSplattedReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
-
     //Shifts the photon pass for path reservoirs
     void shiftPhotonPathPass(RenderContext* pRenderContext, const RenderData& renderData);
 
@@ -201,14 +195,7 @@ private:
     
     bool mUsePathThreshold = false;                     // Enable resampling only if path length are the same
     bool mUsePhotonsForDirectLightInReflections = true; // Uses photons for direct light in reflections, else the final gather sample is used
-    uint mRNGNumPasses = 12;                             // Offset for RNG generator
-
-    //TODO Remove
-    uint mFGRayMaxPathLength = 10;                      // Max path length for the final gather ray
-    float mJacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
-    float mRelativeDepthThreshold = 0.15f;              // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
-    float mNormalThreshold = 0.6f;                      // Cosine of maximum angle between both normals allowed
-
+    uint mRNGNumPasses = 11;                             // Offset for RNG generator
 
     //Splatting
     float4x4 mTemporalCameraViewProjection = float4x4::identity();
@@ -280,10 +267,5 @@ private:
     ref<ComputePass> mpResampleReservoirPass;           // Resampling Pass for the Path Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass;    // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;          // Evaluates ReSTIR DI and FG reservoirs
-
-    //Splatting
-    ref<ComputePass> mpTemporalSplatReservoirs;         //Reprojects reservoirs from last frame to curren
-    ref<ComputePass> mpSplatSortComputeCellOffsets;     //Sort step 1, compute cell offsets
-    ref<ComputePass> mpSplatSortCellData;               //Sort step 2, sort the cell data
 };
 

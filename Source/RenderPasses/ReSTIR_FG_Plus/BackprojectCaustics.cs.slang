@@ -27,7 +27,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 void main(uint2 pixel: SV_DispatchThreadID)
 {
     CausticReservoir r = CausticReservoir();
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 3);
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1);
     let lod = ExplicitLodTextureSampler(0);
     r.c = 1;
 

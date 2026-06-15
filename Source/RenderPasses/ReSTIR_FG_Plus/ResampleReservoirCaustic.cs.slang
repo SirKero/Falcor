@@ -39,7 +39,7 @@ float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, Ca
     jacobianWeight = getSubpixelLocationJacobian(distToCam, toCam, sd.faceN, camForward);
     float jacobianShifted = jacobianWeight / r.subPixelJacobian;
     const float3 bsdf = mi.eval(sd, toCam, sg);
-    targetFunction = luminance(r.photonRadiance * bsdf); ;
+    targetFunction = luminance(r.photonRadiance * bsdf);
     float misP = targetFunction * jacobianShifted;
     misP = isnan(misP) ? 0.0f : misP;
     return misP;
@@ -50,7 +50,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
 {
     //Sample Gen and LOD sampler
     let lod = ExplicitLodTextureSampler(0.0);
-    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + (kRNGNumPasses - 2));
+    SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4);
 
     CausticReservoir rCurr = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
 

@@ -646,7 +646,7 @@ void shiftCameraReservoir()
     uint2 dispatchDims = DispatchRaysDimensions().xy;
 
     // Init Sample Generator for selecting the reservoir
-    SampleGenerator sgSelectReservoir = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3));
+    SampleGenerator sgSelectReservoir = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 5 + (gNumResamplingPass * 3));
 
     // Reproject last frames reservoir (temporal) or randomly sample in a disc (spatial)
     bool isSpatial = gNumResamplingPass > 0;
@@ -686,7 +686,7 @@ void shiftCameraReservoir()
     {
         //Init Path Data struct
         PathData pd = PathData();
-        pd.sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4 + (gNumResamplingPass * 3) + 1); // BSDF SG
+        pd.sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 6 + (gNumResamplingPass * 3)); // BSDF SG
         pd.dirSG = pathReservoir.sgPathDirections;
 
         //Init first hit surface
