@@ -136,6 +136,15 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
         group.tooltip("Fixed probability, that a global photon is rejected");
         changed |= group.var("Mixed Light Analytic Probability", mOptions.photonMixedLightRatio, 0.f, 1.f, 0.0001f);
         group.tooltip("Probability, that a photon is generated from an analytic/emissive light 0 -> 0% Analytic, 100% Emissive");
+
+        if (auto group2 = group.group("PhotonGuiding"))
+        {
+            group2.checkbox("Enable", mOptions.usePhotonGuiding);
+            if (mpPhotonGuiding && mOptions.usePhotonGuiding)
+            {
+                mpPhotonGuiding->renderUI(group2);
+            }
+        }
     }
 
     if (auto group = widget.group("RTXDI"))
@@ -279,6 +288,16 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     if (!mpRTXDI)
         mpRTXDI = std::make_unique<RTXDI>(mpScene, mRTXDIOptions);
 
+    //Init Photon Guiding
+    if (mOptions.usePhotonGuiding && !mpPhotonGuiding)
+    {
+        mpPhotonGuiding = std::make_unique<PhotonGuiding>(mpDevice, mpScene, pRenderContext);
+        mCanResample = false;
+    }else if (!mOptions.usePhotonGuiding && mpPhotonGuiding)
+    {
+        mpPhotonGuiding.reset();
+    }
+
     //Prepare needed Falcor helpers and Buffers/Textures
     prepareLightingStructure(pRenderContext);
     if (!mHasLights)
@@ -290,6 +309,9 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     prepareResources(pRenderContext, renderData);
 
     mpRTXDI->beginFrame(pRenderContext, mScreenRes);
+
+    if (mOptions.usePhotonGuiding && !mpPhotonGuiding)
+        mpPhotonGuiding->update(pRenderContext, mOptions.photonsDispatched);
 
     //Trace Photons and bulids the photon acceleration structure. Also backprojects caustic photons into the camera
     tracePhotonsPass(pRenderContext, renderData);
@@ -453,12 +475,23 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         mResetScreenTex = true;
     }
 
+    //Reset photon guiding extra buffers
+    if(!mOptions.usePhotonGuiding && mpPhotonGuidingData[0])
+    {
+        mpPhotonGuidingData[0].reset();
+        mpPhotonGuidingData[1].reset();
+        mpPhotonGuidingCausticReservoir[0].reset();
+        mpPhotonGuidingCausticReservoir[1].reset();
+    }
+
     if (mPhotonBufferSizeChanged)
     {
         mpPhotonAABB[0].reset();
         mpPhotonAABB[1].reset();
         mpPhotonData[0].reset();
         mpPhotonData[1].reset();
+        mpPhotonGuidingData[0].reset();
+        mpPhotonGuidingData[1].reset();
         mpLightTraceLinkedList.reset();
         mpPhotonAS.reset();
         mPhotonBufferSizeChanged = false;
@@ -484,6 +517,16 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
             );
             mpPhotonData[i]->setName("PhotonData" + std::to_string(i));
         }
+
+        if(!mpPhotonGuidingData[i] && mOptions.usePhotonGuiding)
+        {
+            mpPhotonGuidingData[i] = Buffer::createStructured(
+                mpDevice, sizeof(uint) * 2, photonBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                Buffer::CpuAccess::None, nullptr, false
+            );
+            mpPhotonGuidingData[i]->setName("PhotonGuidingData" + std::to_string(i));
+        }
+
         if (!mpCausticReservoir[i] || mResetScreenTex)
         {
             mCanResample = false;
@@ -493,6 +536,13 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
             );
             mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
         }
+        if ((!mpPhotonGuidingCausticReservoir[i] || mResetScreenTex) && mOptions.usePhotonGuiding)
+        {
+            mpPhotonGuidingCausticReservoir[i] = Texture::create2D(mpDevice, mScreenRes.x, mScreenRes.y,
+                ResourceFormat::RG32Uint, 1u,1u, nullptr, ResourceBindFlags::UnorderedAccess|ResourceBindFlags::ShaderResource);
+            mpPhotonGuidingCausticReservoir[i]->setName("CausticReservoirGuidingData" + std::to_string(i));
+        }
+
         if (!mpPathReservoir[i] || mResetScreenTex)
         {
             mCanResample = false;
@@ -566,52 +616,6 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         mpPhotonHitInfo->setName("PhotonHitInfo");
     }
 
-    //Set Splatting Resources
-    if (!mpSplattingGlobalCounter)
-    {
-        mpSplattingGlobalCounter = Buffer::createStructured(
-            mpDevice, sizeof(uint), 2, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess, Buffer::CpuAccess::None,
-            nullptr, false
-        );
-        mpSplattingGlobalCounter->setName("SplattingGlobalCounter");
-    }
-
-    if (!mpSplattingCellCounter || mResetScreenTex)
-    {
-        mpSplattingCellCounter = Buffer::createStructured(
-            mpDevice, sizeof(uint), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-            Buffer::CpuAccess::None, nullptr, false
-        );
-        mpSplattingCellCounter->setName("SplattingCellCounter");
-    }
-
-    if (!mpSplattingCellOffsets || mResetScreenTex)
-    {
-        mpSplattingCellOffsets = Buffer::createStructured(
-            mpDevice, sizeof(uint), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-            Buffer::CpuAccess::None, nullptr, false
-        );
-        mpSplattingCellOffsets->setName("SplattingCellOffsets");
-    }
-
-    if (!mpSplattingSortingData || mResetScreenTex)
-    {
-        mpSplattingSortingData = Buffer::createStructured(
-            mpDevice, sizeof(uint4), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-            Buffer::CpuAccess::None, nullptr, false
-        );
-        mpSplattingSortingData->setName("SplattingSortingData");
-    }
-
-    if (!mpSplattingSortedReservoirs || mResetScreenTex)
-    {
-        mpSplattingSortedReservoirs = Buffer::createStructured(
-            mpDevice, sizeof(uint2), mScreenRes.x * mScreenRes.y, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
-            Buffer::CpuAccess::None, nullptr, false
-        );
-        mpSplattingSortedReservoirs->setName("SplattingSortedReservoirs");
-    }
-
     //Copy of surface from last frame
     if (!mpVBufferPrev || mResetScreenTex)
     {
@@ -663,6 +667,9 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
         defines.add("USE_ANALYTIC_LIGHTS", mpScene->useAnalyticLights()? "1" : "0");
         defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
         defines.add(getMaterialDefines());
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
+        if(mOptions.usePhotonGuiding)
+            defines.add(mpPhotonGuiding->getDefines());
 
         return defines;
     };
@@ -707,10 +714,19 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     auto var = mTracePhotonPass.pVars->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var);
 
+    if(mOptions.usePhotonGuiding)
+        mpPhotonGuiding->setShaderData(var);
+
     //Shader dispatch dims (TODO optimize for non-guiding case, so that similar lights are traced in the same workgroup)
-    uint dispatchedPhotons = mOptions.photonsDispatched;
-    mPhotonDispatchDim = static_cast<uint>(std::floor(sqrt(dispatchedPhotons)));
-    mPhotonDispatchDim = std::max(32u, mPhotonDispatchDim);
+    if(mOptions.usePhotonGuiding)
+    {
+        mPhotonDispatchDim = mpPhotonGuiding->getPhotonDispatchSize(mOptions.photonsDispatched);
+    }else
+    {
+        uint photonDispatchSide = static_cast<uint>(std::floor(sqrt(mOptions.photonsDispatched)));
+        photonDispatchSide = std::max(32u, photonDispatchSide);
+        mPhotonDispatchDim = uint2(photonDispatchSide);
+    }
 
     //Approximated pixel diagonal at length 1 for adaptive photon radius
     if (mOptions.photonUseAdaptiveRadius)
@@ -741,6 +757,8 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
+        if(mOptions.usePhotonGuiding)
+            var["gPhotonGuidingData"][i] = mpPhotonGuidingData[i];
     }
     var["gPhotonCounter"] = mpPhotonCounter;
 
@@ -750,7 +768,7 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     var["gPhotonHitInfo"] = mpPhotonHitInfo;
 
     //Dispatch raytracing shader
-    mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(mPhotonDispatchDim, mPhotonDispatchDim, 1));
+    mpScene->raytrace(pRenderContext, mTracePhotonPass.pProgram.get(), mTracePhotonPass.pVars, uint3(mPhotonDispatchDim, 1));
 
     pRenderContext->uavBarrier(mpLightTraceHeadCounter.get());
 
@@ -788,6 +806,7 @@ void ReSTIR_FG_Plus::traceCameraPass(RenderContext* pRenderContext, const Render
         defines.add(getMaterialDefines());
         defines.add("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
         return defines;
     };
 
@@ -855,6 +874,8 @@ void ReSTIR_FG_Plus::traceCameraPass(RenderContext* pRenderContext, const Render
     {
         var["gPhotonAABB"][i] = mpPhotonAABB[i];
         var["gPhotonData"][i] = mpPhotonData[i];
+        if(mOptions.usePhotonGuiding)
+            var["gPhotonGuidingData"][i] = mpPhotonGuidingData[i];
     }
 
     //Output Resources
@@ -872,6 +893,7 @@ void ReSTIR_FG_Plus::backprojectCausticsPass(RenderContext* pRenderContext, cons
         DefineList defines = {};
         defines.add(getMaterialDefines());
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
         return defines;
     };
 
@@ -906,6 +928,11 @@ void ReSTIR_FG_Plus::backprojectCausticsPass(RenderContext* pRenderContext, cons
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
     var["gPhotonData"] = mpPhotonData[1]; //Caustic photon data
     var["gPhotonHitInfo"] = mpPhotonHitInfo;
+    if(mOptions.usePhotonGuiding)
+    {
+        var["gPhotonGuidingData"] = mpPhotonGuidingData[1];
+        var["gCausticReservoirGuidingData"] = mpPhotonGuidingCausticReservoir[mFrameCount % 2];
+    }
 
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
 
@@ -998,6 +1025,7 @@ void ReSTIR_FG_Plus::shiftCameraPathPass(RenderContext* pRenderContext, const Re
         defines.add(getMaterialDefines());
         defines.add("USE_ENV_BACKGROUND", mpScene->useEnvBackground() ? "1" : "0");
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0"); 
         return defines;
     };
 
@@ -1227,6 +1255,7 @@ void ReSTIR_FG_Plus::backprojectTemporalCausticReservoirsPass(RenderContext* pRe
         DefineList defines = {};
         defines.add(getMaterialDefines());  
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
         return defines;
     };
 
@@ -1277,6 +1306,7 @@ void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext,
         DefineList defines = {};
         defines.add("RNG_NUM_PASSES", std::to_string(mRNGNumPasses));
         defines.add(getMaterialDefines());
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
 
         return defines;
     };
@@ -1321,6 +1351,12 @@ void ReSTIR_FG_Plus::resampleReservoirCausticPass(RenderContext* pRenderContext,
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter; //Is cleared
 
+    if(mOptions.usePhotonGuiding)
+    {
+        var["gCausticReservoirGuidingDataPrev"] = mpPhotonGuidingCausticReservoir[(mFrameCount + 1) % 2];
+        var["gCausticReservoirGuidingData"] = mpPhotonGuidingCausticReservoir[mFrameCount % 2];
+    }
+
     // Execute
     const uint2 targetDim = renderData.getDefaultTextureDims();
     FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
@@ -1342,6 +1378,9 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
         defines.add("DISABLE_DIRECT", mOptions.debugDisableDirectLight ? "1" : "0");
         defines.add("DISABLE_INDIRECT", mOptions.debugDisableIndirectLight ? "1" : "0");
         defines.add("DISABLE_CAUSTICS", mOptions.debugDisableCaustics ? "1" : "0");
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
+        if(mOptions.usePhotonGuiding)
+            defines.add(mpPhotonGuiding->getDefines());
         return defines;
     };
 
@@ -1368,6 +1407,8 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
     auto var = mpEvaluateReservoirsPass->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
     mpSampleGenerator->setShaderData(var);                    // Sample generator
+    if(mOptions.usePhotonGuiding)
+        mpPhotonGuiding->setShaderData(var);
 
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
@@ -1381,6 +1422,8 @@ void ReSTIR_FG_Plus::evaluateReservoirsPass(RenderContext* pRenderContext, const
     var["gView"] = renderData[kInputView]->asTexture();
     var["gPathReservoir"] = mpPathReservoir[mReservoirIndex % 2];
     var["gCausticReservoir"] = mpCausticReservoir[mFrameCount % 2];
+    if(mOptions.usePhotonGuiding)
+        var["gCausticReservoirGuidingData"] = mpPhotonGuidingCausticReservoir[mFrameCount % 2];
 
     //Output
     var["gVBufferPrev"] = mpVBufferPrev;

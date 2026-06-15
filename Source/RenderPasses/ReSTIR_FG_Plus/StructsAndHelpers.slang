@@ -81,6 +81,35 @@ struct PhotonData {
     }
 }
 
+struct PhotonGuidingData
+{
+    uint lightIndex;
+    uint packedGuidingPixels;
+
+    __init() {
+        lightIndex = 0;
+        packedGuidingPixels = 0;
+    }
+
+    __init(uint2 packedData) {
+        lightIndex = packedData.x;
+        packedGuidingPixels = packedData.y;
+    }
+
+    // Guiding pixels helper
+    property uint2 guidingPixels {
+        get { return int2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        set {
+            packedGuidingPixels = (newValue.x & 0xFFFF) | ((newValue.y & 0xFFFF) << 16);
+        }
+    }
+
+    uint2 pack()
+    {
+        return uint2(lightIndex, packedGuidingPixels);
+    }
+}
+
 struct ReservoirFlags {
     uint flags;
 
@@ -229,7 +258,7 @@ struct PathReservoir {
     }
 }
 
-// Reservoir for a CausticSample 112B
+// Reservoir for a CausticSample 64B
 struct CausticReservoir {
     PackedHitInfo sampleSurface;    // HitSample 16B
 
@@ -353,9 +382,14 @@ ShadingData loadShadingDataWithPrevHit(const HitInfo hit, const float3 prevPosW,
     return sd;
 }
 
-
+//Linearizes 2D index
 uint index2Dto1D(uint2 index, uint frameDimX) {
     return index.x + index.y * frameDimX;
+}
+
+//Reverse from above
+uint2 index1Dto2D(uint index, uint frameDimX) {
+    return uint2(index % frameDimX, index / frameDimX);
 }
 
 /* Evaluate MIS weight with balance heuristic

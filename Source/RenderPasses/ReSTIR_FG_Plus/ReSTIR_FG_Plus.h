@@ -7,6 +7,7 @@
 #include "Rendering/Lights/EnvMapSampler.h"
 
 #include "Rendering/AccelerationStructure/CustomAccelerationStructure.h"
+#include "Rendering/PhotonGuiding/PhotonGuiding.h"
 
 using namespace Falcor;
 
@@ -69,6 +70,7 @@ private:
         float photonGlobalRejection = 0.3f;             // Fixed probability that a global photon is not stored
         float photonASBuildBufferOverestimate = 1.15f; // Guard percentage for AS building (Uses (delayed) CPU Photon Counter to estimate)
 
+        bool usePhotonGuiding = true;                   //Enable Photon Guiding
         //
         // Camera Path Tracing Settings
         //
@@ -161,6 +163,7 @@ private:
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<RTXDI> mpRTXDI;         // Ptr to RTXDI for direct use
     RTXDI::Options mRTXDIOptions;           // Options for RTXDI
+    std::unique_ptr<PhotonGuiding> mpPhotonGuiding; //Photon Guiding
 
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
     std::unique_ptr<CustomAccelerationStructure> mpPhotonAS;      // Photon Accleration Structure
@@ -185,7 +188,7 @@ private:
     float3 mNeeLightSelectProb = float3(0.33f);                                              //Probability to select a NEE/Analytic/EnvMapSample
 
     //Trace Photon
-    uint mPhotonDispatchDim = 32;  //Dispatch Dims for photon.
+    uint2 mPhotonDispatchDim = uint2(32);  //Dispatch Dims for photon.
     float mApproximatePixelDiagonal = 1.f; //Approximated pixel diagonal used for adaptive radius. Updated every frame in tracePhoton
 
     //ReSTIR Reservoirs
@@ -229,12 +232,9 @@ private:
     ref<Texture> mpLightTraceHeadCounter;   //Screen size head buffer counter for light tracing to store the first hit
     ref<Buffer> mpLightTraceLinkedList;     //Linked List for light tracing
 
-    //Splatting
-    ref<Buffer> mpSplattingGlobalCounter;   //Counter used in Splatting
-    ref<Buffer> mpSplattingCellCounter;     //Per pixel cell counter
-    ref<Buffer> mpSplattingCellOffsets;     //Per pixel cell offsets
-    ref<Buffer> mpSplattingSortingData;     //Indices needed for sorting
-    ref<Buffer> mpSplattingSortedReservoirs;//Sorted reservoirs
+    //Photon Guiding additional resources
+    ref<Buffer> mpPhotonGuidingData[2];     //Extra photon data needed for guiding
+    ref<Texture> mpPhotonGuidingCausticReservoir[2]; //Extra data for caustic reservoirs
 
     //
     // Render Passes/Programs

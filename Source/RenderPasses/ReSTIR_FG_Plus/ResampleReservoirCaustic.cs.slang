@@ -31,8 +31,13 @@ StructuredBuffer<int> gLightTraceLinkedList; // next pointer
 RWStructuredBuffer<CausticReservoir> gCausticReservoir;
 RWTexture2D<int> gLightTraceHeadCounter; // Head index for the linked list
 
+// Photon Guiding (can be nullptr)
+RWTexture2D<float2> gCausticReservoirGuidingData;
+Texture2D<float2> gCausticReservoirGuidingDataPrev;
+
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
 float getSplattingMISWeight(float3 toCam, float distToCam, float3 camForward, CausticReservoir r, ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, out float jacobianWeight, out float targetFunction)
 {
@@ -54,6 +59,9 @@ void main(uint2 pixel: SV_DispatchThreadID)
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 4);
 
     CausticReservoir rCurr = gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)];
+    PhotonGuidingData pgd = PhotonGuidingData();
+    if (kUsePhotonGuiding)
+        pgd = PhotonGuidingData(gCausticReservoirGuidingData[pixel]);
 
     float wSum = 0;
     // Shift current to last frame using the previous camera
@@ -131,6 +139,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
                 rCurr = rPrev;
                 rCurr.targetFunction = targetFunction;
                 rCurr.subPixelJacobian = subPixelJacobian;
+                if (kUsePhotonGuiding)
+                    pgd = PhotonGuidingData(gCausticReservoirGuidingDataPrev[index1Dto2D(headIndex, gFrameDim.x)]);
             }
         }
         //Update head index for next iteration
@@ -169,4 +179,6 @@ void main(uint2 pixel: SV_DispatchThreadID)
     gCausticReservoir[index2Dto1D(pixel, gFrameDim.x)] = rCurr;
     // Reset head buffer for linked list
     gLightTraceHeadCounter[pixel] = -1;
+    if (kUsePhotonGuiding)
+        gCausticReservoirGuidingData[pixel] = pgd.pack();
 }

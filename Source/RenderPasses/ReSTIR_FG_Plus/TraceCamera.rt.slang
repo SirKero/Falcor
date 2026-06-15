@@ -30,6 +30,7 @@ Texture2D<float4> gView;
     //Photon Collection
     StructuredBuffer<PhotonData> gPhotonData[2];
     StructuredBuffer<AABB> gPhotonAABB[2];
+    StructuredBuffer<PhotonGuidingData> gPhotonGuidingData[2];
     RaytracingAccelerationStructure gPhotonAS;
 #endif
 
@@ -37,6 +38,7 @@ static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kEvalDeltaPdfs = EVAL_DELTA_PDFS;
 static const bool kUseEnvMap = USE_ENV_BACKGROUND;
 static const bool kDiffClassUseLobes = DIFF_CLASS_USE_LOBES;
+static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
 cbuffer CB
 {
@@ -238,6 +240,9 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyC
             continue;
 
         PhotonData photonData = gPhotonData[instanceIdx][primIdx];
+        PhotonGuidingData pgd = PhotonGuidingData();
+        if (kUsePhotonGuiding)
+            pgd = gPhotonGuidingData[instanceIdx][primIdx];
 
         // If direct global photons should be collected and the photon is global, check the path length
         if (collectOnlyDirectGlobal)
@@ -263,6 +268,7 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyC
             photonSample.F = F;
             photonSample.photonType = instanceIdx;
             photonSample.packedPhotonRetraceData = photonData.packPhotonRetraceData();
+            photonSample.packedGuidingData = pgd.pack();
         }
     }
 

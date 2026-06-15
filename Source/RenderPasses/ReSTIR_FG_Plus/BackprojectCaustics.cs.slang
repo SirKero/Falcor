@@ -8,7 +8,8 @@ import StructsAndHelpers;
 
 #ifndef BACKPROJECT_TMP_RESERVOIRS
 #define BACKPROJECT_TMP_RESERVOIRS 0
-#endif
+#endif
+
 #if BACKPROJECT_TMP_RESERVOIRS
     StructuredBuffer<CausticReservoir> gCausticReservoir;   //Temporal reservoir
 
@@ -16,10 +17,12 @@ import StructsAndHelpers;
     RWStructuredBuffer<int> gLightTraceLinkedList; // next pointer
 #else //Initialize initial Caustic Reservoir by using RIS on all backprojected light paths
     StructuredBuffer<int> gLightTraceLinkedList; // next pointer
-    StructuredBuffer<PhotonData> gPhotonData;    // Photon Dat
+    StructuredBuffer<PhotonData> gPhotonData;    // Photon Data
+    StructuredBuffer<PhotonGuidingData> gPhotonGuidingData; //Photon guiding data
     StructuredBuffer<PackedHitInfo> gPhotonHitInfo; //Hit Info
 
-    RWStructuredBuffer<CausticReservoir> gCausticReservoir; 
+    RWStructuredBuffer<CausticReservoir> gCausticReservoir;
+    RWTexture2D<float2> gCausticReservoirGuidingData; 
     RWTexture2D<int> gLightTraceHeadCounter; // Is cleared
 #endif
 
@@ -32,6 +35,7 @@ cbuffer CB
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
 // Backproject Temporal Caustic Reservoirs before resampling. Only used if photon path shift is disabled (e.g. static scenes)
 #if BACKPROJECT_TMP_RESERVOIRS
@@ -56,6 +60,7 @@ void backprojectTemporalCausticReservoirs(const uint2 pixel)
 void initializeCausticReservoir(const uint2 pixel)
 {
     CausticReservoir r = CausticReservoir();
+    PhotonGuidingData pgd = PhotonGuidingData();
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1);
     let lod = ExplicitLodTextureSampler(0);
     r.c = 1;
@@ -95,6 +100,8 @@ void initializeCausticReservoir(const uint2 pixel)
             r.subPixelJacobian = backprojectJacobian * dot(directionToCamera, sd.getOrientedFaceNormal()); //Cos normal is included in BSDF
             r.packedPhotonRetraceData = photonData.packPhotonRetraceData();
             r.targetFunction = targetFunction;
+            if (kUsePhotonGuiding)
+                pgd = gPhotonGuidingData[headIndex];
         }
 
         // Update head index
@@ -111,6 +118,8 @@ void initializeCausticReservoir(const uint2 pixel)
 
     gCausticReservoir[index2Dto1D(pixel, gScreenDims.x)] = r;
     gLightTraceHeadCounter[pixel] = -1; // Clear Head Counter
+    if (kUsePhotonGuiding)
+        gCausticReservoirGuidingData[pixel] = pgd.pack();
 }
 #endif // BACKPROJECT_TMP_RESERVOIRS
 [numthreads(16, 16, 1)]

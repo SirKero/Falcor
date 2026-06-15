@@ -7,6 +7,7 @@ import Utils.Math.MathHelpers;
 import Utils.Geometry.GeometryHelpers;
 import Utils.Sampling.SampleGenerator;
 import Rendering.Lights.LightHelpers;
+import Rendering.PhotonGuiding.PhotonGuiding;
 import StructsAndHelpers;
 
 cbuffer CB
@@ -16,11 +17,12 @@ cbuffer CB
     PackedPathLength gPackedPathLength;   // Packed Path Length
 
     float gGlobalRejectionProb; // Rejection Probability for global photons
-    uint gDispatchDimension;    // Dispatch dims (x,y identical) 
-    uint2 gScreenDimensions;    //Camera screen dimensions in pixels for backprojection
+    uint2 gDispatchDimension;   // Dispatch dims (x,y identical)
+    float gNormalizedPixelDiagonal; // Approximated pixel diagonal at distance 1
 
-    float gMixedLightsAnalyticProbability;  //Probablity that a analytic light is choosen when mixed lights are utilized
-    float gNormalizedPixelDiagonal;         //Approximated pixel diagonal at distance 1
+    uint2 gScreenDimensions; // Camera screen dimensions in pixels for backprojection
+    float gMixedLightsAnalyticProbability; // Probablity that a analytic light is choosen when mixed lights are utilized
+    uint _pad;
 }
 
 #if IS_SHIFT
@@ -32,6 +34,7 @@ cbuffer CB
 #else
     RWStructuredBuffer<AABB> gPhotonAABB[2];       //(Global/Caustic) AABBs for the Acceleration Structure
     RWStructuredBuffer<PhotonData> gPhotonData[2]; //(Global/Caustic) Photon Data
+    RWStructuredBuffer<PhotonGuidingData> gPhotonGuidingData[2]; //(Global/Caustic) Photon Guiding Data (can be nullptr)
     RWStructuredBuffer<PackedHitInfo> gPhotonHitInfo;   //Caustic Photon Hit Info for backprojection
     RWStructuredBuffer<uint> gPhotonCounter;            //Counter
 #endif
@@ -159,7 +162,7 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
     ls.dirW = woLocal.x * tangent + woLocal.y * bitangent + woLocal.z * ls.normal;
 
     //Divide by the number of light paths
-    ls.flux /= gDispatchDimension * gDispatchDimension;
+    ls.flux /= gDispatchDimension.x * gDispatchDimension.y;
     return true;
 }
 
@@ -225,9 +228,36 @@ void rayGen()
     RayDesc ray;
     PhotonLightSample pls;
 
-    if (!generateLightSample(sg, pls))
-        return;
-    
+    //Create a photon sample
+    #if USE_PHOTON_GUIDING
+        PhotonGuidingSample pgs = {};
+
+        //pgs.lightIndex = (PHOTON_GUIDING_TOTAL_LIGHT_COUNT - 1) * sampleNext1D(sg);
+        //pgs.directionUV = sampleNext2D(sg);
+        //pgs.photonFluxDivFactor = dispatchDims.x * dispatchDims.y;
+
+        if (!gPhotonGuiding.sampleGuidedLightAndDirection(pixel, dispatchDims.x, sampleNext2D(sg), pgs))
+            return;
+        PhotonGuidingPhotonLightSample pgpls = {};
+        if (!gPhotonGuiding.createPhotonSample(pgs, sg, pgpls))
+            return;
+
+        //Copy data 
+        pls.posW = pgpls.posW;
+        pls.normal = pgpls.normal;
+        pls.flux = pgpls.flux;
+        pls.dirW = pgpls.dirW;
+
+        // Store guiding data for the Photon
+        PhotonGuidingData pgd = PhotonGuidingData();
+        pgd.lightIndex = pgs.lightIndex;
+        pgd.guidingPixels = gPhotonGuiding.guidingMapUVToPixel(pgs.directionUV);
+    #else // USE_PHOTON_GUIDING
+
+        if (!generateLightSample(sg, pls))
+            return;
+
+    #endif
     //Prepare Ray and Payload
     ray.Origin = pls.posW;
     ray.Direction = pls.dirW;
@@ -307,6 +337,9 @@ void rayGen()
                         if (causticPhotonBackprojection(sd, gScreenDimensions, photonInsertIndex, gLightTraceHeadCounter, gLightTraceLinkedList))
                             gPhotonHitInfo[photonInsertIndex] = hit.getData();
                     }
+                    #if USE_PHOTON_GUIDING
+                        gPhotonGuidingData[photonTypeIdx][photonInsertIndex] = pgd;
+                    #endif
                 }
             }
             #endif // !IS_SHIFT
