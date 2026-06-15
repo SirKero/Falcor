@@ -6,25 +6,54 @@ import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import StructsAndHelpers;
 
-RWStructuredBuffer<CausticReservoir> gCausticReservoir;
+#ifndef BACKPROJECT_TMP_RESERVOIRS
+#define BACKPROJECT_TMP_RESERVOIRS 0
+#endif
+#if BACKPROJECT_TMP_RESERVOIRS
+    StructuredBuffer<CausticReservoir> gCausticReservoir;   //Temporal reservoir
 
-RWTexture2D<int> gLightTraceHeadCounter;     // Is cleared
-StructuredBuffer<int> gLightTraceLinkedList; // next pointer
-StructuredBuffer<PhotonData> gPhotonData;    // Photon Data
-StructuredBuffer<PackedHitInfo> gPhotonHitInfo; //Hit Info
+    RWTexture2D<int> gLightTraceHeadCounter;     //
+    RWStructuredBuffer<int> gLightTraceLinkedList; // next pointer
+#else //Initialize initial Caustic Reservoir by using RIS on all backprojected light paths
+    StructuredBuffer<int> gLightTraceLinkedList; // next pointer
+    StructuredBuffer<PhotonData> gPhotonData;    // Photon Dat
+    StructuredBuffer<PackedHitInfo> gPhotonHitInfo; //Hit Info
+
+    RWStructuredBuffer<CausticReservoir> gCausticReservoir; 
+    RWTexture2D<int> gLightTraceHeadCounter; // Is cleared
+#endif
 
 cbuffer CB
 {
     uint gFrameCount; // Current it for sample gen
-    uint gFrameDimX;                //Frame Dims in X for linear reservoir buffer offset
+    uint2 gScreenDims;                //Frame Dims in X for linear reservoir buffer offset
     float gNormalizedPixelArea;
 }
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
-[numthreads(16, 16, 1)]
-void main(uint2 pixel: SV_DispatchThreadID)
+// Backproject Temporal Caustic Reservoirs before resampling. Only used if photon path shift is disabled (e.g. static scenes)
+#if BACKPROJECT_TMP_RESERVOIRS
+void backprojectTemporalCausticReservoirs(const uint2 pixel)
+{
+    // Load caustic reservoir
+    const int reservoirIndex = index2Dto1D(pixel, gScreenDims.x);
+    CausticReservoir r = gCausticReservoir[reservoirIndex];
+    if (!r.isValid())
+        return;
+
+    HitInfo hit = HitInfo(r.sampleSurface);
+    let lod = ExplicitLodTextureSampler(0);
+    ShadingData sd = loadShadingData(hit, r.sampleSurfaceView, lod);
+
+    // Backproject Reservoir to camera lens
+    causticPhotonBackprojection(sd, gScreenDims, reservoirIndex, gLightTraceHeadCounter, gLightTraceLinkedList);
+}
+#else // BACKPROJECT_TMP_RESERVOIRS
+
+//Initialization of the caustic reservoir by collecting all backprojected light paths with RIS
+void initializeCausticReservoir(const uint2 pixel)
 {
     CausticReservoir r = CausticReservoir();
     SampleGenerator sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 1);
@@ -41,18 +70,18 @@ void main(uint2 pixel: SV_DispatchThreadID)
             break;
         PhotonData photonData = gPhotonData[headIndex];
 
-        //Init Material
+        // Init Material
         ShadingData sd = loadShadingData(photonHit, photonData.dir, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
 
-        //Get Camera backprojection PDF
+        // Get Camera backprojection PDF
         float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
         float distanceToCamera = length(directionToCamera);
         directionToCamera /= distanceToCamera;
         const float3 camForward = normalize(gScene.camera.data.cameraW);
         const float cameraPdf = getCameraBackprojectPDF(directionToCamera, distanceToCamera, camForward, gNormalizedPixelArea);
 
-        //Eval BSDF, targetFunction and reservoir weight
+        // Eval BSDF, targetFunction and reservoir weight
         const float3 bsdf = mi.eval(sd, directionToCamera, sg);
         float targetFunction = luminance(photonData.flux * bsdf);
         float w = targetFunction / cameraPdf;
@@ -80,6 +109,16 @@ void main(uint2 pixel: SV_DispatchThreadID)
     else
         r.wSum = 0;
 
-    gCausticReservoir[index2Dto1D(pixel, gFrameDimX)] = r;
-    gLightTraceHeadCounter[pixel] = -1; //Clear Head Counter
+    gCausticReservoir[index2Dto1D(pixel, gScreenDims.x)] = r;
+    gLightTraceHeadCounter[pixel] = -1; // Clear Head Counter
+}
+#endif // BACKPROJECT_TMP_RESERVOIRS
+[numthreads(16, 16, 1)]
+void main(uint2 pixel: SV_DispatchThreadID)
+{
+    #if BACKPROJECT_TMP_RESERVOIRS
+        backprojectTemporalCausticReservoirs(pixel);
+    #else
+        initializeCausticReservoir(pixel);
+    #endif
 }

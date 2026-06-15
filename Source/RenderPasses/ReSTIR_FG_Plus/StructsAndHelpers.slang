@@ -408,3 +408,32 @@ bool dispatchShadowRay(ShadingData sd, float3 toLight, float distanceToLight, bo
     const Ray ray = Ray(sd.computeNewRayOrigin(), toLight, 0.0, distance);
     return rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff);
 }
+
+// Backprojects caustic photons (or Reservoirs) back into the camera lens and performs a visibility test
+bool causticPhotonBackprojection(ShadingData sd, uint2 screenDims, int bufferIndex, RWTexture2D<int> headCounter, RWStructuredBuffer<int> linkedList)
+{
+    // Check if position is in camera view
+    float4 screenPos = mul(gScene.camera.getViewProj(), float4(sd.posW, 1));
+    screenPos /= screenPos.w;
+    screenPos.y *= -1;
+    screenPos.xy = screenPos.xy * 0.5 + 0.5; // UV from [-1,1] to [0,1]
+    if (any(screenPos.xy < 0) || any(screenPos.xy >= 1) || screenPos.z < 0 || screenPos.z > 1)
+        return false;
+
+    // If the photon is in screen it is assumed that it will contribute something
+    // Check visibility with ray query
+    float3 directionToCamera = gScene.camera.getPosition() - sd.posW;
+    float distanceToCamera = length(directionToCamera);
+    directionToCamera /= distanceToCamera;
+
+    float visRayDist = distanceToCamera - gScene.camera.data.nearZ; // Remove camera near
+    if(!dispatchShadowRay(sd, directionToCamera, visRayDist, false))
+        return false;
+
+    // Caustic photon is a valid sample, add to the linked list for the RIS pass later
+    uint2 currentPixel = uint2(floor(screenPos.xy * screenDims));
+    int nodeNext = -1;
+    InterlockedExchange(headCounter[currentPixel], bufferIndex, /*out*/ nodeNext);
+    linkedList[bufferIndex] = nodeNext;
+    return true;
+}

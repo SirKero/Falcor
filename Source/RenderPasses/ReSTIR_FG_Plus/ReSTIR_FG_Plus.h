@@ -89,7 +89,9 @@ private:
 
         float jacobianDistanceThreshold = 0.001f;          // Threshold for Jacobian distances
         float normalAngleThreshold = 0.6f;                 // Cosine of maximum angle between both normals allowed
-        float relativeDepthThreshold = 0.15f;              // (TODO)Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
+        float relativeDepthThreshold = 0.15f;              // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
+
+        bool shiftPhotonPaths = true;                     // Should photon paths be shifted (can be disables for static scenes)
 
         //
         // Material Options
@@ -137,8 +139,11 @@ private:
     //Reservoir Resampling for Path Reservoirs
     void resampleReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData, uint numPass);
 
-    //Shift for the caustic reservoirs
+    // Shift and backproject for the temporal caustic reservoirs
     void shiftCausticPathPass(RenderContext* pRenderContext, const RenderData& renderData);
+
+    // Backproject temporal caustic reservoirs
+    void backprojectTemporalCausticReservoirsPass(RenderContext* pRenderContext, const RenderData& renderData);
 
     //Reservoir Resampling for Caustic Reservoirs
     void resampleReservoirCausticPass(RenderContext* pRenderContext, const RenderData& renderData);
@@ -264,6 +269,7 @@ private:
     RayTraceProgramHelper mShiftCausticPathPass;        // Retrace the caustic path
 
     ref<ComputePass> mpBackprojectCausticSamplesPass;   // Backproject the caustic samples
+    ref<ComputePass> mpBackprojectTemporalCausticReservoirsPass;    //Backprojectes caustic temporal reservoirs if photon shift is disabled
     ref<ComputePass> mpResampleReservoirPass;           // Resampling Pass for the Path Reservoirs
     ref<ComputePass> mpResampleReservoirCausticPass;    // Resampling Pass for Caustic Reservoirs
     ref<ComputePass> mpEvaluateReservoirsPass;          // Evaluates ReSTIR DI and FG reservoirs

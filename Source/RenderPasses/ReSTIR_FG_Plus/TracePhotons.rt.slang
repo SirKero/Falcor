@@ -164,6 +164,7 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
 }
 
 //Backprojects the caustic photon and stores it in an linked list to collect all pixels caustic photons with RIS
+/*
 bool causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
 {
     // Check if position is in camera view
@@ -188,10 +189,11 @@ bool causticPhotonBackprojection(uint photonBufferIndex, ShadingData sd)
     // Caustic photon is a valid sample, add to the linked list for the RIS pass later
     uint2 currentPixel = uint2(floor(screenPos.xy * gScreenDimensions));
     int nodeNext = -1;
-    InterlockedExchange(gLightTraceHeadCounter[currentPixel], photonBufferIndex, /*out*/ nodeNext);
+    InterlockedExchange(gLightTraceHeadCounter[currentPixel], photonBufferIndex, nodeNext);
     gLightTraceLinkedList[photonBufferIndex] = nodeNext;
     return true;
 }
+*/
 
 [shader("miss")]
 void miss(inout RayPayload rayData: SV_RayPayload)
@@ -334,7 +336,7 @@ void rayGen()
                     gPhotonAABB[photonTypeIdx][photonInsertIndex] = photonAABB;
                     gPhotonData[photonTypeIdx][photonInsertIndex] = photon;
                     if (photonType == PhotonType::Caustic) {
-                        if (causticPhotonBackprojection(photonInsertIndex, sd))
+                        if (causticPhotonBackprojection(sd, gScreenDimensions, photonInsertIndex, gLightTraceHeadCounter, gLightTraceLinkedList))
                             gPhotonHitInfo[photonInsertIndex] = hit.getData();
                     }
                 }
@@ -370,14 +372,14 @@ void rayGen()
             {
                 if (storeAsCaustic)
                 {
-                    if (causticPhotonBackprojection(index2Dto1D(pixel, dispatchDims.x), sd))
+                    const int bufferIndex = index2Dto1D(pixel, dispatchDims.x);
+                    if (causticPhotonBackprojection(sd, gScreenDimensions, bufferIndex, gLightTraceHeadCounter, gLightTraceLinkedList))
                     {
                         causticReservoir.sampleSurface = hit.getData();
                         causticReservoir.sampleSurfaceView = photon.dir;
                         causticReservoir.photonRadiance = photon.flux;
                         shiftIsValid = true;
                     }
-                     
                 }
                 break;
             }
