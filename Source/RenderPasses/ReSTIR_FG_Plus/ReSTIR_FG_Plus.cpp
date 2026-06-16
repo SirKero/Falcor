@@ -310,7 +310,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
 
     mpRTXDI->beginFrame(pRenderContext, mScreenRes);
 
-    if (mOptions.usePhotonGuiding && !mpPhotonGuiding)
+    if (mOptions.usePhotonGuiding)
         mpPhotonGuiding->update(pRenderContext, mOptions.photonsDispatched);
 
     //Trace Photons and bulids the photon acceleration structure. Also backprojects caustic photons into the camera
@@ -364,6 +364,14 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     mTemporalCameraViewProjection = camData.viewProjMat;
     mTemporalCameraPosition = camData.posW;
     mTemporalCameraForward = math::normalize(camData.cameraW);
+
+    //Visualize Photon Guiding
+    if(mOptions.usePhotonGuiding)
+    {
+        ref<Texture> debugTex = renderData[kOutputDebug]->asTexture();
+        if(debugTex)
+            mpPhotonGuiding->renderDebugView(pRenderContext, debugTex);
+    }
 
     mFrameCount++;
     mReservoirIndex++;

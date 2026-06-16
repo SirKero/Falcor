@@ -532,6 +532,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     if (photonSample.photonType == kPhotonTypeIndexCaustic)
                         flags |= (uint)ReservoirPathFlags::isCaustic;
                     pathReservoir.packedPhotonRetraceData = photonSample.packedPhotonRetraceData;
+                    pathReservoir.packedGuidingData = photonSample.packedGuidingData;
 
                     if (isReconnectionSurface) //Final Gather with Reconnection
                     {
