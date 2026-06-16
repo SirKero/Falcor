@@ -10,8 +10,12 @@ import Utils.Math.MathHelpers;
 struct PhotonGuidingSample
 {
     uint lightIndex;           //Light Index
-    float2 directionUV;        // Random value in [0,1] for directional sampling
     float photonFluxDivFactor; // Scale factor the flux needs to be divided by, as guiding changes the probabilities
+
+    float2 directionUV;        // Random value in [0,1] for directional sampling
+
+    bool isLightGuiding;       // True if light guiding was used
+    uint _pad;
 };
 
 //A photon sampled from the scene
@@ -73,6 +77,18 @@ extension PhotonGuiding
     inline uint2 guidingMapUVToPixel(float2 guidingUV)
     {
         return uint2(floor(guidingUV * gResolutionGM));
+    }
+
+    /* Applies random subpixel jitter to a local guiding map and returns the local UV coordinates
+       \param[in] localPixel: Local pixel within a directional guiding map
+       \param[in] randomVal: Random variable in [0,1]
+       \return UV coordinates with subpixel jitter
+    */
+    inline float2 getUVWithSubpixelJitter(uint2 localPixel, float2 randomVal)
+    {
+        float2 uvMin = float2(localPixel) / gResolutionGM;     // UV of top-left of the choosen pixel
+        float2 uvMax = float2(localPixel + 1) / gResolutionGM; // UV of bottom-right of the choosen pixel
+        return (uvMin + (uvMax - uvMin) * randomVal);       // Final uv with random jitter within the pixel
     }
 
     /*  Records guiding contribution of a photon
@@ -180,9 +196,8 @@ extension PhotonGuiding
 
             // Create photon sample from the selected cell
             uint2 localIndex = dirTS.pixel % gResolutionGM; // Local index
-            float2 uvMin = float2(localIndex) / gResolutionGM;      //UV of top-left of the choosen pixel
-            float2 uvMax = float2(localIndex + 1) / gResolutionGM;  // UV of bottom-right of the choosen pixel
-            pgs.directionUV = uvMin + (uvMax - uvMin) * randomVal;  // Final uv with random jitter within the pixel
+            pgs.directionUV = getUVWithSubpixelJitter(localIndex, randomVal);
+
             // Divide factor for the lights flux. Total photon count cancels out, as a photon is divided by the number of light paths
             pgs.photonFluxDivFactor = float(dirTS.photonCount) * gResolutionGM * gResolutionGM;
         } else //Use a random direction instead to create the sample
@@ -190,6 +205,8 @@ extension PhotonGuiding
             pgs.directionUV = randomVal;
             pgs.photonFluxDivFactor = float(lightTS.photonCount); // Total Photon count cancels out, as a photon is divided by the number of light paths
         }
+
+        pgs.isLightGuiding = !useDirectionalGuiding;
 
         return true;
     }

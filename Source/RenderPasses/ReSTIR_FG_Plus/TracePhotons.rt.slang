@@ -30,6 +30,7 @@ cbuffer CB
         RWStructuredBuffer<PathReservoir> gPathReservoir;
     #elif IS_SHIFT_CAUSTIC
         RWStructuredBuffer<CausticReservoir> gCausticReservoir;
+        Texture2D<uint2> gCausticReservoirGuidingData;
     #endif
 #else
     RWStructuredBuffer<AABB> gPhotonAABB[2];       //(Global/Caustic) AABBs for the Acceleration Structure
@@ -232,12 +233,27 @@ void rayGen()
     #if USE_PHOTON_GUIDING
         PhotonGuidingSample pgs = {};
 
-        //pgs.lightIndex = (PHOTON_GUIDING_TOTAL_LIGHT_COUNT - 1) * sampleNext1D(sg);
-        //pgs.directionUV = sampleNext2D(sg);
-        //pgs.photonFluxDivFactor = dispatchDims.x * dispatchDims.y;
+        float2 randomVals = sampleNext2D(sg);
+        //!IS_SHIFT: Traverse the guiding textures
+        // IS_SHIFT: Load guiding light and direction from reservoir. Re-apply subpixel jitter. Light sampling can proceed as normal
+        #if IS_SHIFT
+            //Load guiding data
+            #if IS_SHIFT_PATH
+                PhotonGuidingData pgd = PhotonGuidingData(pathReservoir.packedGuidingData);
+            #elif IS_SHIFT_CAUSTIC
+                PhotonGuidingData pgd = PhotonGuidingData(gCausticReservoirGuidingData[pixel]);
+            #endif //IS_SHIFT_PATH/_CAUSTIC
+            //Fill PGS manually
+            pgs.lightIndex = pgd.lightIndex;
+            if (pgd.isLightGuiding)
+                pgs.directionUV = randomVals;
+            else
+                pgs.directionUV = getUVWithSubpixelJitter(pgd.guidingPixels, randomVals);
 
-        if (!gPhotonGuiding.sampleGuidedLightAndDirection(pixel, dispatchDims.x, sampleNext2D(sg), pgs))
-            return;
+        #else //IS_SHIFT
+            if (!gPhotonGuiding.sampleGuidedLightAndDirection(pixel, dispatchDims.x, randomVals, pgs))
+                return;
+        #endif
         PhotonGuidingPhotonLightSample pgpls = {};
         if (!gPhotonGuiding.createPhotonSample(pgs, sg, pgpls))
             return;
@@ -248,10 +264,14 @@ void rayGen()
         pls.flux = pgpls.flux;
         pls.dirW = pgpls.dirW;
 
-        // Store guiding data for the Photon
+        // Store guiding data for the Photon. Unused for shifts
+        #if !IS_SHIFT
         PhotonGuidingData pgd = PhotonGuidingData();
         pgd.lightIndex = pgs.lightIndex;
         pgd.guidingPixels = gPhotonGuiding.guidingMapUVToPixel(pgs.directionUV);
+        pgd.lightSelectProb = pgs.photonFluxDivFactor;
+        pgd.isLightGuiding = pgs.isLightGuiding;
+        #endif
     #else // USE_PHOTON_GUIDING
 
         if (!generateLightSample(sg, pls))

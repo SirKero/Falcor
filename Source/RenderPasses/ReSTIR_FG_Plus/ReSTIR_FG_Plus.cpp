@@ -529,7 +529,7 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         if(!mpPhotonGuidingData[i] && mOptions.usePhotonGuiding)
         {
             mpPhotonGuidingData[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint) * 2, photonBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(uint) * 4, photonBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonGuidingData[i]->setName("PhotonGuidingData" + std::to_string(i));

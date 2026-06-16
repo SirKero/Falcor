@@ -22,7 +22,7 @@ import StructsAndHelpers;
     StructuredBuffer<PackedHitInfo> gPhotonHitInfo; //Hit Info
 
     RWStructuredBuffer<CausticReservoir> gCausticReservoir;
-    RWTexture2D<float2> gCausticReservoirGuidingData; 
+    RWTexture2D<uint2> gCausticReservoirGuidingData; 
     RWTexture2D<int> gLightTraceHeadCounter; // Is cleared
 #endif
 

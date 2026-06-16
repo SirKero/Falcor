@@ -32,8 +32,8 @@ RWStructuredBuffer<CausticReservoir> gCausticReservoir;
 RWTexture2D<int> gLightTraceHeadCounter; // Head index for the linked list
 
 // Photon Guiding (can be nullptr)
-RWTexture2D<float2> gCausticReservoirGuidingData;
-Texture2D<float2> gCausticReservoirGuidingDataPrev;
+RWTexture2D<uint2> gCausticReservoirGuidingData;
+Texture2D<uint2> gCausticReservoirGuidingDataPrev;
 
 static const uint kRNGNumPasses = RNG_NUM_PASSES;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;

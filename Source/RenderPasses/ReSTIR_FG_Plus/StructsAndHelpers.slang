@@ -22,14 +22,14 @@ enum class PhotonType // : uint32_t
 };
 
 enum ReservoirPathFlags : uint {
-    firstHitIsDelta = 0x100,               // 1<<8
-    hasNoReconnectionSurface = 0x200,      // 1<<9
-    isFinalGather = 0x400,                 // 1<<10
-    isEmissiveHit = 0x800,                 // 1<<11
-    isEnvMapHit = 0x1000,                  // 1<<12
-    isRadianceEstimate = 0x2000,           // 1<<13
-    isCaustic = 0x4000,                    // 1<<14
-    isNEE = 0x8000,                        // 1<<15
+    firstHitIsDelta = 0x10000,             // 1<<16
+    hasNoReconnectionSurface = 0x20000,    // 1<<17
+    isFinalGather = 0x40000,               // 1<<18
+    isEmissiveHit = 0x80000,               // 1<<19
+    isEnvMapHit = 0x100000,                // 1<<20
+    isRadianceEstimate = 0x200000,         // 1<<21
+    isCaustic = 0x400000,                  // 1<<22
+    isNEE = 0x800000,                      // 1<<23
 }
 
 //
@@ -85,22 +85,46 @@ struct PhotonGuidingData
 {
     uint lightIndex;
     uint packedGuidingPixels;
+    float lightSelectProb;
+    uint _pad;
 
     __init() {
         lightIndex = 0;
         packedGuidingPixels = 0;
+        lightSelectProb = 0.0;
+        _pad = 0;
     }
 
     __init(uint2 packedData) {
         lightIndex = packedData.x;
         packedGuidingPixels = packedData.y;
+        lightSelectProb = 0.0;
+        _pad = 0;
+    }
+
+    __init(uint2 packedData, float lightProb) {
+        lightIndex = packedData.x;
+        packedGuidingPixels = packedData.y;
+        lightSelectProb = lightProb;
+        _pad = 0;
     }
 
     // Guiding pixels helper
     property uint2 guidingPixels {
-        get { return int2(packedGuidingPixels & 0xFFFF, (packedGuidingPixels >> 16) & 0xFFFF); }
+        get { return uint2(packedGuidingPixels & 0xFFF, (packedGuidingPixels >> 12) & 0xFFF); }
         set {
-            packedGuidingPixels = (newValue.x & 0xFFFF) | ((newValue.y & 0xFFFF) << 16);
+            packedGuidingPixels &= 0xFF000000; //Clear lower bits
+            packedGuidingPixels |= (newValue.x & 0xFFF) | ((newValue.y & 0xFFF) << 12);
+        }
+    }
+
+    property bool isLightGuiding
+    {
+        get { return ((packedGuidingPixels >> 25) & 1) > 0;}
+        set {
+            packedGuidingPixels &= ~(1<<25); // Clear bit
+            if (newValue)
+                packedGuidingPixels |= 1 << 25;
         }
     }
 
@@ -120,7 +144,7 @@ struct ReservoirFlags {
     // Replaces path flag. Assumes that it is already or'ed
     [mutating]
     void setReservoirPathFlags(uint pathFlag) {
-        flags &= ~0xFF00; // Clear all flag bits
+        flags &= 0xFFFF; // Clear all flag bits
         flags |= pathFlag;
     }
 
@@ -129,6 +153,14 @@ struct ReservoirFlags {
         set {
             flags &= ~0xFF; // Clear lower bits
             flags |= (newValue & 0xFF);
+        }
+    }
+
+    property uint confidence {
+        get { return (flags & 0xFF00)>>8; }
+        set {
+            flags &= ~0xFF00; // Clear  bits
+            flags |= (newValue & 0xFF)<<8;
         }
     }
 
@@ -208,10 +240,10 @@ struct PathReservoir {
     float2 packedSampleNormal;
 
     float3 F;                  // Complete radiance of the path
-    uint c;                    // Confidence Weight
-
-    float3 fgRadiance;         // Radiance estimate for the final gather point. Can be reused
     float weight;              // Unbiased contribution weight
+
+    float3 fgRadiance;                // Radiance estimate for the final gather point. Can be reused
+    uint _pad;                         // Confidence Weight
 
     uint2 packedPhotonRetraceData;   // Packed sample generator and path length for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
     uint2 packedGuidingData;   // Packed data needed for guiding. Unused if guiding is disabled 
@@ -226,6 +258,7 @@ struct PathReservoir {
         c = 1;
         fgRadiance = float3(0);
         weight = 0.0;
+        _pad = 0;
         packedPhotonRetraceData = uint2(0);
         packedGuidingData = uint2(0);
     }
@@ -235,6 +268,11 @@ struct PathReservoir {
     property uint pathLength {
         get { return flags.pathLength; }
         set { flags.pathLength = newValue;}
+    }
+
+    property uint c {
+        get { return flags.confidence; }
+        set { flags.confidence = newValue;}
     }
 
     property float3 samplePosW {
