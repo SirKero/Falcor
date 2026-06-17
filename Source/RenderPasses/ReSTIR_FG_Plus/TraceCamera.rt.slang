@@ -510,10 +510,11 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                                 float scatterPdf = mi.evalPdf(sd, ls.dir);
                                 misWeight = evalMIS(1.0, ls.pdf, 1.0, scatterPdf);
                             }
+
                             pd.F = ls.Li * misWeight; // BSDF and thp is added later
                             toSample = ls.dir;
                             distToSample = ls.distance;
-                            isFinalGatherOrNEE = true;
+                            isFinalGatherOrNEE = any(pd.F > 0);
                         }
                     }
 
@@ -696,6 +697,10 @@ void shiftCameraReservoir()
     float3 viewDir = gView[pixel].xyz;
     PathReservoir pathReservoir = gPathReservoir[index2Dto1D(reservoirPixel, dispatchDims.x)];
 
+    // Swap back the write index
+    if (kShiftIsCurrent)
+        pixel = reservoirPixel;
+
     // When first hit is valid
     float4 shiftData = float4(0);
     if (hitInfo.isValid() && pathReservoir.isValid() && pathReservoir.pathLength >= 1)
@@ -704,7 +709,6 @@ void shiftCameraReservoir()
         PathData pd = PathData();
         pd.sg = SampleGenerator(pixel, gFrameCount * kRNGNumPasses + 6 + (gNumResamplingPass * 3)); // BSDF SG
         pd.dirSG = pathReservoir.sgPathDirections;
-
         //Init first hit surface
         let lod = ExplicitLodTextureSampler(0);
         ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
@@ -723,10 +727,6 @@ void shiftCameraReservoir()
 
         shiftData = float4(pd.F, pd.jacobian);
     }
-
-    //Swap back the write index
-    if (kShiftIsCurrent)
-        pixel = reservoirPixel;
 
     gShiftData[pixel] = shiftData;
 }

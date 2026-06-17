@@ -59,8 +59,8 @@ private:
         //
         PathLengthSettings photonPathLenght = {};       //Photon Path Length
         uint photonsDispatched = 1000000;               //Number of photons, that are distributed each frame
-        uint photonBufferSizeGlobal = 1000000;          //Maximum global photons that can be stored
-        uint photonBufferSizeCaustic = 1000000;         //Maximum caustic photons that can be stored
+        uint photonBufferSizeGlobal = 2000000;          //Maximum global photons that can be stored
+        uint photonBufferSizeCaustic = 2000000;         //Maximum caustic photons that can be stored
         float photonMixedLightRatio = 0.5f;             //Ratio if both analytic and emissive lights are used. 0 -> 0% Analytic, 100% Emissive
         //Radius
         bool photonUseAdaptiveRadius = true;            //Uses a photon radius that is dependent on the (linear) distance to the camera

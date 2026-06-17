@@ -62,7 +62,7 @@ namespace Falcor
 
             bool useDynamicPMin = false;    //TODO
 
-            bool debugEnable = true;    //Debug view
+            bool debugEnable = false;    //Debug view
             bool debugSelectLightHelperMode = false; //Helper mode to select light
             float3 debugSelectLightHelperModeColor = float3(0,0,1); //Helper mode color
             int debugSelectedLightIndex = -1;   // Selected Light index
