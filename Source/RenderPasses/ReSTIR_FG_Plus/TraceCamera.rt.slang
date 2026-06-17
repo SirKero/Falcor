@@ -189,10 +189,15 @@ struct PathData {
 struct PhotonSample {
     float3 posW;
     float radius;
+
     float3 F;
     uint photonType;
+
     uint2 packedPhotonRetraceData;    // Packed sample generator for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
     uint2 packedGuidingData; // Packed data needed for guiding. Unused if guiding is disabled
+
+    float invPhotonScaleFactor;
+    uint _pad;
 
     __init() {
         posW = float3(0);
@@ -201,6 +206,8 @@ struct PhotonSample {
         F = float3(0);
         packedPhotonRetraceData = uint2(0);
         packedGuidingData = uint2(0);
+        invPhotonScaleFactor = 1.0;
+        _pad = 0;
     }
 }
 
@@ -269,6 +276,7 @@ void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyC
             photonSample.photonType = instanceIdx;
             photonSample.packedPhotonRetraceData = photonData.packPhotonRetraceData();
             photonSample.packedGuidingData = pgd.pack();
+            photonSample.invPhotonScaleFactor = photonData.invPhotonScaleFactor;
         }
     }
 
@@ -532,6 +540,7 @@ void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir
                     if (photonSample.photonType == kPhotonTypeIndexCaustic)
                         flags |= (uint)ReservoirPathFlags::isCaustic;
                     pathReservoir.packedPhotonRetraceData = photonSample.packedPhotonRetraceData;
+                    pathReservoir.invPhotonScaleFactor = photonSample.invPhotonScaleFactor;
                     pathReservoir.packedGuidingData = photonSample.packedGuidingData;
 
                     if (isReconnectionSurface) //Final Gather with Reconnection

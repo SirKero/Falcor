@@ -43,7 +43,7 @@ struct PhotonData {
     float3 dir;                           // Incoming direction
     uint sgSeed;                          // Seed used to initialize the sample generator (for photon shift)
     float3 faceN;                         // World face normal of the hit surface
-    uint _pad;
+    float invPhotonScaleFactor;          // Light selection probability and number of light paths used to generate the photon
 
     __init() {
         this.dir = float3(0);
@@ -51,7 +51,7 @@ struct PhotonData {
         this.flux = float3(0);
         this.packedSGStartPixelAndPathLength = 0;
         this.sgSeed = 0;
-        this._pad = 0;
+        this.invPhotonScaleFactor = 1;
     }
 
     //Helper to get path length
@@ -85,28 +85,15 @@ struct PhotonGuidingData
 {
     uint lightIndex;
     uint packedGuidingPixels;
-    float lightSelectProb;
-    uint _pad;
 
     __init() {
         lightIndex = 0;
         packedGuidingPixels = 0;
-        lightSelectProb = 0.0;
-        _pad = 0;
     }
 
     __init(uint2 packedData) {
         lightIndex = packedData.x;
         packedGuidingPixels = packedData.y;
-        lightSelectProb = 0.0;
-        _pad = 0;
-    }
-
-    __init(uint2 packedData, float lightProb) {
-        lightIndex = packedData.x;
-        packedGuidingPixels = packedData.y;
-        lightSelectProb = lightProb;
-        _pad = 0;
     }
 
     // Guiding pixels helper
@@ -242,8 +229,8 @@ struct PathReservoir {
     float3 F;                  // Complete radiance of the path
     float weight;              // Unbiased contribution weight
 
-    float3 fgRadiance;                // Radiance estimate for the final gather point. Can be reused
-    uint _pad;                         // Confidence Weight
+    float3 fgRadiance;          // Radiance estimate for the final gather point. Can be reused
+    float invPhotonScaleFactor; // Light selection probability and number of light paths used to generate the photon
 
     uint2 packedPhotonRetraceData;   // Packed sample generator and path length for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
     uint2 packedGuidingData;   // Packed data needed for guiding. Unused if guiding is disabled 
@@ -258,7 +245,7 @@ struct PathReservoir {
         c = 1;
         fgRadiance = float3(0);
         weight = 0.0;
-        _pad = 0;
+        invPhotonScaleFactor = 1;
         packedPhotonRetraceData = uint2(0);
         packedGuidingData = uint2(0);
     }
@@ -300,15 +287,16 @@ struct PathReservoir {
 struct CausticReservoir {
     PackedHitInfo sampleSurface;    // HitSample 16B
 
-    float3 sampleSurfaceView;       // Incoming View
+    float2 packedSurfaceView;       // Incoming View in octahedrac encoding
     float wSum;                     // W and wSum
+    uint c;                         // Confidence weight
 
     float3 photonRadiance;          // Radiance
     float subPixelJacobian;         // Sub pixel jacobian for reprojection
 
-    uint2 packedPhotonRetraceData;  // Packed sample generator and path length for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
-    uint c;                         // Confidence weight
-    float targetFunction;           // Target Function for the current reservoir
+    float targetFunction;               // Target Function for the current reservoir
+    uint2 packedPhotonRetraceData;      // Packed sample generator and path length for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
+    float invPhotonScaleFactor; // Light selection probability and number of light paths used to generate the photon
 
     __init() {
         sampleSurface = {};
@@ -319,11 +307,18 @@ struct CausticReservoir {
         packedPhotonRetraceData = uint2(0);
         subPixelJacobian = 0;
         targetFunction = 0;
+        invPhotonScaleFactor = 1;
     }
 
     // Valid check
     bool isValid() {
         return any(photonRadiance > 0) && wSum > 0 && subPixelJacobian > 0;
+    }
+
+    // Helper to pack/unpack the incomming view vector with octahedral mapping
+    property float3 sampleSurfaceView {
+        get { return oct_to_ndir_snorm(packedSurfaceView);}
+        set { packedSurfaceView = ndir_to_oct_snorm(newValue);}
     }
 }
 

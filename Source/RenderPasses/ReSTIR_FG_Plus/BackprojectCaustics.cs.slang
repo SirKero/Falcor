@@ -99,6 +99,7 @@ void initializeCausticReservoir(const uint2 pixel)
             r.photonRadiance = photonData.flux;
             r.subPixelJacobian = backprojectJacobian * dot(directionToCamera, sd.getOrientedFaceNormal()); //Cos normal is included in BSDF
             r.packedPhotonRetraceData = photonData.packPhotonRetraceData();
+            r.invPhotonScaleFactor = photonData.invPhotonScaleFactor;
             r.targetFunction = targetFunction;
             if (kUsePhotonGuiding)
                 pgd = gPhotonGuidingData[headIndex];

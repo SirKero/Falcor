@@ -91,9 +91,10 @@ float getPhotonRadius(const uint photonTypeIdx, const float3 hitPos)
     return adaptiveRadius * gPhotonRadius[photonTypeIdx];
 }
 
-bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
+bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls, out float invPhotonScaleFactor)
 {
     ls = {};
+    invPhotonScaleFactor = 1.0;
 
     float3 woLocal = float3(0);
     bool isEmissive = kUseEmissive;
@@ -123,10 +124,10 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
         woLocal = sample_cosine_hemisphere_concentric(sampleNext2D(sg), lightDirPDF);
         if (lightDirPDF <= 0.) // Invalid direction
             return false;
-        ls.flux *= M_PI;               // Lambert Emitter (or reduced cos/pdf)
-        ls.flux *= lightCount;         // Inv light select pdf
+        ls.flux *= M_PI;                    // Lambert Emitter (or reduced cos/pdf)
+        invPhotonScaleFactor /= lightCount;         // Inv light select pdf
         if (kUseAnalytic && kUseEmissive)
-            ls.flux /= 1.0 - gMixedLightsAnalyticProbability; // Probability to select an emissive light
+            invPhotonScaleFactor *= 1.0 - gMixedLightsAnalyticProbability; // Probability to select an emissive light
     } else
     {
         const uint lightCount = gScene.getLightCount();
@@ -151,9 +152,9 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
         ls.normal = lightData.dirW;
         ls.posW = lightData.posW;
         ls.flux = lightData.intensity * invLightPdf;
-        ls.flux *= lightCount; // Inv light select pdf
+        invPhotonScaleFactor /= lightCount; // Inv light select pdf
         if (kUseAnalytic && kUseEmissive)
-            ls.flux /= gMixedLightsAnalyticProbability; // Probability to select an emissive light
+            invPhotonScaleFactor *= gMixedLightsAnalyticProbability; // Probability to select an emissive light
     }
 
     // Local to world direction
@@ -162,8 +163,8 @@ bool generateLightSample(inout SampleGenerator sg, out PhotonLightSample ls)
     float3 tangent = cross(bitangent, ls.normal);
     ls.dirW = woLocal.x * tangent + woLocal.y * bitangent + woLocal.z * ls.normal;
 
-    //Divide by the number of light paths
-    ls.flux /= gDispatchDimension.x * gDispatchDimension.y;
+    // Add number of photon paths to probability
+    invPhotonScaleFactor *= gDispatchDimension.x * gDispatchDimension.y;
     return true;
 }
 
@@ -228,6 +229,7 @@ void rayGen()
 
     RayDesc ray;
     PhotonLightSample pls;
+    float invPhotonScaleFactor = 1.0; // Light selection probabilty and number of light paths
 
     //Create a photon sample
     #if USE_PHOTON_GUIDING
@@ -240,15 +242,17 @@ void rayGen()
             //Load guiding data
             #if IS_SHIFT_PATH
                 PhotonGuidingData pgd = PhotonGuidingData(pathReservoir.packedGuidingData);
+                pgs.photonFluxDivFactor = pathReservoir.invPhotonScaleFactor;
             #elif IS_SHIFT_CAUSTIC
                 PhotonGuidingData pgd = PhotonGuidingData(gCausticReservoirGuidingData[pixel]);
+                pgs.photonFluxDivFactor = causticReservoir.invPhotonScaleFactor;
             #endif //IS_SHIFT_PATH/_CAUSTIC
             //Fill PGS manually
             pgs.lightIndex = pgd.lightIndex;
             if (pgd.isLightGuiding)
                 pgs.directionUV = randomVals;
             else
-                pgs.directionUV = getUVWithSubpixelJitter(pgd.guidingPixels, randomVals);
+                pgs.directionUV = gPhotonGuiding.getUVWithSubpixelJitter(pgd.guidingPixels, randomVals);
 
         #else //IS_SHIFT
             if (!gPhotonGuiding.sampleGuidedLightAndDirection(pixel, dispatchDims.x, randomVals, pgs))
@@ -263,20 +267,30 @@ void rayGen()
         pls.normal = pgpls.normal;
         pls.flux = pgpls.flux;
         pls.dirW = pgpls.dirW;
+        invPhotonScaleFactor = pgs.photonFluxDivFactor; //Store div factor
 
         // Store guiding data for the Photon. Unused for shifts
         #if !IS_SHIFT
         PhotonGuidingData pgd = PhotonGuidingData();
         pgd.lightIndex = pgs.lightIndex;
         pgd.guidingPixels = gPhotonGuiding.guidingMapUVToPixel(pgs.directionUV);
-        pgd.lightSelectProb = pgs.photonFluxDivFactor;
         pgd.isLightGuiding = pgs.isLightGuiding;
         #endif
     #else // USE_PHOTON_GUIDING
 
-        if (!generateLightSample(sg, pls))
-            return;
+        if (!generateLightSample(sg, pls, invPhotonScaleFactor))
+                return;
 
+        //For shift, reuse the scale factor stored in the reservoir
+        #if IS_SHIFT
+            #if IS_SHIFT_PATH
+                pls.flux /= pathReservoir.invPhotonScaleFactor;
+            #elif IS_SHIFT_CAUSTIC
+                pls.flux /= causticReservoir.invPhotonScaleFactor;
+            #endif
+        #else
+            pls.flux /= invPhotonScaleFactor;
+        #endif
     #endif
     //Prepare Ray and Payload
     ray.Origin = pls.posW;
@@ -295,6 +309,7 @@ void rayGen()
     //Store sample generator data
     photon.sgStartPixel = pixel;
     photon.sgSeed = gFrameCount * kRNGNumPasses;
+    photon.invPhotonScaleFactor = invPhotonScaleFactor;
 
     uint maxPathLength = gPackedPathLength.pathLength; 
     #if IS_SHIFT

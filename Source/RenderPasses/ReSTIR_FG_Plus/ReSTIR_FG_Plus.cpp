@@ -529,7 +529,7 @@ void ReSTIR_FG_Plus::prepareResources(RenderContext* pRenderContext, const Rende
         if(!mpPhotonGuidingData[i] && mOptions.usePhotonGuiding)
         {
             mpPhotonGuidingData[i] = Buffer::createStructured(
-                mpDevice, sizeof(uint) * 4, photonBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
+                mpDevice, sizeof(uint) * 2, photonBufferSize, ResourceBindFlags::ShaderResource | ResourceBindFlags::UnorderedAccess,
                 Buffer::CpuAccess::None, nullptr, false
             );
             mpPhotonGuidingData[i]->setName("PhotonGuidingData" + std::to_string(i));
@@ -963,6 +963,9 @@ void ReSTIR_FG_Plus::shiftPhotonPathPass(RenderContext* pRenderContext, const Re
         defines.add("USE_ANALYTIC_LIGHTS", mpScene->useAnalyticLights()? "1" : "0");
         defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
         defines.add(getMaterialDefines());
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
+        if(mOptions.usePhotonGuiding)
+            defines.add(mpPhotonGuiding->getDefines());
 
         return defines;
     };
@@ -1006,7 +1009,10 @@ void ReSTIR_FG_Plus::shiftPhotonPathPass(RenderContext* pRenderContext, const Re
     FALCOR_ASSERT(mShiftPhotonPathPass.pVars);
     auto var = mShiftPhotonPathPass.pVars->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var);
-        
+
+    if(mOptions.usePhotonGuiding)
+        mpPhotonGuiding->setShaderData(var);
+
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPhotonRadius"] = mOptions.photonUseAdaptiveRadius ? mOptions.photonAdaptiveRadius : mOptions.photonRadius;
@@ -1190,6 +1196,10 @@ void ReSTIR_FG_Plus::shiftCausticPathPass(RenderContext* pRenderContext, const R
         defines.add("USE_EMISSIVE_LIGHTS", mpScene->useEmissiveLights()? "1" : "0");
         defines.add("USE_ANALYTIC_LIGHTS", mpScene->useAnalyticLights()? "1" : "0");
         defines.add("USE_ADAPTIVE_PHOTON_RADIUS", mOptions.photonUseAdaptiveRadius ? "1" : "0");
+        defines.add("USE_PHOTON_GUIDING", mOptions.usePhotonGuiding ? "1" : "0");
+        if(mOptions.usePhotonGuiding)
+            defines.add(mpPhotonGuiding->getDefines());
+
         defines.add(getMaterialDefines());
 
         return defines;
@@ -1234,6 +1244,8 @@ void ReSTIR_FG_Plus::shiftCausticPathPass(RenderContext* pRenderContext, const R
     FALCOR_ASSERT(mShiftCausticPathPass.pVars);
     auto var = mShiftCausticPathPass.pVars->getRootVar();
     mpScene->setRaytracingShaderData(pRenderContext, var);
+    if(mOptions.usePhotonGuiding)
+        mpPhotonGuiding->setShaderData(var);
         
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
@@ -1249,6 +1261,8 @@ void ReSTIR_FG_Plus::shiftCausticPathPass(RenderContext* pRenderContext, const R
     var["gCausticReservoir"] = mpCausticReservoir[(mFrameCount + 1) % 2]; //Temporal Reservoir
     var["gLightTraceHeadCounter"] = mpLightTraceHeadCounter;
     var["gLightTraceLinkedList"] = mpLightTraceLinkedList;
+    if(mOptions.usePhotonGuiding)
+        var["gCausticReservoirGuidingData"] = mpPhotonGuidingCausticReservoir[(mFrameCount + 1) % 2]; //Temporal guiding data
 
     //Dispatch raytracing shader
     mpScene->raytrace(pRenderContext, mShiftCausticPathPass.pProgram.get(), mShiftCausticPathPass.pVars, uint3(mScreenRes.x, mScreenRes.y, 1));
