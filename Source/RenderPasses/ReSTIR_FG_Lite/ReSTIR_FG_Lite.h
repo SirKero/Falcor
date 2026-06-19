@@ -129,6 +129,9 @@ private:
 
     //Photon Guiding
     bool mUsePhotonGuiding = true;
+    bool mUseAdaptiveRadius = true;
+    float2 mPhotonAdaptiveRadius = float2(4.f, 2.f); //(Global|Caustic) Pixel Size scale for adptive radius
+    float mApproximatePixelDiagonal = 1.f; //Approximated pixel diagonal used for adaptive radius. Updated every frame in tracePhoton
 
     bool mDebugDisableFinalGather = false;      //If disabled, final gather contribtuion is not added to final color
     bool mDebugDisableCaustic = false;          //If disabled, caustic contribtuion is not added to final color

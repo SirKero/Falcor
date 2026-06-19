@@ -134,10 +134,24 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
 
             groupGen.separator();
         }
-        group.text("Photon Radius(Global / Caustic):");
-        group.indent(10.f);
-        group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
-        group.indent(-10.f);
+
+         //Radius Setting
+        changed |= group.checkbox("Use Adaptive Photon Radius", mUseAdaptiveRadius);
+        group.tooltip("Enables adaptive photon radius, that is equal to the projected camera pixel size, which depends on the distance from the camera to the hit point");
+        if(mUseAdaptiveRadius)
+        {
+            group.text("Adaptive Scale(Global / Caustic):");
+            group.indent(10.f);
+            group.var(" ##PhotonRadiusScale", mPhotonAdaptiveRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
+            group.indent(-10.f);
+        }else
+        {
+            group.text("Photon Radius(Global / Caustic):");
+            group.indent(10.f);
+            group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
+            group.indent(-10.f);
+        }
+        
 
     }
 
@@ -528,6 +542,7 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_GLOBAL", std::to_string(mNumMaxPhotons[0]));
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
+    mTracePhotonPass.pProgram->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptiveRadius ? "1" : "0");
     mTracePhotonPass.pProgram->addDefine("USE_PHOTON_GUIDING", mUsePhotonGuiding ? "1" : "0");
     mTracePhotonPass.pProgram->addDefines(getMaterialDefines());
     if (mpEmissiveLightSampler)
@@ -561,13 +576,28 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
 
         shaderDispatchDims = uint2(std::max(32u, static_cast<uint>(std::floor(sqrt(dispatchedPhotons)))));
     }
+
+    //Photon Radius pixel diagonal at length 1
+    if (mUseAdaptiveRadius)
+    {
+        // Update Image plane distance
+        auto& cameraData = mpScene->getCamera()->getData();
+        // Get normalized pixel area
+        float h = cameraData.frameHeight / cameraData.focalLength; //Normalized Frame height
+        float w = h * cameraData.aspectRatio;
+        float wPix = w / mScreenRes.x;
+        float hPix = h / mScreenRes.y;
+
+        mApproximatePixelDiagonal = sqrt((wPix * wPix) + (hPix * hPix));
+    }
     
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
-    var["CB"]["gPhotonRadius"] = mPhotonRadius;
+    var["CB"]["gPhotonRadius"] = mUseAdaptiveRadius ? mPhotonAdaptiveRadius :  mPhotonRadius;
     var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gUseAnalyticLights"] = analyticOnly;
+    var["CB"]["gNormalizedPixelDiagonal"] = mApproximatePixelDiagonal;
 
     //Structures
     if (mpEmissiveLightSampler)

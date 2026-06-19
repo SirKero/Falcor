@@ -34,10 +34,6 @@ Texture2D<uint2> gCausticReservoirGuidingDataPrev;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
-inline float getPhotonRadius(ReservoirCaustic r) {
-    return r.pathLength == 0 ? gPhotonRadius.y : gPhotonRadius.x;
-}
-
 /*  Generalized Balance Heuristic with two samples
     \param[in] Reservoir which sample is used for MIS
     \param[in] Shading data of the resampling surface from the other sample
@@ -48,7 +44,7 @@ inline float getPhotonRadius(ReservoirCaustic r) {
 float generalizedBalanceHeuristic(ReservoirCaustic r, ShadingData otherSD, BSDFProperties otherProps, uint otherC) {
     float p0 = r.targetFunction * r.c;
     float p1 = 0;
-    if (length(otherSD.posW - r.photonPosW) < getPhotonRadius(r))   //Check if sample could have been collected from the surface of the other reservoir
+    if (length(otherSD.posW - r.photonPosW) < r.sampleRadius)   //Check if sample could have been collected from the surface of the other reservoir
         p1 = evalApproximateBRDFPhoton(otherSD, otherProps, r.photonDir) * luminance(r.photonRadiance) * otherC;
 
     float sum = (p0 + p1);
@@ -74,8 +70,8 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
     //Check if surfaces are similar and resampling can be performed
     bool normalThreshold = dot(otherSD.faceN, currentSD.faceN) < gNormalThreshold;
     bool pathThreshold = (other.pathLength != current.pathLength);
-    bool surfacesPosThreshold = length(currentSD.posW - otherSD.posW) >= (2 * getPhotonRadius(current));
-    if (normalThreshold || pathThreshold || surfacesPosThreshold)
+    //bool surfacesPosThreshold = length(currentSD.posW - otherSD.posW) >= (2 * getPhotonRadius(current));
+    if (normalThreshold || pathThreshold)// || surfacesPosThreshold)
         return false;
 
     //Needed reservoir variables
@@ -94,7 +90,7 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
     bool otherReservoirValid = other.isValid();
     if (otherReservoirValid) {
         // Check if sample is part of the domain
-        if (length(currentSD.posW - other.photonPosW) < getPhotonRadius(other)) {
+        if (length(currentSD.posW - other.photonPosW) < other.sampleRadius) {
             float mis = generalizedBalanceHeuristic(other, currentSD, currentProps, current.c);
             targetFunctionOther = evalApproximateBRDFPhoton(currentSD, currentProps, other.photonDir) * luminance(other.photonRadiance);
             w_1 = mis * targetFunctionOther * other.wSum;
@@ -109,6 +105,7 @@ bool combineReservoirsCaustic(inout ReservoirCaustic current, ShadingData curren
         current.photonDir = other.photonDir;
         current.photonRadiance = other.photonRadiance;
         current.targetFunction = targetFunctionOther;
+        current.sampleRadius = other.sampleRadius;
         if (kUsePhotonGuiding)
             currentRgd = otherRgd;
     }

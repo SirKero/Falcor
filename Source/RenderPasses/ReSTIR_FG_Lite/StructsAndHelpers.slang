@@ -97,7 +97,7 @@ struct ReservoirFG {
     bool isValid() {
         return jacobianDeterminant >= 0;
     }
-}
+    }
 
 // Reservoir for a CausticSample 112B
 struct ReservoirCaustic {
@@ -113,7 +113,7 @@ struct ReservoirCaustic {
     float wSum;                     // W and wSum
     uint c;                         // Confidence weight
     uint pathLength;                // Path Length
-    uint _pad;
+    float sampleRadius;             // Radius of the photon
 
     __init() {
         sampleSurface = {};
@@ -128,7 +128,7 @@ struct ReservoirCaustic {
         wSum = 0;
         c = 0;
         pathLength = 0;
-        _pad = 0;
+        sampleRadius = 0;
     }
 
     // Photon direction helper

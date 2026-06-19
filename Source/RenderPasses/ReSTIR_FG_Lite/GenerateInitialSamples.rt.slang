@@ -257,6 +257,7 @@ void photonResampling(ShadingData sd, BSDFProperties bsdfProperties, bool collec
             causticReservoir.photonDir = photonData.dir;
             causticReservoir.photonRadiance = photonData.flux;
             causticReservoir.targetFunction = targetFunction;
+            causticReservoir.sampleRadius = radius;
             rgd.lightIndex = photonData.lightIndex;
             rgd.packedGuidingPixels = photonData.packedGuidingPixels;
         }
