@@ -143,7 +143,7 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
 
     if (auto group = widget.group("PhotonGuiding"))
     {
-        group.checkbox("Enable", mUsePhotonGuiding);
+        changed |= group.checkbox("Enable", mUsePhotonGuiding);
         if (mpPhotonGuiding)
         {
             mpPhotonGuiding->renderUI(group);
@@ -208,6 +208,12 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
         group.indent(10.f);
         group.var("##RoughnessThreshold", mSpecularRoughnessThreshold, 0.f, 1.f, 0.001f);
         group.indent(-10.f);
+    }
+
+    if (auto group = widget.group("Debug"))
+    {
+        changed |= group.checkbox("Disable Final Gather", mDebugDisableFinalGather);
+        changed |= group.checkbox("Disable Caustics", mDebugDisableCaustic);
     }
 }
 
@@ -865,6 +871,8 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
         defines.add(mpRTXDI->getDefines());
         defines.add(getMaterialDefines());
         defines.add("USE_PHOTON_GUIDING", mUsePhotonGuiding ? "1" : "0");
+        defines.add("DISABLE_FINAL_GATHER", mDebugDisableFinalGather ? "1" : "0");
+        defines.add("DISABLE_CAUSTICS", mDebugDisableCaustic ? "1" : "0");
         if (mUsePhotonGuiding)
             defines.add(mpPhotonGuiding->getDefines());
 
@@ -876,6 +884,8 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
     mpEvaluateReservoirsPass->getProgram()->addDefines(mpRTXDI->getDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefines(getMaterialDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
+    mpEvaluateReservoirsPass->getProgram()->addDefine("DISABLE_FINAL_GATHER", mDebugDisableFinalGather ? "1" : "0");
+    mpEvaluateReservoirsPass->getProgram()->addDefine("DISABLE_CAUSTICS", mDebugDisableCaustic ? "1" : "0");
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_PHOTON_GUIDING", mUsePhotonGuiding ? "1" : "0");
     if(mUsePhotonGuiding)
         mpEvaluateReservoirsPass->getProgram()->addDefines(mpPhotonGuiding->getDefines());

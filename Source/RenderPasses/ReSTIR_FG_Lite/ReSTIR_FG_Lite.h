@@ -88,7 +88,7 @@ private:
     bool mOptionsChanged = false;
 
     // Material Settings
-    bool mUseLambertianDiffuse = true;          // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
+    bool mUseLambertianDiffuse = false;          // Diffuse BSDF used by ReSTIR PT and SuffixReSTIR
     float mSpecularRoughnessThreshold = 0.25f;  // Any material below this is considered specular
 
     // Light
@@ -129,7 +129,9 @@ private:
 
     //Photon Guiding
     bool mUsePhotonGuiding = true;
-    //TODO add guiding contribution record variable? 
+
+    bool mDebugDisableFinalGather = false;      //If disabled, final gather contribtuion is not added to final color
+    bool mDebugDisableCaustic = false;          //If disabled, caustic contribtuion is not added to final color
 
     //
     // Resources

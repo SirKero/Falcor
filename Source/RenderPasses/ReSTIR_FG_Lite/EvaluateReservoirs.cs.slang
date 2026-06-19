@@ -28,6 +28,8 @@ cbuffer CB
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
+static const bool kDisableFinalGather = DISABLE_FINAL_GATHER;
+static const bool kDisableCaustics = DISABLE_CAUSTICS;
 
 /*  Evaluates the final gather reservoir
     \param[in] Current Pixel
@@ -128,8 +130,13 @@ void main(uint2 pixel: SV_DispatchThreadID)
         }
 
         //Eval ReSTIR FG
-        outColor += evaluateFinalGatherReservoir(pixel, sg);
-        outColor += evaluateCausticReservoir(pixel, sg);
+        float3 finalGather = evaluateFinalGatherReservoir(pixel, sg);
+        float3 caustics = evaluateCausticReservoir(pixel, sg);
+
+        if (!kDisableFinalGather)
+            outColor += finalGather;
+        if (!kDisableCaustics)
+            outColor += caustics;
         //Emissive for (highly) specular materials (path length > 0)
         outColor += gEmission[pixel].xyz;
     }else{
