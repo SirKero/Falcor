@@ -8,8 +8,10 @@ import Utils.Sampling.SampleGenerator;
 import Rendering.Lights.LightHelpers;
 import Rendering.Lights.EmissiveLightSampler;
 import Rendering.Lights.EmissiveLightSamplerHelpers;
-import Rendering.PhotonGuiding.PhotonGuiding;
 import StructsAndHelpers;
+#if USE_PHOTON_GUIDING
+import Rendering.PhotonGuiding.PhotonGuiding;
+#endif 
 
 cbuffer CB
 {
@@ -214,14 +216,10 @@ void rayGen()
 #if USE_PHOTON_GUIDING
 
     PhotonGuidingSample pgs = {};
-    /*
-    pgs.lightIndex = (PHOTON_GUIDING_TOTAL_LIGHT_COUNT - 1) * sampleNext1D(sg);
-    pgs.directionUV = sampleNext2D(sg);
-    pgs.photonFluxDivFactor = dispatchDims.x * dispatchDims.y;
-    */
-    
+    //Get as sample from the guiding mip
     if (!gPhotonGuiding.sampleGuidedLightAndDirection(pixel, dispatchDims.x, sampleNext2D(sg), pgs))
         return;
+    //Sample the selected light
     PhotonGuidingPhotonLightSample pgpls = {};
     if (!gPhotonGuiding.createPhotonSample(pgs, sg, pgpls))
         return;

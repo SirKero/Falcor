@@ -143,6 +143,7 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
 
     if (auto group = widget.group("PhotonGuiding"))
     {
+        group.checkbox("Enable", mUsePhotonGuiding);
         if (mpPhotonGuiding)
         {
             mpPhotonGuiding->renderUI(group);
@@ -267,6 +268,9 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     if (mUsePhotonGuiding && !mpPhotonGuiding) {
         mpPhotonGuiding = std::make_unique<PhotonGuiding>(mpDevice, mpScene, pRenderContext);
     }
+    if (!mUsePhotonGuiding && mpPhotonGuiding) {
+        mpPhotonGuiding.reset();
+    }
 
     prepareResources(pRenderContext, renderData);
 
@@ -277,7 +281,7 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     //Clear Photon Counter before tracing the Photons for this frame
     pRenderContext->clearUAV(mpPhotonCounter->getUAV().get(), uint4(0));
 
-    if(mUsePhotonGuiding && mpPhotonGuiding)
+    if(mUsePhotonGuiding)
         mpPhotonGuiding->update(pRenderContext, mNumDispatchedPhotons);
 
     //Trace Photons. Up to two passes may be executed, depending on the light types in the scene
@@ -309,7 +313,7 @@ void ReSTIR_FG_Lite::execute(RenderContext* pRenderContext, const RenderData& re
     mpRTXDI->endFrame(pRenderContext);
 
     //(Optional) Debug view
-    if (mpPhotonGuiding) {
+    if (mUsePhotonGuiding) {
         ref<Texture> debugTexture = renderData[kOutputDebug]->asTexture();
         mpPhotonGuiding->renderDebugView(pRenderContext, debugTexture);
     }    
@@ -411,7 +415,7 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
             mpCausticReservoir[i]->setName("CausticReservoir" + std::to_string(i));
         }
 
-
+        //Init additional photon guiding resources
         if(mUsePhotonGuiding)
         {
             if (!mpFinalGatherReservoirGuidingData[i] || mResetScreenTex) {
@@ -424,6 +428,13 @@ void ReSTIR_FG_Lite::prepareResources(RenderContext* pRenderContext, const Rende
                     ResourceFormat::RG32Uint, 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
                 mpCausticReservoirGuidingData[i]->setName("CausticReservoirGuidingData" + std::to_string(i));
             }
+        }
+        //Reset Photon Guiding Resources
+        if (!mUsePhotonGuiding) {
+            if (mpFinalGatherReservoirGuidingData[i])
+                mpFinalGatherReservoirGuidingData[i].reset();
+            if (mpCausticReservoirGuidingData[i])
+                mpCausticReservoirGuidingData[i].reset();
         }
     }
 
@@ -866,7 +877,8 @@ void ReSTIR_FG_Lite::evaluateReservoirsPass(RenderContext* pRenderContext, const
     mpEvaluateReservoirsPass->getProgram()->addDefines(getMaterialDefines());
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_ENV_BACKROUND", mpScene->useEnvBackground() ? "1" : "0");
     mpEvaluateReservoirsPass->getProgram()->addDefine("USE_PHOTON_GUIDING", mUsePhotonGuiding ? "1" : "0");
-    mpEvaluateReservoirsPass->getProgram()->addDefines(mpPhotonGuiding->getDefines());
+    if(mUsePhotonGuiding)
+        mpEvaluateReservoirsPass->getProgram()->addDefines(mpPhotonGuiding->getDefines());
 
     // Set variables
     auto var = mpEvaluateReservoirsPass->getRootVar();

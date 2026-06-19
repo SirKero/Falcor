@@ -5,16 +5,18 @@ import Scene.RaytracingInline;
 import Utils.Sampling.SampleGenerator;
 import Utils.Color.ColorHelpers;
 import Rendering.RTXDI.RTXDI;
-import Rendering.PhotonGuiding.PhotonGuiding;
 import StructsAndHelpers;
+#if USE_PHOTON_GUIDING
+import Rendering.PhotonGuiding.PhotonGuiding;
+#endif
 
 Texture2D<PackedHitInfo> gVBuffer;
 StructuredBuffer<ReservoirFG> gFinalGatherReservoir;
 StructuredBuffer<ReservoirCaustic> gCausticReservoir;
 Texture2D<float4> gEmission;
 
-Texture2D<uint2> gFinalGatherReservoirPGData;
-Texture2D<uint2> gCausticReservoirPGData;
+Texture2D<uint2> gFinalGatherReservoirPGData; // Can be nullptr
+Texture2D<uint2> gCausticReservoirPGData;     // Can be nullptr
 
 RWTexture2D<float4> gOutColor;
 
@@ -26,7 +28,6 @@ cbuffer CB
 
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
-static const bool kUsePhotonGuiding = USE_PHOTON_GUIDING;
 
 /*  Evaluates the final gather reservoir
     \param[in] Current Pixel
@@ -48,11 +49,10 @@ float3 evaluateFinalGatherReservoir(uint2 pixel, inout SampleGenerator sg) {
     outColor = evaluateFinalGatherSample(fgReservoir, sd, mi, sg);
     outColor *= fgReservoir.thp * fgReservoir.wSum;
 
-    if (kUsePhotonGuiding)
-    {
+    #if USE_PHOTON_GUIDING
         ReservoirGuidingData rgd = ReservoirGuidingData(gFinalGatherReservoirPGData[pixel]);
         gPhotonGuiding.addGuidingContribution(rgd.lightIndex, rgd.guidingPixels, luminance(outColor));
-    }
+    #endif
 
     return outColor;
 }
@@ -82,11 +82,10 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
         outColor *= causticReservoir.thp;
     }
 
-    if (kUsePhotonGuiding)
-    {
+    #if USE_PHOTON_GUIDING
         ReservoirGuidingData rgd = ReservoirGuidingData(gCausticReservoirPGData[pixel]);
         gPhotonGuiding.addGuidingContribution(rgd.lightIndex, rgd.guidingPixels, luminance(outColor));
-    }
+    #endif
     
     return outColor;
 }
