@@ -30,16 +30,6 @@ public:
     virtual bool onKeyEvent(const KeyboardEvent& keyEvent) override { return false; }
 
 private:
-
-    struct ResamplingSettings
-    {
-        bool enable = true;
-        uint confidenceCap = 20;                // Maximum confidence allowed
-        uint spatialSamples = 1;                // Number of spatial samples
-        uint disocclusionBoostExtraSamples = 1; // Number of spatial samples if no temporal surface was found
-        float samplingRadius = 20.f;            // Sampling radius in pixel
-    };
-
     struct PathLengthSettings {
         uint bounces = 10;  //Total Bounces
         uint diffuse = 3;   //Max Diffuse Bounces on the path
@@ -192,8 +182,6 @@ private:
     float mApproximatePixelDiagonal = 1.f; //Approximated pixel diagonal used for adaptive radius. Updated every frame in tracePhoton
 
     //ReSTIR Reservoirs
-    ResamplingSettings mResampleSettingsPath = {};
-    ResamplingSettings mResampleSettingsCaustic = {};
     bool mRebuildReservoirBuffer = false;               // Rebuild the reservoir buffer
     bool mClearReservoir = true;                        // Clears both reservoirs
     bool mCanResample = false;                          // Resampling is only allowed if last iterations reservoir was created

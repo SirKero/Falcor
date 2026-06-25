@@ -62,11 +62,6 @@ ReSTIR_FG_Plus::ReSTIR_FG_Plus(ref<Device> pDevice, const Properties& props)
         throw RuntimeError("ReSTIR_FG: Raytracing Tier 1.1 is not supported by the current device");
     }
 
-    //Caustic Reservoir default values
-    mResampleSettingsCaustic.spatialSamples = 0;
-    mResampleSettingsCaustic.disocclusionBoostExtraSamples = 1;
-    mResampleSettingsCaustic.samplingRadius = 4.f;
-
     // Create sample generator.
     mpSampleGenerator = SampleGenerator::create(mpDevice, SAMPLE_GENERATOR_UNIFORM);
 }
@@ -281,7 +276,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     }
 
     //Update RNG constants
-    mRNGNumPasses = 8 + (3 * mResampleSettingsPath.spatialSamples);
+    mRNGNumPasses = 8 + (3 * mOptions.pathNumberSpatialSamples);
 
     //Init ReSTIR DI
     const auto& pMotionVectors = renderData[kInputMotionVectors]->asTexture();
