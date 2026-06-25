@@ -130,7 +130,10 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
             changed |= groupGen.var("Light Store Probability", mGlobalPhotonRejection, 0.f, 1.f, 0.0001f);
             group.tooltip("Probability a photon light is stored on diffuse hit. Flux is scaled up appropriately");
 
-            changed |= groupGen.var("Max Bounces", mPhotonMaxBounces, 0u, 32u);
+            changed |= groupGen.var("Max Bounces", mPhotonPathLenght.bounces, 0u, 255u, 1u);
+            changed |= groupGen.var("Max Diffuse Bounces", mPhotonPathLenght.diffuse , 0u, 255u, 1u);
+            changed |= groupGen.var("Max Specular Bounces", mPhotonPathLenght.specular, 0u, 255u, 1u);
+            changed |= groupGen.var("Max Delta Bounces", mPhotonPathLenght.delta, 0u, 255u, 1u);
 
             groupGen.separator();
         }
@@ -151,8 +154,8 @@ void ReSTIR_FG_Lite::renderUI(Gui::Widgets& widget) {
             group.var(" ##PhotonRadius", mPhotonRadius, 0, FLT_MAX, 0.0001f, false, "%.6f");
             group.indent(-10.f);
         }
-        
 
+        group.checkbox("Use Russian Roulette", mPhotonUseRussianRoulette);
     }
 
     if (auto group = widget.group("PhotonGuiding"))
@@ -543,13 +546,13 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     mTracePhotonPass.pProgram->addDefine("PHOTON_BUFFER_SIZE_CAUSTIC", std::to_string(mNumMaxPhotons[1]));
     mTracePhotonPass.pProgram->addDefine("ROUGHNESS_THRESHOLD", std::to_string(mSpecularRoughnessThreshold));
     mTracePhotonPass.pProgram->addDefine("USE_ADAPTIVE_PHOTON_RADIUS", mUseAdaptiveRadius ? "1" : "0");
-    mTracePhotonPass.pProgram->addDefine("USE_PHOTON_GUIDING", mUsePhotonGuiding ? "1" : "0");
+    mTracePhotonPass.pProgram->addDefine("USE_RUSSIAN_ROULETTE", mPhotonUseRussianRoulette ? "1" : "0");
     mTracePhotonPass.pProgram->addDefines(getMaterialDefines());
     if (mpEmissiveLightSampler)
         mTracePhotonPass.pProgram->addDefines(mpEmissiveLightSampler->getDefines());
+    mTracePhotonPass.pProgram->addDefine("USE_PHOTON_GUIDING", mUsePhotonGuiding ? "1" : "0");
     if(mUsePhotonGuiding)
         mTracePhotonPass.pProgram->addDefines(mpPhotonGuiding->getDefines());
-
     // Program Vars
     if (!mTracePhotonPass.pVars)
         mTracePhotonPass.initProgramVars(mpDevice, mpScene, mpSampleGenerator);
@@ -594,7 +597,7 @@ void ReSTIR_FG_Lite::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     //Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gPhotonRadius"] = mUseAdaptiveRadius ? mPhotonAdaptiveRadius :  mPhotonRadius;
-    var["CB"]["gMaxBounces"] = mPhotonMaxBounces;
+    var["CB"]["gPackedPathLength"] = mPhotonPathLenght.pack();
     var["CB"]["gGlobalRejectionProb"] = mGlobalPhotonRejection;
     var["CB"]["gUseAnalyticLights"] = analyticOnly;
     var["CB"]["gNormalizedPixelDiagonal"] = mApproximatePixelDiagonal;

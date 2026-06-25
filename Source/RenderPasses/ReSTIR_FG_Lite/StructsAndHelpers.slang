@@ -179,6 +179,58 @@ struct ReservoirGuidingData
     }
 };
 
+// Helper for packed path length
+struct PackedPathLength
+{
+    uint data;
+
+    property uint pathLength {
+        get { return data & 0xFF; }
+        set {
+            data &= ~0xFF;
+            data |= newValue & 0xFF;
+        }
+    }
+
+    property uint diffuseBounces {
+        get { return (data >> 8) & 0xFF; }
+        set {
+            data &= ~0xFF00;
+            data |= (newValue & 0xFF) << 8;
+        }
+    }
+
+    property uint specularBounces {
+        get { return (data >> 16) & 0xFF; }
+        set {
+            data &= ~0xFF0000;
+            data |= (newValue & 0xFF) << 16;
+        }
+    }
+
+    property uint deltaBounces {
+        get { return (data >> 24) & 0xFF; }
+        set {
+            data &= ~0xFF000000;
+            data |= (newValue & 0xFF) << 24;
+        }
+    }
+
+    __init() {
+        data = 0;
+    }
+
+    // Compare path with max path length
+    // Returns true if max path length was not reached
+    bool comparePathLengts(PackedPathLength max) {
+        bool valid = true;
+        valid &= deltaBounces < max.deltaBounces;
+        valid &= specularBounces < max.specularBounces;
+        valid &= diffuseBounces < max.diffuseBounces;
+        return valid;
+    }
+}
+
 /*  Load shading data from hit and direction
     \param[in] Triangle Hit
     \param[in] incoming world direction (ray direction)

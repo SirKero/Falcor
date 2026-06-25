@@ -15,7 +15,7 @@ import Rendering.PhotonGuiding.PhotonGuiding;
 
 cbuffer CB
 {
-    uint gMaxBounces;   // Max number of bounces allowed
+    PackedPathLength gPackedPathLength;   // Path Length for the photon path
     uint gFrameCount;   // Frame count since scene was loaded.
     float2 gPhotonRadius;//Global/Caustic radius
 
@@ -38,7 +38,7 @@ RWStructuredBuffer<uint> gPhotonCounter;
 static const bool kAlphaTest = true;
 static const uint2 kPhotonBufferSize = uint2(PHOTON_BUFFER_SIZE_GLOBAL, PHOTON_BUFFER_SIZE_CAUSTIC);
 static const float kRoughnessThreshold = ROUGHNESS_THRESHOLD;
-static const bool kRussianRoulette = true; // TODO as option
+static const bool kRussianRoulette = USE_RUSSIAN_ROULETTE;
 static const bool kUseAdaptivePhotonRadius = USE_ADAPTIVE_PHOTON_RADIUS;
 
 struct RayPayload
@@ -292,8 +292,10 @@ void rayGen()
     photon.dir = -ray.Direction;
     photon.normalW = pls.normal;
 
+    PackedPathLength pathLengthInfo = PackedPathLength();
+    const uint maxPathLength = gPackedPathLength.pathLength;
     // Main Raytrace Loop
-    for (uint i = 0; i < gMaxBounces; i++) {
+    for (uint i = 0; i < maxPathLength; i++) {
         TraceRay(gScene.rtAccel, 0 /*Flags*/, 0xff /* instanceInclusionMask */, 0 /* hitIdx */, rayTypeCount, 0 /* missIdx */, ray, rayPayload);
 
         HitInfo hit = HitInfo(rayPayload.packedHitInfo);
@@ -337,6 +339,16 @@ void rayGen()
         // Sample Photon bounce for next iteration
         BSDFSample bsdfSample;
         bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+
+        // Path Length
+        if (bsdfSample.isLobe(LobeType::Delta))
+            pathLengthInfo.deltaBounces = pathLengthInfo.deltaBounces + 1;
+        else if (bsdfSample.isLobe(LobeType::Diffuse))
+            pathLengthInfo.diffuseBounces = pathLengthInfo.diffuseBounces + 1;
+        else if (bsdfSample.isLobe(LobeType::Specular))
+            pathLengthInfo.specularBounces = pathLengthInfo.specularBounces + 1;
+        validSample &= pathLengthInfo.comparePathLengts(gPackedPathLength);
+
         if (!validSample)
             return;
         bool transmission = bsdfSample.isLobe(LobeType::Transmission);
@@ -345,17 +357,20 @@ void rayGen()
         thp *= bsdfSample.weight;
 
         // Russian Roulette
-        const float rrVal = (thp.x + thp.y + thp.z) / 3.0;
-        const float prob = max(0.f, 1.f - rrVal);
-        if (sampleNext1D(sg) < prob)
+        if (kRussianRoulette)
         {
-            return; // Photon is absorbed
+            const float rrVal = (thp.x + thp.y + thp.z) / 3.0;
+            const float prob = max(0.f, 1.f - rrVal);
+            if (sampleNext1D(sg) < prob)
+            {
+                return; // Photon is absorbed
+            }
+            else
+            {
+                thp /= (1.f - prob);
+            }
         }
-        else
-        {
-            thp /= (1.f - prob);
-        }
-
+       
         // Update Photon
         storeAsCaustic = !reflectedDiffuse;
         photon.dir = -ray.Direction;

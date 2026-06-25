@@ -37,6 +37,18 @@ private:
         float samplingRadius = 20.f;            // Sampling radius in pixel
     };
 
+    struct PathLengthSettings {
+        uint bounces = 10;  //Total Bounces
+        uint diffuse = 3;   //Max Diffuse Bounces on the path
+        uint specular = 3;  //Max Specular Bounces on the path
+        uint delta = 10;    //Max Delta Bounces on the Path
+
+        const uint pack() const
+        {
+            return (bounces & 0xFF) | ((diffuse & 0xFF) << 8) | ((specular & 0xFF) << 16) | ((delta & 0xFF) << 24);
+        }
+    };
+
     //Initializes the emissive sampler used to sample photons
     void prepareLightingStructure(RenderContext* pRenderContext);
 
@@ -111,7 +123,7 @@ private:
     bool mUsePhotonsForDirectLightInReflections = true; // Uses photons for direct light in reflections, else the final gather sample is used
 
     //Photon Distribution
-    uint mPhotonMaxBounces = 10;                        // Number of photon bounces
+    PathLengthSettings mPhotonPathLenght = {};          // Path length settings for photons
     float mGlobalPhotonRejection = 0.3f;                // Probability a global photon is stored
     uint mNumDispatchedPhotons = 1000000;               // Number of photons dispatched
     uint2 mNumMaxPhotons = uint2(1000000, 1000000);     // Size of the photon buffer
@@ -121,6 +133,7 @@ private:
     uint2 mCurrentPhotonCount = mNumMaxPhotons;
     float2 mPhotonRadius = float2(0.020f, 0.005f);      // Global/Caustic Radius.
     float mPhotonAnalyticRatio = 0.5f;                  // Analytic photon distribution ratio in a mixed light case. E.g. 0.3 -> 30% analytic, 70% emissive
+    bool mPhotonUseRussianRoulette = false;             //Enables/Disables russian roulette
 
     bool mUseDynamicPhotonDispatchCount = false;         // Dynamically change the number of photons to fit the max photon number
     uint mPhotonDynamicDispatchMax = 4000000;           // Max value for dynamically dispatched photons
