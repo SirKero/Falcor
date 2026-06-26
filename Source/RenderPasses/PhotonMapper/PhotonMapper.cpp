@@ -256,10 +256,16 @@ void PhotonMapper::renderUI(Gui::Widgets& widget)
 
         mChangePhotonLightBufferSize |= widget.checkbox("Use Reduce Photon Data format", mUseReducePhotonDataFormat);
         widget.tooltip("When reduced format is used, the photons position and direction is stored at half precision (float16)");
+    }
 
-        changed |= widget.checkbox("Enable random radius", mEnableRandomSize);
-        if (mEnableRandomSize)
-            changed |= widget.var("Random offset (Global/Caustic)", mRandomSizeRadiusRange,0.f);
+    if(auto group = widget.group("Photon Guiding"))
+    {
+        group.checkbox("Enable", mEnableGuiding);
+        if(mEnableGuiding)
+        {
+            if(mpPhotonGuiding)
+                mpPhotonGuiding->renderUI(group);
+        }
     }
 
     mOptionsChanged |= changed;
