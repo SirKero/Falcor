@@ -163,10 +163,10 @@ private:
     // Parameters
     //
     Options mOptions = {};                     //Options for the renderer
-    uint mFrameCount = 0;
+    uint mFrameCount = 0;                      //Current Frame 
     uint mReservoirIndex = 0;                  //Track reservoir index for path reservoir
-    uint2 mScreenRes = uint2(0, 0);
-    bool mResetScreenTex = false;
+    uint2 mScreenRes = uint2(0, 0);            //Screen Resolution
+    bool mResetScreenTex = false;        
     bool mOptionsChanged = false;
 
     // Light
@@ -190,7 +190,7 @@ private:
     bool mUsePhotonsForDirectLightInReflections = true; // Uses photons for direct light in reflections, else the final gather sample is used
     uint mRNGNumPasses = 11;                             // Offset for RNG generator
 
-    //Splatting
+    //Splatting, camera data from last frame
     float4x4 mTemporalCameraViewProjection = float4x4::identity();
     float3 mTemporalCameraPosition = float3(0);
     float3 mTemporalCameraForward = float3(0);

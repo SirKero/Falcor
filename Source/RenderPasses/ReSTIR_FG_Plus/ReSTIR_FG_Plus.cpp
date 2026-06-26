@@ -131,14 +131,14 @@ void ReSTIR_FG_Plus::renderUI(Gui::Widgets& widget) {
         group.tooltip("Fixed probability, that a global photon is rejected");
         changed |= group.var("Mixed Light Analytic Probability", mOptions.photonMixedLightRatio, 0.f, 1.f, 0.0001f);
         group.tooltip("Probability, that a photon is generated from an analytic/emissive light 0 -> 0% Analytic, 100% Emissive");
+    }
 
-        if (auto group2 = group.group("PhotonGuiding"))
+    if (auto group = widget.group("PhotonGuiding"))
+    {
+        group.checkbox("Enable", mOptions.usePhotonGuiding);
+        if (mpPhotonGuiding && mOptions.usePhotonGuiding)
         {
-            group2.checkbox("Enable", mOptions.usePhotonGuiding);
-            if (mpPhotonGuiding && mOptions.usePhotonGuiding)
-            {
-                mpPhotonGuiding->renderUI(group2);
-            }
+            mpPhotonGuiding->renderUI(group);
         }
     }
 
@@ -262,12 +262,11 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
         mOptionsChanged = false;
     }
 
-    if (mClearDebugTexture)
-    {
-        auto pDebugTex = renderData[kOutputDebug]->asTexture();
+    //Clear Debug Texture
+    auto pDebugTex = renderData[kOutputDebug]->asTexture();
+    if (mClearDebugTexture && pDebugTex)
         pRenderContext->clearTexture(pDebugTex.get());
-    }
-
+    
     //Disables Resampling for the frame
     if (mClearReservoir)
     {
@@ -308,7 +307,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     if (mOptions.usePhotonGuiding)
         mpPhotonGuiding->update(pRenderContext, mOptions.photonsDispatched);
 
-    //Trace Photons and bulids the photon acceleration structure. Also backprojects caustic photons into the camera
+    //Trace Photons and builds the photon acceleration structure. Also backprojects caustic photons into the camera
     tracePhotonsPass(pRenderContext, renderData);
 
     //Caustic Backprojection
@@ -317,7 +316,7 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     //Creates initial Reservoirs samples for Path and Caustic Reservoirs. Also fills the Surface structure for RTXDI
     traceCameraPass(pRenderContext, renderData);
 
-    // ReSTIR DI pass
+    //ReSTIR DI update
     mpRTXDI->update(pRenderContext, pMotionVectors);
 
     //Resampling with Caustic Reservoirs
@@ -363,9 +362,8 @@ void ReSTIR_FG_Plus::execute(RenderContext* pRenderContext, const RenderData& re
     //Visualize Photon Guiding
     if(mOptions.usePhotonGuiding)
     {
-        ref<Texture> debugTex = renderData[kOutputDebug]->asTexture();
-        if(debugTex)
-            mpPhotonGuiding->renderDebugView(pRenderContext, debugTex);
+        if(pDebugTex)
+            mpPhotonGuiding->renderDebugView(pRenderContext, pDebugTex);
     }
 
     mFrameCount++;
@@ -720,7 +718,8 @@ void ReSTIR_FG_Plus::tracePhotonsPass(RenderContext* pRenderContext, const Rende
     if(mOptions.usePhotonGuiding)
         mpPhotonGuiding->setShaderData(var);
 
-    //Shader dispatch dims (TODO optimize for non-guiding case, so that similar lights are traced in the same workgroup)
+    //Shader dispatch dims
+    //TODO optimize for non-guiding case, so that similar lights are traced in the same workgroup
     if(mOptions.usePhotonGuiding)
     {
         mPhotonDispatchDim = mpPhotonGuiding->getPhotonDispatchSize(mOptions.photonsDispatched);
@@ -863,7 +862,7 @@ void ReSTIR_FG_Plus::traceCameraPass(RenderContext* pRenderContext, const Render
 
     //RTXDI Resources
     mpRTXDI->setShaderData(var);
-    // NEE Structures for Path Resampling 
+    //NEE Structures for Path Resampling 
     if (mpEmissiveLightSampler)
         mpEmissiveLightSampler->setShaderData(var["Light"]["gEmissiveSampler"]);
     if (mpEnvMapSampler)

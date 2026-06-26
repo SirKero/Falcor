@@ -218,6 +218,8 @@ bool hitSphere(const float3 center, const float radius, const float3 p)
     return dot(radiusTest, radiusTest) < radius * radius;
 }
 
+//Performes photon collection using the ray tracing acceleration structure
+//RIS is used to select one representative photon
 void photonRIS(ShadingData sd, IMaterialInstance mi, float3 N, bool collectOnlyCaustics, inout SampleGenerator sg, out PhotonSample photonSample, bool collectOnlyDirectGlobal = false) {
     photonSample = PhotonSample();
     RayDesc ray;
@@ -343,6 +345,7 @@ bool addSampleToReservoir(inout PathReservoir reservoir, float rand, float3 radi
     return selectOther;
 }
 
+//Traces a path, starting from the first surface visible from camera
 void tracePath(RayDesc ray, inout PathData pd, inout PathReservoir pathReservoir)
 {
     // If first reflection was delta, it is a delta path
@@ -657,6 +660,7 @@ inline void setFirstHitSurfaceData(inout PathData pd, const ShadingData sd, cons
 }
 
 #if IS_SHIFT
+// Fetches temporal/spatial reservoir and performs retracing if neccessary 
 void shiftCameraReservoir()
 {
     int2 pixel = DispatchRaysIndex().xy;

@@ -54,7 +54,7 @@ float3 evaluateCausticReservoir(uint2 pixel, inout SampleGenerator sg) {
     if (kUsePhotonGuiding)
     {
         PhotonGuidingData pgd = PhotonGuidingData(gCausticReservoirGuidingData[pixel]);
-        //gPhotonGuiding.addGuidingContribution(pgd.lightIndex, pgd.guidingPixels, luminance(outColor));
+        gPhotonGuiding.addGuidingContribution(pgd.lightIndex, pgd.guidingPixels, luminance(outColor));
     }
 
     return outColor;

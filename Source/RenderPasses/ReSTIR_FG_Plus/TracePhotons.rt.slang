@@ -379,7 +379,7 @@ void rayGen()
             }
             #endif // !IS_SHIFT
 
-            //TODO update photon radiance
+            //TODO Update photon radiance for the path case
             //Shift for path samples (Radiance Estimate)
             #if IS_SHIFT && IS_SHIFT_PATH
             if (i == maxPathLength)

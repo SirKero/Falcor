@@ -81,6 +81,7 @@ struct PhotonData {
     }
 }
 
+//Data needed for photon guiding
 struct PhotonGuidingData
 {
     uint lightIndex;
@@ -121,6 +122,7 @@ struct PhotonGuidingData
     }
 }
 
+//Path reservoir flag helper struct
 struct ReservoirFlags {
     uint flags;
 
@@ -296,7 +298,7 @@ struct CausticReservoir {
 
     float targetFunction;               // Target Function for the current reservoir
     uint2 packedPhotonRetraceData;      // Packed sample generator and path length for photon retrace (uint2(PackedPixel,Seed); see PhotonData)
-    float invPhotonScaleFactor; // Light selection probability and number of light paths used to generate the photon
+    float invPhotonScaleFactor;         // Light selection probability and number of light paths used to generate the photon
 
     __init() {
         sampleSurface = {};
@@ -401,17 +403,6 @@ ShadingData loadShadingData(const HitInfo hit, const float3 rayDir, const ITextu
     uint materialID = gScene.getMaterialID(triangleHit.instanceID);
     ShadingData sd = gScene.materials.prepareShadingData(v, materialID, rayDir, lod);
     
-    return sd;
-}
-
-ShadingData loadShadingDataWithPrevHit(const HitInfo hit, const float3 prevPosW, const ITextureSampler lod)
-{
-    const TriangleHit triangleHit = hit.getTriangleHit();
-    VertexData v = gScene.getVertexData(triangleHit);
-    uint materialID = gScene.getMaterialID(triangleHit.instanceID);
-    float3 dir = normalize(v.posW - prevPosW);
-    ShadingData sd = gScene.materials.prepareShadingData(v, materialID, dir, lod);
-
     return sd;
 }
 

@@ -57,6 +57,12 @@ namespace Falcor
         //Get per light and total contribution
         reduceContributionPass(pRenderContext);
 
+        //For debug view, directional guiding maps should be cleard, as some remains from other frames can be visible otherwise
+        if(mOptions.debugEnable)
+        {
+            pRenderContext->clearUAV(mpGuidingMapsDirection->getUAV(0).get(), uint4(0));
+        }
+
         //
         //Update the Guiding Maps.
         //
