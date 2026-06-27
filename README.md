@@ -5,7 +5,7 @@
 ## Introduction
 This repository contains the source code and an interactive demo for the upcoming EGSR paper:
 
-> **Guided ReSTIR FG+: Photon Resampling for Large Scenes and Many Lights** <br>
+> **[Guided ReSTIR FG+: Photon Resampling for Large Scenes and Many Lights (Preprint)](https://www2.in.tu-clausthal.de/~cgstore/Kern2026GuidedReSTIRFGPlus.pdf)** <br>
 > René Kern, Felix Brüll, Jonas Kastning, Thorsten Grosch <br>
 > TU Clausthal
 
