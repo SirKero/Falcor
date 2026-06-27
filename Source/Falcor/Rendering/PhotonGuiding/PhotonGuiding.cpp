@@ -9,6 +9,7 @@ namespace Falcor
         const std::string kShaderReduce = kShaderFolder + "Reduce.cs.slang";
         const std::string kShaderUpdateHistograms = kShaderFolder + "UpdateHistograms.cs.slang"; 
         const std::string kShaderUpdateGuidingMaps = kShaderFolder + "UpdateGuidingMaps.cs.slang";
+        const std::string kShaderDynamicPMin = kShaderFolder + "DynamicPhotonMin.cs.slang";
         const std::string kShaderDebug = kShaderFolder + "DebugView.cs.slang";
 
         const std::string kShaderModel = "6_6";
@@ -69,6 +70,10 @@ namespace Falcor
         
         //First temporally accumulate the light resources
         updateHistogramsPass(pRenderContext, false);
+
+        //Dynamic PMin
+        if(mOptions.useDynamicPMin)
+            dynamicallyPMinPass(pRenderContext);
 
         //Convert Light Histogram to Light Guiding Map by distributing the photons using the histogram as a guide
         updateGuidingMapsPass(pRenderContext, maxPhotonsDistributed, false);
@@ -202,12 +207,19 @@ namespace Falcor
         changed |= widget.var("Exponential Moving Average (alpha)", mOptions.exponentialMovingAverageFactor, 0.f, 1.f, 0.0001f);
         if(auto group = widget.group("Mapping"))
         {
-            widget.text("Mapping is enabled by default on scenes with more than 1000 light sources");
-            mRebuildResources |= widget.checkbox("Enable", mOptions.useMappingScheme);
-            mRebuildResources |= widget.dropdown("Maximum Directional Resources", kGuidingMapResolutionDropdownList,mOptions.mappingDirGMCount); //"Reuse" Resolution dropdown
-            changed |= widget.var("Min Photon to create a Guiding Map", mOptions.mappingPhotonNeededToCreate, mOptions.photonNeededForGM, UINT_MAX, 1u);
+            group.text("Mapping is enabled by default on scenes with more than 1000 light sources");
+            mRebuildResources |= group.checkbox("Enable", mOptions.useMappingScheme);
+            mRebuildResources |= group.dropdown("Maximum Directional Resources", kGuidingMapResolutionDropdownList,mOptions.mappingDirGMCount); //"Reuse" Resolution dropdown
+            changed |= group.var("Min Photon to create a Guiding Map", mOptions.mappingPhotonNeededToCreate, mOptions.photonNeededForGM, UINT_MAX, 1u);
         }
-        //TODO Dynamic Pmin
+
+        if(auto group = widget.group("Dynamic PMin"))
+        {
+            group.text("Dynamic PMin is enabled by default on scenes with more than 1000 light sources");
+            group.checkbox("Enable", mOptions.useDynamicPMin);
+            group.var("Min/Max Distance", mOptions.dynamicPMinMinMaxDistance, 0.f, FLT_MAX, 0.0001f);
+            group.var("Min/Max Photons", mOptions.dynamicPMinPhotonsMinMax, 1, UINT_MAX, 1u);
+        }
         changed |= widget.var("Reserved Photons per Light", mOptions.reservedPhotonsPerLight, 1u, UINT_MAX, 1u);
         changed |= widget.var("Reserved Photons per Direction Cell", mOptions.reservedPhotonsPerDirection, 1u, UINT_MAX, 1u);
         uint minPhotonsNeeded = mOptions.reservedPhotonsPerDirection * mOptions.guidingMapResolution * mOptions.guidingMapResolution;
@@ -344,7 +356,10 @@ namespace Falcor
 
             //If total lights > the threshold, enable mapping by default. Disable on rebuild
             if((mTotalLightCount > kAutomaticMappingCount) && !mRebuildResources)
+            {
                 mOptions.useMappingScheme = true;
+                mOptions.useDynamicPMin = true;
+            }
 
             mRebuildResources = false;
         }
@@ -631,6 +646,7 @@ namespace Falcor
             defines.add("PHOTONS_NEEDED_FOR_DIR_GM", std::to_string(mOptions.photonNeededForGM));
 
             defines.add("USE_MAPPING", mOptions.useMappingScheme ? "1" : "0");
+            defines.add("USE_DYNAMIC_PMIN", mOptions.useDynamicPMin ? "1" : "0");
             defines.add("MAPPING_PHOTONS_NEEDED_TO_CREATE", std::to_string(mOptions.mappingPhotonNeededToCreate));
             defines.add("MAP_TEXTURE_SIZE", std::to_string(mResolutionMap));
             defines.add("LIGHT_GM_SIZE", std::to_string(mResolutionLightGM));
@@ -652,6 +668,7 @@ namespace Falcor
             defines.add("IS_DIRECTIONAL", isDirectionalResource ? "1" : "0");
             defines.add("MAPPING_INVALID_INDEX", std::to_string(kMappingInvalidIndex));
             defines.add("COUNTER_MAPPING_INDEX", std::to_string(kCounterIndexMapping));
+            defines.add("COUNTER_PMIN_INDEX", std::to_string(kCounterIndexDynamicPhoton));
             defines.add(getRuntimeDefines());
             
             pUpdateGuidingMapsPass = ComputePass::create(mpDevice, desc, defines, true);
@@ -662,7 +679,7 @@ namespace Falcor
 
         //Calculate the free photons for the light Guiding Map
         uint freePhotonsPerLight = maxPhotonsDistributed;
-        if(!isDirectionalResource)
+        if(!isDirectionalResource && !mOptions.useDynamicPMin)
         {
             freePhotonsPerLight = maxPhotonsDistributed - mOptions.reservedPhotonsPerLight * mTotalLightCount;
         }
@@ -671,6 +688,7 @@ namespace Falcor
         var["CB"]["gDispatchSize"] = isDirectionalResource ? mResolutionDirGM : mResolutionLightGM;
         var["CB"]["gDirectionalResourceSize"] = mOptions.guidingMapResolution;
         var["CB"]["gFreePhotonsLight"] = freePhotonsPerLight;
+        var["CB"]["gDynMinPhotonsPerLight"] = std::min(mOptions.dynamicPMinPhotonsMinMax.x, mOptions.dynamicPMinPhotonsMinMax.y); //Fallback min photons
 
         auto pGuidingMap = isDirectionalResource ? mpGuidingMapsDirection : mpGuidingMapLight;
         var["gHistogram"] = isDirectionalResource ? mpHistogramDirection : mpHistogramLight;
@@ -690,6 +708,12 @@ namespace Falcor
             }
         }
 
+        //Bind dynamic PMin resources
+        if (mOptions.useDynamicPMin && !isDirectionalResource) {
+            var["gCounter"] = mpResourceCounter;
+            var["gPMinPerLight"] = mpReservedPhoton;
+        }
+
         uint3 dispatchIndex = isDirectionalResource ?
             uint3(mResolutionDirGM,mResolutionDirGM,1) :
             uint3(mResolutionLightGM,mResolutionLightGM,1);
@@ -699,5 +723,40 @@ namespace Falcor
         //Reuse the reduce loop to generate MipMaps for the Guiding Maps, that are used for top-down quadtree traversal
         reduceLoop(pRenderContext, pGuidingMap, 0, pGuidingMap->getMipCount()-1, true);
 
+    }
+
+    void PhotonGuiding::dynamicallyPMinPass(RenderContext* pRenderContext)
+    {
+        FALCOR_PROFILE(pRenderContext, "DynamicPMin");
+        //Create Shader
+        if (!mpDynamicPMinPass)
+        {
+            Program::Desc desc;
+            desc.addShaderModules(mpScene->getShaderModules());
+            desc.addShaderLibrary(kShaderDynamicPMin).csEntry("main").setShaderModel(kShaderModel);
+            desc.addTypeConformances(mpScene->getTypeConformances());
+
+            DefineList defines;
+            defines.add("LIGHT_COUNT", std::to_string(mTotalLightCount));
+            defines.add("ANALYTIC_START_INDEX", std::to_string(mEmissiveLightCount));
+            defines.add(mpScene->getSceneDefines());
+
+            mpDynamicPMinPass = ComputePass::create(mpDevice, desc, defines, true);
+        }
+
+        //Set shader variables
+        auto var = mpDynamicPMinPass->getRootVar();
+        mpScene->setRaytracingShaderData(pRenderContext, var);
+
+        var["CB"]["gMinDist"] = std::min(mOptions.dynamicPMinMinMaxDistance.x, mOptions.dynamicPMinMinMaxDistance.y);
+        var["CB"]["gMaxDist"] = std::max(mOptions.dynamicPMinMinMaxDistance.x, mOptions.dynamicPMinMinMaxDistance.y);
+        var["CB"]["gMinPhotons"] = std::min(mOptions.dynamicPMinPhotonsMinMax.x, mOptions.dynamicPMinPhotonsMinMax.y);
+        var["CB"]["gMaxPhotons"] = std::max(mOptions.dynamicPMinPhotonsMinMax.x, mOptions.dynamicPMinPhotonsMinMax.y);
+        var["CB"]["gLightGMSize"] = mResolutionLightGM;
+
+        var["gReservedPhotonsPerLight"] = mpReservedPhoton;
+        var["gResourceCounter"] = mpResourceCounter;
+
+        mpDynamicPMinPass->execute(pRenderContext, uint3(mResolutionLightGM, mResolutionLightGM, 1));
     }
 } //namespace Falcor

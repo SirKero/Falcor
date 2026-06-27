@@ -11,12 +11,14 @@ RWTexture2D<uint> gGuidingMap;         // The to be updated Guiding Map
     RWTexture2D<uint> gMapLightIndexToDirGM;
     RWTexture2D<uint> gMapDirGMToLightIndex;
     RWStructuredBuffer<uint> gCounter;
+    Texture2D<uint> gPMinPerLight;
 #endif
 
 cbuffer CB {
     uint gDispatchSize;     //Resolution of the current resource
     uint gDirectionalResourceSize; // Resolution of a directional resource
-    uint gFreePhotonsLight; //Free photons per light (or total photon count if dynamic Pmin is used)
+    uint gFreePhotonsLight;        // Free photons per light (or total photon count if dynamic Pmin is used)
+    uint gDynMinPhotonsPerLight;   //Fallback min size per light.
 }
 
 static const bool kIsDirectional = IS_DIRECTIONAL;  //True if the current resources are directional
@@ -25,9 +27,11 @@ static const uint kReservedPhotonsPerCell = RESERVED_PHOTONS_PER_CELL; // Number
 static const uint kPhotonsNeededForDirectionalGM = PHOTONS_NEEDED_FOR_DIR_GM; // Light photons needed to create a directional GM
 
 static const bool kUseMapping = USE_MAPPING; // Is mapping enabled
+static const bool kUseDynamicPMin = USE_DYNAMIC_PMIN;   //Is dynamic PMin enabled
 static const uint kMappingInvalidIndex = MAPPING_INVALID_INDEX; //Invalid index for mapping
 static const uint kMappingPhotonsNeededToCreate = MAPPING_PHOTONS_NEEDED_TO_CREATE; // Minimum amount of photons needed to create a new direction GM with Mapping enabled
 static const uint kCounterMappingIndex = COUNTER_MAPPING_INDEX;
+static const uint kCounterPMinIndex = COUNTER_PMIN_INDEX;
 static const uint kMapTextureSize = MAP_TEXTURE_SIZE;
 static const uint kLightGMSize = LIGHT_GM_SIZE;
 
@@ -39,8 +43,7 @@ void main(uint3 thdID: SV_DispatchThreadID)
         return;
 
     // Early out for unused regions.
-    // Cannot be used on directional resources if mapping is enabled (TODO handle?)
-    //TODO add early out if light dir has not enough photons?
+    // Cannot be used on directional resources if mapping is enabled
     uint2 lightPixel = pixel;
     if (kIsDirectional)
         lightPixel /= gDirectionalResourceSize;
@@ -76,8 +79,26 @@ void main(uint3 thdID: SV_DispatchThreadID)
             return;
         //Free photons (Total - (cellPhotons * cellCount))
         freePhotons = photonsForLight - (reservedPhotons * gDirectionalResourceSize * gDirectionalResourceSize);
-    #else //IS_DIRECTIONAL
-        freePhotons = gFreePhotonsLight;
+    #else  // IS_DIRECTIONAL
+        // For dynamic PMin load in the reserved amount of photons for the current cell,
+        // and calculate free photons
+        if (kUseDynamicPMin)
+        {
+            // Get free photons. gFreePhotonsLight contains all photons for this case
+            int freePhotonsDyn = int(gFreePhotonsLight) - gCounter[kCounterPMinIndex];
+            reservedPhotons = gDynMinPhotonsPerLight;
+            if (freePhotonsDyn > 0)
+            {
+                reservedPhotons = gPMinPerLight[pixel];
+                freePhotons = uint(freePhotonsDyn);
+            } else //Fallback
+            {
+                freePhotons = uint(max(0, int(gFreePhotonsLight) - int(kLightCount * gDynMinPhotonsPerLight)));
+            }
+        } else //Fix number of photons per cell. Free photon were calculated on CPU
+        {
+            freePhotons = gFreePhotonsLight;
+        }
     #endif //IS_DIRECTIONAL
 
     // Get Photons per cell using a lower bound approximation of the histogram weight times the free photons

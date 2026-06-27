@@ -60,7 +60,9 @@ namespace Falcor
             uint mappingDirGMCount = 32;    //Maximum number of Guiding Maps that are reserved
             uint mappingPhotonNeededToCreate = 16384; //Minimum photons needed to create a GM with mapping
 
-            bool useDynamicPMin = false;    //TODO
+            bool useDynamicPMin = false;    //Enables and disabled dynamic PMin
+            float2 dynamicPMinMinMaxDistance = float2(1.f, 16.f); //Distance used for the range
+            uint2 dynamicPMinPhotonsMinMax = uint2(4, 1024); //Photons at maximum and minimum distance
 
             bool debugEnable = false;    //Debug view
             bool debugSelectLightHelperMode = false; //Helper mode to select light
@@ -157,6 +159,7 @@ namespace Falcor
         ref<ComputePass> mpReducePass;              //Reduces the Contribution
         ref<ComputePass> mpUpdateHistogramsPass[2];    //Updates the histogram with the normalized contribution. 0=Light, 1=Direction
         ref<ComputePass> mpUpdateGuidingMapsPass[2];   //Updates the guiding maps with the histograms. 0=Light, 1=Direction
+        ref<ComputePass> mpDynamicPMinPass;             //Dynamically determines the PMin for each light 
         ref<ComputePass> mpDebugViewPass;              //Debug view
 
         //
@@ -187,5 +190,9 @@ namespace Falcor
         /* Creates the guiding maps from the histogram and number of photons distributed
         */
         void updateGuidingMapsPass(RenderContext* pRenderContext, uint maxPhotonsDistributed, bool isDirectionalResource);
+
+        /* Dynamically reserves the photons per light cell, depending on (light) distance to camera (origin)
+        */
+        void dynamicallyPMinPass(RenderContext* pRenderContext);
     };
 }
