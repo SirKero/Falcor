@@ -52,6 +52,9 @@ namespace Falcor
     {
         FALCOR_PROFILE(pRenderContext, "PhotonGuiding_UpdateResources");
 
+        //Increase to minimum needed amount. A warning is triggered in the UI in this case (see getPhotonDispatchSize())
+        maxPhotonsDistributed = std::max(mMinPhotonNeededForGuiding, maxPhotonsDistributed);
+
         //Check if resources needs to be rebuild 
         prepareResources(pRenderContext);
 
@@ -113,6 +116,18 @@ namespace Falcor
     uint2 PhotonGuiding::getPhotonDispatchSize(uint numberOfPhotons)
     {
         FALCOR_ASSERT(numberOfPhotons > 0);
+
+        //Ensure that number of photons are at least enough to cover min photons
+        uint minPhotonsPerLight = mOptions.useDynamicPMin ?
+            std::min(mOptions.dynamicPMinPhotonsMinMax.x, mOptions.dynamicPMinPhotonsMinMax.y) :
+            mOptions.reservedPhotonsPerLight;
+        mMinPhotonNeededForGuiding =  (mTotalLightCount + 16) * minPhotonsPerLight;
+        if(numberOfPhotons < mMinPhotonNeededForGuiding)
+        {
+            mWarningNotEnoughDispatchedPhotons = true;
+            numberOfPhotons = mMinPhotonNeededForGuiding;
+        }else
+            mWarningNotEnoughDispatchedPhotons = false;
 
         //Check if the optimized dispatch size was calculated last frame
         if(numberOfPhotons == mTracePhotonNumberOfPhotonsLastFrame)
@@ -195,6 +210,9 @@ namespace Falcor
     bool PhotonGuiding::renderUI(Gui::Widgets& widget)
     {
         bool changed = false;
+        if(mWarningNotEnoughDispatchedPhotons)
+            widget.text("WARNING: Not enough photons dispatched. Amount is automatically adjusted to:\n " + std::to_string(mTracePhotonNumberOfPhotonsLastFrame));
+
         widget.text("Tipp: Changing the values will trigger recompilation. \n Use \"Strg+Space\" to stop rendering when changing value. \n Press \"Strg+Space\" again to resume.");
 
         //TODO Move text on top of dropdown

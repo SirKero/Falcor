@@ -130,6 +130,9 @@ namespace Falcor
 
         int             mTracePhotonNumberOfPhotonsLastFrame = -1;     //Photon count from last frame
         uint2           mOptimalTracePhotonDispatchDims = uint2(0); //Stored dispatch dims that can be reused if photon count did not change
+
+        uint            mMinPhotonNeededForGuiding = 0;     //Minimum amount of photons needed to cover reserved lights
+        bool mWarningNotEnoughDispatchedPhotons = false;    //Warning is triggered if not enough photons are dispatched
         //
         // Resources
         //
