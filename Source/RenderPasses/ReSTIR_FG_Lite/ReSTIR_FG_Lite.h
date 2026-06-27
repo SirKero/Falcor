@@ -125,8 +125,8 @@ private:
     //Photon Distribution
     PathLengthSettings mPhotonPathLenght = {};          // Path length settings for photons
     float mGlobalPhotonRejection = 0.3f;                // Probability a global photon is stored
-    uint mNumDispatchedPhotons = 1000000;               // Number of photons dispatched
-    uint2 mNumMaxPhotons = uint2(1000000, 1000000);     // Size of the photon buffer
+    uint mNumDispatchedPhotons = 2000000;               // Number of photons dispatched
+    uint2 mNumMaxPhotons = uint2(2000000, 2000000);     // Size of the photon buffer
     uint2 mNumMaxPhotonsUI = mNumMaxPhotons;            // For UI, as changing happens with a button
     bool mChangePhotonLightBufferSize = true;           // True if buffer size has changed
     float mASBuildBufferPhotonOverestimate = 1.15f;     // Guard percentage for AS building
