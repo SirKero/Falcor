@@ -55,13 +55,13 @@ In addition to our algorithm, the reposiory and demo provides an implementation 
 Implementations of ReSTIR PT and the full (non-Lite) version of ReSTIR FG will be added soon.
 
 ## Demo usage
-After downloading the demo from the release page, run `StartDemo.bat` and select the desired scene. 
+The demo contains all four test scenes.
+After downloading the demo from the [releases page](https://github.com/TU-Clausthal-Rendering/Guided-ReSTIR-FG-Plus/releases/latest), run `StartDemo.bat` and select the desired scene. 
 
-The demo includes four scenes, one of which (Corridor) is bundled with the download. The other three scenes (Kitchen, Hotel, and Block Castle) can be downloaded separately from the [Releases Page](https://github.com/TU-Clausthal-Rendering/Guided-ReSTIR-FG-Plus/releases/latest) and unzipped into the `Models` folder. 
-For additional scenes, see the [Testing with more Scenes](#testing-with-more-scenes) section.
+To test additional scenes that are not included with the demo, see the [Testing with more Scenes](#testing-with-more-scenes) section.
 
-TODO Demo UI details
-For more information about a setting, hover over the `(?)`.
+To change the rendering algorithm, use the `Active Graph` drop-down menu at the top of the UI window. Note that selecting an algorithm allocates the memory required for that algorithm.
+For more information about a setting, hover over the `(?)` icon.
 
 Controls:
 - `WASD` - Camera movement
