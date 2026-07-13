@@ -14,11 +14,14 @@ Texture2D<float4> gView;
 StructuredBuffer<Reservoir> gReservoir;
 
 RWTexture2D<float4> gColorOut;
+RWTexture2D<PackedHitInfo> gVBufferPrev;
+RWTexture2D<float4> gViewPrev;
 
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
     uint2 gFrameDims;
+    float gAmbient;
 }
 
 cbuffer Light {
@@ -36,7 +39,7 @@ void main(uint2 pixel: SV_DispatchThreadID)
         return;
 
     HitInfo hitInfo = HitInfo(gVBuffer[pixel]);
-    float3 viewDir = -gView[pixel].xyz;
+    float3 viewDir = gView[pixel].xyz;
 
     float3 outColor = float3(0);
     if (hitInfo.isValid())
@@ -44,12 +47,12 @@ void main(uint2 pixel: SV_DispatchThreadID)
         SampleGenerator sg = SampleGenerator(pixel, gFrameCount * 5 + 4);
         // Get Material properties
         let lod = ExplicitLodTextureSampler(0.f);
-        ShadingData sd = loadShadingData(hitInfo, viewDir, lod);
+        ShadingData sd = loadShadingData(hitInfo, -viewDir, lod);
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
 
-        outColor += bsdfProperties.emission; // Add emissive
-        outColor += bsdfProperties.diffuseReflectionAlbedo *  0.01; // Add Ambient
+        outColor += bsdfProperties.emission;                           // Add emissive
+        outColor += bsdfProperties.diffuseReflectionAlbedo * gAmbient; // Add Ambient
 
         // Load Reservoir
         Reservoir reservoir = gReservoir[index2Dto1D(pixel, gFrameDims.x)];
@@ -67,4 +70,6 @@ void main(uint2 pixel: SV_DispatchThreadID)
     }
 
     gColorOut[pixel] = float4(outColor, 1.0);
+    gVBufferPrev[pixel] = hitInfo.getData();
+    gViewPrev[pixel] = float4(viewDir, 1);
 }

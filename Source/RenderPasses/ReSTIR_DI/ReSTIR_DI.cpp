@@ -44,16 +44,21 @@ namespace
     // Input Textures
     const std::string kInputVBuffer = "VBuffer";
     const std::string kInputView = "View";
+    const std::string kInputMotionVector = "MVec";
 
     const Falcor::ChannelList kInputChannels{
         {kInputVBuffer, "gVBuffer", "Visibility buffer in packed format"},
         {kInputView, "gView", "View Vector"},
+        {kInputMotionVector, "gMVec", "Motion Vector"},
+
     };
 
     // Output textures
     const std::string kOutputColor = "ColorOut";
+    const std::string kOutputDebug = "DebugOut";
     const Falcor::ChannelList kOutputChannels{
-        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float}
+        {kOutputColor, "gOutColor", "HDR output color", false /*optional*/, ResourceFormat::RGBA32Float},
+        {kOutputDebug, "gOutDebug", "HDR debug out", true /*optional*/, ResourceFormat::RGBA32Float}
     };
 }
 
@@ -114,15 +119,18 @@ void ReSTIR_DI::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     generateInitialSamplesPass(pRenderContext, renderData);
 
-    resamplePass(pRenderContext, renderData);
+    if(mCanResample)
+        resamplePass(pRenderContext, renderData);
 
     finalizeSamplePass(pRenderContext, renderData);
 
     mFrameCount++;
+    mCanResample = true;
 }
 
 void ReSTIR_DI::renderUI(Gui::Widgets& widget)
 {
+    widget.var("Ambient Strength", mAmbient, 0.f, FLT_MAX, 0.0001f);
 
     widget.var("Emissive Samples", mNumEmissiveSamples, 0u, 256u, 1u);
     widget.var("BSDF Samples", mNumBSDFSamples, 0u, 256u, 1u);
@@ -134,6 +142,19 @@ void ReSTIR_DI::renderUI(Gui::Widgets& widget)
         {
             mpEmissiveLightSampler->renderUI(group);
         }
+    }
+
+    if(auto group = widget.group("Resample Settings"))
+    {
+        group.var("Spatial Samples", mSpatialSamples, 0u, UINT_MAX, 1u);
+        group.var("Spatial Radius", mSpatialRadius, 1.f, FLT_MAX, 0.01f);
+
+        group.var("Confidence Cap", mConfidenceCap, 1u, UINT_MAX);
+
+        group.var("Normal Rejection Threshold", mNormalAngleThreshold, 0.f, 1.0f, 0.001f);
+        group.tooltip("Threshold of dot product between both reservoir face normals");
+        group.var("Relative depth threshold", mRelativeDepthThreshold, 0.f, 10.0f, 0.001f);
+        group.tooltip("Only resamples if relative depth is similar. E.g. 0.15 -> relative depth should be a maximum of 15% different");
     }
 }
 
@@ -196,6 +217,9 @@ void ReSTIR_DI::prepareResources(RenderContext* pRenderContext, const RenderData
         mScreenRes = renderData.getDefaultTextureDims();
         mpReservoir[0].reset();
         mpReservoir[1].reset();
+        mpVBufferPrev.reset();
+        mpViewPrev.reset();
+        mCanResample = false;
     }
 
     for (uint i = 0; i < 2; i++)
@@ -208,6 +232,20 @@ void ReSTIR_DI::prepareResources(RenderContext* pRenderContext, const RenderData
             );
             mpReservoir[i]->setName("Reservoir" + std::to_string(i));
         }
+    }
+
+    if(!mpVBufferPrev)
+    {
+        ref<Texture> pVBuffer = renderData[kInputVBuffer]->asTexture();
+        mpVBufferPrev = Texture::create2D(mpDevice, mScreenRes.x, mScreenRes.y, pVBuffer->getFormat(), 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpVBufferPrev->setName("VBufferPrevious");
+    }
+
+    if(!mpViewPrev)
+    {
+        ref<Texture> pView = renderData[kInputView]->asTexture();
+        mpViewPrev = Texture::create2D(mpDevice, mScreenRes.x, mScreenRes.y, pView->getFormat(), 1u, 1u, nullptr, ResourceBindFlags::UnorderedAccess | ResourceBindFlags::ShaderResource);
+        mpViewPrev->setName("ViewPrevious");
     }
 }
 
@@ -262,7 +300,50 @@ void ReSTIR_DI::generateInitialSamplesPass(RenderContext* pRenderContext, const 
 
 void ReSTIR_DI::resamplePass(RenderContext* pRenderContext, const RenderData& renderData)
 {
-    
+    FALCOR_PROFILE(pRenderContext, "Resample");
+
+    if (!mpResamplePass)
+    {
+        Program::Desc desc;
+        desc.addShaderModules(mpScene->getShaderModules());
+        desc.addShaderLibrary(kShaderResample).csEntry("main").setShaderModel("6_6");
+        desc.addTypeConformances(mpScene->getTypeConformances());
+
+        DefineList defines;
+        defines.add(mpScene->getSceneDefines());
+        defines.add(mpSampleGenerator->getDefines());
+
+        mpResamplePass = ComputePass::create(mpDevice, desc, defines, true);
+    }
+    FALCOR_ASSERT(mpResamplePass);
+
+    // Set variables
+    auto var = mpResamplePass->getRootVar();
+    mpScene->setRaytracingShaderData(pRenderContext, var); // Set scene data
+    mpSampleGenerator->setShaderData(var);                 // Sample generator
+
+    var["CB"]["gFrameCount"] = mFrameCount;
+    var["CB"]["gFrameDims"] = mScreenRes;
+    var["CB"]["gConfidenceCap"] = mConfidenceCap;
+    var["CB"]["gNormalThreshold"] = mNormalAngleThreshold;
+    var["CB"]["gRelativeDepthThreshold"] = mRelativeDepthThreshold;
+    var["CB"]["gNumSpatialSamples"] = mSpatialSamples;
+    var["CB"]["gSpatialSampleRadius"] = mSpatialRadius;
+
+    var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
+    var["gView"] = renderData[kInputView]->asTexture();
+    var["gMVec"] = renderData[kInputMotionVector]->asTexture();
+
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gViewPrev"] = mpViewPrev;
+
+    var["gReservoir"] = mpReservoir[mFrameCount % 2];
+    var["gReservoirPrev"] = mpReservoir[(mFrameCount + 1) % 2];
+
+    // Execute
+    const uint2 targetDim = mScreenRes;
+    FALCOR_ASSERT(targetDim.x > 0 && targetDim.y > 0);
+    mpResamplePass->execute(pRenderContext, uint3(targetDim, 1));
 }
 
 void ReSTIR_DI::finalizeSamplePass(RenderContext* pRenderContext, const RenderData& renderData)
@@ -298,6 +379,7 @@ void ReSTIR_DI::finalizeSamplePass(RenderContext* pRenderContext, const RenderDa
     // Constant Buffer
     var["CB"]["gFrameCount"] = mFrameCount;
     var["CB"]["gFrameDims"] = mScreenRes;
+    var["CB"]["gAmbient"] = mAmbient;
 
     // Input
     var["gVBuffer"] = renderData[kInputVBuffer]->asTexture();
@@ -306,6 +388,8 @@ void ReSTIR_DI::finalizeSamplePass(RenderContext* pRenderContext, const RenderDa
 
     // Output
     var["gColorOut"] = renderData[kOutputColor]->asTexture();
+    var["gVBufferPrev"] = mpVBufferPrev;
+    var["gViewPrev"] = mpViewPrev;
 
     // Execute
     const uint2 targetDim = mScreenRes;

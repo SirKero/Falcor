@@ -12,6 +12,7 @@ Texture2D<PackedHitInfo> gVBuffer;
 Texture2D<float4> gView;
 
 RWStructuredBuffer<Reservoir> gReservoir;
+
 cbuffer CB
 {
     uint gFrameCount; // Frame count since scene was loaded.
@@ -28,7 +29,7 @@ cbuffer Light {
 static const bool kUseEnvBackground = USE_ENV_BACKROUND;
 static const uint kMIHints = (uint)MaterialInstanceHints::AdjustShadingNormal;
 
-void addSampleToReservoir(inout Reservoir reservoir, float w, float targetFunction, uint triIndex, float3 hitPos, float3 emission, inout SampleGenerator sg)
+bool addSampleToReservoir(inout Reservoir reservoir, float w, float targetFunction, uint triIndex, float3 hitPos, float3 emission, inout SampleGenerator sg)
 {
     reservoir.wSum += w;
     bool selectSample = sampleNext1D(sg) * reservoir.wSum <= w;
@@ -38,10 +39,18 @@ void addSampleToReservoir(inout Reservoir reservoir, float w, float targetFuncti
         reservoir.targetFuction = targetFunction;
         reservoir.emission = emission;
     }
+
+    return selectSample;
 }
 
 void genEmissiveSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout Reservoir reservoir)
 {
+    //TODO is this completly right? especially with BSDF samples?
+
+    // For deferred shadow test
+    float3 selectedLightDir = float3(0);
+    float selectedLightDist = 0;
+
     for (uint i = 0; i < gNumEmissiveSamples; i++)
     {
         TriangleLightSample tls = {};
@@ -52,24 +61,28 @@ void genEmissiveSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenera
         if (all(bsdf <= 0) || tls.pdf <= 0)
             continue;
 
-        // Shadow Ray
-        SceneRayQuery<1> rayQuery;
-        const Ray ray = Ray(sd.computeNewRayOrigin(), tls.dir, 0.f, tls.distance * 0.98);
-        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
-            continue;
-
         // MIS
         float mis = 1.0 / gNumEmissiveSamples;
         if (gNumBSDFSamples > 0) {
             float bsdfPdf = mi.evalPdf(sd, tls.dir);
             mis = tls.pdf / (tls.pdf * gNumEmissiveSamples + bsdfPdf * gNumBSDFSamples);
         }
-               
-        //Add to reservoir
+
+        // Add to reservoir
         float targetFunction = luminance(bsdf * tls.Le);
         float w = mis * targetFunction / tls.pdf;
-        addSampleToReservoir(reservoir, w, targetFunction, tls.triangleIndex, tls.posW,tls.Le , sg);
+        if (addSampleToReservoir(reservoir, w, targetFunction, tls.triangleIndex, tls.posW, tls.Le, sg))
+        {
+            selectedLightDir = tls.dir;
+            selectedLightDist = tls.distance;
+        }
     }
+
+    //Test visibility for the selected sample
+    SceneRayQuery<1> rayQuery;
+    const Ray ray = Ray(sd.computeNewRayOrigin(), selectedLightDir, 0.f, selectedLightDist * 0.98);
+    if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+        reservoir.wSum = 0;    
 }
 
 void genBSDFSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout Reservoir reservoir)

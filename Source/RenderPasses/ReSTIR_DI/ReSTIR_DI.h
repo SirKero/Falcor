@@ -37,7 +37,7 @@ using namespace Falcor;
 class ReSTIR_DI : public RenderPass
 {
 public:
-    FALCOR_PLUGIN_CLASS(ReSTIR_DI, "ReSTIR_DI", "ReSTIR DI");
+    FALCOR_PLUGIN_CLASS(ReSTIR_DI, "ReSTIR_DI", "Simple implementation of ReSTIR DI for static scenes");
 
     static ref<ReSTIR_DI> create(ref<Device> pDevice, const Properties& props) { return make_ref<ReSTIR_DI>(pDevice, props); }
 
@@ -78,7 +78,7 @@ private:
     ref<Scene> mpScene;                     // Scene Pointer
     ref<SampleGenerator> mpSampleGenerator; // GPU Sample Gen
     std::unique_ptr<EmissiveLightSampler> mpEmissiveLightSampler; // Light Sampler
-    EmissiveLightSamplerType mEmissiveLightSamplerType = EmissiveLightSamplerType::LightBVH;
+    EmissiveLightSamplerType mEmissiveLightSamplerType = EmissiveLightSamplerType::Power;
     LightBVHSampler::Options mLightBVHOptions;
     bool mRebuildLightSampler = true;
 
@@ -89,11 +89,22 @@ private:
     uint2 mScreenRes = uint2(0, 0);
     bool mResetScreenTex = false;
     bool mOptionsChanged = false;
+    bool mCanResample = false;
 
-    uint mNumEmissiveSamples = 1;
-    uint mNumBSDFSamples = 1;
+    uint mNumEmissiveSamples = 32;
+    uint mNumBSDFSamples = 0;
+
+    float mAmbient = 0.05f;
+
+    uint mSpatialSamples = 1;
+    float mSpatialRadius = 20.f;                    //Pixel radius for spatial sampling
+    uint mConfidenceCap = 20;
+    float mNormalAngleThreshold = 0.6f;                 // Cosine of maximum angle between both normals allowed
+    float mRelativeDepthThreshold = 0.15f;              // Relative Depth threshold (is neighbor 0.1 = 10% as near as the current depth)
 
     ref<Buffer> mpReservoir[2];
+    ref<Texture> mpVBufferPrev;
+    ref<Texture> mpViewPrev;
 
     ref<ComputePass> mpInitialSamplesPass;           // Generate initial samples
     ref<ComputePass> mpResamplePass;                 // Resampling
