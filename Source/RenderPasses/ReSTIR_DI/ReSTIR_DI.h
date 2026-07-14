@@ -96,6 +96,7 @@ private:
 
     float mAmbient = 0.05f;
 
+    bool mEnableResampling = true;              // Enables/Disables resampling
     uint mSpatialSamples = 1;
     float mSpatialRadius = 20.f;                    //Pixel radius for spatial sampling
     uint mConfidenceCap = 20;

@@ -119,7 +119,7 @@ void ReSTIR_DI::execute(RenderContext* pRenderContext, const RenderData& renderD
 
     generateInitialSamplesPass(pRenderContext, renderData);
 
-    if(mCanResample)
+    if(mCanResample && mEnableResampling)
         resamplePass(pRenderContext, renderData);
 
     finalizeSamplePass(pRenderContext, renderData);
@@ -144,8 +144,9 @@ void ReSTIR_DI::renderUI(Gui::Widgets& widget)
         }
     }
 
-    if(auto group = widget.group("Resample Settings"))
+    if(auto group = widget.group("Resample Settings",true))
     {
+        group.checkbox("Enable", mEnableResampling);
         group.var("Spatial Samples", mSpatialSamples, 0u, UINT_MAX, 1u);
         group.var("Spatial Radius", mSpatialRadius, 1.f, FLT_MAX, 0.01f);
 

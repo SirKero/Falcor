@@ -43,14 +43,8 @@ bool addSampleToReservoir(inout Reservoir reservoir, float w, float targetFuncti
     return selectSample;
 }
 
-void genEmissiveSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout Reservoir reservoir)
+void genEmissiveSamplesReference(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout Reservoir reservoir)
 {
-    //TODO is this completly right? especially with BSDF samples?
-
-    // For deferred shadow test
-    float3 selectedLightDir = float3(0);
-    float selectedLightDist = 0;
-
     for (uint i = 0; i < gNumEmissiveSamples; i++)
     {
         TriangleLightSample tls = {};
@@ -59,6 +53,12 @@ void genEmissiveSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenera
 
         float3 bsdf = mi.eval(sd, tls.dir, sg);
         if (all(bsdf <= 0) || tls.pdf <= 0)
+            continue;
+
+        // Test visibility for the selected sample
+        SceneRayQuery<1> rayQuery;
+        const Ray ray = Ray(sd.computeNewRayOrigin(), tls.dir, 0.f, tls.distance * 0.98);
+        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
             continue;
 
         // MIS
@@ -71,18 +71,61 @@ void genEmissiveSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenera
         // Add to reservoir
         float targetFunction = luminance(bsdf * tls.Le);
         float w = mis * targetFunction / tls.pdf;
-        if (addSampleToReservoir(reservoir, w, targetFunction, tls.triangleIndex, tls.posW, tls.Le, sg))
+        addSampleToReservoir(reservoir, w, targetFunction, tls.triangleIndex, tls.posW, tls.Le, sg);
+    }
+}
+
+void genEmissiveSamplesWRS(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout Reservoir reservoir)
+{
+    TriangleLightSample selectedTls = {};
+    float weightSum = 0;
+    float choosenWeight = 0;
+    float choosenTargetFunc = 0;
+    
+    for (uint i = 0; i < gNumEmissiveSamples; i++)
+    {
+        TriangleLightSample tls = {};
+        if (!gEmissiveSampler.sampleLight(sd.posW, sd.faceN, true, sg, tls))
+            continue;
+
+        float3 bsdf = mi.eval(sd, tls.dir, sg);
+        if (all(bsdf <= 0) || tls.pdf <= 0)
+            continue;
+
+        // Add to reservoir
+        float targetFunction = luminance(bsdf * tls.Le);
+        float w = targetFunction / tls.pdf;
+
+        weightSum += w;
+        if((sampleNext1D(sg) * weightSum) < w)
         {
-            selectedLightDir = tls.dir;
-            selectedLightDist = tls.distance;
+            selectedTls = tls;
+            choosenWeight = w;
+            choosenTargetFunc = targetFunction;
         }
     }
 
-    //Test visibility for the selected sample
-    SceneRayQuery<1> rayQuery;
-    const Ray ray = Ray(sd.computeNewRayOrigin(), selectedLightDir, 0.f, selectedLightDist * 0.98);
-    if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
-        reservoir.wSum = 0;    
+    // Check if a valid sample was found
+    if (choosenWeight > 0)
+    {
+        // MIS
+        float mis = 1.0 / gNumEmissiveSamples;
+        if (gNumBSDFSamples > 0) {
+            float bsdfPdf = mi.evalPdf(sd, selectedTls.dir);
+            mis = selectedTls.pdf / (selectedTls.pdf * gNumEmissiveSamples + bsdfPdf * gNumBSDFSamples);
+        }
+
+        float risWeight = mis * choosenWeight / (choosenWeight / weightSum);
+        //risWeight /= gNumEmissiveSamples;
+        //risWeight /= selectedTls.pdf;
+        // Test visibility for the selected sample
+        SceneRayQuery<1> rayQuery;
+        const Ray ray = Ray(sd.computeNewRayOrigin(), selectedTls.dir, 0.f, selectedTls.distance * 0.98);
+        if (!rayQuery.traceVisibilityRay(ray, RAY_FLAG_NONE, 0xff))
+            risWeight = 0;
+
+        addSampleToReservoir(reservoir, risWeight, choosenTargetFunc, selectedTls.triangleIndex, selectedTls.posW, selectedTls.Le, sg);
+    }    
 }
 
 void genBSDFSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenerator sg, inout Reservoir reservoir)
@@ -160,7 +203,8 @@ void main(uint2 pixel: SV_DispatchThreadID)
         let mi = gScene.materials.getMaterialInstance(sd, lod, kMIHints);
         let bsdfProperties = mi.getProperties(sd);
 
-        genEmissiveSamples(sd, mi, sg, reservoir);
+        //genEmissiveSamplesReference(sd, mi, sg, reservoir);
+        genEmissiveSamplesWRS(sd, mi, sg, reservoir);
 
         genBSDFSamples(sd, mi, sg, reservoir);
 
