@@ -62,15 +62,17 @@ void genEmissiveSamplesReference(ShadingData sd, IMaterialInstance mi, inout Sam
             continue;
 
         // MIS
-        float mis = 1.0 / gNumEmissiveSamples;
+        float mis = 1.0;
         if (gNumBSDFSamples > 0) {
+            sd.mtl.setActiveLobes((uint)LobeType::NonDeltaReflection);
             float bsdfPdf = mi.evalPdf(sd, tls.dir);
-            mis = tls.pdf / (tls.pdf * gNumEmissiveSamples + bsdfPdf * gNumBSDFSamples);
+            sd.mtl.setActiveLobes((uint)LobeType::All);
+            mis = evalMIS(gNumEmissiveSamples, tls.pdf, gNumBSDFSamples, bsdfPdf);
         }
 
         // Add to reservoir
         float targetFunction = luminance(bsdf * tls.Le);
-        float w = mis * targetFunction / tls.pdf;
+        float w = mis * targetFunction / (tls.pdf * gNumEmissiveSamples);
         addSampleToReservoir(reservoir, w, targetFunction, tls.triangleIndex, tls.posW, tls.Le, sg);
     }
 }
@@ -109,15 +111,17 @@ void genEmissiveSamplesWRS(ShadingData sd, IMaterialInstance mi, inout SampleGen
     if (choosenWeight > 0)
     {
         // MIS
-        float mis = 1.0 / gNumEmissiveSamples;
+        float mis = 1.0;
         if (gNumBSDFSamples > 0) {
+            sd.mtl.setActiveLobes((uint)LobeType::NonDeltaReflection);
             float bsdfPdf = mi.evalPdf(sd, selectedTls.dir);
-            mis = selectedTls.pdf / (selectedTls.pdf * gNumEmissiveSamples + bsdfPdf * gNumBSDFSamples);
+            sd.mtl.setActiveLobes((uint)LobeType::All);
+            mis = evalMIS(gNumEmissiveSamples, selectedTls.pdf, gNumBSDFSamples, bsdfPdf);
         }
 
-        float risWeight = mis * choosenWeight / (choosenWeight / weightSum);
-        //risWeight /= gNumEmissiveSamples;
-        //risWeight /= selectedTls.pdf;
+        float wrsWeigth = (choosenWeight / weightSum);
+        float risWeight = mis * choosenWeight / (wrsWeigth * gNumEmissiveSamples);
+
         // Test visibility for the selected sample
         SceneRayQuery<1> rayQuery;
         const Ray ray = Ray(sd.computeNewRayOrigin(), selectedTls.dir, 0.f, selectedTls.distance * 0.98);
@@ -132,15 +136,21 @@ void genBSDFSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenerator 
 {
     for (uint i = 0; i < gNumBSDFSamples; i++)
     {
+        //Create BSDF sample
         BSDFSample bsdfSample;
-        if (!mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/))
+        // Delta lobes cannot be evaluated by bsdf.eval, therefore they need to be excluded
+        sd.mtl.setActiveLobes((uint)LobeType::NonDeltaReflection); 
+        bool validSample = mi.sample(sd, sg, bsdfSample, true /*ImportanceSampling*/);
+        bool transmission = bsdfSample.isLobe(LobeType::Transmission);
+
+        if (!validSample || transmission)
             continue;
 
+        //Init Ray
         Ray ray;
         ray.tMin = 0;
         ray.tMax = FLT_MAX;
-        bool transmission = bsdfSample.isLobe(LobeType::Transmission);
-        ray.origin = sd.computeNewRayOrigin(!transmission); // false is for transmissions
+        ray.origin = sd.computeNewRayOrigin();
         ray.dir = bsdfSample.wo;
 
         HitInfo hitInfo;
@@ -169,16 +179,15 @@ void genBSDFSamples(ShadingData sd, IMaterialInstance mi, inout SampleGenerator 
             continue;
 
         // MIS
-        const float pdf = bsdfSample.pdf;
-        float mis = 1.0 / gNumBSDFSamples;
+        float mis = 1.0;
         if (gNumEmissiveSamples > 0) {
             float emissivePdf = gEmissiveSampler.evalPdf(sd.posW, sd.faceN, true, emissiveHit);
-            mis = pdf / (emissivePdf * gNumEmissiveSamples + pdf * gNumBSDFSamples);
+            mis = evalMIS(gNumBSDFSamples, bsdfSample.pdf, gNumEmissiveSamples, emissivePdf); 
         }
 
         // Add to reservoir
         float targetFunction = luminance(bsdf * bsdfPropertiesHit.emission);
-        float w = mis * targetFunction / pdf;
+        float w = mis * targetFunction / (bsdfSample.pdf * gNumBSDFSamples);
         addSampleToReservoir(reservoir, w, targetFunction, emissiveHit.triangleIndex, sdHit.posW, bsdfPropertiesHit.emission , sg);
     }
 }

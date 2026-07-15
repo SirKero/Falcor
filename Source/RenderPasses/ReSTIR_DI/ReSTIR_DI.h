@@ -92,7 +92,7 @@ private:
     bool mCanResample = false;
 
     uint mNumEmissiveSamples = 32;
-    uint mNumBSDFSamples = 0;
+    uint mNumBSDFSamples = 1;
 
     float mAmbient = 0.05f;
 
